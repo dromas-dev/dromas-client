@@ -97,9 +97,10 @@ func (w *world) mailbox() *shMailbox {
 	return b
 }
 
-// goMailbox is a Go client's mailbox at the world's server, in working-key
-// mode as init --offline makes one or in identity mode as init does, taking
-// every sender's messages into its inbox; and its directory as a shMailbox,
+// goMailbox is a Go client's mailbox at the world's server, registered under
+// a certificate as init --offline makes one, with workingKey, or by its
+// identity as init does, taking every sender's messages into its inbox; and
+// its directory as a shMailbox,
 // whose identity.doc, address, identity and work/ the script's helpers read
 // (certs) and no script command ever runs in.
 func (w *world) goMailbox(workingKey bool) (*client.Mailbox, *shMailbox) {

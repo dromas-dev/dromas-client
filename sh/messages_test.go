@@ -75,8 +75,7 @@ func (w *world) signWith(key string, to protocol.Address, line []byte) []byte {
 	return []byte(b.must(fmt.Sprintf("ssh-keygen -q -Y sign -n dromas-msg-v1:%s -f %s < %s", to, key, f)))
 }
 
-// sign signs line for to as mailbox b does: with its identity, its signer in
-// identity mode.
+// sign signs line for to as mailbox b does: with its identity.
 func (b *shMailbox) sign(to protocol.Address, line []byte) []byte {
 	return b.w.signWith(b.file("identity"), to, line)
 }
@@ -206,8 +205,8 @@ func TestScriptInit(t *testing.T) {
 			t.Errorf("%s: %v %v, not 0600", f, fi.Mode(), err)
 		}
 	}
-	if a.has("work") || a.has("revoked-certs.json") {
-		t.Error("the mailbox keeps a working key, or a revocation of its certificates: it is not in identity mode")
+	if a.has("work") {
+		t.Error("the mailbox keeps a working key: its identity signs")
 	}
 	id, err := protocol.ParseIdentity([]byte(a.read("identity.doc")))
 	if err != nil {
@@ -362,9 +361,9 @@ func TestScriptRefusesForgedMessages(t *testing.T) {
 		t.Error("the forgery pinned D")
 	}
 	// A from the server made up, with a line feed and a signer after it,
-	// beside the operator's own message, which its identity signs, as an
-	// address no trip is held for: the from is never read, so the message is
-	// the operator's, as its signature says, and nothing is built from it.
+	// beside the operator's own message, which its identity signs: the from
+	// is never read, so the message is the operator's, as its signature says,
+	// and nothing is built from it.
 	opDoc := []byte(mustReadString(t, filepath.Join(op.dir, "identity.doc")))
 	ol := envelope(t, op.addr, b.addr, opDoc, "00000000-0000-4000-8000-000000000001", "PAPAYA", 0)
 	w.inject(b, "", ol, w.signWith(opID, b.addr, ol))
@@ -579,14 +578,12 @@ age-keygen -pq -o agekey 2> /dev/null`)
 	if a.has("peers/" + e.addr.String()) {
 		t.Error("the padded identity was pinned")
 	}
-	// What B's identity could sign, with the server's help, and a certificate
-	// it made, which B's mode refuses: B is in identity mode, as A holds it.
+	// What B's identity could sign, with the server's help.
 	bi := b.file("identity")
 	key := keyOf(string(st))
 	for _, c := range []struct{ what, notAfter, signer, want string }{
 		{"an expired prekey, validly signed, at a higher serial", "2020-01-01T00:00:00Z", bi, "expired"},
 		{"a not_after of never", "never", bi, "no valid not_after"},
-		{"a statement under a certificate B's identity made, B in identity mode", notAfter(), w.certify(b, b1+9), "is signed under a certificate, and " + b.addr.String() + " is in identity mode"},
 	} {
 		w.serving(b, w.statement(b, b1+9, key, c.notAfter, c.signer))
 		refused(c.what, a, b.addr.String(), c.want)
