@@ -11,15 +11,21 @@ import (
 	"github.com/dromas-dev/dromas-client/protocol"
 )
 
+// The two values of [Status.Signer].
+const (
+	SignerIdentity    = "identity"
+	SignerCertificate = "certificate"
+)
+
 // Status is what a mailbox can say of itself from its own files, with no call to
 // the server: what a wrapper reads to learn that the mailbox needs a look.
 type Status struct {
 	Address protocol.Address `json:"address"`
-	// Certified is set when the statement this mailbox published last is
-	// under a certificate, whose working key signs what it says: from then
-	// on it signs under certificates (PROTOCOL.md §5). Unset, its identity
-	// signs.
-	Certified bool `json:"certified"`
+	// Signer is what signs what this mailbox says (PROTOCOL.md §5):
+	// [SignerIdentity], or [SignerCertificate] once the statement it
+	// published last is under a certificate, whose working key signs, from
+	// then on.
+	Signer string `json:"signer"`
 	// Format is the mailbox's format (client/doc.go), this client's: a
 	// mailbox in another is refused, never read ([FormatError]).
 	Format int `json:"format"`
@@ -141,10 +147,14 @@ func (b *Mailbox) status() (*Status, error) {
 		}
 	}
 	certified, cerr := b.certified()
-	s.Certified = cerr == nil && certified
+	certified = cerr == nil && certified
+	s.Signer = SignerIdentity
+	if certified {
+		s.Signer = SignerCertificate
+	}
 	switch _, cert, werr := b.currentSigner(); {
 	case werr != nil && (err != nil || perr != nil || s.Revoked):
-	case werr != nil && s.Certified:
+	case werr != nil && certified:
 		s.Attention = append(s.Attention, "this mailbox holds no working key it can sign with, or its certificate has ended: it cannot poll or send until dromas prekey renew makes new ones")
 	case werr != nil:
 		s.Attention = append(s.Attention, fmt.Sprintf("this mailbox cannot sign: %v", werr))

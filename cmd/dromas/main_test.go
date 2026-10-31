@@ -2531,7 +2531,7 @@ func TestCertificatesOnTheCommandLine(t *testing.T) {
 	if l, err := line("init", "--offline"); err != nil || l["type"] != "mailbox" || l["mode"] != nil {
 		t.Fatalf("init --offline: %v, %v", l, err)
 	}
-	if l, err := line("status"); err != nil || l["certified"] != true || l["certificate_serial"] == nil {
+	if l, err := line("status"); err != nil || l["signer"] != "certificate" || l["certificate_serial"] == nil {
 		t.Fatalf("status under a certificate: %v, %v", l, err)
 	}
 
@@ -2540,7 +2540,7 @@ func TestCertificatesOnTheCommandLine(t *testing.T) {
 	if _, err := line("init"); err != nil {
 		t.Fatalf("init: %v", err)
 	}
-	if l, err := line("status"); err != nil || l["certified"] != false || l["certificate_serial"] != nil || l["certificate_not_after"] != nil {
+	if l, err := line("status"); err != nil || l["signer"] != "identity" || l["certificate_serial"] != nil || l["certificate_not_after"] != nil {
 		t.Fatalf("status of a mailbox its identity signs for: %v, %v", l, err)
 	}
 	b, err := client.Open(home, client.Options{Base: srv.URL})
@@ -2555,7 +2555,7 @@ func TestCertificatesOnTheCommandLine(t *testing.T) {
 	if err := do(ctx, "cert switch", []string{other.Address().String()}, nil, &out, io.Discard); err == nil || out.Len() != 0 {
 		t.Fatalf("a switch confirmed by another address: %v, %q", err, out.String())
 	}
-	if l, err := line("status"); err != nil || l["certified"] != false {
+	if l, err := line("status"); err != nil || l["signer"] != "identity" {
 		t.Fatalf("after a wrong confirmation: %v, %v", l, err)
 	}
 	out.Reset()
@@ -2565,7 +2565,7 @@ func TestCertificatesOnTheCommandLine(t *testing.T) {
 	if ls := printed(t, out.String()); typesOf(ls) != "prekey" {
 		t.Fatalf("cert switch printed %q", out.String())
 	}
-	if l, err := line("status"); err != nil || l["certified"] != true || l["certificate_serial"] == nil {
+	if l, err := line("status"); err != nil || l["signer"] != "certificate" || l["certificate_serial"] == nil {
 		t.Fatalf("status after the switch: %v, %v", l, err)
 	}
 }

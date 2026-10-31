@@ -34,7 +34,7 @@ func certified(t *testing.T, b *client.Mailbox) bool {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return st.Certified
+	return st.Signer == client.SignerCertificate
 }
 
 // A reader that has never met a sender takes its first message by either
