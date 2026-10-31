@@ -106,8 +106,9 @@ func TestPassRoundTrip(t *testing.T) {
 		}
 	}
 	// Nor is one by the working key without its certificate. One by the
-	// identity itself verifies, as the identity: which signer a server takes is
-	// its mailbox's mode, the caller's to hold.
+	// identity itself verifies, as the identity: holding a certificate to the
+	// revocation of certificates, and to the current statement, is the
+	// caller's.
 	for name, s := range map[string]ssh.Signer{"the bare working key": b.work, "the identity": b.identity} {
 		h, _, err := NewPass(s, a, "dromas.dev", now)
 		if err != nil {
@@ -267,10 +268,10 @@ func TestPassVerifyUnder(t *testing.T) {
 		if _, err := lp.VerifyUnder(sum, "dromas.dev", end); !errors.Is(err, ErrCertificateTime) {
 			t.Errorf("%s: after the certificate ended: %v", name, err)
 		}
-		// With the identity's key on record, the address in identity mode: a
-		// pass the identity signed is taken, and returns that key; one under a
-		// certificate is not, nor is the identity's pass against the
-		// certificate on record.
+		// With the identity's key on record, a pass the identity signed is
+		// taken, and returns that key; one under a certificate is not, nor is
+		// the identity's pass against the certificate on record: VerifyUnder
+		// holds a pass to the one key it is given.
 		idSum := sha256.Sum256(b.mailbox.id.PublicKey().Marshal())
 		own, _, err := NewPass(b.mailbox.identity, a, "dromas.dev", now)
 		if err != nil {
@@ -458,7 +459,7 @@ func TestPassAgainstSSHKeygen(t *testing.T) {
 	if _, err := pass.Verify(id, "dromas.dev", now); err != nil {
 		t.Fatalf("a pass made with printf and ssh-keygen: %v", err)
 	}
-	// And one the identity signs itself, as a mailbox in identity mode does.
+	// And one the identity signs itself.
 	sig = must([]byte(stmt), "-Y", "sign", "-n", "dromas-pass-v1:"+a.String(), "-f", "identity")
 	pass, err = ParsePass(`dromas-pass address="` + a.String() + `", not_after="` + notAfter.Format(TimeLayout) + `", signature="` + base64.StdEncoding.EncodeToString(sig) + `"`)
 	if err != nil {
