@@ -178,7 +178,9 @@ func TestTheIdentitysSignatureRewrappedInACertificateIsRefused(t *testing.T) {
 		if err := sshsig.Verify(cert, msg, wrapped, ns); err != nil {
 			t.Fatalf("%s: control: the re-wrapped signature does not verify under its certificate: %v", name, err)
 		}
-		if s, err := VerifySigned(b.id, msg, Armor(wrapped), ns, now); !errors.Is(err, ErrCertificate) {
+		// Refused: for its certificate, or, a P-256 key being longer than
+		// a working key, as over the bound first.
+		if s, err := VerifySigned(b.id, msg, Armor(wrapped), ns, now); err == nil || len(Armor(wrapped)) <= SignatureBound(b.id.Type()) && !errors.Is(err, ErrCertificate) {
 			t.Errorf("%s: the identity's signature re-wrapped at serial 9: %v, %v", name, s, err)
 		}
 		if _, err := CheckCertificate(b.id, cert, now); !errors.Is(err, ErrCertificate) {

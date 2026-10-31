@@ -90,7 +90,7 @@ identity_doc() { printf 'dromas-v1\nssh-ed25519 %s\n' "$(bin "$(str "$(asc ssh-e
 p256_doc() { printf 'dromas-v1\necdsa-sha2-nistp256 %s\n' "$(bin "$(p256_wire "$@")" | b64)"; }
 
 KEYS=$(mktemp -d) # private keys live only here, and only while this runs
-cleanup() { local k; for k in a b c a-work b-work a-work-2 c-work small-work; do rm -f "$KEYS/$k" "$KEYS/$k.pub" "$KEYS/$k-cert.pub"; done; rm -f "$KEYS/padded.sig"; rmdir "$KEYS"; }
+cleanup() { local k; for k in a b c a-work b-work a-work-2 c-work small-work; do rm -f "$KEYS/$k" "$KEYS/$k.pub" "$KEYS/$k-cert.pub"; done; rmdir "$KEYS"; }
 trap cleanup EXIT
 
 printf '%s\n' "$NOW" > now
@@ -143,19 +143,17 @@ statement "$A" 1 "$(cat input/a-1.pq)" "$NOT_AFTER" > a/prekey-1.txt
 statement "$A" 2 "$(cat input/a-2.pq)" "$NOT_AFTER" > a/prekey-2.txt
 statement "$B" 1 "$(cat input/b-1.pq)" "$NOT_AFTER" > b/prekey-1.txt
 for f in a/prekey-1 a/prekey-2; do under a-work a/work-cert.pub "dromas-prekey-v1:$A" < "$f.txt" > "$f.txt.sig"; done
-under a-work a/work-cert.pub "dromas-prekey-v1:$A" -O hashalg=sha256 < a/prekey-1.txt > a/prekey-1.txt.sha256.sig
 sign b "dromas-prekey-v1:$B" < b/prekey-1.txt > b/prekey-1.txt.sig
 statement "$C" 1 "$(cat input/b-1.pq)" "$NOT_AFTER" > c/prekey-1.txt
 [ -e c/prekey-1.txt.sig ] || sign c "dromas-prekey-v1:$C" < c/prekey-1.txt > c/prekey-1.txt.sig
 printf 'dromas-revoke-v1\n%s\n' "$A" > a/revoke.txt
 sign a "dromas-revoke-v1:$A" < a/revoke.txt > a/revoke.sig
 
-# Revocations. A's again with the other hash SSHSIG allows, and C's, by a P-256 identity: an ECDSA
+# Revocations. C's, by a P-256 identity: an ECDSA
 # signature differs each time it is made, so C's is made once and kept. Then signatures every
 # implementation must refuse as a revocation of mailbox A: by a working key under A's own certificate, by
 # another mailbox's identity, in another namespace, and A's signature over the revocation of another mailbox.
 mkdir -p revoke
-sign a "dromas-revoke-v1:$A" -O hashalg=sha256 < a/revoke.txt > a/revoke.sha256.sig
 printf 'dromas-revoke-v1\n%s\n' "$C" > c/revoke.txt
 [ -e c/revoke.sig ] || sign c "dromas-revoke-v1:$C" < c/revoke.txt > c/revoke.sig
 under a-work a/work-cert.pub "dromas-revoke-v1:$A" < a/revoke.txt > revoke/bad-by-a-working-key.sig
@@ -173,7 +171,6 @@ through() { printf 'dromas-revoke-certs-v1\n%s\n%s\n' "$2" "$3" > "revoked/$1.tx
 thsig() { sign a "dromas-revoke-certs-v1:$A" < "revoked/$1.txt" > "revoked/$1.sig"; }
 through ok-through-4 "$A" 4; thsig ok-through-4
 through ok-through-the-highest "$A" 9007199254740991; thsig ok-through-the-highest      # 2^53 - 1, the highest serial
-sign a "dromas-revoke-certs-v1:$A" -O hashalg=sha256 < revoked/ok-through-4.txt > revoked/ok-through-4.sha256.sig
 cp revoked/ok-through-4.txt revoked/bad-by-a-working-key.txt; under a-work a/work-cert.pub "dromas-revoke-certs-v1:$A" < revoked/bad-by-a-working-key.txt > revoked/bad-by-a-working-key.sig
 cp revoked/ok-through-4.txt revoked/bad-another-namespace.txt; sign a "dromas-revoke-v1:$A" < revoked/bad-another-namespace.txt > revoked/bad-another-namespace.sig
 through bad-another-address "$B" 4; thsig bad-another-address
@@ -245,9 +242,9 @@ pv bad-an-address-of-63-hex 'dromas-pass address="%s", not_after="%s", signature
 pv bad-not-after-not-a-time 'dromas-pass address="%s", not_after="%s", signature="%s"' "$A" 2026-13-10T00:10:00Z "$PS" # month 13, quoted, so it is read to its form
 pv bad-the-signature-with-padding-bits-set 'dromas-pass address="%s", not_after="%s", signature="%sLR=="' "$A" "$PT" "${PS:0:${#PS}-4}" # the pattern's, and no writer's: "LQ==" is that byte (RFC 4648 §3.5)
 # The longest a value may be (§8: the form a client writes with a signature of the most any identity key type
-# allows, 4,096 bytes), made so with empty list elements, one for each byte that signature's base64 is longer than
-# A's, and a byte longer.
-printf -v PC '%*s' $(( (4096 + 2) / 3 * 4 - ${#PS} )) ''
+# allows, 975 bytes, P-256's), made so with empty list elements, one for each byte that signature's base64 is longer
+# than A's, and a byte longer.
+printf -v PC '%*s' $(( (975 + 2) / 3 * 4 - ${#PS} )) ''
 pv ok-as-long-as-a-pass-can-be 'dromas-pass address="%s", not_after="%s", signature="%s"%s' "$A" "$PT" "$PS" "${PC// /,}"
 pv bad-a-byte-longer-than-a-pass-can-be 'dromas-pass address="%s", not_after="%s", signature="%s"%s,' "$A" "$PT" "$PS" "${PC// /,}"
 
@@ -259,10 +256,11 @@ badcert() { # <name> <signing key> <certified key> <ssh-keygen options…>
   under "$key" "cert/$name.pub" "dromas-prekey-v1:$A" < a/prekey-1.txt > "cert/$name.sig"
 }
 badcert bad-critical-option a a-work $(good "$A") -O force-command=true
-# Extensions are ignored, each in its one encoding: a name once, in lexical order, and a value nothing or one string that
-# is not empty, as Go's x/crypto/ssh reads them. ssh-keygen writes a name twice when told to, and a value of one empty string.
-badcert bad-extension-twice a a-work $(good "$A") -O extension:nobody-defines@dromas.invalid -O extension:nobody-defines@dromas.invalid
-badcert bad-extension-value-an-empty-string a a-work $(good "$A") -O extension:nobody-defines@dromas.invalid=
+# A certificate is in the one form its makers write, ssh-keygen -s … -O clear: no extension, an empty reserved field and a
+# nonce of 32 bytes. bad-extensions carries the five ssh-keygen adds without -O clear. Two more, made by protocol's
+# TestVectorsCertificateForm, since ssh-keygen writes neither: cert/bad-reserved-field, whose reserved field holds bytes,
+# and cert/bad-nonce-of-16-bytes.
+badcert bad-extensions a a-work -I dromas-cert-v1 -n "$A" -z "$SA" -V "$V_OK"
 badcert bad-key-id a a-work -I dromas-cert-v2 -n "$A" -z "$SA" -V "$V_OK" -O clear
 badcert bad-two-principals a a-work -I dromas-cert-v1 -n "$A,$B" -z "$SA" -V "$V_OK" -O clear
 badcert bad-principal-another-mailbox a a-work $(good "$B")
@@ -288,78 +286,72 @@ okcert ok-begins-now a a-work $(good "$A" "$SA" "$V_BEGINS_NOW")
 okcert ok-valid-from-0 a a-work $(good "$A" "$SA" "always:${V_OK#*:}")      # begins at 0, as -V always: writes it
 okcert ok-ends-at-the-last-date a a-work $(good "$A" "$SA" "$V_LAST")
 okcert ok-longer-than-a-server-takes a a-work $(good "$A" "$SA" "$V_LONG")
-# Extensions a verifier does not know, and it knows none, are ignored (draft-ietf-sshm-cert-01 §2.1.1): ssh-keygen's five,
-# without -O clear, and one nobody defines, with a value, so the slot stays in use (RFC 9170). And one more, made by
-# protocol's TestVectorsReservedField, since ssh-keygen writes the reserved field empty: cert/ok-reserved-field, whose
-# reserved field holds bytes, which a verifier ignores as well.
-okcert ok-extensions a a-work -I dromas-cert-v1 -n "$A" -z "$SA" -V "$V_OK"
-okcert ok-unknown-extension a a-work $(good "$A") -O extension:nobody-defines@dromas.invalid=not-read
 
-# One signature, a/prekey-1.txt.sig, in forms a verifier reads as ssh-keygen -Y verify reads them (OpenSSH's
-# sshsig_dearmor), and in a file of at most 4096 bytes in all (PROTOCOL.md §3.2): ok-* are taken, bad-* refused. Then
-# what ssh-keygen takes and a verifier here refuses: more than 4096 bytes, and an Ed25519 S that is not below L.
+# A signature has one form, the bytes ssh-keygen -Y sign writes (PROTOCOL.md §3.2): the armor with LF line ends and
+# lines of 70, version 1, sha512, an empty reserved field, no trailing NUL, an ECDSA signature's r and s each the
+# minimal mpint. ok-* are taken: that form for each identity key type, A's a/prekey-1.txt.sig and C's
+# c/prekey-1.txt.sig (c-*, over c/prekey-1.txt in C's prekey namespace), and C's with s written as n - s, which ECDSA
+# verifies as well. bad-* are refused: one for each other form of A's, and C's r with a zero byte before it. Then
+# what ssh-keygen takes and a verifier here refuses: an Ed25519 S that is not below L.
 mkdir -p sig
 S=a/prekey-1.txt.sig; X=$(blob "$S")
 [ "$(armor "$X" | sha256sum)" = "$(sha256sum < "$S")" ] || { echo "armor() does not armor as ssh-keygen does" >&2; exit 1; }
-sed 's/$/\r/' "$S" > sig/ok-crlf.sig
-sed '1s/$/\r/' "$S" > sig/ok-crlf-after-begin-only.sig
-sed "2s/\$/ /; 3s/^/"$'\t'"/" "$S" > sig/ok-space-and-tab.sig
-sed "2s/\$/"$'\v'"/; 3s/^/"$'\f'"/" "$S" > sig/ok-vt-and-ff.sig
-{ sed '$d' "$S"; echo; tail -n 1 "$S"; } > sig/ok-blank-line-before-end.sig
-{ head -n 1 "$S"; sed '1d;$d' "$S" | tr -d '\n'; echo; tail -n 1 "$S"; } > sig/ok-one-line.sig
-head -c -1 "$S" > sig/ok-no-line-feed-after-end.sig
-{ cat "$S"; echo "nothing after the END line is read"; } > sig/ok-text-after-end.sig
-{ cat "$S"; head -c $((4096 - $(wc -c < "$S"))) /dev/zero | tr '\0' .; } > sig/ok-4096-bytes.sig
+cp "$S" sig/ok-ed25519.sig
+cp c/prekey-1.txt.sig sig/c-ok-p256.sig
+sed 's/$/\r/' "$S" > sig/bad-crlf.sig
+sed "2s/\$/ /; 3s/^/"$'\t'"/" "$S" > sig/bad-whitespace-in-the-base64.sig
+{ head -n 1 "$S"; sed '1d;$d' "$S" | tr -d '\n'; echo; tail -n 1 "$S"; } > sig/bad-base64-on-one-line.sig
+head -c -1 "$S" > sig/bad-no-line-feed-after-end.sig
+{ cat "$S"; echo "nothing after the END line is read"; } > sig/bad-text-after-end.sig
+{ sed '$d' "$S" | head -c -1; printf '\0\n'; tail -n 1 "$S"; } > sig/bad-nul-before-end.sig
 skip() { echo $(($2 + 8 + 2 * 16#${1:$2:8})); } # <blob hex> <hex offset of a string> → the offset after it
+content() { printf %s "${1:$2+8:2*16#${1:$2:8}}"; } # <hex> <hex offset of a string> → what the string holds
+restr() { printf %s "${1:0:$2}$(str "$3")${1:$(skip "$1" "$2")}"; } # <hex> <hex offset of a string> <what it now holds, hex> → the hex with that string replaced
 o=$(skip "$X" "$(skip "$X" 20)")      # after the signing key and the namespace: the reserved field, empty
 [ "${X:o:8}" = 00000000 ] || { echo "no empty reserved field where it should be" >&2; exit 1; }
-armor "${X:0:o}$(str "$(asc 'not read')")${X:o+8}" > sig/ok-reserved-not-empty.sig      # the key signed an empty one
-{ cat "$S"; head -c $((4097 - $(wc -c < "$S"))) /dev/zero | tr '\0' .; } > sig/bad-4097-bytes.sig
-sed "2s/\$/$(printf "%$((4097 - $(wc -c < "$S")))s" '')/" "$S" > sig/bad-4097-bytes-before-end.sig
+armor "${X:0:o}$(str "$(asc 'not read')")${X:o+8}" > sig/bad-reserved-not-empty.sig      # the key signed an empty one
+armor "${X:0:12}00000000${X:20}" > sig/bad-version-0.sig
+armor "$(restr "$X" "$(skip "$X" 20)" "$(content "$X" "$(skip "$X" 20)")00")" > sig/bad-namespace-ending-in-a-nul.sig
+under a-work a/work-cert.pub "dromas-prekey-v1:$A" -O hashalg=sha256 < a/prekey-1.txt > sig/bad-sha256.sig
 sed '1s/$/ /' "$S" > sig/bad-space-after-begin.sig
 { echo "text before the BEGIN line"; cat "$S"; } > sig/bad-text-before-begin.sig
 sed '$d' "$S" > sig/bad-no-end-line.sig
 sed '$s/^/ /' "$S" > sig/bad-end-line-indented.sig
 sed '2s/^./!/' "$S" > sig/bad-not-base64.sig
 { head -n 1 "$S"; printf '\0'; tail -n +2 "$S"; } > sig/bad-nul.sig
-# The padding forms need a blob whose length is no multiple of 3. When S's is one, P is S with a byte in its reserved
-# field, which a verifier ignores (ok-reserved-not-empty): the padding is then all that is wrong with each.
-P=$S; [ $(( ${#X} / 2 % 3 )) -ne 0 ] || { P=$KEYS/padded.sig; armor "${X:0:o}$(str "$(asc .)")${X:o+8}" > "$P"; }
+# The base64 not in its one encoding needs a blob whose length is no multiple of 3. A's is one, and every byte of a blob is
+# in the one form, so these two are C's, made once and kept: its padding is all that is wrong with each.
+P=c/prekey-1.txt.sig; [ $(( $(sed '1d;$d' "$P" | tr -d '\n' | base64 -d | wc -c) % 3 )) -ne 0 ] || { echo "the length of c/prekey-1.txt.sig's blob is a multiple of 3" >&2; exit 1; }
 t=$(sed -n 'x;$p' "$P"); p=${t##*[!=]}; t=${t%"$p"}; c=${t: -1}; B64=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/; i=${B64%%"$c"*}      # the last base64 line: its padding p, one = or two, and the character before it
 # Before one = the last character has 2 unused bits, before two 4: none may be set yet, and setting the lowest sets one of them.
 [ -n "$p" ] && [ $(( ${#i} % (${#p} == 1 ? 4 : 16) )) -eq 0 ] || { echo "the last base64 line has no padding, or its last character already has a padding bit set" >&2; exit 1; }
-sed "$(( $(wc -l < "$P") - 1 ))s/$c$p\$/${B64:${#i}+1:1}$p/" "$P" > sig/bad-padding-bits.sig      # one of the unused bits of the last character set
-sed "$(( $(wc -l < "$P") - 1 ))s/=*\$//" "$P" > sig/bad-no-padding.sig
+sed "$(( $(wc -l < "$P") - 1 ))s/$c$p\$/${B64:${#i}+1:1}$p/" "$P" > sig/c-bad-padding-bits.sig      # one of the unused bits of the last character set
+sed "$(( $(wc -l < "$P") - 1 ))s/=*\$//" "$P" > sig/c-bad-no-padding.sig
 armor "$(plusl "$X" $((${#X} - 64)))" > sig/bad-s-plus-l.sig      # the working key's S
 armor "$(plusl "$X" $((28 + 2 * 16#${X:20:8} - 64)))" > sig/bad-certificate-s-plus-l.sig      # the identity's S on the certificate, its last 32 bytes
 armor "${X}00" > sig/bad-trailing-byte-in-the-blob.sig
-# What every OpenSSH build takes, as they all read it (PROTOCOL.md §3.2), and what they all refuse beside each: one NUL as the
-# last byte before the END line; version 0; and one NUL at the end of a string nothing signs, which OpenSSH reads with
-# sshbuf_get_cstring and builds the signed data without. Two NULs, or version 2, are refused.
-content() { printf %s "${1:$2+8:2*16#${1:$2:8}}"; } # <hex> <hex offset of a string> → what the string holds
-restr() { printf %s "${1:0:$2}$(str "$3")${1:$(skip "$1" "$2")}"; } # <hex> <hex offset of a string> <what it now holds, hex> → the hex with that string replaced
-W=$(blob cert/bad-certifies-the-identity.sig); V=$(blob <(sign a "dromas-prekey-v1:$A" < a/prekey-1.txt))
-[ "$(restr "$V" 20 "$(content "$W" 20)")" = "$W" ] || { echo "cert/bad-certifies-the-identity.sig is not the identity's own signature re-wrapped" >&2; exit 1; }
-nuls() { local z; printf -v z '%*s' "${3:-1}" ''; restr "$1" "$2" "$(content "$1" "$2")${z// /00}"; } # <hex> <hex offset of a string> [how many] → that string ending in one NUL more, or as many as given
-{ sed '$d' "$S" | head -c -1; printf '\0\n'; tail -n 1 "$S"; } > sig/ok-nul-before-end.sig
-{ sed '$d' "$S" | head -c -1; printf '\0\0\n'; tail -n 1 "$S"; } > sig/bad-two-nuls-before-end.sig
-armor "${X:0:12}00000000${X:20}" > sig/ok-version-0.sig
-armor "${X:0:12}00000002${X:20}" > sig/bad-version-2.sig
-o=$(skip "$X" 20)      # the namespace
-armor "$(nuls "$X" "$o")" > sig/ok-namespace-nul.sig
-armor "$(nuls "$X" "$o" 2)" > sig/bad-namespace-two-nuls.sig
-o=$(skip "$X" "$(skip "$X" "$o")")      # the hash name, after the namespace and reserved
-armor "$(nuls "$X" "$o")" > sig/ok-hash-nul.sig
-o=$(skip "$X" "$o")      # the working key's signature: its type, then its bytes
-armor "$(restr "$X" "$o" "$(nuls "$(content "$X" "$o")" 0)")" > sig/ok-type-nul.sig
-Y=$(restr "$X" "$o" "$(nuls "$(content "$X" "$o")" 0)"); armor "$(plusl "$Y" $((${#Y} - 64)))" > sig/bad-type-nul-s-plus-l.sig      # and S + L: still Ed25519's, refused
-k=$(content "$X" 20); c=$((${#k} - 174))      # the certificate, whose last field is the identity's Ed25519 signature on it, 87 bytes
-[ "${k:c:38}" = "00000053$(str "$(asc ssh-ed25519)")" ] || { echo "no Ed25519 signature at the end of the certificate" >&2; exit 1; }
-armor "$(restr "$X" 20 "$(restr "$k" "$c" "$(nuls "$(content "$k" "$c")" 0)")")" > sig/ok-certificate-type-nul.sig
-armor "$(restr "$X" 20 "$(nuls "$k" 0)")" > sig/bad-certificate-own-type-nul.sig      # the identity signed the certificate's type: OpenSSH checks its signature over the bytes as they came
+k=$(content "$X" 20)
+armor "$(restr "$X" 20 "$(restr "$k" 0 "$(content "$k" 0)00")")" > sig/bad-certificate-own-type-nul.sig      # the identity signed the certificate's type: no key has that type
+# C's: r and s are one string, after the signature's type. s as n - s, n the order of P-256's group, subtracted a byte at
+# a time; and r with a zero byte before it, which the minimal mpint does not have.
+X=$(blob c/prekey-1.txt.sig)
+o=$(skip "$X" "$(skip "$X" "$(skip "$X" "$(skip "$X" 20)")")")      # the signature: its type, then r and s in one string
+g=$(content "$X" "$o"); i=$(skip "$g" 0); rs=$(content "$g" "$i"); j=$(skip "$rs" 0); s=$(content "$rs" "$j")
+nminus() { # <a P-256 number, hex, as an mpint holds it> → n - it, as the minimal mpint holds it
+  local x n=ffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551 r="" b=0 i d
+  printf -v x '%064s' "${1: -64}"; x=${x// /0}
+  for ((i = 62; i >= 0; i -= 2)); do d=$((16#${n:i:2} - 16#${x:i:2} - b)); b=$((d < 0)); r=$(printf %02x $(((d + 256) % 256)))$r; done
+  while [ "${r:0:2}" = 00 ]; do r=${r:2}; done
+  [[ $r =~ ^[89a-f] ]] && r=00$r
+  printf %s "$r"
+}
+armor "$(restr "$X" "$o" "$(restr "$g" "$i" "$(restr "$rs" "$j" "$(nminus "$s")")")")" > sig/c-ok-the-other-s.sig
+armor "$(restr "$X" "$o" "$(restr "$g" "$i" "$(restr "$rs" 0 "00$(content "$rs" 0)")")")" > sig/c-bad-r-padded.sig
 # Two more, made by protocol's TestVectorsEd25519R, since they need arithmetic on the curve: sig/ok-r-small-order.sig, whose
 # R is the neutral point, and sig/bad-r-plus-order-2.sig, whose R has a point of order 2 added. OpenSSH's own Ed25519 from
 # 10.6p1 judges both the other way (PROTOCOL.md Appendix A).
+W=$(blob cert/bad-certifies-the-identity.sig); V=$(blob <(sign a "dromas-prekey-v1:$A" < a/prekey-1.txt))
+[ "$(restr "$V" 20 "$(content "$W" 20)")" = "$W" ] || { echo "cert/bad-certifies-the-identity.sig is not the identity's own signature re-wrapped" >&2; exit 1; }
 # A certificate of a working key of small order, the neutral point, which ssh-keygen certifies as it reads any 32 bytes,
 # and a signature under it over a/prekey-1.txt that Ed25519's equation takes, R the neutral point and S zero: the check
 # on the working key is all that refuses it.
@@ -368,18 +360,6 @@ cert cert/bad-working-key-small-order.pub a small-work $(good "$A")
 X=$(blob a/prekey-1.txt.sig); X=$(restr "$X" 20 "$(cut -d' ' -f2 cert/bad-working-key-small-order.pub | base64 -d | od -An -v -tx1 | tr -d ' \n')")
 o=$(skip "$X" "$(skip "$X" "$(skip "$X" "$(skip "$X" 20)")")")      # the signature: its type, then R and S in one string
 armor "$(restr "$X" "$o" "$(str "$(asc ssh-ed25519)")$(str 01$(printf '%0126d' 0))")" > cert/bad-working-key-small-order.sig
-# A revocation's key is the identity's own, and nothing signs it: its type may end in a NUL, and a P-256 key's curve
-# too. And C's ECDSA signature with r at the most OpenSSH reads, 2,049 bytes with the zeros before it, and a byte over.
-X=$(blob a/revoke.sig)
-armor "$(restr "$X" 20 "$(nuls "$(content "$X" 20)" 0)")" > revoke/ok-key-type-nul.sig
-X=$(blob c/revoke.sig); k=$(content "$X" 20)
-armor "$(restr "$X" 20 "$(nuls "$k" "$(skip "$k" 0)")")" > revoke/c-ok-curve-nul.sig
-o=$(skip "$X" "$(skip "$X" "$(skip "$X" "$(skip "$X" 20)")")")      # the signature: its type, then r and s in one string
-g=$(content "$X" "$o"); i=$(skip "$g" 0); rs=$(content "$g" "$i"); n=$((16#${rs:0:8}))
-for want in 2049:ok 2050:bad; do
-  printf -v z '%*s' $((${want%:*} - n)) ''
-  armor "$(restr "$X" "$o" "$(restr "$g" "$i" "$(restr "$rs" 0 "${z// /00}$(content "$rs" 0)")")")" > "revoke/c-${want#*:}-r-${want%:*}-bytes.sig"
-done
 
 # Identity documents every implementation must reject, but ok-*, which every one takes.
 GOOD=$(sed -n 2p a/identity.doc)
@@ -607,9 +587,8 @@ refuse refuse-certificate-revoked message/a-to-b.line under a-work cert/bad-revo
 refuse refuse-signed-by-a-bare-working-key message/a-to-b.line sign a-work "dromas-msg-v1:$B"
 refuse refuse-certificate-ended message/a-to-b.line under a-work cert/bad-ended.pub "dromas-msg-v1:$B"
 sed 's/"body":"hello"/"body":"hellp"/' message/a-to-b.line > "$L"; cat "$L" "$GOOD_SIG" > plain/refuse-line-changed-after-signing.txt
-# The signature block is read as ssh-keygen reads a signature (sig/), and is at most 4096 bytes from its BEGIN line through its END line.
-{ cat message/a-to-b.line; sed "2s/\$/ \r/; 3s/^/"$'\t'"/" "$GOOD_SIG"; } > plain/accept-whitespace-in-the-signature.txt
-{ cat message/a-to-b.line; sed "2s/\$/$(printf "%$((4097 - $(wc -c < "$GOOD_SIG")))s" '')/" "$GOOD_SIG"; } > plain/refuse-signature-over-4096-bytes.txt
+# The signature block is a signature in its one form (sig/): whitespace in its base64 refuses it.
+{ cat message/a-to-b.line; sed "2s/\$/ \r/; 3s/^/"$'\t'"/" "$GOOD_SIG"; } > plain/refuse-whitespace-in-the-signature.txt
 # A sender whose identity is of the optional type, signed by that identity, made once and kept: delivered by a client
 # that verifies ecdsa-sha2-nistp256, and refused with unsupported_key_type by one that does not; and the same under C's
 # certificate, which nothing revokes. Then one of a type nobody verifies: refused so if the document is the sender's,

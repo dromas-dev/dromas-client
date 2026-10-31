@@ -323,21 +323,19 @@ func TestCertificateAgainstSSHKeygen(t *testing.T) {
 	if s, err := VerifySigned(id, msg, must(msg, "-Y", "sign", "-n", ns, "-f", "identity"), ns, now); err != nil || !s.Identity() || s.Rank() != 0 {
 		t.Errorf("ssh-keygen's signature by the identity: %v", err)
 	}
-	// Without "-O clear" ssh-keygen adds five extensions. None means
-	// anything here, and an extension a verifier does not know is ignored
-	// (draft-ietf-sshm-cert-01 §2.1.1); a critical option is refused.
+	// Without "-O clear" ssh-keygen adds five extensions, and with
+	// "-O force-command" a critical option: neither is the one form its
+	// makers write, and each is refused, the signature under it being over
+	// the bound before the certificate is read.
 	if err := os.Rename(filepath.Join(dir, "work-cert.pub"), filepath.Join(dir, "clear-cert.pub")); err != nil {
 		t.Fatal(err)
 	}
-	must(nil, "-q", "-s", "identity", "-I", CertificateKeyID, "-n", a, "-z", "8", "-V", "+64d", "work.pub")
-	sig = must(msg, "-Y", "sign", "-n", ns, "-f", "work-cert.pub")
-	if _, err := VerifySigned(id, msg, sig, ns, now); err != nil {
-		t.Errorf("a certificate with ssh-keygen's default extensions: %v", err)
-	}
-	must(nil, "-q", "-s", "identity", "-I", CertificateKeyID, "-n", a, "-z", "9", "-V", "+64d", "-O", "clear", "-O", "force-command=true", "work.pub")
-	sig = must(msg, "-Y", "sign", "-n", ns, "-f", "work-cert.pub")
-	if _, err := VerifySigned(id, msg, sig, ns, now); !errors.Is(err, ErrCertificate) {
-		t.Errorf("a certificate with a critical option: %v", err)
+	for serial, opts := range map[string][]string{"8": nil, "9": {"-O", "clear", "-O", "force-command=true"}} {
+		must(nil, append(append([]string{"-q", "-s", "identity", "-I", CertificateKeyID, "-n", a, "-z", serial, "-V", "+64d"}, opts...), "work.pub")...)
+		sig = must(msg, "-Y", "sign", "-n", ns, "-f", "work-cert.pub")
+		if _, err := VerifySigned(id, msg, sig, ns, now); err == nil {
+			t.Errorf("a certificate made with %q: taken", opts)
+		}
 	}
 
 	// A certificate and a signature made here, checked by ssh-keygen.

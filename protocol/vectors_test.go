@@ -16,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -327,21 +328,8 @@ func TestVectorCertificates(t *testing.T) {
 			}
 		}
 	}
-	// Two certificates whose extensions are not in their one encoding: a
-	// name given twice, which the library does not parse, and a value of one
-	// empty string, which it writes back as no value, so the certificate is
-	// not the bytes the identity signed. The signature that carries either
-	// is refused before any rule of the table is read.
-	unread := map[string]bool{"bad-extension-twice": true, "bad-extension-value-an-empty-string": true}
 	for _, f := range glob(t, "cert/bad-*.pub") {
 		name := strings.TrimSuffix(filepath.Base(f), ".pub")
-		if unread[name] {
-			if _, err := VerifySigned(a, st, read(t, "cert/"+name+".sig"), PrekeyNamespace(a.Address()), now); err == nil {
-				t.Errorf("%s: VerifySigned took it", name)
-			}
-			delete(unread, name)
-			continue
-		}
 		key := vectorCertificate(t, "cert/"+name+".pub")
 		sig := read(t, "cert/"+name+".sig")
 		want := ErrCertificate
@@ -363,21 +351,18 @@ func TestVectorCertificates(t *testing.T) {
 		if _, err := CheckCertificate(a, key, now); !errors.Is(err, want) {
 			t.Errorf("%s: CheckCertificate: %v, want %v", name, err, want)
 		}
-		if _, err := VerifySigned(a, st, sig, PrekeyNamespace(a.Address()), now); !errors.Is(err, want) {
+		// A certificate that carries what its makers do not write (a
+		// critical option, extensions) makes a signature over the bound,
+		// which is refused before the certificate is read.
+		_, err := VerifySigned(a, st, sig, PrekeyNamespace(a.Address()), now)
+		if over := len(sig) > SignatureBound(a.Type()); over && err == nil || !over && !errors.Is(err, want) {
 			t.Errorf("%s: VerifySigned: %v, want %v", name, err, want)
 		}
 		// Control: the signature is good under the certificate it carries,
 		// so the certificate is what was refused.
-		blob, err := Dearmor(sig)
-		if err != nil {
-			t.Fatalf("%s: %v", name, err)
-		}
-		if err := sshsig.Verify(key, st, blob, PrekeyNamespace(a.Address())); err != nil {
+		if err := sshsig.Verify(key, st, armoredBlob(t, sig), PrekeyNamespace(a.Address())); err != nil {
 			t.Errorf("%s: control: the signature itself fails: %v", name, err)
 		}
-	}
-	for name := range unread {
-		t.Errorf("cert/%s is missing", name)
 	}
 	// The re-wrap: cert/bad-certifies-the-identity carries A's identity's own
 	// signature, rank 0, with a certificate of the identity's key above A's
@@ -425,14 +410,14 @@ func TestVectorRevokedCerts(t *testing.T) {
 	}
 }
 
-// cert/ok-reserved-field: A's working key's certificate with bytes in its
-// reserved field, which a verifier ignores (draft-ietf-sshm-cert-01 §2.1.1),
-// and a signature made under it over a/prekey-1.txt in A's prekey namespace.
-// ssh-keygen writes the field empty, so they are made here, the same bytes
-// each time: the nonce is a hash of the vector's name, and Ed25519 signs
-// deterministically. The kept files are held to them, and
+// Two certificates of A's working key out of the one form its makers write,
+// each with a signature made under it over a/prekey-1.txt in A's prekey
+// namespace: cert/bad-reserved-field, with bytes in its reserved field, and
+// cert/bad-nonce-of-16-bytes. ssh-keygen writes neither, so they are made
+// here, the same bytes each time: each nonce is a hash of the vector's name,
+// and Ed25519 signs deterministically. The kept files are held to them, and
 // DROMAS_WRITE_VECTORS=1 writes them.
-func TestVectorsReservedField(t *testing.T) {
+func TestVectorsCertificateForm(t *testing.T) {
 	a := vectorIdentity(t, "a")
 	identity, _ := vectorKey(t, "a")
 	seed, err := hex.DecodeString(strings.Fields(string(read(t, "input/a-work.ed25519")))[0])
@@ -445,36 +430,44 @@ func TestVectorsReservedField(t *testing.T) {
 	}
 	after, _ := time.Parse(time.RFC3339, "2026-10-09T23:00:00Z") // as generate.sh's V_OK
 	before, _ := time.Parse(time.RFC3339, "2026-11-24T00:00:00Z")
-	cert := &ssh.Certificate{
-		Key:             work.PublicKey(),
-		Serial:          vectorRank(t),
-		CertType:        ssh.UserCert,
-		KeyId:           CertificateKeyID,
-		ValidPrincipals: []string{a.Address().String()},
-		ValidAfter:      uint64(after.Unix()),  //nolint:gosec // a time in 2026
-		ValidBefore:     uint64(before.Unix()), //nolint:gosec // a time in 2026
-		Reserved:        []byte("not read"),
-	}
-	nonce := sha512.Sum512([]byte("dromas vector: cert/ok-reserved-field"))
-	if err := cert.SignCert(bytes.NewReader(nonce[:32]), identity); err != nil {
-		t.Fatal(err)
-	}
-	signer, err := ssh.NewCertSigner(cert, work)
-	if err != nil {
-		t.Fatal(err)
-	}
-	sig, err := Sign(signer, read(t, "a/prekey-1.txt"), PrekeyNamespace(a.Address()))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for name, b := range map[string][]byte{"cert/ok-reserved-field.pub": ssh.MarshalAuthorizedKey(cert), "cert/ok-reserved-field.sig": sig} {
-		if os.Getenv("DROMAS_WRITE_VECTORS") != "" {
-			if err := os.WriteFile(filepath.Join(vectors, name), b, 0o600); err != nil {
-				t.Fatal(err)
-			}
+	for name, change := range map[string]func(*ssh.Certificate){
+		"bad-reserved-field":    func(c *ssh.Certificate) { c.Reserved = []byte("not read") },
+		"bad-nonce-of-16-bytes": func(c *ssh.Certificate) { c.Nonce = c.Nonce[:16] },
+	} {
+		cert := &ssh.Certificate{
+			Key:             work.PublicKey(),
+			Serial:          vectorRank(t),
+			CertType:        ssh.UserCert,
+			KeyId:           CertificateKeyID,
+			ValidPrincipals: []string{a.Address().String()},
+			ValidAfter:      uint64(after.Unix()),  //nolint:gosec // a time in 2026
+			ValidBefore:     uint64(before.Unix()), //nolint:gosec // a time in 2026
 		}
-		if !bytes.Equal(read(t, name), b) {
-			t.Errorf("%s is not what this test makes", name)
+		nonce := sha512.Sum512([]byte("dromas vector: cert/" + name))
+		cert.Nonce, cert.SignatureKey = nonce[:32], identity.PublicKey()
+		change(cert)
+		sig, err := identity.Sign(nil, signedBytes(cert)) // Ed25519 reads no randomness
+		if err != nil {
+			t.Fatal(err)
+		}
+		cert.Signature = sig
+		signer, err := ssh.NewCertSigner(cert, work)
+		if err != nil {
+			t.Fatal(err)
+		}
+		st, err := Sign(signer, read(t, "a/prekey-1.txt"), PrekeyNamespace(a.Address()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for file, b := range map[string][]byte{"cert/" + name + ".pub": ssh.MarshalAuthorizedKey(cert), "cert/" + name + ".sig": st} {
+			if os.Getenv("DROMAS_WRITE_VECTORS") != "" {
+				if err := os.WriteFile(filepath.Join(vectors, file), b, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if !bytes.Equal(read(t, file), b) {
+				t.Errorf("%s is not what this test makes", file)
+			}
 		}
 	}
 }
@@ -494,7 +487,6 @@ func TestVectorPrekeys(t *testing.T) {
 		rank   uint64
 	}{
 		{a, "a/prekey-1.txt", "a/prekey-1.txt.sig", 1, vectorRank(t)},
-		{a, "a/prekey-1.txt", "a/prekey-1.txt.sha256.sig", 1, vectorRank(t)},
 		{a, "a/prekey-2.txt", "a/prekey-2.txt.sig", 2, vectorRank(t)},
 		{a, "prekey/outlives-its-certificate.txt", "prekey/outlives-its-certificate.txt.sig", 1, vectorRank(t) + 1},
 		{b, "b/prekey-1.txt", "b/prekey-1.txt.sig", 1, 0},
@@ -765,26 +757,91 @@ func TestVectorSignatures(t *testing.T) {
 	}
 }
 
-// One signature in the forms sig/ holds: each ok-* is read as "ssh-keygen -Y
-// verify" reads it and verifies, and each bad-* is refused (PROTOCOL.md §3.2).
-// sh/sh_test.go holds the script to the same verdicts, and ssh-keygen too but
-// for the ones it takes and a verifier here does not.
+// A signature has one form (PROTOCOL.md §3.2): each sig/ok-* is taken, the
+// one form of each identity key type, A's and C's own signatures, and C's
+// with s written as n − s, which ECDSA verifies too; each sig/bad-* is
+// refused, A's signature in another form, C's r with a zero byte before it,
+// C's base64 not in its one encoding, and an Ed25519 S or R a verifier refuses.
+// A c-* vector is C's, over c/prekey-1.txt in C's namespace. sh/sh_test.go
+// holds the script to the same verdicts.
 func TestVectorSignatureForms(t *testing.T) {
 	now := vectorNow(t)
-	a := vectorIdentity(t, "a")
-	stmt := read(t, "a/prekey-1.txt")
+	a, c := vectorIdentity(t, "a"), vectorIdentity(t, "c")
 	for _, f := range glob(t, "sig/*.sig") {
 		name := "sig/" + filepath.Base(f)
-		_, err := VerifySigned(a, stmt, read(t, name), PrekeyNamespace(a.Address()), now)
-		if ok := strings.HasPrefix(filepath.Base(f), "ok-"); ok != (err == nil) {
+		id, stmt := a, read(t, "a/prekey-1.txt")
+		base := strings.TrimPrefix(filepath.Base(f), "c-")
+		if base != filepath.Base(f) {
+			id, stmt = c, read(t, "c/prekey-1.txt")
+		}
+		_, err := VerifySigned(id, stmt, read(t, name), PrekeyNamespace(id.Address()), now)
+		if ok := strings.HasPrefix(base, "ok-"); ok != (err == nil) {
 			t.Errorf("%s: %v", name, err)
 		}
 	}
-	if n := len(read(t, "sig/ok-4096-bytes.sig")); n != MaxSignature {
-		t.Errorf("sig/ok-4096-bytes.sig is %d bytes, not the bound", n)
+	for v, signed := range map[string]string{"sig/ok-ed25519.sig": "a/prekey-1.txt.sig", "sig/c-ok-p256.sig": "c/prekey-1.txt.sig"} {
+		if !bytes.Equal(read(t, v), read(t, signed)) {
+			t.Errorf("%s is not %s", v, signed)
+		}
 	}
-	if n := len(read(t, "sig/bad-4097-bytes.sig")); n != MaxSignature+1 {
-		t.Errorf("sig/bad-4097-bytes.sig is %d bytes, not one over the bound", n)
+	// C's other s: the same signature but for s, which is n − s.
+	one, err := Dearmor(read(t, "sig/c-ok-p256.sig"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := Dearmor(read(t, "sig/c-ok-the-other-s.sig"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rs := func(blob []byte) (r, s *big.Int, before []byte) {
+		f := wireReader(blob[10:])
+		for range 4 {
+			f.string()
+		}
+		before = blob[:len(blob)-len(f)]
+		sig := new(ssh.Signature)
+		raw, _ := f.string()
+		var v struct{ R, S *big.Int }
+		if ssh.Unmarshal(raw, sig) != nil || ssh.Unmarshal(sig.Blob, &v) != nil {
+			t.Fatal("C's signature has no r and s")
+		}
+		return v.R, v.S, before
+	}
+	r1, s1, b1 := rs(one)
+	r2, s2, b2 := rs(other)
+	if r1.Cmp(r2) != 0 || new(big.Int).Add(s1, s2).Cmp(elliptic.P256().Params().N) != 0 || !bytes.Equal(b1, b2) {
+		t.Error("sig/c-ok-the-other-s.sig is not C's signature with s as n − s")
+	}
+}
+
+// Every form of a signature but its one form is refused: each byte of A's
+// and C's signatures changed, a byte that is no base64 put before each, and
+// each byte taken out. Only an ECDSA signature's other s, which no change of
+// a byte makes, verifies beside it (TestVectorSignatureForms).
+func TestEveryOtherFormOfASignatureIsRefused(t *testing.T) {
+	now := vectorNow(t)
+	for _, m := range []string{"a", "c"} {
+		id, stmt, sig := vectorIdentity(t, m), read(t, m+"/prekey-1.txt"), read(t, m+"/prekey-1.txt.sig")
+		if _, err := VerifySigned(id, stmt, sig, PrekeyNamespace(id.Address()), now); err != nil {
+			t.Fatalf("control: %s/prekey-1.txt.sig: %v", m, err)
+		}
+		for i := range sig {
+			var forms [][]byte
+			for _, b := range []byte{sig[i] ^ 1, sig[i] ^ 0x20, ' ', '\r', '\n', 0} {
+				if b != sig[i] {
+					forms = append(forms, slices.Concat(sig[:i], []byte{b}, sig[i+1:]))
+				}
+			}
+			for _, b := range []byte{' ', '\r', '\n', '\t', 0, '='} {
+				forms = append(forms, slices.Concat(sig[:i], []byte{b}, sig[i:]))
+			}
+			forms = append(forms, slices.Concat(sig[:i], sig[i+1:]))
+			for _, f := range forms {
+				if _, err := VerifySigned(id, stmt, f, PrekeyNamespace(id.Address()), now); err == nil {
+					t.Fatalf("%s/prekey-1.txt.sig changed at byte %d is taken: %q", m, i, f)
+				}
+			}
+		}
 	}
 }
 
@@ -896,6 +953,18 @@ func TestASignatureIsHeldToItsIdentitysBound(t *testing.T) {
 	if got[6] != nil || got[7] != nil {
 		t.Errorf("C's signatures, a P-256 identity's, were held to Ed25519's bound: %v, %v", got[6], got[7])
 	}
+}
+
+// armoredBlob is the blob an armored signature's base64 holds, read with no
+// check of its form or its size: a control's reading.
+func armoredBlob(t *testing.T, armored []byte) []byte {
+	t.Helper()
+	body := bytes.TrimSuffix(bytes.TrimPrefix(armored, []byte(armorBegin)), []byte("\n"+armorEnd+"\n"))
+	blob, err := base64.StdEncoding.DecodeString(string(bytes.ReplaceAll(body, []byte("\n"), nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return blob
 }
 
 // widestECDSA is an SSHSIG blob in the one form with every ECDSA
@@ -1076,8 +1145,7 @@ var plainVerdicts = map[string]string{
 	"refuse-end-line-followed-by-a-byte-and-a-later-one": RefusedMessage,
 	"refuse-crlf":                                        RefusedMessage,
 	"refuse-envelope-on-two-lines":                       RefusedMessage,
-	"accept-whitespace-in-the-signature":                 "",
-	"refuse-signature-over-4096-bytes":                   RefusedSignature,
+	"refuse-whitespace-in-the-signature":                 RefusedSignature,
 }
 
 // verdictOf is what B makes of plaintext pt at now: OpenSigned's checks, then

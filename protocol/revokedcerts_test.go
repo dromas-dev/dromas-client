@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dromas-dev/dromas-client/sshsig"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -22,9 +23,6 @@ func TestVectorRevokedCertificates(t *testing.T) {
 	four, err := VerifyRevokedCertificates(a.Address(), doc, read(t, "revoked/ok-through-4.txt"), read(t, "revoked/ok-through-4.sig"))
 	if err != nil || four.Through != 4 || !four.Revokes(1) || !four.Revokes(4) || four.Revokes(5) {
 		t.Fatalf("revoked/ok-through-4: %+v, %v", four, err)
-	}
-	if _, err := VerifyRevokedCertificates(a.Address(), doc, read(t, "revoked/ok-through-4.txt"), read(t, "revoked/ok-through-4.sha256.sig")); err != nil {
-		t.Errorf("revoked/ok-through-4.sha256.sig: %v", err)
 	}
 	top, err := VerifyRevokedCertificates(a.Address(), doc, read(t, "revoked/ok-through-the-highest.txt"), read(t, "revoked/ok-through-the-highest.sig"))
 	if err != nil || top.Through != MaxSerial || !top.Revokes(MaxSerial) {
@@ -52,8 +50,10 @@ func TestVectorRevokedCertificates(t *testing.T) {
 	}
 	// Controls: the working key's signature is good under A's certificate,
 	// and each malformed one carries a good signature of A's identity, so it
-	// is the rule and the form that refuse them.
-	if s, err := VerifySigned(a, read(t, "revoked/bad-by-a-working-key.txt"), read(t, "revoked/bad-by-a-working-key.sig"), RevokedCertsNamespace(a.Address()), vectorNow(t)); err != nil || s.Identity() {
+	// is the rule and the form that refuse them. (A working key's signature
+	// in this namespace is over Ed25519's bound too: a working key signs no
+	// revocation, so its signatures here are no part of the bound.)
+	if err := sshsig.Verify(vectorCertificate(t, "a/work-cert.pub"), read(t, "revoked/bad-by-a-working-key.txt"), armoredBlob(t, read(t, "revoked/bad-by-a-working-key.sig")), RevokedCertsNamespace(a.Address())); err != nil {
 		t.Errorf("revoked/bad-by-a-working-key.sig is not a good signature under A's certificate, so it tests nothing: %v", err)
 	}
 	for _, name := range []string{"bad-a-list", "bad-a-second-serial", "bad-crlf", "bad-no-serial", "bad-another-address", "bad-serial-zero", "bad-no-final-newline", "bad-nul"} {
