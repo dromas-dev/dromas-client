@@ -26,7 +26,7 @@
 # ship older, and go install filippo.io/age/cmd/...@v1.3.2 is current), OpenSSH >= 9.1 (the first to take a
 # certificate's validity and a time to verify at in UTC), curl >= 7.84 (--fail-with-body, and -w with %header),
 # jq >= 1.7.1 (1.7.0 can abort on a number a sender writes, CVE-2023-50246; Ubuntu 24.04's fixed jq prints jq-1.7),
-# iconv, and coreutils (sha256sum, sha384sum, base64, od, sync). Dates go through jq, never date -d, and base64 is never -w0.
+# iconv, and coreutils (sha256sum, sha384sum, base64, fold, od, sync). Dates go through jq, never date -d, and base64 is never -w0.
 
 # recipe: setup
 set -o pipefail; umask 077
