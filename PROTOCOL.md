@@ -183,7 +183,7 @@ A certificate is an OpenSSH user certificate, and a verifier MUST check every ro
 | Critical options | none. A verifier MUST refuse a certificate with any (draft-ietf-sshm-cert-01 §2.1.1) |
 | Extensions | ignored, each, but a verifier MUST refuse a certificate whose extensions are not in one encoding: each name once, in lexical order, and each value empty or one string that is not empty. A maker writes none |
 | Reserved | ignored, whatever it holds. A maker writes it empty |
-| Signed by | the key in the identity document, byte for byte |
+| Signed by | the key in the identity document, byte for byte, its signature in the one form of the key's type (Section 3.2) |
 
 - **A certificate is checked at the verifier's clock, exactly, and only once the identity's signature on it has verified.** It holds from its `valid after` and has ended at its `valid before` (Section 2.2). A date past `9999-12-31T23:59:59Z`, `ssh-keygen`'s `forever` among them, refuses it.
 - **A verifier sets no bound on how long a certificate runs.** A server bounds what it takes (Section 11.7, step 6); a reader takes any certificate within its window.
