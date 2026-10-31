@@ -2,14 +2,12 @@ package client
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"path/filepath"
 	"slices"
 	"strings"
 	"time"
 
-	"github.com/dromas-dev/dromas-client/client/internal/sign"
 	"github.com/dromas-dev/dromas-client/protocol"
 )
 
@@ -17,11 +15,11 @@ import (
 // the server: what a wrapper reads to learn that the mailbox needs a look.
 type Status struct {
 	Address protocol.Address `json:"address"`
-	// Mode is the mailbox's mode (PROTOCOL.md §5): "identity", where its
-	// identity signs what it says, or "working_key", where a working key under
-	// a certificate does, read from the revocation of its certificates it
-	// keeps.
-	Mode string `json:"mode"`
+	// Certified is set when the statement this mailbox published last is
+	// under a certificate, whose working key signs what it says: from then
+	// on it signs under certificates (PROTOCOL.md §5). Unset, its identity
+	// signs.
+	Certified bool `json:"certified"`
 	// Format is the mailbox's format (client/doc.go), this client's: a
 	// mailbox in another is refused, never read ([FormatError]).
 	Format int `json:"format"`
@@ -40,10 +38,10 @@ type Status struct {
 	// the mailbox's prekey-lifetime file, or 33 days. Zero if the file names no
 	// lifetime, and the mailbox then renews no prekey until it is put right.
 	PrekeyLifetime int64 `json:"prekey_lifetime"`
-	// CertificateSerial and CertificateNotAfter are, in working-key mode,
-	// the certificate of the working key in use, the one made with that
-	// prekey: zero and empty, and not written, if the mailbox holds none it can
-	// sign with, and in identity mode, where its identity signs.
+	// CertificateSerial and CertificateNotAfter are the certificate of the
+	// working key in use, the one made with that prekey: zero and empty, and
+	// not written, if the mailbox holds none it can sign with, and where its
+	// identity signs.
 	CertificateSerial   uint64 `json:"certificate_serial,omitempty"`
 	CertificateNotAfter string `json:"certificate_not_after,omitempty"`
 	// RenewalPendingSince is when this mailbox signed the oldest new prekey it
@@ -101,18 +99,6 @@ func (b *Mailbox) status() (*Status, error) {
 		s.Revoked = true
 		s.Attention = append(s.Attention, "this mailbox's address is revoked, for good, and the revocation verifies: it sends and receives nothing more. Make a new mailbox and give its address to those who wrote to this one")
 	}
-	m, merr := b.mode()
-	s.Mode = modeName(m)
-	if merr != nil {
-		s.Attention = append(s.Attention, merr.Error())
-	}
-	var switching bool
-	if err := b.view(func(st store) error { switching = st.get(bucketIntent, "switch") != nil; return nil }); err != nil {
-		return nil, err
-	}
-	if switching {
-		s.Attention = append(s.Attention, "a move to working-key mode is under way: dromas cert switch, with this mailbox's address in full, finishes it")
-	}
 	var err error
 	if s.Policy, err = b.policy(); err != nil {
 		s.Attention = append(s.Attention, fmt.Sprintf("the mailbox's policy cannot be read, so it neither sends nor receives until that is put right: %v", err))
@@ -154,11 +140,11 @@ func (b *Mailbox) status() (*Status, error) {
 			s.Attention = append(s.Attention, fmt.Sprintf("the prekey expired at %s: senders are refused until dromas recv or dromas prekey renew renews it", s.PrekeyNotAfter))
 		}
 	}
+	certified, cerr := b.certified()
+	s.Certified = cerr == nil && certified
 	switch _, cert, werr := b.currentSigner(); {
-	case werr != nil && (err != nil || perr != nil || s.Revoked || merr != nil):
-	case errors.Is(werr, sign.ErrNotIdentityMode):
-		s.Attention = append(s.Attention, werr.Error())
-	case werr != nil && m == sign.WorkingKeyMode:
+	case werr != nil && (err != nil || perr != nil || s.Revoked):
+	case werr != nil && s.Certified:
 		s.Attention = append(s.Attention, "this mailbox holds no working key it can sign with, or its certificate has ended: it cannot poll or send until dromas prekey renew makes new ones")
 	case werr != nil:
 		s.Attention = append(s.Attention, fmt.Sprintf("this mailbox cannot sign: %v", werr))

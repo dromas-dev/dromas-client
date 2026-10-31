@@ -21,10 +21,10 @@ import (
 //     namespace, and name the peer. One whose key is an age recipient of a
 //     type this client cannot encrypt to is refused with its own code,
 //     RefusedPrekeyType.
-//   - Its signer must be one the peer's mode takes, by the revocation of its
-//     certificates this mailbox holds (protocol.Admits): the identity in
-//     identity mode, where no certificate is taken, and a certificate above
-//     the revocation in working-key mode (PROTOCOL.md §5, §12.2).
+//   - Its certificate, where it is under one, may not be one the peer's
+//     identity has revoked, by the revocation this mailbox holds
+//     (protocol.Admits): the identity's own signature is always taken
+//     (PROTOCOL.md §5, §12.2).
 //   - It may not be ordered before one already seen (rollback), in the
 //     order (c, p): by a signer of lower rank, or by the same with a lower
 //     serial. A later certificate outranks any serial under an earlier one,
@@ -98,12 +98,7 @@ func (b *Mailbox) resolve(ctx context.Context, peer protocol.Address, l *lookups
 	if err != nil {
 		return nil, err
 	}
-	switch err := protocol.Admits(certs, by); {
-	case errors.Is(err, protocol.ErrIdentityMode):
-		return nil, refuse("%s's prekey is signed under a certificate, and its address is in identity mode, where its identity signs and no certificate is taken: nothing is sent", peer)
-	case errors.Is(err, protocol.ErrRevokedSigner) && by.Identity():
-		return nil, refuse("%s's prekey is signed by its identity, and its address is in working-key mode, where its identity's own signature is revoked: its owner must publish a new one", peer)
-	case err != nil:
+	if protocol.Admits(certs, by) != nil {
 		return nil, refuse("%s's prekey is signed under a certificate its identity has revoked: its owner must publish a new one", peer)
 	}
 	var seen, seenRank uint64

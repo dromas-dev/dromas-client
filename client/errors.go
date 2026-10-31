@@ -137,11 +137,9 @@ func (e *APIError) words() string {
 		if p.CertificateSerial != nil && *p.CertificateSerial >= 1 && *p.CertificateSerial <= protocol.MaxSerial {
 			s += fmt.Sprintf(", certificate %d", *p.CertificateSerial)
 		}
-		return s + ", as after a restore or a renewal on another machine, or in another mode: dromas prekey renew publishes a statement above it"
+		return s + ", as after a restore or a renewal on another machine: dromas prekey renew publishes a statement above it"
 	case protocol.CodeCertificateRevoked:
-		return "the server holds the signer this mailbox signs with as one its identity revoked, a certificate at or below its revocation of certificates, or the identity itself once it holds one: in working-key mode dromas prekey renew certifies a new working key above it"
-	case protocol.CodeIdentityMode:
-		return "the server holds this address in identity mode, with no revocation of its certificates, and takes no statement under a certificate until it holds one: dromas cert publish-revoked publishes the one this mailbox keeps"
+		return "the server holds the certificate this mailbox signs under as one its identity revoked, at or below its revocation of certificates: dromas prekey renew certifies a new working key above it"
 	case protocol.CodeUnknownSender:
 		return "the server does not know this mailbox: it is not registered there, or was forgotten there (dromas init registers a mailbox, and dromas prekey renew registers one again)"
 	case protocol.CodeSenderRevoked:

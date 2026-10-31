@@ -13,10 +13,10 @@
 // message a mailbox can no longer decrypt. While it runs, each Receive renews the
 // prekey once it is a day old, as for any mailbox.
 //
-// It runs in the mode --mode names (PROTOCOL.md §5): identity mode, where its
-// identity signs its replies, or working-key mode, where a working key its
-// identity certifies does, so that both reach the wire. A start restores the
-// mailbox in that mode, and stops where its server holds it in the other.
+// Its identity signs its replies, or with --mode working-key a working key
+// under a certificate its identity made does (PROTOCOL.md §5), so that both
+// reach the wire: such a start registers or renews the mailbox under a
+// certificate, after which it signs under certificates for good.
 package main
 
 import (
@@ -48,7 +48,7 @@ is answered, signed, with what was checked and the body it carried.
               is registered at its first start
   --mode      identity (the default), where the identity signs, or
               working-key, where a working key it certifies signs: for good,
-              once the mailbox is registered so
+              once the mailbox is registered or renewed so
   --dir       the mailbox's state directory, which belongs in memory (a tmpfs):
               $DROMAS_HOME, or ${XDG_CONFIG_HOME:-~/.config}/dromas/${DROMAS_MAILBOX:-default}
 
@@ -142,17 +142,20 @@ func start(ctx context.Context, dir, identity string, opt client.Options, l *log
 		return nil, err
 	}
 	// A state directory in memory holds the identity alone at each start:
-	// init restores the mailbox in its mode, reading it at its server first,
-	// and registers it where the server holds none, so the first start too.
-	// One that kept its state renews.
-	if st.PrekeySerial == 0 {
+	// init restores the mailbox, reading it at its server first, and
+	// registers it where the server holds none, so the first start too. One
+	// that kept its state renews, under a certificate where --mode asks for
+	// one.
+	switch {
+	case st.PrekeySerial == 0:
 		if b, err = client.Init(ctx, dir, opt); err != nil {
 			return nil, err
 		}
-	} else {
-		if want := map[bool]string{false: "identity", true: "working_key"}[opt.WorkingKey]; st.Mode != want {
-			return nil, fmt.Errorf("the mailbox in %s is in %s mode, not the one --mode names", dir, st.Mode)
+	case opt.WorkingKey && !st.Certified:
+		if _, err := b.RenewUnderCertificate(ctx); err != nil {
+			return nil, err
 		}
+	default:
 		if _, err := b.Rekey(ctx); err != nil {
 			return nil, err
 		}
@@ -317,14 +320,14 @@ func report(d client.Delivery, now time.Time) string {
 	env := d.Envelope
 	var s strings.Builder
 	s.WriteString("dromas echo mailbox: your message passed every check.\n")
-	fmt.Fprintf(&s, "from: %s (its signature verified, by the identity this address is the SHA-384 of, or by a working key that identity certified, as its mode takes)\n", env.From)
+	fmt.Fprintf(&s, "from: %s (its signature verified, by the identity this address is the SHA-384 of, or by a working key that identity certified)\n", env.From)
 	fmt.Fprintf(&s, "to: %s\n", env.To)
 	fmt.Fprintf(&s, "msg_id: %s\n", env.MsgID)
 	fmt.Fprintf(&s, "sent_at: %s\n", env.SentAt.UTC().Format(protocol.TimeLayout))
 	fmt.Fprintf(&s, "received_at: %s\n", now.UTC().Format(protocol.TimeLayout))
 	fmt.Fprintf(&s, "ciphertext_sha256: %s\n", d.ID)
 	fmt.Fprintf(&s, "checked: decryption with this mailbox's prekey; the sender's identity, which the message carries, against its address; "+
-		"the signer, that identity or its certificate for a working key, against the sender's mode; the signature, made for this mailbox only; "+
+		"the signer, that identity or its certificate for a working key, not revoked; the signature, made for this mailbox only; "+
 		"the envelope's version, from and to; sent_at within %d days; not a replay\n", protocol.TTL/(24*time.Hour))
 	s.WriteString("A message to an echo mailbox is readable by whoever runs it.\n")
 	fmt.Fprintf(&s, "body, as JSON: %s\n", env.Body)
