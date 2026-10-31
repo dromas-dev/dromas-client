@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -29,6 +30,7 @@ import (
 	"net/url"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -691,6 +693,25 @@ func (s *Server) getRevocations(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, &protocol.Revocations{Identity: identity, Revocation: kept.revoked, RevokedCertificates: kept.certList, RevokedCertificatesSignature: kept.certListSig})
 }
 
+// certificatePass reports whether r carries a pass signed by a key under a
+// certificate, read from its signature before the pass is judged: the state
+// a call answers first (PROTOCOL.md §11.4 rule 1) refuses a certificate's
+// pass while the mailbox's current certificate is revoked, and lets the
+// identity's through to be judged, which it always takes (§8).
+func certificatePass(r *http.Request) bool {
+	p, err := protocol.ParsePass(r.Header.Get("Authorization"))
+	if err != nil {
+		return false
+	}
+	_, sig, _ := strings.Cut(p.Authorization(), `signature="`)
+	armored, err := base64.StdEncoding.DecodeString(strings.TrimSuffix(sig, `"`))
+	if err != nil {
+		return false
+	}
+	_, err = protocol.CertificateBegan(armored)
+	return err == nil
+}
+
 // current reports whether the mailbox's current signer is one its identity
 // has not revoked: the identity, or a certificate above its revocation of
 // certificates. A mailbox whose certificate is revoked has no pass the
@@ -824,8 +845,8 @@ func (s *Server) send(w http.ResponseWriter, r *http.Request) {
 		problem(w, protocol.CodeSenderRevoked, "the sending mailbox is revoked")
 		return
 	}
-	if !sender.current() {
-		problem(w, protocol.CodeCertificateRevoked, "the sender's signer is one its identity revoked")
+	if !sender.current() && certificatePass(r) {
+		problem(w, protocol.CodeCertificateRevoked, "the sender's certificate is one its identity revoked")
 		return
 	}
 	if !s.pass(w, r, sender.identity, sender.signer, sender.listed) {
@@ -910,7 +931,7 @@ func (s *Server) owner(h func(http.ResponseWriter, *http.Request, *mailbox)) htt
 			problem(w, protocol.CodeNoSuchMailbox, "no mailbox has this address")
 			return
 		}
-		if !b.current() {
+		if !b.current() && certificatePass(r) {
 			problem(w, protocol.CodeCertificateRevoked, "the pass is under a certificate the mailbox's identity revoked")
 			return
 		}

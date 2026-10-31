@@ -617,3 +617,114 @@ func TestARevocationOfCertificatesLeavesTheIdentity(t *testing.T) {
 		t.Fatalf("the reader: %+v", res)
 	}
 }
+
+// While its current certificate is revoked at its server, a mailbox's
+// identity's pass is taken (PROTOCOL.md §8, §11.4 rule 1): it drains with
+// one, where a certificate's pass is certificate_revoked. The client signs
+// its passes by its current statement's signer, so its recv meets that
+// refusal, reads itself, and renews under a new certificate above the
+// revocation, its upload carrying the new certificate's pass, then drains.
+func TestARevokedCurrentCertificateLeavesTheIdentitysPass(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	e := newWorkEnv(t)
+	a := e.mailbox()
+	e.working = false
+	b := e.mailbox()
+	send(t, b, a, "waiting while the certificate is revoked")
+	through := numberOf(t, a)
+	publish(t, e, certsRecord(t, a.Dir(), through))
+
+	if code := getAs(t, e, a, "/messages", identityKey(t, a)); code != "" {
+		t.Errorf("a drain with the identity's pass: %q", code)
+	}
+	if code := getAs(t, e, a, "/messages", worker(t, a)); code != protocol.CodeCertificateRevoked {
+		t.Errorf("a drain with the revoked certificate's pass: %q", code)
+	}
+	// So is a send: with the identity's pass it goes past its sender's
+	// state, and with the certificate's it is refused there.
+	for _, identity := range []bool{true, false} {
+		by := worker(t, a)
+		if identity {
+			by = identityKey(t, a)
+		}
+		h, _, err := protocol.NewPass(by, a.Address(), strings.TrimPrefix(e.srv.URL, "http://"), e.clock.Now())
+		if err != nil {
+			t.Fatal(err)
+		}
+		st, _ := e.srv.Prekey(b.Address())
+		req, _ := http.NewRequest(http.MethodPost, e.srv.URL+postTo(b)+"?"+protocol.SendQuery{Statement: protocol.StatementHash(st)}.Encode(), strings.NewReader("not an age file"))
+		req.Header.Set("Authorization", h)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var p protocol.Problem
+		_ = json.NewDecoder(resp.Body).Decode(&p)
+		_ = resp.Body.Close()
+		if identity == (p.Code == protocol.CodeCertificateRevoked) {
+			t.Errorf("a send with the identity's pass %v: %d %q", identity, resp.StatusCode, p.Code)
+		}
+	}
+
+	var upload string
+	e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
+		if r.Method == http.MethodPut && r.URL.Path == mailboxPath(a)+"/prekey" {
+			upload = r.Header.Get("Authorization")
+		}
+		next.ServeHTTP(w, r)
+	})
+	e.clock.Add(2 * time.Second)
+	res, err := a.Receive(ctx)
+	if err != nil || res.Renewed == nil || len(res.Delivered) != 1 {
+		t.Fatalf("recv: %+v, %v", res, err)
+	}
+	n := numberOf(t, a)
+	if n <= through || servedCertificate(t, e, a) != n {
+		t.Fatalf("renewed to %d, the server serves rank %d, revoked through %d", n, servedCertificate(t, e, a), through)
+	}
+	if r := passRank(t, e, a, upload); r != n {
+		t.Errorf("the renewal's pass is by rank %d, want the new certificate, %d", r, n)
+	}
+}
+
+// getAs GETs mailbox a's path rest with a pass by pass, and returns the code
+// the server answers, or "" for none.
+func getAs(t *testing.T, e *env, a *client.Mailbox, rest string, pass ssh.Signer) protocol.Code {
+	t.Helper()
+	h, _, err := protocol.NewPass(pass, a.Address(), strings.TrimPrefix(e.srv.URL, "http://"), e.clock.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, _ := http.NewRequest(http.MethodGet, e.srv.URL+mailboxPath(a)+rest, nil)
+	req.Header.Set("Authorization", h)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close() //nolint:errcheck // read only
+	if resp.StatusCode < 300 {
+		return ""
+	}
+	var p protocol.Problem
+	if err := json.NewDecoder(resp.Body).Decode(&p); err != nil {
+		t.Fatal(err)
+	}
+	return p.Code
+}
+
+// passRank is the rank of the signer of an Authorization value's pass,
+// verified as mailbox a's at e's server: 0 for its identity, a certificate's
+// serial otherwise.
+func passRank(t *testing.T, e *env, a *client.Mailbox, authorization string) uint64 {
+	t.Helper()
+	p, err := protocol.ParsePass(authorization)
+	if err != nil {
+		t.Fatalf("not a pass: %v", err)
+	}
+	by, err := p.Verify(a.Identity(), strings.TrimPrefix(e.srv.URL, "http://"), e.clock.Now())
+	if err != nil {
+		t.Fatalf("the pass: %v", err)
+	}
+	return by.Rank()
+}
