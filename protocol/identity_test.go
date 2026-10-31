@@ -153,11 +153,10 @@ func TestAP256IdentityCertifies(t *testing.T) {
 		t.Error("a P-256 key was certified as a working key")
 	}
 
-	// An ECDSA signature (r, s) verifies as (r, n - s) too, and with either
-	// number written longer, up to the 2,049 bytes OpenSSH reads, and anyone
-	// who has seen a certificate can write those. So a certificate of an ECDSA identity has many sets of bytes,
-	// and nothing may rest on a certificate's bytes being the only ones its
-	// identity signed.
+	// An ECDSA signature (r, s) verifies as (r, n - s) too, and anyone who
+	// has seen a certificate can write that: so a certificate of an ECDSA
+	// identity has two sets of bytes, each in the one form, and nothing may
+	// rest on a certificate's bytes being the only ones its identity signed.
 	c := cert.PublicKey().(*ssh.Certificate)
 	var rs struct{ R, S *big.Int }
 	if err := ssh.Unmarshal(c.Signature.Blob, &rs); err != nil {
@@ -178,27 +177,24 @@ func TestAP256IdentityCertifies(t *testing.T) {
 		t.Error("the twin is not a second set of bytes for the same certificate")
 	}
 
-	// r written with zero bytes before it: taken to 2,049 bytes in all, the
-	// most OpenSSH's sshbuf_get_bignum2 reads, and refused at one more, as
-	// every OpenSSH build refuses it.
+	// r or s written with a zero byte before it, the minimal mpint's no
+	// longer, is not the one form, and is refused.
 	var raw struct{ R, S []byte }
 	if err := ssh.Unmarshal(c.Signature.Blob, &raw); err != nil {
 		t.Fatal(err)
 	}
-	for _, n := range []int{maxMPInt, maxMPInt + 1} {
+	for name, padded := range map[string]struct{ R, S []byte }{
+		"r": {append([]byte{0}, raw.R...), raw.S},
+		"s": {raw.R, append([]byte{0}, raw.S...)},
+	} {
 		long := *c
-		r := append(make([]byte, n-len(raw.R)), raw.R...)
-		long.Signature = &ssh.Signature{Format: c.Signature.Format, Blob: ssh.Marshal(struct{ R, S []byte }{r, raw.S})}
+		long.Signature = &ssh.Signature{Format: c.Signature.Format, Blob: ssh.Marshal(padded)}
 		parsed, err := ssh.ParsePublicKey(long.Marshal())
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, err = CheckCertificate(b.id, parsed, now)
-		if n == maxMPInt && err != nil {
-			t.Errorf("r in %d bytes, which OpenSSH reads, is refused: %v", n, err)
-		}
-		if n > maxMPInt && !errors.Is(err, ErrCertificate) {
-			t.Errorf("r in %d bytes, which OpenSSH refuses, is taken: %v", n, err)
+		if _, err := CheckCertificate(b.id, parsed, now); !errors.Is(err, ErrCertificate) {
+			t.Errorf("%s with a zero byte before it is taken: %v", name, err)
 		}
 	}
 }

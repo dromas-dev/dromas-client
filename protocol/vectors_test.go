@@ -788,27 +788,68 @@ func TestVectorSignatureForms(t *testing.T) {
 	}
 }
 
-// Each identity key type states its own bound on a signature, and
-// MaxSignature, what a verifier holds one to before it knows the type, is the
-// largest of them. What a mailbox signs is held to its identity's: with that
-// bound lowered, every verifier refuses the mailbox's signatures, a pass's
-// included, and another type's mailbox is untouched (PROTOCOL.md §3.2).
+// Each identity key type's bound is the largest signature a mailbox of that
+// type makes in the one form, and MaxSignature, what a verifier holds one to
+// before it knows the type, is the largest of them (PROTOCOL.md §3.2). The
+// largest is made here: in every namespace the protocol signs in, by the
+// identity and by a working key under a certificate as NewCertificate makes
+// it, each ECDSA signature's r and s written in the most bytes the one form
+// gives them, 33. An Ed25519 identity's signatures have one size in each
+// namespace, so its bound is exact: a prekey statement under a certificate.
+// What a mailbox signs is held to its identity's: with that bound lowered,
+// every verifier refuses the mailbox's signatures, a pass's included, and
+// another type's mailbox is untouched.
 func TestASignatureIsHeldToItsIdentitysBound(t *testing.T) {
+	now := vectorNow(t)
 	most := 0
 	for _, ty := range IdentityTypes() {
-		if SignatureBound(ty) <= 0 {
-			t.Errorf("%s states no bound", ty)
+		m := map[string]func(*testing.T) certMailbox{IdentityEd25519: newCertMailbox, IdentityP256: p256Mailbox}[ty]
+		if m == nil {
+			t.Fatalf("%s has no mailbox to sign with here", ty)
 		}
-		most = max(most, SignatureBound(ty))
+		b := m(t)
+		cert, err := NewCertificate(b.id, b.identity, b.work.PublicKey(), MaxSerial, now, testLifetime)
+		if err != nil {
+			t.Fatal(err)
+		}
+		work, err := cert.Signer(b.work)
+		if err != nil {
+			t.Fatal(err)
+		}
+		largest, made := 0, 0
+		// What each signer signs (PROTOCOL.md §5): the identity, everything;
+		// a working key, statements, passes and messages.
+		for signer, namespaces := range map[ssh.Signer][]func(Address) string{
+			b.identity: {PrekeyNamespace, PassNamespace, MessageNamespace, RevokeNamespace, RevokedCertsNamespace},
+			work:       {PrekeyNamespace, PassNamespace, MessageNamespace},
+		} {
+			for _, ns := range namespaces {
+				sig, err := Sign(signer, []byte("a statement"), ns(b.id.Address()))
+				if err != nil {
+					t.Fatal(err)
+				}
+				blob, err := Dearmor(sig)
+				if err != nil {
+					t.Fatalf("%s: Sign wrote a signature Dearmor refuses: %v", ty, err)
+				}
+				largest, made = max(largest, len(Armor(widestECDSA(t, blob)))), max(made, len(sig))
+			}
+		}
+		if SignatureBound(ty) != largest {
+			t.Errorf("%s's bound is %d, and its largest signature in the one form %d", ty, SignatureBound(ty), largest)
+		}
+		if ty == IdentityEd25519 && made != largest {
+			t.Errorf("%s's largest signature is %d bytes as made, and %d as the one form gives it", ty, made, largest)
+		}
+		most = max(most, largest)
 	}
-	if most != MaxSignature || SignatureBound(IdentityEd25519) != 4096 || SignatureBound(IdentityP256) != 4096 {
-		t.Errorf("the bounds are %d and %d, the most %d, and MaxSignature %d", SignatureBound(IdentityEd25519), SignatureBound(IdentityP256), most, MaxSignature)
+	if most != MaxSignature {
+		t.Errorf("the largest bound is %d, and MaxSignature %d", most, MaxSignature)
 	}
 	if SignatureBound("no-such-key-type@dromas.invalid") != 0 {
 		t.Error("a key type not defined here has a bound")
 	}
 
-	now := vectorNow(t)
 	a, b, c := vectorIdentity(t, "a"), vectorIdentity(t, "b"), vectorIdentity(t, "c")
 	pass := func(mailbox string) *Pass {
 		p, err := ParsePass(strings.TrimSuffix(string(read(t, mailbox+"/pass.authorization")), "\n"))
@@ -855,6 +896,48 @@ func TestASignatureIsHeldToItsIdentitysBound(t *testing.T) {
 	if got[6] != nil || got[7] != nil {
 		t.Errorf("C's signatures, a P-256 identity's, were held to Ed25519's bound: %v, %v", got[6], got[7])
 	}
+}
+
+// widestECDSA is an SSHSIG blob in the one form with every ECDSA
+// signature in it, its own and its certificate's, given an r and an s of 33
+// bytes, the most the one form gives a P-256 number: the size of the largest
+// signature of its kind. It verifies no more.
+func widestECDSA(t *testing.T, blob []byte) []byte {
+	t.Helper()
+	wide := func(s *ssh.Signature) *ssh.Signature {
+		if !strings.HasPrefix(s.Format, "ecdsa-sha2-") {
+			return s
+		}
+		top := new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 256), big.NewInt(1))
+		return &ssh.Signature{Format: s.Format, Blob: ssh.Marshal(struct{ R, S *big.Int }{top, top})}
+	}
+	r := wireReader(blob[10:])
+	var f [5][]byte
+	for i := range f {
+		var ok bool
+		if f[i], ok = r.string(); !ok {
+			t.Fatal("a blob of fewer than five fields")
+		}
+	}
+	key, err := ssh.ParsePublicKey(f[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cert, ok := key.(*ssh.Certificate); ok {
+		c := *cert
+		c.Signature = wide(cert.Signature)
+		key = &c
+	}
+	sig := new(ssh.Signature)
+	if err := ssh.Unmarshal(f[4], sig); err != nil {
+		t.Fatal(err)
+	}
+	f[0], f[4] = key.Marshal(), ssh.Marshal(wide(sig))
+	out := bytes.Clone(blob[:10])
+	for _, s := range f {
+		out = appendWireString(out, s)
+	}
+	return out
 }
 
 // Each mailbox's pass is signed by the signer of its statements: A's under its

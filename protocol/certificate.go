@@ -6,7 +6,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"golang.org/x/crypto/ssh"
@@ -123,10 +122,10 @@ func certificateForm(id *Identity, key ssh.PublicKey) (*ssh.Certificate, error) 
 	if err := checkWorkingKey(id, cert.Key); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrCertificate, err)
 	}
-	// Dearmor has held a signature's numbers to OpenSSH's bound already; a
-	// certificate that reached here another way is held to it too.
-	if cert.Signature == nil || strings.HasPrefix(cert.Signature.Format, "ecdsa-sha2-") && ecdsaNumbersAsRead(cert.Signature.Blob) != nil {
-		return nil, fmt.Errorf("%w: the identity's signature on it is not one OpenSSH reads", ErrCertificate)
+	// Dearmor has held the identity's signature on it to its one form
+	// already; a certificate that reached here another way is held to it too.
+	if cert.Signature == nil || !bytes.Equal(ssh.Marshal(oneSignature(cert.Signature)), ssh.Marshal(cert.Signature)) {
+		return nil, fmt.Errorf("%w: the identity's signature on it is not in its one form", ErrCertificate)
 	}
 
 	// The identity's signature, before any verdict on the dates: "it has not

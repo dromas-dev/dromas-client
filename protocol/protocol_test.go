@@ -33,41 +33,37 @@ func TestParseAddress(t *testing.T) {
 	}
 }
 
+// Armor writes a blob as ssh-keygen does, in lines of armorWidth, and
+// Dearmor takes a signature only so: the armor written any other way is
+// refused, however its base64 reads (PROTOCOL.md §3.2). The sig/ vectors
+// hold each form of the blob.
 func TestArmor(t *testing.T) {
-	for _, n := range []int{0, 1, 52, 53, 54, 400} {
-		blob := bytes.Repeat([]byte{0xa5}, n)
-		armored := Armor(blob)
-		for _, line := range strings.Split(strings.TrimSuffix(string(armored), "\n"), "\n") {
-			if len(line) > armorWidth && !strings.HasPrefix(line, "-----") {
-				t.Errorf("%d: line longer than %d", n, armorWidth)
-			}
-		}
-		for name, in := range map[string][]byte{
-			"as armored":           armored,
-			"CRLF after BEGIN":     bytes.Replace(armored, []byte("-----\n"), []byte("-----\r\n"), 1),
-			"CRLF lines":           bytes.ReplaceAll(armored, []byte("\n"), []byte("\r\n")),
-			"junk after END":       append(bytes.Clone(armored), "junk"...),
-			"no newline after END": bytes.TrimSuffix(armored, []byte("\n")),
-			"other line lengths":   []byte(armorBegin + strings.Join(splitEvery(b64(blob), 64), "\n") + "\n" + armorEnd + "\n"),
-		} {
-			got, err := dearmor(in)
-			if err != nil || !bytes.Equal(got, blob) {
-				t.Errorf("%d, %s: %v", n, name, err)
-			}
+	armored := read(t, "a/prekey-1.txt.sig")
+	blob, err := Dearmor(armored)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(Armor(blob), armored) {
+		t.Fatal("Armor does not write a/prekey-1.txt.sig as ssh-keygen wrote it")
+	}
+	for _, line := range strings.Split(strings.TrimSuffix(string(armored), "\n"), "\n") {
+		if len(line) > armorWidth {
+			t.Errorf("a line longer than %d", armorWidth)
 		}
 	}
-	blob := []byte{1, 2, 3, 4}
-	for name, in := range map[string]string{
-		"no BEGIN":          "U1NI\n" + armorEnd + "\n",
-		"junk before":       "x" + string(Armor(blob)),
-		"no END":            armorBegin + "AQIDBA==\n",
-		"END not on a line": armorBegin + "AQIDBA==" + armorEnd + "\n",
-		"bad base64":        armorBegin + "AQID*A==\n" + armorEnd + "\n",
-		"non-zero pad bits": armorBegin + "AQIDBB==\n" + armorEnd + "\n",
-		"wrong type":        "-----BEGIN SSH SIGNATURX-----\nAQIDBA==\n" + armorEnd + "\n",
+	for name, in := range map[string][]byte{
+		"CRLF after BEGIN":     bytes.Replace(armored, []byte("-----\n"), []byte("-----\r\n"), 1),
+		"CRLF lines":           bytes.ReplaceAll(armored, []byte("\n"), []byte("\r\n")),
+		"junk after END":       append(bytes.Clone(armored), "junk"...),
+		"no newline after END": bytes.TrimSuffix(armored, []byte("\n")),
+		"other line lengths":   []byte(armorBegin + strings.Join(splitEvery(b64(blob), 64), "\n") + "\n" + armorEnd + "\n"),
+		"junk before":          append([]byte("x"), armored...),
+		"no END":               bytes.TrimSuffix(armored, []byte(armorEnd+"\n")),
+		"END not on a line":    bytes.Replace(armored, []byte("\n"+armorEnd), []byte(armorEnd), 1),
+		"wrong type":           bytes.Replace(armored, []byte("SIGNATURE-----\n"), []byte("SIGNATURX-----\n"), 1),
 	} {
-		if _, err := dearmor([]byte(in)); err == nil {
-			t.Errorf("%s: accepted", name)
+		if got, err := Dearmor(in); err == nil || got != nil {
+			t.Errorf("%s: taken", name)
 		}
 	}
 }
