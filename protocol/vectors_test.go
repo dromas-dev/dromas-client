@@ -95,9 +95,9 @@ func vectorIdentity(t *testing.T, mailbox string) *Identity {
 func vectorRevokedCerts(t *testing.T) *RevokedCertificates {
 	t.Helper()
 	a := vectorIdentity(t, "a")
-	r, err := VerifyRevokedCertificates(a.Address(), a.Document(), read(t, "a/trip.txt"), read(t, "a/trip.sig"))
+	r, err := VerifyRevokedCertificates(a.Address(), a.Document(), read(t, "a/revoked-certs.txt"), read(t, "a/revoked-certs.sig"))
 	if err != nil {
-		t.Fatalf("a/trip: %v", err)
+		t.Fatalf("a/revoked-certs: %v", err)
 	}
 	return r
 }
@@ -350,7 +350,7 @@ func TestVectorCertificates(t *testing.T) {
 			want = ErrCertificateEnded
 		case "bad-not-begun":
 			want = ErrCertificateNotBegun
-		case "bad-at-the-trip":
+		case "bad-revoked":
 			// Good by every rule of a certificate, and numbered at the
 			// serial A's revocation of certificates runs through, which
 			// covers it; with none held it is taken.
@@ -382,7 +382,7 @@ func TestVectorCertificates(t *testing.T) {
 	// The re-wrap: cert/bad-certifies-the-identity carries A's identity's own
 	// signature, rank 0, with a certificate of the identity's key above A's
 	// revocation of certificates in its key's place.
-	own, err := Dearmor(read(t, "prekey/bad-signed-by-the-identity.txt.sig"))
+	own, err := Dearmor(read(t, "prekey/signed-by-the-identity.txt.sig"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -402,15 +402,15 @@ func TestVectorRevokedCerts(t *testing.T) {
 	a := vectorIdentity(t, "a")
 	held := vectorRevokedCerts(t)
 	if held.Through != uint64(now.Unix())-1 || held.Through+1 != vectorRank(t) {
-		t.Errorf("a/trip runs through %d, not one below A's certificates at ./now", held.Through)
+		t.Errorf("a/revoked-certs runs through %d, not one below A's certificates at ./now", held.Through)
 	}
 	signer, _ := vectorKey(t, "a")
 	built, err := NewRevokedCertificates(a.Address(), held.Through)
-	if err != nil || !bytes.Equal(built.Statement(), read(t, "a/trip.txt")) {
-		t.Fatalf("NewRevokedCertificates differs from a/trip.txt: %v", err)
+	if err != nil || !bytes.Equal(built.Statement(), read(t, "a/revoked-certs.txt")) {
+		t.Fatalf("NewRevokedCertificates differs from a/revoked-certs.txt: %v", err)
 	}
-	if sig, err := SignRevokedCertificates(signer, built); err != nil || !bytes.Equal(sig, read(t, "a/trip.sig")) {
-		t.Errorf("SignRevokedCertificates differs from a/trip.sig: %v", err)
+	if sig, err := SignRevokedCertificates(signer, built); err != nil || !bytes.Equal(sig, read(t, "a/revoked-certs.sig")) {
+		t.Errorf("SignRevokedCertificates differs from a/revoked-certs.sig: %v", err)
 	}
 	if err := Admits(held, IdentitySigner()); err != nil {
 		t.Errorf("A's revocation of certificates refuses its identity: %v", err)
@@ -499,9 +499,9 @@ func TestVectorPrekeys(t *testing.T) {
 		{a, "prekey/outlives-its-certificate.txt", "prekey/outlives-its-certificate.txt.sig", 1, vectorRank(t) + 1},
 		{b, "b/prekey-1.txt", "b/prekey-1.txt.sig", 1, 0},
 		{c, "c/prekey-1.txt", "c/prekey-1.txt.sig", 1, 0},
-		{a, "prekey/bad-signed-by-the-identity.txt", "prekey/bad-signed-by-the-identity.txt.sig", 1, 0},
-		{b, "prekey/bad-b-signed-under-its-certificate.txt", "prekey/bad-b-signed-under-its-certificate.txt.sig", 1, vectorRank(t)},
-		{c, "prekey/bad-c-signed-under-its-certificate.txt", "prekey/bad-c-signed-under-its-certificate.txt.sig", 1, vectorRank(t)},
+		{a, "prekey/signed-by-the-identity.txt", "prekey/signed-by-the-identity.txt.sig", 1, 0},
+		{b, "prekey/b-signed-under-its-certificate.txt", "prekey/b-signed-under-its-certificate.txt.sig", 1, vectorRank(t)},
+		{c, "prekey/c-signed-under-its-certificate.txt", "prekey/c-signed-under-its-certificate.txt.sig", 1, vectorRank(t)},
 	} {
 		p, signer, err := VerifyPrekey(v.id, read(t, v.file), read(t, v.sig), now)
 		if err != nil {
@@ -545,7 +545,7 @@ func TestVectorPrekeys(t *testing.T) {
 	// And A's identity's statement stands below every one under a
 	// certificate, its serial 1 below A's prekey-1, so a sender that holds
 	// one of those refuses it.
-	own, _ := PrekeyOrder(read(t, "prekey/bad-signed-by-the-identity.txt"), read(t, "prekey/bad-signed-by-the-identity.txt.sig"))
+	own, _ := PrekeyOrder(read(t, "prekey/signed-by-the-identity.txt"), read(t, "prekey/signed-by-the-identity.txt.sig"))
 	one, _ := PrekeyOrder(read(t, "a/prekey-1.txt"), read(t, "a/prekey-1.txt.sig"))
 	if own.Rank != 0 || !own.Less(one) || one.Less(own) {
 		t.Errorf("(%d, %d) does not stand below (%d, %d)", own.Rank, own.Serial, one.Rank, one.Serial)
@@ -568,9 +568,9 @@ func TestVectorBadPrekeys(t *testing.T) {
 	// These verify, each for its own mailbox: A's identity's own, and B's and
 	// C's under each one's certificate (TestVectorPrekeys).
 	taken := map[string]*Identity{
-		"bad-signed-by-the-identity":         a,
-		"bad-b-signed-under-its-certificate": b,
-		"bad-c-signed-under-its-certificate": c,
+		"signed-by-the-identity":         a,
+		"b-signed-under-its-certificate": b,
+		"c-signed-under-its-certificate": c,
 	}
 	for _, f := range glob(t, "prekey/*.txt") {
 		name := strings.TrimSuffix(filepath.Base(f), ".txt")
@@ -744,7 +744,7 @@ func TestVectorSignatures(t *testing.T) {
 		{wa, "message/a-to-b.line", "message/a-to-b.sig", MessageNamespace(b.Address())},
 		{wa, "message/a-to-c.line", "message/a-to-c.sig", MessageNamespace(c.Address())},
 		{ia, "a/revoke.txt", "a/revoke.sig", RevokeNamespace(a.Address())},
-		{ia, "a/trip.txt", "a/trip.sig", RevokedCertsNamespace(a.Address())},
+		{ia, "a/revoked-certs.txt", "a/revoked-certs.sig", RevokedCertsNamespace(a.Address())},
 		{ib, "b/prekey-1.txt", "b/prekey-1.txt.sig", PrekeyNamespace(b.Address())},
 		{ib, "b/pass.txt", "b/pass.sig", PassNamespace(b.Address())},
 		{ib, "message/b-to-c.line", "message/b-to-c.sig", MessageNamespace(c.Address())},
@@ -959,8 +959,8 @@ var plainVerdicts = map[string]string{
 	"accept-every-field":                                 "",
 	"accept-body-more-precise-than-binary64":             "",
 	"refuse-signed-for-another-mailbox":                  RefusedSignature,
-	"refuse-signed-by-the-identity":                      "",
-	"refuse-certificate-at-the-trip":                     refusedCertificateRevoked,
+	"accept-signed-by-the-identity":                      "",
+	"refuse-certificate-revoked":                         refusedCertificateRevoked,
 	"refuse-identity-s-signature-re-wrapped":             RefusedSignature,
 	"refuse-signed-by-a-bare-working-key":                RefusedSignature,
 	"refuse-certificate-ended":                           RefusedSignature,
@@ -969,7 +969,7 @@ var plainVerdicts = map[string]string{
 	"refuse-from-is-not-the-identity":                    RefusedAttribution,
 	"refuse-from-null":                                   RefusedAttribution,
 	"accept-p256-sender":                                 "",
-	"refuse-p256-sender-under-a-certificate":             "",
+	"accept-p256-sender-under-a-certificate":             "",
 	"refuse-unsupported-key-type":                        RefusedKeyType,
 	"refuse-from-is-not-the-identity-of-an-unknown-type": RefusedAttribution,
 	"refuse-to-another-mailbox":                          RefusedAttribution,
@@ -1067,8 +1067,8 @@ func TestVectorPlaintexts(t *testing.T) {
 	// certificate it takes, C's, is refused by a revocation that covers it,
 	// as A's is.
 	for name, held := range map[string]*RevokedCertificates{
-		"refuse-certificate-at-the-trip":         nil,
-		"refuse-p256-sender-under-a-certificate": {Address: c.Address(), Through: vectorRank(t)},
+		"refuse-certificate-revoked":             nil,
+		"accept-p256-sender-under-a-certificate": {Address: c.Address(), Through: vectorRank(t)},
 	} {
 		m, err := OpenSigned(read(t, "plain/"+name+".txt"), b.Address(), now)
 		if err != nil {
