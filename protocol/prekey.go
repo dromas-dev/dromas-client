@@ -51,7 +51,7 @@ const PostQuantum KeyType = "mlkem768x25519"
 var serialGrammar = regexp.MustCompile(`\A[1-9][0-9]{0,15}\z`)
 
 // Prekey is a prekey statement: the mailbox's current age encryption key, signed
-// by its identity or, in working-key mode, by a working key it certified.
+// by its identity or by a working key it certified.
 type Prekey struct {
 	Address  Address   // the mailbox the key belongs to
 	Serial   uint64    // strictly increasing under one signer: its maker's clock, or one above the highest it knows

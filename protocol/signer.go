@@ -14,11 +14,10 @@ import (
 // A mailbox's statements, passes and messages are signed by one of two forms
 // of key (PROTOCOL.md §5): the identity key itself, which ranks 0, or a working
 // key under a certificate the identity made, which ranks at the certificate's
-// serial. Which a party takes is the address's mode, read from the revocations
-// of certificates it holds: with none it is in identity mode, and takes the
-// identity alone; with one through N it is in working-key mode, and takes a
-// certificate above N alone. Certificates and revocations are signed by the
-// identity in both modes, and are never ranked.
+// serial. A verifier takes the identity's signature always, and a
+// certificate above the revocation of certificates it holds for the address,
+// every certificate where it holds none. Certificates and revocations are
+// signed by the identity, and are never ranked.
 
 // Signer is the key a signature that verified was made by: the identity, or a
 // working key under a certificate.
@@ -46,27 +45,17 @@ func (s *Signer) Rank() uint64 {
 // identity's signature by other means: its own record.
 func IdentitySigner() *Signer { return &Signer{} }
 
-// ErrIdentityMode is a certificate's signature on a statement, a pass or a
-// message of an address in identity mode: one whose holder knows no
-// revocation of its certificates, and so takes its identity's signature alone
-// (PROTOCOL.md §5).
-var ErrIdentityMode = errors.New("the address is in identity mode: its identity signs, and no certificate is taken")
+// ErrRevokedSigner is a signature under a certificate the address's
+// revocation of certificates covers: one at or below it.
+var ErrRevokedSigner = errors.New("signed under a certificate the address's revocation of its certificates covers")
 
-// ErrRevokedSigner is a signature by a signer the address's revocation of
-// certificates covers: a certificate at or below it, or the identity itself,
-// which ranks 0, once the address is in working-key mode.
-var ErrRevokedSigner = errors.New("signed by a key the address's revocation of its certificates covers")
-
-// Admits applies an address's mode to a signer of its statement, pass or
-// message: held is the revocation of its certificates its holder keeps, nil
-// for none. In identity mode a certificate is ErrIdentityMode; in working-key
-// mode a signer at or below the revocation, the identity among them, is
-// ErrRevokedSigner.
+// Admits holds a signer of an address's statement, pass or message to the
+// revocation of its certificates its holder keeps, held, nil for none: the
+// identity is always taken, and a certificate at or below held is
+// ErrRevokedSigner (PROTOCOL.md §5). A revocation of certificates never
+// covers the identity: only revoking the address ends it.
 func Admits(held *RevokedCertificates, s *Signer) error {
-	switch {
-	case held == nil && s.cert != nil:
-		return ErrIdentityMode
-	case held != nil && held.Revokes(s.Rank()):
+	if s.cert != nil && held != nil && held.Revokes(s.Rank()) {
 		return ErrRevokedSigner
 	}
 	return nil
@@ -76,7 +65,7 @@ func Admits(held *RevokedCertificates, s *Signer) error {
 // the identity id or a working key it certified, under a certificate valid at
 // now (CheckCertificate). Its signing key decides which: the identity's key,
 // byte for byte, or a certificate. It returns the signer; holding it to the
-// address's mode is the caller's (Admits).
+// revocation of certificates is the caller's (Admits).
 func VerifySigned(id *Identity, message, signature []byte, namespace string, now time.Time) (*Signer, error) {
 	return verifySigned(id, message, signature, namespace, func(key ssh.PublicKey) (*Certificate, error) { return CheckCertificate(id, key, now) })
 }

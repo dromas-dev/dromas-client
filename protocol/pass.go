@@ -97,9 +97,9 @@ const MaxPassAuthorization = len(PassScheme+` address="", not_after="", signatur
 var passSignature = regexp.MustCompile(`\A[A-Za-z0-9+/]+={0,2}\z`)
 
 // NewPass makes mailbox a's pass for server, good for PassLifetime from now, and
-// returns it as the Authorization header's value. signer is the signer of
-// the mailbox's current statement: the identity in identity mode, or the
-// working key under its certificate (Certificate.Signer).
+// returns it as the Authorization header's value. signer is the identity, or
+// the working key under the certificate of the mailbox's current statement
+// (Certificate.Signer).
 func NewPass(signer ssh.Signer, a Address, server string, now time.Time) (authorization string, notAfter time.Time, err error) {
 	if err := CheckServerName(server); err != nil {
 		return "", time.Time{}, err
@@ -333,7 +333,7 @@ func (p *Pass) Verify(id *Identity, server string, now time.Time) (*Signer, erro
 
 // VerifyUnder checks the pass against the signing key a caller has on record
 // for the mailbox, known by the SHA-256 of its wire bytes, sum: the identity's
-// key in identity mode, the current certificate in working-key mode. The pass
+// key, or the certificate of the mailbox's current statement. The pass
 // must be for server, not run out, signed by exactly that key, and its
 // signature must verify; a certificate must name the mailbox the pass names and
 // must not have ended. It returns the key.
