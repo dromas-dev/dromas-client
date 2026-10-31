@@ -283,7 +283,8 @@ func CertificateBegan(signature []byte) (time.Time, error) {
 
 // signingKey returns the public key an SSHSIG blob says it was signed with:
 // after "SSHSIG" and the version, a length-prefixed key in SSH wire form. The
-// key must be in its one encoding, so a certificate has one set of bytes.
+// key must be in its one encoding, so a certificate has one set of bytes for
+// each value its identity's signature on it has (an ECDSA s has two).
 func signingKey(blob []byte) (ssh.PublicKey, error) {
 	const magic = "SSHSIG"
 	notSig := errors.New("not an SSH signature")
