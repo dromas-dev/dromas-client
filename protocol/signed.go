@@ -32,8 +32,8 @@ import (
 const padFiller = '.'
 
 // SignEnvelope returns the envelope's line and the signature over it for its
-// recipient, by signer: the identity in identity mode, or a working key under
-// its certificate (Certificate.Signer) in working-key mode. The namespace names the recipient, so the signature
+// recipient, by signer: the identity, or a working key under its certificate
+// (Certificate.Signer). The namespace names the recipient, so the signature
 // holds for that mailbox only.
 func SignEnvelope(e *Envelope, signer ssh.Signer) (line, signature []byte, err error) {
 	if line, err = e.Line(); err != nil {
@@ -89,8 +89,8 @@ type Signed struct {
 	// Sender is the identity the envelope carries, whose address is From.
 	Sender *Identity
 	// Signer is the key the signature was made by: the identity, or a working
-	// key under a certificate. Holding it to the sender's mode is the reader's
-	// (PROTOCOL.md §12.3 check 7, Admits).
+	// key under a certificate. Holding a certificate to the sender's revocation
+	// of certificates is the reader's (PROTOCOL.md §12.3 check 7, Admits).
 	Signer *Signer
 }
 
@@ -107,8 +107,8 @@ type Signed struct {
 //     own code, since nothing is wrong with it.
 //  5. The signature over the line, as decrypted, verifies in this mailbox's
 //     message namespace, by that identity or a working key it certified,
-//     under a certificate valid at now. The sender's mode is not applied
-//     here: the reader learns it at check 7 (PROTOCOL.md §12.3).
+//     under a certificate valid at now. Whether the sender revoked that
+//     certificate is the reader's to ask, at check 7 (PROTOCOL.md §12.3).
 //  6. The envelope, in OpenEnvelope's order: a body and every member of its
 //     type, version 1, to is this mailbox, a msg_id, and a sent_at no older than
 //     TTL and no more than MaxSkew ahead.

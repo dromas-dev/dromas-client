@@ -419,7 +419,7 @@ func TestARenewalWhoseReadAgainEndsSendsNoRegistration(t *testing.T) {
 				}
 				calls = append(calls, s)
 			}
-			// In working-key mode a new certificate runs for the longest its
+			// A new certificate runs for the longest its
 			// server takes, which its document names (GET /v1/).
 			if want := "GET /v1/own, GET /v1/, PUT /v1/own/prekey +pass, GET /v1/own, GET /v1/own/revocations"; strings.Join(calls, ", ") != want {
 				t.Fatalf("calls %q, want %q", calls, want)
@@ -477,15 +477,6 @@ func TestARestoredMailboxRegistersWhereItsServerForgotIt(t *testing.T) {
 	e := newWorkEnv(t)
 	a := e.mailbox()
 	r := restoreWith(t, e, a, e.clock.Now)
-	// Its owner hands it its trip, which tells it its mode where its server
-	// does not answer.
-	trip, err := a.CertificatesRecord(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := r.KeepRevocation(ctx, trip); err != nil {
-		t.Fatal(err)
-	}
 	e.clock.Add(time.Minute)
 	watch(e, func(w http.ResponseWriter, req *http.Request) bool {
 		if req.Method == http.MethodGet && req.URL.Path == mailboxPath(a) {

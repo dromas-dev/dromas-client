@@ -321,10 +321,10 @@ func TestARenewalGoesPastItsOwnRecordWhateverItsDates(t *testing.T) {
 
 // A statement the mailbox signed and has since pruned is its own: a server that
 // serves it again shows a rollback, never a statement the mailbox did not make,
-// and the mailbox recommends no revocation of its address (#590). In
-// working-key mode its renewal stops there, and the remedy goes past it; in
-// identity mode, where no certificate of its own is in doubt, its owner's
-// renewal goes past it, and recv's stops.
+// and the mailbox recommends no revocation of its address (#590). Under a
+// certificate its renewal stops there, and the remedy goes past it; where its
+// identity signs, no certificate of its own is in doubt, its owner's renewal
+// goes past it, and recv's stops.
 func TestAPrunedStatementOfItsOwnIsNotOneItDidNotMake(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -349,14 +349,14 @@ func TestAPrunedStatementOfItsOwnIsNotOneItDidNotMake(t *testing.T) {
 		})
 		e.clock.Add(25 * time.Hour)
 		if res, err := b.Receive(ctx); err != nil || res.RenewErr == nil || !strings.Contains(res.RenewErr.Error(), "rollback") {
-			t.Fatalf("working-key mode %v: recv: %+v, %v, want its renewal refused as a rollback", working, res, err)
+			t.Fatalf("under a certificate %v: recv: %+v, %v, want its renewal refused as a rollback", working, res, err)
 		}
 		_, err := b.Rekey(ctx)
 		if working && (err == nil || !strings.Contains(err.Error(), "rollback")) || !working && err != nil {
-			t.Fatalf("working-key mode %v: rekey: %v", working, err)
+			t.Fatalf("under a certificate %v: rekey: %v", working, err)
 		}
 		if nm, err := b.NotMade(ctx); err != nil || nm != nil {
-			t.Fatalf("working-key mode %v: NotMade: %+v, %v, want none: the mailbox signed it", working, nm, err)
+			t.Fatalf("under a certificate %v: NotMade: %+v, %v, want none: the mailbox signed it", working, nm, err)
 		}
 	}
 }

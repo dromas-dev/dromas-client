@@ -265,9 +265,9 @@ func TestVectorsIdentity(t *testing.T) {
 }
 
 // held is the shell that keeps, in the scratch mailbox, what a reader of the
-// vectors holds of a vector mailbox's mode: A's trip, a/trip.txt, for A, which
-// is in working-key mode, and nothing for B and C, which are in identity mode
-// (testdata/vectors/README.md). It exits 9 unless the trip is then held.
+// vectors holds of a vector mailbox's revocations: A's revocation of its
+// certificates, a/revoked-certs.txt, for A, and nothing for B and C
+// (testdata/vectors/README.md). It exits 9 unless A's is then held.
 func held(t *testing.T, mailbox string) string {
 	t.Helper()
 	if mailbox != "a" {
@@ -275,11 +275,12 @@ func held(t *testing.T, mailbox string) string {
 	}
 	a, aDoc := identity(t, "a")
 	return fmt.Sprintf(`mkdir -p "$DR" && dr_keepcerts %[1]s %[2]s %[3]s %[4]s && dr_certskept %[1]s > /dev/null || exit 9`+"\n",
-		a, aDoc, abs(t, filepath.Join(vectors, "a/trip.txt")), abs(t, filepath.Join(vectors, "a/trip.sig")))
+		a, aDoc, abs(t, filepath.Join(vectors, "a/revoked-certs.txt")), abs(t, filepath.Join(vectors, "a/revoked-certs.sig")))
 }
 
-// vectorHeld is what the Go client holds of a vector mailbox's mode, as held
-// keeps it for the script: A's trip for A, and nothing for B and C.
+// vectorHeld is what the Go client holds of a vector mailbox's certificates,
+// as held keeps it for the script: A's revocation of its certificates for A,
+// and nothing for B and C.
 func vectorHeld(t *testing.T, mailbox string) *protocol.RevokedCertificates {
 	t.Helper()
 	if mailbox != "a" {
@@ -290,47 +291,44 @@ func vectorHeld(t *testing.T, mailbox string) *protocol.RevokedCertificates {
 	if err != nil {
 		t.Fatal(err)
 	}
-	trip, err := protocol.VerifyRevokedCertificates(A, mustRead(t, aDoc), mustRead(t, filepath.Join(vectors, "a/trip.txt")), mustRead(t, filepath.Join(vectors, "a/trip.sig")))
+	r, err := protocol.VerifyRevokedCertificates(A, mustRead(t, aDoc), mustRead(t, filepath.Join(vectors, "a/revoked-certs.txt")), mustRead(t, filepath.Join(vectors, "a/revoked-certs.sig")))
 	if err != nil {
-		t.Fatalf("a/trip: %v", err)
+		t.Fatalf("a/revoked-certs: %v", err)
 	}
-	return trip
+	return r
 }
 
-// The script's mode refusals as exit statuses, past those of the check that
-// ran before it: 11 for a signer the mode revokes, a rank at or below the
-// trip, and 12 for a certificate at an address in identity mode (dr_mode).
-const (
-	exitRevokedSigner = 11
-	exitIdentityMode  = 12
-)
+// exitRevokedSigner is the script's exit status, past those of the check that
+// ran before it, for a signer the sender's revocation of its certificates
+// covers: a certificate at or below it (dr_certrevoked).
+const exitRevokedSigner = 11
 
-// modeExit is the Go client's verdict on a signer that verified, in the
-// mailbox's mode, as the script's exit status gives it: 0 when the mode takes
-// it.
-func modeExit(t *testing.T, mailbox string, s *protocol.Signer) int {
+// revokedExit is the Go client's verdict on a signer that verified, by what
+// it holds of the mailbox's certificates, as the script's exit status gives
+// it: 0 when it is taken.
+func revokedExit(t *testing.T, mailbox string, s *protocol.Signer) int {
 	t.Helper()
 	switch err := protocol.Admits(vectorHeld(t, mailbox), s); {
 	case err == nil:
 		return 0
 	case errors.Is(err, protocol.ErrRevokedSigner):
 		return exitRevokedSigner
-	case errors.Is(err, protocol.ErrIdentityMode):
-		return exitIdentityMode
 	default:
 		t.Fatalf("Admits: %v", err)
 		return -1
 	}
 }
 
-// moded is the shell that applies the mode to the rank in $c, as dr_resolve and
-// dr_judge do, exiting with modeExit's status where it refuses the signer.
-const moded = `dr_mode "$A" "$c"; m=$?; [ $m = 0 ] || exit $((10 + m)); echo "$c"`
+// unrevoked is the shell that holds the signer of rank $c to what is held of
+// $A's certificates, as dr_resolve and dr_judge do, exiting with revokedExit's
+// status where it is revoked.
+const unrevoked = `dr_certrevoked "$A" "$c"; case $? in 0) exit 11 ;; 3) exit 3 ;; esac; echo "$c"`
 
 // A signature under each certificate of cert/ is refused, as the Go client
-// refuses it, with A's trip held, and one under a mailbox's own certificate
-// verifies. The signatures themselves are good: it is the certificate's form,
-// its signer, its dates or A's mode that fail, which ssh-keygen -Y verify
+// refuses it, with A's revocation of its certificates held, and one under a
+// mailbox's own certificate verifies. The signatures themselves are good: it
+// is the certificate's form, its signer, its dates or that revocation that
+// fail, which ssh-keygen -Y verify
 // alone does not all check.
 func TestVectorsCertificate(t *testing.T) {
 	t.Parallel()
@@ -345,11 +343,11 @@ func TestVectorsCertificate(t *testing.T) {
 	}
 	stmt := abs(t, filepath.Join(vectors, "a/prekey-1.txt"))
 	signed := func(addr, doc, sig string) (string, error) {
-		return bash(t, scratch(t), setNow+held(t, "a")+fmt.Sprintf("A=%s; c=$(dr_signed %s %s dromas-prekey-v1:%s %s %s) || exit\n", addr, addr, doc, a, abs(t, sig), stmt)+moded)
+		return bash(t, scratch(t), setNow+held(t, "a")+fmt.Sprintf("A=%s; c=$(dr_signed %s %s dromas-prekey-v1:%s %s %s) || exit\n", addr, addr, doc, a, abs(t, sig), stmt)+unrevoked)
 	}
 	// The script's status says which way it failed, as the Go client's error
 	// does: 2 for a certificate that has ended, 3 for one that has not begun,
-	// 1 for every other, and the mode's past those (modeExit).
+	// 1 for every other, and a revoked one's past those (revokedExit).
 	status := map[string]int{"bad-ended.sig": 2, "bad-not-begun.sig": 3}
 	verdict := func(sig string) (string, int) {
 		t.Helper()
@@ -360,13 +358,13 @@ func TestVectorsCertificate(t *testing.T) {
 			}
 			return "", 1
 		}
-		if m := modeExit(t, "a", signer); m != 0 {
+		if m := revokedExit(t, "a", signer); m != 0 {
 			return "", m
 		}
 		return fmt.Sprintln(signer.Rank()), 0
 	}
 	if out, err := signed(a, aDoc, filepath.Join(vectors, "a/prekey-1.txt.sig")); err != nil || out != fmt.Sprintln(vectorHeld(t, "a").Through+1) {
-		t.Fatalf("a/prekey-1.txt.sig under A's certificate, one above its trip: %q %v", out, err)
+		t.Fatalf("a/prekey-1.txt.sig under A's certificate, above its revocation of certificates: %q %v", out, err)
 	}
 	if _, err := signed(b, bDoc, filepath.Join(vectors, "a/prekey-1.txt.sig")); err == nil {
 		t.Error("A's certificate was taken for B's identity")
@@ -492,10 +490,11 @@ func TestTheScriptReadsASignatureInItsOneEncoding(t *testing.T) {
 	}
 }
 
-// Every prekey statement of the vectors, as the Go client judges it in its
-// mailbox's mode: A's with A's trip held, B's and C's with nothing held. A
-// sender checks a statement (dr_prekeycheck), then its signer against the
-// mode (dr_mode), as dr_resolve does.
+// Every prekey statement of the vectors, as the Go client judges it with what
+// a reader holds of its mailbox's certificates: A's with A's revocation of
+// its certificates held, B's and C's with nothing held. A sender checks a
+// statement (dr_prekeycheck), then its signer against that revocation
+// (dr_certrevoked), as dr_resolve does.
 func TestVectorsPrekey(t *testing.T) {
 	t.Parallel()
 	need(t, scriptTools...)
@@ -509,7 +508,7 @@ func TestVectorsPrekey(t *testing.T) {
 	check := func(stmt, sig, mailbox string) (judged, int, string) {
 		t.Helper()
 		a, doc := identity(t, mailbox)
-		out, err := bash(t, scratch(t), setNow+held(t, mailbox)+fmt.Sprintf("A=%s; r=$(dr_prekeycheck %s %s %s %s) || { rc=$?; echo \"$r\"; exit $rc; }; c=${r##* }; echo \"$r\"\n", a, abs(t, stmt), abs(t, sig), a, doc)+moded)
+		out, err := bash(t, scratch(t), setNow+held(t, mailbox)+fmt.Sprintf("A=%s; r=$(dr_prekeycheck %s %s %s %s) || { rc=$?; echo \"$r\"; exit $rc; }; c=${r##* }; echo \"$r\"\n", a, abs(t, stmt), abs(t, sig), a, doc)+unrevoked)
 		var exit *exec.ExitError
 		if errors.As(err, &exit) {
 			return judged{}, exit.ExitCode(), out
@@ -525,7 +524,8 @@ func TestVectorsPrekey(t *testing.T) {
 		}
 		return j, 0, out
 	}
-	// verdict is the Go client's: VerifyPrekey, then the mode.
+	// verdict is the Go client's: VerifyPrekey, then what is held of the
+	// mailbox's certificates.
 	verdict := func(stmt, sig, mailbox string) (judged, int) {
 		t.Helper()
 		_, doc := identity(t, mailbox)
@@ -540,7 +540,7 @@ func TestVectorsPrekey(t *testing.T) {
 		case err != nil:
 			return judged{}, 1
 		}
-		if m := modeExit(t, mailbox, signer); m != 0 {
+		if m := revokedExit(t, mailbox, signer); m != 0 {
 			return judged{}, m
 		}
 		return judged{p.Serial, signer.Rank(), p.NotAfter.Unix()}, 0
@@ -562,8 +562,8 @@ func TestVectorsPrekey(t *testing.T) {
 	for _, st := range stmts {
 		name := strings.TrimSuffix(filepath.Base(st), ".txt")
 		mailbox := "a"
-		if m, ok := strings.CutPrefix(name, "bad-"); ok && strings.HasSuffix(m, "-signed-under-its-certificate") {
-			mailbox = m[:1] // B's and C's own, each in its own namespace
+		if strings.HasSuffix(name, "-signed-under-its-certificate") {
+			mailbox = name[:1] // B's and C's own, each in its own namespace
 		}
 		cases = append(cases, vector{"prekey/" + name + ".txt", "prekey/" + name + ".txt.sig", mailbox})
 	}
@@ -598,7 +598,7 @@ func TestVectorsPrekey(t *testing.T) {
 			}
 		}
 	}
-	if kinds[0] == 0 || kinds[1] == 0 || kinds[2] == 0 || kinds[exitRevokedSigner] == 0 || kinds[exitIdentityMode] == 0 {
+	if kinds[0] == 0 || kinds[1] == 0 || kinds[2] == 0 {
 		t.Errorf("the prekey vectors do not hold every verdict: %v", kinds)
 	}
 }
@@ -814,13 +814,14 @@ func TestVectorsAnswer(t *testing.T) {
 }
 
 // What a mailbox decrypts gets the Go client's verdict from the script, code for
-// code, for every plain/ vector: checks 2 to 6 (dr_open), then check 7's mode
-// (dr_mode, dr_admitted), with A's trip held, which a reader makes with the
-// read of the sender it already makes (PROTOCOL.md §12.3). The script need not
-// give a code it cannot; none differs today, and one that comes to is named
-// here as a known variance: the layout, the identity the envelope carries,
-// the signature by either form of signer, the envelope, and the mode. An
-// accepted one gives the same sender and the same delivered line.
+// code, for every plain/ vector: checks 2 to 6 (dr_open), then check 7's
+// revocation of certificates (dr_certrevoked, as dr_judge applies it), with
+// A's held, which a reader takes from the read of the sender it already makes
+// (PROTOCOL.md §12.3). The script need not give a code it cannot; none
+// differs today, and one that comes to is named here as a known variance: the
+// layout, the identity the envelope carries, the signature by either form of
+// signer, the envelope, and the revocation. An accepted one gives the same
+// sender and the same delivered line.
 func TestVectorsPlain(t *testing.T) {
 	t.Parallel()
 	need(t, scriptTools...)
@@ -839,19 +840,16 @@ func TestVectorsPlain(t *testing.T) {
 		signed, gerr := protocol.OpenSigned(pt, B, now)
 		var refusal string
 		if gerr == nil {
-			sender := "b" // B and C are in identity mode alike
+			sender := "b" // nothing is held of B's certificates, or of C's
 			if signed.Sender.Address().String() == a {
 				sender = "a"
 			}
-			switch modeExit(t, sender, signed.Signer) {
-			case exitRevokedSigner:
+			if revokedExit(t, sender, signed.Signer) == exitRevokedSigner {
 				refusal = "certificate_revoked"
-			case exitIdentityMode:
-				refusal = protocol.RefusedSignature
 			}
 		}
 		out, err := bash(t, scratch(t), setNow+held(t, "a")+fmt.Sprintf(`cp %s "$DR/msg.T" && A=$(dr_open %s "$DR/msg") || { echo "$A"; exit 1; }
-c=$(dr_rank "$DR/msg.sig" "$DR/msg.doc" "$A") || exit 3; dr_mode "$A" "$c"; dr_admitted "$A" "$c" $? || exit
+c=$(dr_rank "$DR/msg.sig" "$DR/msg.doc" "$A") || exit 3; dr_certrevoked "$A" "$c"; case $? in 0) echo "certificate_revoked: revoked"; exit 1 ;; 3) exit 3 ;; esac
 echo "$A"; dr_line "$DR/msg.P"`, abs(t, f), b))
 		if gerr == nil && err != nil && signed.Sender.Type() == protocol.IdentityP256 && !p256() {
 			t.Logf("%s: %s reads no P-256 key, so the script refuses a P-256 sender: a known variance (PROTOCOL.md Appendix A)", name, sshBuild())
@@ -906,10 +904,10 @@ echo "$A"; dr_line "$DR/msg.P"`, abs(t, f), b))
 
 // Each ciphertext of message/ is read by the script as its recipient reads
 // it: decrypted with its prekey's published identity to exactly its .plain,
-// then checks 2 to 6 and check 7's mode in its sender's (dr_open, dr_mode,
-// dr_admitted): A's under A's certificate with A's trip held, and B's,
-// signed by B's identity, with nothing held. Each is delivered from its
-// sender.
+// then checks 2 to 6 and check 7's revocation of certificates (dr_open,
+// dr_certrevoked): A's under A's certificate with A's revocation of its
+// certificates held, and B's, signed by B's identity, with nothing held. Each
+// is delivered from its sender.
 func TestVectorsMessage(t *testing.T) {
 	t.Parallel()
 	need(t, scriptTools...)
@@ -921,12 +919,12 @@ func TestVectorsMessage(t *testing.T) {
 		m := filepath.Join(vectors, "message", v.name)
 		out, err := bash(t, scratch(t), setNow+held(t, v.from)+fmt.Sprintf(`age -d -i %s < %s > "$DR/msg.T" && cmp -s "$DR/msg.T" %s || exit 5
 A=$(dr_open %s "$DR/msg") || { echo "$A"; exit 1; }
-c=$(dr_rank "$DR/msg.sig" "$DR/msg.doc" "$A") || exit 3; dr_mode "$A" "$c"; dr_admitted "$A" "$c" $? || exit
+c=$(dr_rank "$DR/msg.sig" "$DR/msg.doc" "$A") || exit 3; dr_certrevoked "$A" "$c"; case $? in 0) exit 11 ;; 3) exit 3 ;; esac
 echo "$A $c"`, key, abs(t, m+".age"), abs(t, m+".plain"), to))
 		var sender string
 		var rank uint64
 		if _, serr := fmt.Sscan(out, &sender, &rank); err != nil || serr != nil || sender != from || (rank == 0) != (v.from != "a") {
-			t.Errorf("%s: the script says %q, %v; want delivered from %s, by its identity only where it is in identity mode", v.name, strings.TrimSpace(out), err, from)
+			t.Errorf("%s: the script says %q, %v; want delivered from %s, under A's certificate and by B's identity", v.name, strings.TrimSpace(out), err, from)
 		}
 	}
 }
@@ -1612,8 +1610,8 @@ func TestVectorsRevokedCertificates(t *testing.T) {
 		t.Fatalf("%d vectors taken as revocations of certificates, want the three that are", taken)
 	}
 
-	// A kept one revokes the same ranks for both, the identity's 0 and 2^53 - 1
-	// too: the address's mode, which dr_mode applies.
+	// A kept one revokes the same certificates for both, at 2^53 - 1 too, and
+	// never the identity, rank 0 (dr_certrevoked).
 	mailbox := t.TempDir()
 	kept := filepath.Join(mailbox, "peers", a)
 	if err := os.MkdirAll(kept, 0o700); err != nil {
@@ -1648,30 +1646,31 @@ func TestVectorsRevokedCertificates(t *testing.T) {
 	}{{"ok-through-4", four}, {"ok-through-the-highest", &protocol.RevokedCertificates{Through: protocol.MaxSerial}}} {
 		keep(read(filepath.Join(vectors, "revoked", c.name+".txt")), read(filepath.Join(vectors, "revoked", c.name+".sig")))
 		for _, serial := range []uint64{0, 1, 3, 4, 5, protocol.MaxSerial - 1, protocol.MaxSerial} {
-			out, err := bash(t, env, fmt.Sprintf(`dr_mode %s %d; echo $?`, a, serial))
+			out, err := bash(t, env, fmt.Sprintf(`dr_certrevoked %s %d; echo $?`, a, serial))
 			if err != nil {
 				t.Fatal(err)
 			}
-			want := "0"
-			if c.certs.Revokes(serial) {
-				want = "1"
+			revoked := serial != 0 && c.certs.Revokes(serial) // Admits takes the identity whatever is held
+			want := "1"
+			if revoked {
+				want = "0"
 			}
 			if strings.TrimSpace(out) != want {
-				t.Errorf("%s, rank %d: the Go client says revoked is %v, and the script's dr_mode returned %s", c.name, serial, c.certs.Revokes(serial), strings.TrimSpace(out))
+				t.Errorf("%s, rank %d: the Go client says revoked is %v, and the script's dr_certrevoked returned %s", c.name, serial, revoked, strings.TrimSpace(out))
 			}
 		}
 	}
 	// A kept one that no longer verifies is a fault, never "not revoked":
 	// one under another's signature, and a file that holds none.
 	keep(read(filepath.Join(vectors, "revoked", "ok-through-4.txt")), read(filepath.Join(vectors, "revoked", "ok-through-the-highest.sig")))
-	if out, err := bash(t, env, fmt.Sprintf(`dr_mode %s 3; echo $?`, a)); err != nil || strings.TrimSpace(out) != "3" {
-		t.Errorf("a kept revocation under another's signature: dr_mode returned %q %v, want 3", out, err)
+	if out, err := bash(t, env, fmt.Sprintf(`dr_certrevoked %s 3; echo $?`, a)); err != nil || strings.TrimSpace(out) != "3" {
+		t.Errorf("a kept revocation under another's signature: dr_certrevoked returned %q %v, want 3", out, err)
 	}
 	if err := os.WriteFile(filepath.Join(kept, "revoked-certs.json"), []byte("{}\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if out, err := bash(t, env, fmt.Sprintf(`dr_mode %s 3; echo $?`, a)); err != nil || strings.TrimSpace(out) != "3" {
-		t.Errorf("a kept file that holds no revocation of certificates: dr_mode returned %q %v, want 3", out, err)
+	if out, err := bash(t, env, fmt.Sprintf(`dr_certrevoked %s 3; echo $?`, a)); err != nil || strings.TrimSpace(out) != "3" {
+		t.Errorf("a kept file that holds no revocation of certificates: dr_certrevoked returned %q %v, want 3", out, err)
 	}
 
 	// Control: the working key's signature is one ssh-keygen takes once the
@@ -1684,8 +1683,8 @@ func TestVectorsRevokedCertificates(t *testing.T) {
 	}
 }
 
-// Certificates revoked, across the two clients and one server: a Go mailbox in
-// working-key mode, made by init --offline, revokes its first certificate,
+// Certificates revoked, across the two clients and one server: a Go mailbox
+// registered under a certificate by init --offline revokes its first certificate,
 // which the script checks for itself, keeps and applies, and each follows the
 // other to a later statement, naming it by its hash.
 func TestRevokedCertificatesInBothClients(t *testing.T) {

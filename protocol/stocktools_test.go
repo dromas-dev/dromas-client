@@ -195,11 +195,11 @@ func TestVectorsByToolsNotOurs(t *testing.T) {
 				t.Errorf("%s does not carry the certificate in %s", sig, pub)
 			}
 		}
-		// A is in working-key mode: every signature in its directory, and every
-		// one of its messages, that carries a certificate carries a/work-cert.pub,
-		// and the rest carry the bare identity, verified below. B and C are in
-		// identity mode: no signature in their directories, nor B's message,
-		// carries one.
+		// A signs under its certificate: every signature in its directory, and
+		// every one of its messages, that carries a certificate carries
+		// a/work-cert.pub, and the rest carry the bare identity, verified below.
+		// B and C sign by the identity: no signature in their directories, nor
+		// B's message, carries one.
 		for sigs, want := range map[string]bool{"a/*.sig": true, "message/a-to-*.sig": true, "b/*.sig": false, "c/*.sig": false, "message/b-to-*.sig": false} {
 			certified := 0
 			for _, s := range globIn(t, dir, sigs) {
@@ -248,7 +248,7 @@ func TestVectorsByToolsNotOurs(t *testing.T) {
 		}
 		bareA := signers("a-bare", "a", false)
 		verify(t, bareA, "a", ns("dromas-revoke-v1", "a"), "a/revoke.txt", "a/revoke.sha256.sig")
-		verify(t, bareA, "a", ns("dromas-revoke-certs-v1", "a"), "a/trip.txt", "a/trip.sig")
+		verify(t, bareA, "a", ns("dromas-revoke-certs-v1", "a"), "a/revoked-certs.txt", "a/revoked-certs.sig")
 		for _, s := range globIn(t, dir, "revoked/ok-*.sig") {
 			verify(t, bareA, "a", ns("dromas-revoke-certs-v1", "a"), strings.TrimSuffix(strings.TrimSuffix(s, ".sig"), ".sha256")+".txt", s)
 		}

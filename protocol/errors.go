@@ -51,7 +51,6 @@ const (
 	CodeConflict       Code = "conflict"        // what is held is newer, or another: a replay that is not byte-identical
 	CodeMailboxChanged Code = "mailbox_changed" // the mailbox changed while the request was handled: send it again as it is
 	CodeStalePrekey    Code = "stale_prekey"    // a newer prekey exists: re-fetch, re-encrypt the same envelope
-	CodeIdentityMode   Code = "identity_mode"   // the address is in identity mode: publish a revocation of certificates first
 	CodePrekeyExpired  Code = "prekey_expired"  // the mailbox's owner must publish a new prekey
 
 	// 408
@@ -109,7 +108,6 @@ var codes = map[Code]struct {
 	CodeConflict:              {http.StatusConflict, "Conflict"},
 	CodeMailboxChanged:        {http.StatusConflict, "Mailbox changed"},
 	CodeStalePrekey:           {http.StatusConflict, "Stale prekey"},
-	CodeIdentityMode:          {http.StatusConflict, "Identity mode"},
 	CodePrekeyExpired:         {http.StatusConflict, "Prekey expired"},
 	CodeRequestTimeout:        {http.StatusRequestTimeout, "Request timeout"},
 	CodeRevoked:               {http.StatusGone, "Revoked"},

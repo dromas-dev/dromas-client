@@ -88,11 +88,11 @@ func TestVerifySignedTakesEitherForm(t *testing.T) {
 	}
 }
 
-// An address's mode is the revocation of its certificates its holder keeps
-// (PROTOCOL.md §5): with none, identity mode, which takes the identity alone;
-// with one through N, working-key mode, which takes a certificate above N
-// alone, the identity's rank 0 being at or below every N.
-func TestAdmitsAppliesTheMode(t *testing.T) {
+// A verifier takes the identity's signature always, and a certificate above
+// the revocation of certificates it holds for the address, every certificate
+// where it holds none (PROTOCOL.md §5): a revocation of certificates never
+// covers the identity, whatever it runs through.
+func TestAdmitsTakesTheIdentityAndACertificateAboveTheRevocation(t *testing.T) {
 	t.Parallel()
 	b := newCertMailbox(t)
 	now := time.Date(2026, 10, 31, 12, 0, 0, 0, time.UTC)
@@ -118,28 +118,27 @@ func TestAdmitsAppliesTheMode(t *testing.T) {
 		signer *Signer
 		want   error
 	}{
-		{"identity mode, the identity", nil, IdentitySigner(), nil},
-		{"identity mode, a certificate", nil, under(1), ErrIdentityMode},
-		{"identity mode, the highest certificate", nil, under(MaxSerial), ErrIdentityMode},
-		{"working-key mode, the identity", through(1), IdentitySigner(), ErrRevokedSigner},
-		{"working-key mode, a certificate below N", through(5), under(4), ErrRevokedSigner},
-		{"working-key mode, a certificate at N", through(5), under(5), ErrRevokedSigner},
-		{"working-key mode, a certificate above N", through(5), under(6), nil},
-		{"working-key mode through the highest serial", through(MaxSerial), under(MaxSerial), ErrRevokedSigner},
+		{"the identity, none held", nil, IdentitySigner(), nil},
+		{"the identity, a revocation through 1 held", through(1), IdentitySigner(), nil},
+		{"the identity, a revocation through the highest serial held", through(MaxSerial), IdentitySigner(), nil},
+		{"a certificate, none held", nil, under(1), nil},
+		{"the highest certificate, none held", nil, under(MaxSerial), nil},
+		{"a certificate below N", through(5), under(4), ErrRevokedSigner},
+		{"a certificate at N", through(5), under(5), ErrRevokedSigner},
+		{"a certificate above N", through(5), under(6), nil},
+		{"the highest certificate, through the highest serial", through(MaxSerial), under(MaxSerial), ErrRevokedSigner},
 	} {
 		if err := Admits(c.held, c.signer); !errors.Is(err, c.want) || (c.want == nil && err != nil) {
 			t.Errorf("%s: %v, want %v", c.name, err, c.want)
 		}
 	}
-	if errors.Is(ErrIdentityMode, ErrRevokedSigner) || errors.Is(ErrRevokedSigner, ErrIdentityMode) {
-		t.Error("the two refusals of the mode are one")
-	}
 }
 
 // The re-wrap: SSHSIG signs no signing-key field, so the identity's own
-// signature, rank 0, which a trip covers, verifies under a certificate of the
-// identity's own key at a serial above the trip. A certified key is never the
-// identity's key (PROTOCOL.md §5), and that alone refuses it.
+// signature, rank 0, verifies under a certificate of the identity's own key at
+// any serial: above a revocation of certificates, and above every statement
+// the identity signed by (c, p), a rank it does not have. A certified key is
+// never the identity's key (PROTOCOL.md §5), and that alone refuses it.
 func TestTheIdentitysSignatureRewrappedInACertificateIsRefused(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, 10, 31, 12, 0, 0, 0, time.UTC)
@@ -150,13 +149,13 @@ func TestTheIdentitysSignatureRewrappedInACertificateIsRefused(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		trip, err := NewRevokedCertificates(b.id.Address(), 5)
+		held, err := NewRevokedCertificates(b.id.Address(), 5)
 		if err != nil {
 			t.Fatal(err)
 		}
 		signer, err := VerifySigned(b.id, msg, own, ns, now)
-		if err != nil || !errors.Is(Admits(trip, signer), ErrRevokedSigner) {
-			t.Fatalf("%s: control: the identity's own signature, with a trip held: %v, %v", name, err, Admits(trip, signer))
+		if err != nil || signer.Rank() != 0 || Admits(held, signer) != nil {
+			t.Fatalf("%s: control: the identity's own signature, rank 0, with a revocation through 5 held: %v, %v", name, err, Admits(held, signer))
 		}
 		cert := &ssh.Certificate{
 			Key:             b.identity.PublicKey(),
@@ -185,43 +184,6 @@ func TestTheIdentitysSignatureRewrappedInACertificateIsRefused(t *testing.T) {
 		if _, err := CheckCertificate(b.id, cert, now); !errors.Is(err, ErrCertificate) {
 			t.Errorf("%s: a certificate of the identity's own key: %v", name, err)
 		}
-	}
-}
-
-// What the identity signs itself is never ranked: once its address holds a
-// trip, which refuses the identity's signature on a statement, a pass or a
-// message, a revocation of the address and a revocation of its certificates
-// still verify, each under the identity's bare key (PROTOCOL.md §5, §10).
-func TestRevocationsVerifyWithATripHeld(t *testing.T) {
-	t.Parallel()
-	b := newCertMailbox(t)
-	a := b.id.Address()
-	trip, err := NewRevokedCertificates(a, 5)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !errors.Is(Admits(trip, IdentitySigner()), ErrRevokedSigner) {
-		t.Fatal("control: the trip does not refuse the identity's rank")
-	}
-	higher, err := NewRevokedCertificates(a, 9)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, r := range []*RevokedCertificates{trip, higher} {
-		sig, err := SignRevokedCertificates(b.identity, r)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if got, err := VerifyRevokedCertificates(a, b.id.Document(), r.Statement(), sig); err != nil || got.Through != r.Through {
-			t.Errorf("a revocation of certificates through %d, with the trip held: %v", r.Through, err)
-		}
-	}
-	sig, err := SignRevocation(b.identity, a)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := VerifyRevocation(a, b.id.Document(), sig); err != nil {
-		t.Errorf("a revocation of the address, with the trip held: %v", err)
 	}
 }
 
@@ -298,12 +260,11 @@ func TestStatementHashIsTheStatementsSHA256(t *testing.T) {
 	}
 }
 
-// The two codes of the mode's refusals at a server, under their statuses, and
-// the member the second carries.
-func TestTheModesCodes(t *testing.T) {
+// certificate_too_long is under its status, and carries the server's maximum.
+func TestCertificateTooLongsCode(t *testing.T) {
 	t.Parallel()
-	if CodeIdentityMode.Status() != 409 || CodeCertificateTooLong.Status() != 400 {
-		t.Errorf("identity_mode %d, certificate_too_long %d", CodeIdentityMode.Status(), CodeCertificateTooLong.Status())
+	if CodeCertificateTooLong.Status() != 400 {
+		t.Errorf("certificate_too_long %d", CodeCertificateTooLong.Status())
 	}
 	var p Problem
 	if err := Unmarshal([]byte(`{"type":"`+CodeCertificateTooLong.TypeURI()+`","code":"certificate_too_long","status":400,"max_certificate_lifetime":3891600}`), &p); err != nil || p.CodeAt(400) != CodeCertificateTooLong || p.MaxCertificateLifetime == nil || *p.MaxCertificateLifetime != 3891600 {

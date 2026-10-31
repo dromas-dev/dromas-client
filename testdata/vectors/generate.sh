@@ -10,19 +10,18 @@
 # is the PUBLISHED test key of RFC 6979 §A.2.5. B's and C's prekey is the PUBLISHED test identity of the
 # C2SP age testkit (CCTV age/internal/testkit: TestHybridIdentity), in input/b-1.pq.key, so the two messages
 # decrypt with any age; the other age recipients' secret keys were discarded. Every vector is judged at the
-# time in ./now. A is in working-key mode: it holds its trip, a revocation of its certificates through
-# TRIP, and its certificates are numbered above it. B and C are in identity mode: each identity signs
-# its own statements, passes and messages.
+# time in ./now, with the revocations of certificates a reader holds: A's, through THROUGH, its certificates
+# numbered above it, and none of B's or C's. A signs under its certificate; B and C sign by the identity, and each
+# has a certificate whose signatures a reader takes too.
 set -euo pipefail
 umask 077
 cd "$(dirname "$0")"
 NOW=2026-10-10T00:00:00Z
 NOT_AFTER=2026-11-12T00:00:00Z # NOW + 33 days exactly: what a client asks for. A server takes one that ends up to an hour later
 MSG_ID=6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b
-# A's trip, as a mailbox made in working-key mode makes it: a revocation of its certificates through its clock
-# less one, at NOW (1791590400). Its certificates are numbered above it: SA is its clock at NOW, the serial
-# SerialAt gives above the trip.
-TRIP=1791590399
+# A's revocation of its certificates runs through its clock at NOW (1791590400) less one. Its certificates are
+# numbered above it: SA is its clock at NOW, the serial SerialAt gives, and B's and C's take the same.
+THROUGH=1791590399
 SA=1791590400
 # A certificate's validity, as ssh-keygen -V takes it: from an hour before it is made (PROTOCOL.md §5) for
 # the server's maximum, which a client asks for, the reference server's default being 45 days and the hour.
@@ -127,15 +126,15 @@ sign() { ssh-keygen -q -Y sign -n "$2" -f "$KEYS/$1" "${@:3}"; } # <key> <namesp
 under() { cp "$2" "$KEYS/$1-cert.pub"; ssh-keygen -q -Y sign -n "$3" -f "$KEYS/$1-cert.pub" "${@:4}"; } # <working key> <certificate> <namespace> [-O …] < message > signature under that certificate
 statement() { printf 'dromas-prekey-v1\n%s\n%s\n%s\n%s\n' "$@"; } # <address> <serial> <recipient> <not_after>
 
-# Each mailbox's working key, certified by its identity. B's and C's are certificates no reader takes while
-# its mailbox is in identity mode, for the vectors that refuse one.
+# Each mailbox's working key, certified by its identity. A reader takes a signature under each: A's above A's
+# revocation of its certificates, and B's and C's, whose certificates nothing revokes.
 cert a/work-cert.pub a a-work $(good "$A")
 cert b/work-cert.pub b b-work $(good "$B")
 cert c/work-cert.pub c c-work $(good "$C")
 
-# A's trip: its identity's revocation of its certificates through TRIP, which puts A in working-key mode.
-printf 'dromas-revoke-certs-v1\n%s\n%s\n' "$A" "$TRIP" > a/trip.txt
-sign a "dromas-revoke-certs-v1:$A" < a/trip.txt > a/trip.sig
+# A's identity's revocation of its certificates through THROUGH, which a reader of A holds.
+printf 'dromas-revoke-certs-v1\n%s\n%s\n' "$A" "$THROUGH" > a/revoked-certs.txt
+sign a "dromas-revoke-certs-v1:$A" < a/revoked-certs.txt > a/revoked-certs.sig
 
 # The three mailboxes, their prekeys and A's revocation. A's statements are signed by its working key under its
 # certificate, B's and C's by the identity itself; C's, an ECDSA signature, is made once and kept.
@@ -271,12 +270,12 @@ badcert bad-serial-zero a a-work $(good "$A" 0)
 badcert bad-serial-above-2-53 a a-work $(good "$A" 9007199254740992)
 badcert bad-host-certificate a a-work $(good "$A") -h
 badcert bad-signed-by-b b a-work $(good "$A")
-# The re-wrap: SSHSIG does not sign its signing-key field, so the identity's own signature, rank 0, which A's trip
-# covers, verifies under a certificate of the identity's own key above the trip. Its signature is A's identity's
-# over a/prekey-1.txt with that certificate put in its key's place, which is what ssh-keygen signs under it (checked
-# below, once the helpers that take a blob apart are defined).
+# The re-wrap: SSHSIG does not sign its signing-key field, so the identity's own signature, rank 0, verifies under a
+# certificate of the identity's own key, which would rank it above A's revocation of certificates and above every
+# statement the identity signed. Its signature is A's identity's over a/prekey-1.txt with that certificate put in its
+# key's place, which is what ssh-keygen signs under it (checked below, once the helpers that take a blob apart are defined).
 badcert bad-certifies-the-identity a a $(good "$A")
-badcert bad-at-the-trip a a-work $(good "$A" "$TRIP")      # good in every way, and at or below A's trip
+badcert bad-revoked a a-work $(good "$A" "$THROUGH")      # good in every way, and at the serial A's revocation of certificates runs through
 badcert bad-ended a a-work $(good "$A" "$SA" "$V_ENDED")
 badcert bad-not-begun a a-work $(good "$A" "$SA" "$V_NOT_BEGUN")
 badcert bad-ends-after-the-last-date a a-work $(good "$A" "$SA" "$V_PAST_LAST")
@@ -434,22 +433,22 @@ printf 'dromas-v1\n%s\0' "$(sed -n 2p identity/unsupported-type.doc)" > identity
 # expired at ./now, so a sender must not encrypt to it. longest: valid, and the longest a server
 # takes, an hour past the 33 days a client asks for. too-long: a second past that, so valid and not
 # expired, but a server must refuse to publish it. Each is signed by A in A's prekey namespace
-# unless its name says otherwise; bad-signed-by-the-identity is A's identity's own, rank 0, which A's
-# trip covers.
+# unless its name says otherwise; signed-by-the-identity is A's identity's own, rank 0, which A's revocation of
+# certificates does not cover: valid, and below every statement of A's under a certificate.
 PQ=$(cat input/a-1.pq)
 bad() { local name=$1; shift; printf "$@" > "prekey/$name.txt"; under a-work a/work-cert.pub "dromas-prekey-v1:$A" < "prekey/$name.txt" > "prekey/$name.txt.sig"; }
 cp a/prekey-1.txt prekey/bad-wrong-namespace.txt; under a-work a/work-cert.pub "dromas-msg-v1:$A" < a/prekey-1.txt > prekey/bad-wrong-namespace.txt.sig
 cp a/prekey-1.txt prekey/bad-signed-by-b.txt; under b-work b/work-cert.pub "dromas-prekey-v1:$A" < a/prekey-1.txt > prekey/bad-signed-by-b.txt.sig
-cp a/prekey-1.txt prekey/bad-signed-by-the-identity.txt; sign a "dromas-prekey-v1:$A" < a/prekey-1.txt > prekey/bad-signed-by-the-identity.txt.sig
+cp a/prekey-1.txt prekey/signed-by-the-identity.txt; sign a "dromas-prekey-v1:$A" < a/prekey-1.txt > prekey/signed-by-the-identity.txt.sig
 cp a/prekey-1.txt prekey/bad-signed-by-a-bare-working-key.txt; sign a-work "dromas-prekey-v1:$A" < a/prekey-1.txt > prekey/bad-signed-by-a-bare-working-key.txt.sig
 # A statement may outlive the certificate it is signed under, whose end a sender reads apart: this one's certificate,
 # a later one of A's second working key, ends in 10 days.
 cert prekey/outlives-its-certificate.cert.pub a a-work-2 $(good "$A" $((SA + 1)) "$V_SHORT")
 cp a/prekey-1.txt prekey/outlives-its-certificate.txt; under a-work-2 prekey/outlives-its-certificate.cert.pub "dromas-prekey-v1:$A" < a/prekey-1.txt > prekey/outlives-its-certificate.txt.sig
-# B's and C's own statements, each signed under its own mailbox's certificate in its own namespace: refused for each,
-# since each is in identity mode and takes its identity's signature alone.
-cp b/prekey-1.txt prekey/bad-b-signed-under-its-certificate.txt; under b-work b/work-cert.pub "dromas-prekey-v1:$B" < b/prekey-1.txt > prekey/bad-b-signed-under-its-certificate.txt.sig
-cp c/prekey-1.txt prekey/bad-c-signed-under-its-certificate.txt; under c-work c/work-cert.pub "dromas-prekey-v1:$C" < c/prekey-1.txt > prekey/bad-c-signed-under-its-certificate.txt.sig
+# B's and C's own statements, each signed under its own mailbox's certificate in its own namespace: valid for each,
+# whose certificates nothing revokes.
+cp b/prekey-1.txt prekey/b-signed-under-its-certificate.txt; under b-work b/work-cert.pub "dromas-prekey-v1:$B" < b/prekey-1.txt > prekey/b-signed-under-its-certificate.txt.sig
+cp c/prekey-1.txt prekey/c-signed-under-its-certificate.txt; under c-work c/work-cert.pub "dromas-prekey-v1:$C" < c/prekey-1.txt > prekey/c-signed-under-its-certificate.txt.sig
 bad bad-names-another-mailbox 'dromas-prekey-v1\n%s\n1\n%s\n%s\n' "$B" "$PQ" "$NOT_AFTER"
 bad bad-serial-zero 'dromas-prekey-v1\n%s\n0\n%s\n%s\n' "$A" "$PQ" "$NOT_AFTER"
 bad bad-serial-leading-zero 'dromas-prekey-v1\n%s\n01\n%s\n%s\n' "$A" "$PQ" "$NOT_AFTER"
@@ -569,7 +568,7 @@ SEALED_C=$(( (1659 + n + 1023) / 1024 * 1024 ))
 { cat message/a-to-c.line message/a-to-c.sig; head -c $((SEALED_C - 1659 - n)) /dev/zero | tr '\0' .; } > message/a-to-c.plain
 [ -e message/a-to-c.age ] || age -r "$(cat input/b-1.pq)" -o message/a-to-c.age < message/a-to-c.plain
 [ "$(wc -c < message/a-to-c.age)" -eq "$SEALED_C" ] || { echo "message/a-to-c.age is not the $SEALED_C bytes its padding was made for" >&2; exit 1; }
-# And one from B to C, signed by B's identity, as a mailbox in identity mode signs, to C's prekey.
+# And one from B to C, signed by B's identity, to C's prekey.
 line "$B" "$C" "$ID_B" > message/b-to-c.line
 sign b "dromas-msg-v1:$C" < message/b-to-c.line > message/b-to-c.sig
 n=$(( $(wc -c < message/b-to-c.line) + $(wc -c < message/b-to-c.sig) ))
@@ -600,9 +599,10 @@ refuse() { # <name> <line file> <signature command…>: the line, then the signa
 L=$(mktemp)
 # The signature.
 refuse refuse-signed-for-another-mailbox message/a-to-b.line under a-work a/work-cert.pub "dromas-msg-v1:$A"
-refuse refuse-signed-by-the-identity message/a-to-b.line sign a "dromas-msg-v1:$B"      # rank 0, which A's trip covers
-refuse refuse-certificate-at-the-trip message/a-to-b.line under a-work cert/bad-at-the-trip.pub "dromas-msg-v1:$B"
-# The re-wrap: that signature of A's identity, its key replaced by a certificate of the identity's own key above A's trip.
+refuse accept-signed-by-the-identity message/a-to-b.line sign a "dromas-msg-v1:$B"      # rank 0, which A's revocation of certificates does not cover
+refuse refuse-certificate-revoked message/a-to-b.line under a-work cert/bad-revoked.pub "dromas-msg-v1:$B"
+# The re-wrap: that signature of A's identity, its key replaced by a certificate of the identity's own key above A's
+# revocation of certificates.
 { cat message/a-to-b.line; armor "$(restr "$(blob <(sign a "dromas-msg-v1:$B" < message/a-to-b.line))" 20 "$(content "$(blob cert/bad-certifies-the-identity.sig)" 20)")"; } > plain/refuse-identity-s-signature-re-wrapped.txt
 refuse refuse-signed-by-a-bare-working-key message/a-to-b.line sign a-work "dromas-msg-v1:$B"
 refuse refuse-certificate-ended message/a-to-b.line under a-work cert/bad-ended.pub "dromas-msg-v1:$B"
@@ -611,12 +611,12 @@ sed 's/"body":"hello"/"body":"hellp"/' message/a-to-b.line > "$L"; cat "$L" "$GO
 { cat message/a-to-b.line; sed "2s/\$/ \r/; 3s/^/"$'\t'"/" "$GOOD_SIG"; } > plain/accept-whitespace-in-the-signature.txt
 { cat message/a-to-b.line; sed "2s/\$/$(printf "%$((4097 - $(wc -c < "$GOOD_SIG")))s" '')/" "$GOOD_SIG"; } > plain/refuse-signature-over-4096-bytes.txt
 # A sender whose identity is of the optional type, signed by that identity, made once and kept: delivered by a client
-# that verifies ecdsa-sha2-nistp256, and refused with unsupported_key_type by one that does not. The same under C's
-# certificate is refused, since C is in identity mode. Then one of a type nobody verifies: refused so if the document is
-# the sender's, and as reattributed if it is not.
+# that verifies ecdsa-sha2-nistp256, and refused with unsupported_key_type by one that does not; and the same under C's
+# certificate, which nothing revokes. Then one of a type nobody verifies: refused so if the document is the sender's,
+# and as reattributed if it is not.
 line "$C" "$B" "$(b64 < c/identity.doc)" > "$L"; [ -e plain/accept-p256-sender.txt ] || refuse accept-p256-sender "$L" sign c "dromas-msg-v1:$B"
 head -n 1 plain/accept-p256-sender.txt | cmp -s - "$L" || { echo "plain/accept-p256-sender.txt is not C's line" >&2; exit 1; }
-refuse refuse-p256-sender-under-a-certificate "$L" under c-work c/work-cert.pub "dromas-msg-v1:$B"
+refuse accept-p256-sender-under-a-certificate "$L" under c-work c/work-cert.pub "dromas-msg-v1:$B"
 line "$(address < identity/unsupported-type.doc)" "$B" "$(b64 < identity/unsupported-type.doc)" > "$L"; refuse refuse-unsupported-key-type "$L" under a-work a/work-cert.pub "dromas-msg-v1:$B"
 line "$A" "$B" "$(b64 < identity/unsupported-type.doc)" > "$L"; refuse refuse-from-is-not-the-identity-of-an-unknown-type "$L" under a-work a/work-cert.pub "dromas-msg-v1:$B"
 # Who it is from. The first is the forgery an identity member invites: A's document beside a

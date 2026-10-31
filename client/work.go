@@ -16,12 +16,12 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-// In working-key mode (mode.go) a mailbox's identity certifies a working key,
-// and the working key signs what the mailbox says: its prekey statements,
-// its messages and its passes (PROTOCOL.md §5). This client makes a new
-// working key, with a new certificate, each time it makes a new prekey in
-// that mode: work/<n> is the working key made with prekey n, in the files
-// ssh-keygen keeps for one,
+// A mailbox that signs under certificates (signer.go) has its identity
+// certify a working key, and the working key signs what the mailbox says:
+// its prekey statements, its messages and its passes (PROTOCOL.md §5). This
+// client makes a new working key, with a new certificate, each time it makes
+// a new prekey under a certificate: work/<n> is the working key made with
+// prekey n, in the files ssh-keygen keeps for one,
 //
 //	work/<n>            the working key, OpenSSH format
 //	work/<n>.pub        its public key
@@ -30,8 +30,8 @@ import (
 // so "ssh-keygen -Y sign -f work/<n>-cert.pub" signs with it. The one in use
 // is the one made with the prekey this mailbox published last. Older ones are
 // deleted once a newer prekey is published: the server then takes no pass
-// under them, and what they signed is already signed. A mailbox in identity
-// mode keeps none.
+// under them, and what they signed is already signed. A mailbox whose
+// identity signs keeps none.
 
 func (b *Mailbox) workStem(n uint64) string { return b.path("work", strconv.FormatUint(n, 10)) }
 
@@ -56,7 +56,7 @@ func (b *Mailbox) makeWork(n uint64, lifetime time.Duration) (*sign.Work, *proto
 	if err != nil {
 		return nil, nil, err
 	}
-	cert, err := b.certifier.Certify(b.id, sshPub, n, b.now(), lifetime)
+	cert, err := b.identity.Certify(b.id, sshPub, n, b.now(), lifetime)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -76,8 +76,7 @@ func (b *Mailbox) makeWork(n uint64, lifetime time.Duration) (*sign.Work, *proto
 
 // worker returns working key n's signer under its certificate, checked
 // against the mailbox's identity at the mailbox's clock: a certificate that has
-// ended signs nothing, and nor does a working key of a mailbox not in
-// working-key mode (sign).
+// ended signs nothing.
 func (b *Mailbox) worker(n uint64) (*sign.Work, *protocol.Certificate, error) {
 	stem := b.workStem(n)
 	pemBytes, err := os.ReadFile(stem) //nolint:gosec // a path inside the mailbox's own directory
@@ -114,11 +113,7 @@ func (b *Mailbox) worker(n uint64) (*sign.Work, *protocol.Certificate, error) {
 	if err != nil {
 		return nil, nil, fmt.Errorf("working key %d does not match its certificate: %w", n, err)
 	}
-	w, err := sign.NewWork(signer, b.checks())
-	if err != nil {
-		return nil, nil, err
-	}
-	return w, cert, nil
+	return sign.NewWork(signer, b.finished), cert, nil
 }
 
 // dropWork deletes every working key older than n.

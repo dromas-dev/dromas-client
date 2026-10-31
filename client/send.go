@@ -69,8 +69,8 @@ func (b *Mailbox) Send(ctx context.Context, to protocol.Address, body string) (*
 
 // SendWith sends one logical message: its envelope is built once and kept in
 // the outbox, then sealed for the post: dated at the post, signed for that
-// peer only by this mailbox's signer (its identity, or in working-key mode its
-// working key), and encrypted with that signature to the peer's verified
+// peer only by this mailbox's signer (its identity, or the working key of its
+// current certificate), and encrypted with that signature to the peer's verified
 // prekey. On 409 stale_prekey it seals the SAME envelope
 // to the newer prekey, once. If the post fails, the envelope stays in the outbox:
 // retry with [Mailbox.Flush], never by sending again, or the peer gets it twice.
@@ -476,7 +476,7 @@ func (b *Mailbox) postSealed(ctx context.Context, to protocol.Address, s *sealed
 }
 
 // seal dates the entry's envelope at this post, signs it for the peer only,
-// with the signer in use, the identity or a working key by the mailbox's mode,
+// with the signer in use, the identity or the working key of its current certificate,
 // and encrypts the envelope, the signature and
 // the padding to the peer's VERIFIED current prekey, and returns what to
 // post. Nothing of it is written: the outbox keeps the envelope as written,
@@ -510,27 +510,24 @@ func (b *Mailbox) seal(ctx context.Context, to protocol.Address, stem string, l 
 	if err != nil {
 		return nil, err
 	}
-	// A signer this mailbox's own identity has revoked signs no message: every
-	// reader that holds the revocation refuses it, whatever this mailbox's
-	// server took. That is the remedy's window while its renewal waits
-	// (PROTOCOL.md §12.6), and a switch's before its first statement under a
-	// certificate is taken (sign refuses the identity's signature then): the
-	// entry waits too. A kept revocation that does not verify is a fault,
-	// never "nothing revoked".
+	// A certificate this mailbox's own identity has revoked signs no message:
+	// every reader that holds the revocation refuses it, whatever this
+	// mailbox's server took. That is the remedy's window while its renewal
+	// waits (PROTOCOL.md §12.6): the entry waits too. A kept revocation that
+	// does not verify is a fault, never "nothing revoked".
 	if held, err := b.revokedCerts(b.id.Address()); err != nil {
 		return nil, err
 	} else if cert != nil && held != nil && held.Revokes(cert.Serial()) {
 		return nil, refuse("this mailbox's identity has revoked the certificate it signs under, so a message signed now would be refused: dromas recv or dromas prekey renew publishes the new one first")
 	}
-	// In working-key mode, nor does a certificate whose working key another
-	// holds, as a statement this mailbox did not make under it shows
+	// Nor does a certificate whose working key another holds, as a statement this mailbox did not make under it shows
 	// (PROTOCOL.md §12.4): its owner's remedy revokes it, and its reader then
 	// refuses this message with the thief's. The entry waits for the
 	// mailbox's next certificate. The record is what the mailbox's last read
 	// of itself showed (known, its one writer), not a read made for this post:
 	// a statement its server serves only since then holds back no message
-	// until the mailbox reads itself again. In identity mode no certificate of
-	// its own is in doubt, and nothing waits.
+	// until the mailbox reads itself again. Where its identity signs, no
+	// certificate of its own is in doubt, and nothing waits.
 	if cert != nil {
 		if nm, err := b.notMade(); err != nil {
 			return nil, err

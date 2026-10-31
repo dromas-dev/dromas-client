@@ -153,10 +153,6 @@ func TestARestoredMailboxRevokesWhatTheLostMachineNeverPublished(t *testing.T) {
 	e := newWorkEnv(t)
 	lost, reader := e.mailbox(), e.mailbox()
 	first := numberOf(t, lost)
-	trip, err := lost.CertificatesRecord(ctx) // its trip to working-key mode
-	if err != nil || trip == nil {
-		t.Fatalf("the trip: %v", err)
-	}
 	kept := uploads(e, lost)
 	if _, err := lost.Rekey(ctx); err == nil {
 		t.Fatal("the lost machine's renewal was meant to fail")
@@ -183,18 +179,9 @@ func TestARestoredMailboxRevokesWhatTheLostMachineNeverPublished(t *testing.T) {
 	}
 
 	// The control: the taken key is good under its certificate, so the
-	// revocation is what refuses it. A reader shown the trip and none since
-	// delivers what it signs.
+	// revocation is what refuses it. A reader shown none delivers what it signs.
 	control := e.mailbox()
-	e.srv.SetMiddle(func(w http.ResponseWriter, req *http.Request, next http.Handler) {
-		if x, ok := forge.ReadOf(req); ok && x == r.Address() {
-			e.serve(w, req, next, func(br *protocol.MailboxResponse) {
-				br.RevokedCertificates, br.RevokedCertificatesSignature = trip.RevokedCertificates, trip.RevokedCertificatesSignature
-			})
-			return
-		}
-		next.ServeHTTP(w, req)
-	})
+	forge.Hides(e.t, e.srv)
 	messageAs(t, e, r, control, taken, "signed with the key the lost machine never published")
 	if res := receive(t, control); len(res.Delivered) != 1 {
 		t.Fatalf("the control: a message under the lost machine's certificate, no revocation shown: %+v", res)

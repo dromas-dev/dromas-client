@@ -516,23 +516,26 @@ func TestEchoHoldsWithAReplyPending(t *testing.T) {
 	})
 }
 
-// An echo mailbox runs in the mode --mode names: started again, as from a
-// tmpfs, it restores its mailbox in that mode, answers in it, and a start in
-// the other mode is refused, publishing nothing. The reply says what was
-// checked, by the address's SHA-384.
-func TestEchoRunsInItsMode(t *testing.T) {
+// An echo mailbox started with --mode working-key registers under a
+// certificate; started again, as from a tmpfs, it restores its mailbox under
+// one, whatever --mode says, since its server serves one. Its identity signs
+// otherwise. It answers either way, and the reply says what was checked, by
+// the address's SHA-384.
+func TestEchoSignsAsItsModeSays(t *testing.T) {
 	for _, mode := range []string{"identity", "working-key"} {
 		e := newEnv(t)
 		opt := e.opts()
 		opt.WorkingKey = mode == "working-key"
-		for range 2 {
+		for _, again := range []bool{false, true} {
+			if again {
+				opt.WorkingKey = false
+			}
 			x, err := start(context.Background(), t.TempDir(), e.key, opt, log.New(io.Discard, "", 0))
 			if err != nil {
 				t.Fatalf("%s: start: %v", mode, err)
 			}
-			want := map[bool]string{false: "identity", true: "working_key"}[opt.WorkingKey]
-			if m, err := x.b.Mode(context.Background()); err != nil || m != want {
-				t.Fatalf("%s: the mode %s, %v", mode, m, err)
+			if st, err := x.b.Status(context.Background()); err != nil || st.Certified != (mode == "working-key") {
+				t.Fatalf("%s, started again %v: certified %v, %v", mode, again, st.Certified, err)
 			}
 			a := e.mailbox()
 			if _, err := a.Send(context.Background(), x.b.Address(), "ping"); err != nil {
@@ -544,21 +547,26 @@ func TestEchoRunsInItsMode(t *testing.T) {
 				t.Fatalf("%s: the reply: %+v", mode, res)
 			}
 		}
-		other := e.opts()
-		other.WorkingKey = mode != "working-key"
-		from := len(e.srv.Requests())
-		if _, err := start(context.Background(), t.TempDir(), e.key, other, log.New(io.Discard, "", 0)); err == nil {
-			t.Fatalf("%s: a start in the other mode was taken", mode)
-		}
-		for _, q := range e.srv.Requests()[from:] {
-			if q.Method == http.MethodPut {
-				t.Errorf("%s: a start in the other mode put %s", mode, q.Path)
-			}
-		}
+	}
+	// One that kept its state, started with --mode working-key, renews under
+	// a certificate.
+	e := newEnv(t)
+	dir := t.TempDir()
+	if _, err := start(context.Background(), dir, e.key, e.opts(), log.New(io.Discard, "", 0)); err != nil {
+		t.Fatal(err)
+	}
+	opt := e.opts()
+	opt.WorkingKey = true
+	x, err := start(context.Background(), dir, e.key, opt, log.New(io.Discard, "", 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st, err := x.b.Status(context.Background()); err != nil || !st.Certified {
+		t.Fatalf("a kept mailbox started with --mode working-key: %+v, %v", st, err)
 	}
 }
 
-// The mode flag takes the two modes' names and nothing else.
+// --mode takes identity and working-key, and nothing else.
 func TestEchoTakesOnlyItsModes(t *testing.T) {
 	if err := run(context.Background(), []string{"--identity", newKey(t), "--mode", "offline"}, io.Discard); !errors.Is(err, flag.ErrHelp) {
 		t.Fatalf("--mode offline: %v", err)

@@ -136,8 +136,8 @@ func (b *Mailbox) known(ctx context.Context) (*own, error) {
 // someone else's working key, as on the lost machine a mailbox restored from its
 // identity alone meets. Each way the mailbox recommends revoking the address
 // (PROTOCOL.md §12.4), and recv renews nothing above it: Rekey, which its
-// owner runs, does (#74). In identity mode the outbox waits for nothing: no
-// certificate of the mailbox's own is in doubt (seal).
+// owner runs, does (#74). Where the mailbox's identity signs, the outbox
+// waits for nothing: no certificate of the mailbox's own is in doubt (seal).
 type NotMade struct {
 	Serial uint64 `json:"serial"`
 	// CertificateSerial is the serial of the certificate it is signed under,

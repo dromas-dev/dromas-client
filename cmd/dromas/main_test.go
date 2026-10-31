@@ -197,7 +197,7 @@ func TestRecvPrintsTheCheckedLine(t *testing.T) {
 	signed := func(from *client.Mailbox, msgID, body string) []byte {
 		env := &protocol.Envelope{From: from.Address(), To: b.Address(), SentAt: time.Now().UTC().Truncate(time.Second), MsgID: msgID,
 			Identity: from.Identity().Document(), Body: []byte(`"` + body + `"`)}
-		// In identity mode, the default, the identity signs.
+		// The identity signs, as init leaves a mailbox.
 		signer, err := ssh.ParsePrivateKey(must(t, filepath.Join(from.Dir(), "identity")))
 		if err != nil {
 			t.Fatal(err)
@@ -798,7 +798,7 @@ func TestTheLink(t *testing.T) {
 		t.Fatal(err)
 	}
 	link := srv.URL + "/to/" + a.Address().String()
-	mailbox := `{"type":"mailbox","address":"` + a.Address().String() + `","link":"` + link + `","mode":"identity"}` + "\n"
+	mailbox := `{"type":"mailbox","address":"` + a.Address().String() + `","link":"` + link + `"}` + "\n"
 	if out.String() != mailbox {
 		t.Fatalf("init printed %q, not %q", out.String(), mailbox)
 	}
@@ -1790,17 +1790,17 @@ func TestRevokedAsk(t *testing.T) {
 	if ls := printed(t, out); err != nil || typesOf(ls) != "not_revoked" || ls[0]["address"] != addr || !strings.Contains(ls[0]["detail"].(string), "the server's word") || warn != "" {
 		t.Fatalf("ask about a mailbox with nothing revoked: %v %q %q", err, out, warn)
 	}
-	// A moves to working-key mode: its trip is a revocation of certificates.
-	if _, err := a.Switch(ctx); err != nil {
+	// A renews under a certificate, then under another, and revokes the
+	// first.
+	if _, err := a.RenewUnderCertificate(ctx); err != nil {
 		t.Fatal(err)
 	}
-	trip, err := a.CertificatesRecord(ctx)
-	if err != nil || trip == nil {
-		t.Fatalf("the trip: %v", err)
-	}
-	certs, err := protocol.ParseRevokedCertificates(trip.RevokedCertificates)
-	if err != nil {
+	if _, err := a.Rekey(ctx); err != nil {
 		t.Fatal(err)
+	}
+	certs, err := a.RevokeEarlier(ctx)
+	if err != nil || certs == nil {
+		t.Fatalf("revoke earlier: %+v, %v", certs, err)
 	}
 	held := `{"type":"certificates_revoked","address":"` + addr + `","through":` + strconv.FormatUint(certs.Through, 10) + "}\n"
 	// By its link, as send takes one.
@@ -2509,11 +2509,11 @@ func TestVersionPrintsWhatTheBinaryIs(t *testing.T) {
 	}
 }
 
-// init --offline makes the mailbox in working-key mode, and init and addr say
-// the mode; cert switch moves an identity-mode mailbox there, its cost said
-// first, its address in full the confirmation; a wrong address does nothing;
-// status shows the mode, and no certificate in identity mode.
-func TestTheModesOnTheCommandLine(t *testing.T) {
+// init --offline registers the mailbox under a certificate, and status says
+// so, with the certificate; init registers it signed by its identity, with
+// none. cert switch renews the latter under a certificate, its address in
+// full the confirmation, and prints the prekey; a wrong address does nothing.
+func TestCertificatesOnTheCommandLine(t *testing.T) {
 	ctx := context.Background()
 	srv := fakeserver.New(t, time.Now)
 	t.Setenv("DROMAS_SERVER_URL", srv.URL)
@@ -2528,20 +2528,20 @@ func TestTheModesOnTheCommandLine(t *testing.T) {
 		return ls[len(ls)-1], err
 	}
 	t.Setenv("DROMAS_HOME", t.TempDir())
-	if l, err := line("init", "--offline"); err != nil || l["mode"] != "working_key" {
+	if l, err := line("init", "--offline"); err != nil || l["type"] != "mailbox" || l["mode"] != nil {
 		t.Fatalf("init --offline: %v, %v", l, err)
 	}
-	if l, err := line("status"); err != nil || l["mode"] != "working_key" || l["certificate_serial"] == nil {
-		t.Fatalf("status in working-key mode: %v, %v", l, err)
+	if l, err := line("status"); err != nil || l["certified"] != true || l["certificate_serial"] == nil {
+		t.Fatalf("status under a certificate: %v, %v", l, err)
 	}
 
 	home := t.TempDir()
 	t.Setenv("DROMAS_HOME", home)
-	if l, err := line("init"); err != nil || l["mode"] != "identity" {
-		t.Fatalf("init: %v, %v", l, err)
+	if _, err := line("init"); err != nil {
+		t.Fatalf("init: %v", err)
 	}
-	if l, err := line("status"); err != nil || l["mode"] != "identity" || l["certificate_serial"] != nil || l["certificate_not_after"] != nil {
-		t.Fatalf("status in identity mode: %v, %v", l, err)
+	if l, err := line("status"); err != nil || l["certified"] != false || l["certificate_serial"] != nil || l["certificate_not_after"] != nil {
+		t.Fatalf("status of a mailbox its identity signs for: %v, %v", l, err)
 	}
 	b, err := client.Open(home, client.Options{Base: srv.URL})
 	if err != nil {
@@ -2555,18 +2555,17 @@ func TestTheModesOnTheCommandLine(t *testing.T) {
 	if err := do(ctx, "cert switch", []string{other.Address().String()}, nil, &out, io.Discard); err == nil || out.Len() != 0 {
 		t.Fatalf("a switch confirmed by another address: %v, %q", err, out.String())
 	}
-	if l, err := line("addr"); err != nil || l["mode"] != "identity" {
+	if l, err := line("status"); err != nil || l["certified"] != false {
 		t.Fatalf("after a wrong confirmation: %v, %v", l, err)
 	}
 	out.Reset()
 	if err := do(ctx, "cert switch", []string{b.Address().String()}, nil, &out, io.Discard); err != nil {
 		t.Fatalf("cert switch: %v", err)
 	}
-	ls := printed(t, out.String())
-	if typesOf(ls) != "switch_cost prekey mode" || !strings.Contains(ls[0]["detail"].(string), "is for good") || ls[2]["mode"] != "working_key" {
+	if ls := printed(t, out.String()); typesOf(ls) != "prekey" {
 		t.Fatalf("cert switch printed %q", out.String())
 	}
-	if l, err := line("addr"); err != nil || l["mode"] != "working_key" {
-		t.Fatalf("addr after the switch: %v, %v", l, err)
+	if l, err := line("status"); err != nil || l["certified"] != true || l["certificate_serial"] == nil {
+		t.Fatalf("status after the switch: %v, %v", l, err)
 	}
 }

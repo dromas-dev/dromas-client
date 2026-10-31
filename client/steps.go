@@ -9,8 +9,6 @@ package client
 var steps = map[string][]string{
 	"renewal":    {"renewal begun", "working key made", "prekey made", "statement kept", "renewal taken", "renewal recorded"},
 	"revocation": {"revocation published", "revocation kept"},
-	"trip":       {"trip begun", "trip published", "trip kept"},
-	"switch":     {"switch begun", "retries written"},
 	"delivery":   {"delivery written", "delivery seen"},
 	"refusal":    {"refusal written", "refusal kept"},
 	"post":       {"outbox written", "posted", "sent kept"},

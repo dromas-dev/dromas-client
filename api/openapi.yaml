@@ -308,8 +308,8 @@ paths:
       summary: Register a mailbox
       description: |
         Registers a mailbox (`PROTOCOL.md` §11.7): `201` for a new mailbox, `200` for
-        an identical retry. The pass is by the signer of the prekey statement
-        the body brings.
+        an identical retry. The pass is by the identity, or by the
+        certificate of the prekey statement the body brings (`PROTOCOL.md` §8).
       requestBody:
         required: true
         content:
@@ -353,7 +353,8 @@ paths:
       summary: Publish a new prekey
       description: |
         Publishes a new prekey statement (`PROTOCOL.md` §11.9). The pass is
-        by the signer of the new statement.
+        by the identity, or by the certificate of the new statement
+        (`PROTOCOL.md` §8).
       requestBody:
         required: true
         content:
@@ -1934,8 +1935,8 @@ components:
       description: |
         `conflict` (with `prekey_serial`, and `certificate_serial` where the
         current signer is a certificate, or `through`, as the call has one) ·
-        `mailbox_changed` · `stale_prekey` · `prekey_expired` ·
-        `identity_mode`. `PROTOCOL.md` §11.3 has what each means.
+        `mailbox_changed` · `stale_prekey` · `prekey_expired`.
+        `PROTOCOL.md` §11.3 has what each means.
       headers:
         Date:
           $ref: '#/components/headers/Date'
@@ -1964,7 +1965,7 @@ components:
                   status:
                     const: 409
                   code:
-                    enum: [conflict, mailbox_changed, stale_prekey, prekey_expired, identity_mode]
+                    enum: [conflict, mailbox_changed, stale_prekey, prekey_expired]
     Gone:
       description: |
         `revoked`. Every `410 revoked` a server answers from the record it

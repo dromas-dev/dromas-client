@@ -3,11 +3,10 @@
 // prekey, send, list page by page, fetch and ack, each call carrying its
 // mailbox's pass. It is NOT the dromas.dev server, and checks little of what
 // that server checks. Like every server it keeps and serves a revocation of
-// any address, with a mailbox here or none (PROTOCOL.md §11.15), and holds an
-// address to its mode by the revocation of its certificates it keeps
-// (PROTOCOL.md §5): in identity mode it takes the identity's statements and
-// passes and no certificate (409 identity_mode), and in working-key mode a
-// certificate above the revocation alone (401 certificate_revoked).
+// any address, with a mailbox here or none (PROTOCOL.md §11.15), and holds a
+// certificate to the revocation of the address's certificates it keeps
+// (PROTOCOL.md §5): the identity's statements and passes are always taken,
+// and a certificate's only above the revocation (401 certificate_revoked).
 //
 // A test plays the hostile operator two ways: with SetMiddle, a function that
 // sees every request and can rewrite it, answer it or forge the reply; and
@@ -21,6 +20,7 @@ import (
 	"bytes"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -30,6 +30,7 @@ import (
 	"net/url"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -429,18 +430,14 @@ func keyOf(identity []byte, by *protocol.Signer) []byte {
 	return id.PublicKey().Marshal()
 }
 
-// moded holds a statement's signer to the address's mode, by the revocation
-// of its certificates listed, nil for none (PROTOCOL.md §5, §11.7 step 6):
-// a certificate in identity mode is 409 identity_mode, and a signer at or
-// below the revocation, the identity among them, 401 certificate_revoked.
-// It writes the refusal and reports true if refused.
-func moded(w http.ResponseWriter, listed *protocol.RevokedCertificates, by *protocol.Signer) bool {
-	switch err := protocol.Admits(listed, by); {
-	case errors.Is(err, protocol.ErrIdentityMode):
-		problem(w, protocol.CodeIdentityMode, "this address is in identity mode: publish a revocation of certificates first")
-		return true
-	case err != nil:
-		problem(w, protocol.CodeCertificateRevoked, "the statement's signer is one this address's identity revoked")
+// revokedSigner holds a statement's signer to the revocation of the
+// address's certificates listed, nil for none (PROTOCOL.md §5, §11.7 step
+// 6): a certificate at or below it is 401 certificate_revoked, and the
+// identity is always taken. It writes the refusal and reports true if
+// refused.
+func revokedSigner(w http.ResponseWriter, listed *protocol.RevokedCertificates, by *protocol.Signer) bool {
+	if protocol.Admits(listed, by) != nil {
+		problem(w, protocol.CodeCertificateRevoked, "the statement is under a certificate this address's identity revoked")
 		return true
 	}
 	return false
@@ -448,11 +445,12 @@ func moded(w http.ResponseWriter, listed *protocol.RevokedCertificates, by *prot
 
 // pass checks a call's pass: it is the pass of the mailbox whose identity
 // document is given, made for this server as the caller named it, and signed
-// by the key whose wire bytes are under, by the signer under is (PROTOCOL.md
-// §8). It writes the refusal and reports false if not: an identity pass where
-// the server holds a revocation of the address's certificates is
-// certificate_revoked, and any other signer certificate_not_current, naming
-// the certificate under where it is one.
+// by the identity, which is always taken, or under exactly the certificate
+// of under, the signer the call takes a pass by (PROTOCOL.md §8). It writes
+// the refusal and reports false if not: a certificate at or below the
+// revocation of the address's certificates listed is certificate_revoked,
+// and any other certificate_not_current, naming the certificate under where
+// it is one.
 func (s *Server) pass(w http.ResponseWriter, r *http.Request, identity []byte, under *protocol.Signer, listed *protocol.RevokedCertificates) bool {
 	p, err := protocol.ParsePass(r.Header.Get("Authorization"))
 	if err != nil {
@@ -477,10 +475,10 @@ func (s *Server) pass(w http.ResponseWriter, r *http.Request, identity []byte, u
 	case err != nil:
 		problem(w, protocol.CodeUnauthorized, "not this mailbox's pass for this server")
 		return false
-	case bytes.Equal(keyOf(identity, by), keyOf(identity, under)):
+	case by.Identity(), bytes.Equal(keyOf(identity, by), keyOf(identity, under)) && protocol.Admits(listed, by) == nil:
 		return true
-	case by.Identity() && listed != nil:
-		problem(w, protocol.CodeCertificateRevoked, "the pass is the identity's, and this address is in working-key mode")
+	case protocol.Admits(listed, by) != nil:
+		problem(w, protocol.CodeCertificateRevoked, "the pass is under a certificate this address's identity revoked")
 		return false
 	}
 	problem(w, protocol.CodeCertificateNotCurrent, "the pass is not by the signer this call takes a pass by", func(p *protocol.Problem) {
@@ -548,8 +546,8 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// What the identity signed about the address before it had a mailbox here
-	// holds the registration to it: none of a revoked address, and its mode,
-	// which comes before the pass (PROTOCOL.md §11.4 rule 4).
+	// holds the registration to it: none of a revoked address, and none
+	// under a certificate it revoked.
 	var kept revocations
 	if h := s.held[a]; h != nil {
 		if h.revoked != nil {
@@ -558,7 +556,7 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 		}
 		kept = h.revocations
 	}
-	if moded(w, kept.listed, by) {
+	if revokedSigner(w, kept.listed, by) {
 		return
 	}
 	// A registration carries a pass by the signer of the statement it brings:
@@ -695,10 +693,29 @@ func (s *Server) getRevocations(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, &protocol.Revocations{Identity: identity, Revocation: kept.revoked, RevokedCertificates: kept.certList, RevokedCertificatesSignature: kept.certListSig})
 }
 
+// certificatePass reports whether r carries a pass signed by a key under a
+// certificate, read from its signature before the pass is judged: the state
+// a call answers first (PROTOCOL.md §11.4 rule 1) refuses a certificate's
+// pass while the mailbox's current certificate is revoked, and lets the
+// identity's through to be judged, which it always takes (§8).
+func certificatePass(r *http.Request) bool {
+	p, err := protocol.ParsePass(r.Header.Get("Authorization"))
+	if err != nil {
+		return false
+	}
+	_, sig, _ := strings.Cut(p.Authorization(), `signature="`)
+	armored, err := base64.StdEncoding.DecodeString(strings.TrimSuffix(sig, `"`))
+	if err != nil {
+		return false
+	}
+	_, err = protocol.CertificateBegan(armored)
+	return err == nil
+}
+
 // current reports whether the mailbox's current signer is one its identity
-// has not revoked: a certificate above its revocation of certificates, or the
-// identity while there is none. A mailbox whose signer is revoked has no pass
-// the server takes and no prekey a sender may use, until it publishes by a
+// has not revoked: the identity, or a certificate above its revocation of
+// certificates. A mailbox whose certificate is revoked has no pass the
+// server takes and no prekey a sender may use, until it publishes under a
 // new one.
 func (b *mailbox) current() bool { return protocol.Admits(b.listed, b.signer) == nil }
 
@@ -739,8 +756,7 @@ func (s *Server) newPrekey(w http.ResponseWriter, r *http.Request) {
 		refuseStatement(w, refusal, err, s.policy.MaxCertificateLifetime)
 		return
 	}
-	// The mode comes before the pass (PROTOCOL.md §11.4 rule 4).
-	if moded(w, b.listed, by) || order(w, b, p, by) {
+	if revokedSigner(w, b.listed, by) || order(w, b, p, by) {
 		return
 	}
 	// A prekey upload carries a pass by the signer of the statement it
@@ -829,8 +845,8 @@ func (s *Server) send(w http.ResponseWriter, r *http.Request) {
 		problem(w, protocol.CodeSenderRevoked, "the sending mailbox is revoked")
 		return
 	}
-	if !sender.current() {
-		problem(w, protocol.CodeCertificateRevoked, "the sender's signer is one its identity revoked")
+	if !sender.current() && certificatePass(r) {
+		problem(w, protocol.CodeCertificateRevoked, "the sender's certificate is one its identity revoked")
 		return
 	}
 	if !s.pass(w, r, sender.identity, sender.signer, sender.listed) {
@@ -915,7 +931,7 @@ func (s *Server) owner(h func(http.ResponseWriter, *http.Request, *mailbox)) htt
 			problem(w, protocol.CodeNoSuchMailbox, "no mailbox has this address")
 			return
 		}
-		if !b.current() {
+		if !b.current() && certificatePass(r) {
 			problem(w, protocol.CodeCertificateRevoked, "the pass is under a certificate the mailbox's identity revoked")
 			return
 		}

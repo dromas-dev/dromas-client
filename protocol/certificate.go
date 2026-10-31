@@ -12,8 +12,8 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-// A mailbox in working-key mode has its identity certify a working key, and the
-// working key signs what the mailbox says (PROTOCOL.md §5). A certificate's
+// A mailbox's identity may certify a working key, and the working key then
+// signs what the mailbox says (PROTOCOL.md §5). A certificate's
 // lifetime is its maker's, up to the maximum its server takes; a verifier holds
 // it to its window alone.
 

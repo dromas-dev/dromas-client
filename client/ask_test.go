@@ -126,8 +126,7 @@ func helpsTheThief(e *env, a *client.Mailbox, statement, signature []byte, hide 
 
 // A sender that has never read a mailbox's messages holds nothing about it. Asked
 // before the send, the server shows the mailbox's list, and the sender then
-// refuses the statement under the revoked certificate: nothing is posted;
-// shown none, it refuses every certificate.
+// refuses the statement under the revoked certificate: nothing is posted.
 // What the sender learned stands when the server later hides it.
 func TestASenderAsksBeforeItSends(t *testing.T) {
 	t.Parallel()
@@ -137,16 +136,17 @@ func TestASenderAsksBeforeItSends(t *testing.T) {
 	taken := numberOf(t, a)
 	statement, signature := theft(t, e, a)
 
-	// A sender shown no list holds A in identity mode, and takes no statement
-	// under a certificate: a server that hides the list costs A its messages
-	// from a sender that has never seen it, and sends none to the thief.
+	// The control: a sender shown no list takes the old statement, and its
+	// message goes to the prekey the thief holds. This is what asking is for,
+	// and what a server that hides the list can still do to a sender that
+	// has never seen it.
 	blind := e.mailbox()
 	op := helpsTheThief(e, a, statement, signature, true)
-	if _, err := blind.Send(ctx, a.Address(), "to whoever holds the old prekey"); err == nil || !strings.Contains(err.Error(), "its address is in identity mode") {
+	if _, err := blind.Send(ctx, a.Address(), "to whoever holds the old prekey"); err != nil {
 		t.Fatalf("a sender shown no list: %v", err)
 	}
-	if op.count(http.MethodGet, mailboxPath(a)) != 1 || op.count(http.MethodPost, postTo(a)) != 0 {
-		t.Fatalf("a sender shown no list read the mailbox once and posted nothing: %q", op.seen)
+	if op.count(http.MethodGet, mailboxPath(a)) != 1 || op.count(http.MethodPost, postTo(a)) != 1 {
+		t.Fatalf("a sender shown no list read the mailbox once and posted once: %q", op.seen)
 	}
 
 	// The same operator, with the list not hidden: the sender asks first.
@@ -706,9 +706,8 @@ func TestAskingAtAnyTimeAndARevocationHandedOver(t *testing.T) {
 	e := newWorkEnv(t)
 	a, b, c := e.mailbox(), e.mailbox(), e.mailbox()
 
-	// A mailbox in working-key mode, whose trip revokes nothing it uses.
-	if held, err := b.Ask(ctx, a.Address()); err != nil || held.Revoked || held.Certificates == nil || held.Certificates.Revokes(numberOf(t, a)) {
-		t.Fatalf("ask about a mailbox with nothing revoked but before its trip: %+v, %v", held, err)
+	if held, err := b.Ask(ctx, a.Address()); err != nil || held.Revoked || held.Certificates != nil {
+		t.Fatalf("ask about a mailbox with nothing revoked: %+v, %v", held, err)
 	}
 	stolen := worker(t, a)
 	theft(t, e, a)
