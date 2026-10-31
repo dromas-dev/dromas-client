@@ -477,10 +477,9 @@ func (b *Mailbox) keepRevokedCerts(a protocol.Address, doc, statement, sig []byt
 // took, and a fault of this mailbox after that: the mailbox keeps it at its next
 // read of itself (#383).
 // A message this mailbox sent under those certificates, and that its reader has not
-// read yet, is refused too: nobody can tell it from a thief's. A mailbox
-// whose identity signed the statement it published last, by what it keeps
-// once it has read itself, has no certificate to revoke, and is refused
-// (certificatesOwn).
+// read yet, is refused too: nobody can tell it from a thief's. A mailbox that
+// keeps no statement under a certificate, once it has read itself, has none
+// to revoke, and is refused (certificatesOwn).
 func (b *Mailbox) RevokeEarlier(ctx context.Context) (*protocol.RevokedCertificates, error) {
 	return locked(ctx, b, func() (*protocol.RevokedCertificates, error) {
 		// What its server holds of the mailbox's own revocations, kept where it
@@ -492,9 +491,9 @@ func (b *Mailbox) RevokeEarlier(ctx context.Context) (*protocol.RevokedCertifica
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		if certified, err := b.certified(); err != nil {
+		if made, err := b.madeCertificate(); err != nil {
 			return nil, err
-		} else if err := certificatesOwn(certified); err != nil {
+		} else if err := certificatesOwn(made); err != nil {
 			return nil, err
 		}
 		current, err := b.publishedSerial()
@@ -564,10 +563,10 @@ type Remedy struct {
 // renewal, or the mailbox's own revocation, shown at the renewal.
 //
 // A mailbox that has no certificate, by what it keeps once it has read
-// itself, its own statement published last and the one its server serves
-// both its identity's, has none to revoke, and is refused before anything
-// is signed (certificatesOwn). One restored with nothing published, whose
-// read went unanswered, goes on.
+// itself (no statement it keeps is under one, and its server serves none),
+// has none to revoke, and is refused before anything is signed
+// (certificatesOwn). One restored with nothing published, whose read went
+// unanswered, goes on.
 func (b *Mailbox) RenewAndRevoke(ctx context.Context) (*Remedy, error) {
 	return locked(ctx, b, func() (*Remedy, error) { return b.renewAndRevoke(ctx) })
 }
@@ -595,7 +594,11 @@ func (b *Mailbox) renewAndRevoke(ctx context.Context) (*Remedy, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := certificatesOwn(st.certify || st.unread != nil && published == 0); err != nil {
+	made, err := b.madeCertificate()
+	if err != nil {
+		return nil, err
+	}
+	if err := certificatesOwn(st.certify || made || st.unread != nil && published == 0); err != nil {
 		return nil, err
 	}
 	st.certify = true

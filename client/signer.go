@@ -96,6 +96,21 @@ func (b *Mailbox) certified() (bool, error) {
 	return rank > 0, err
 }
 
+// madeCertificate reports whether this mailbox keeps a statement it signed
+// under a certificate, published or not: it has made one.
+func (b *Mailbox) madeCertificate() (bool, error) {
+	ns, err := b.prekeys()
+	if err != nil {
+		return false, err
+	}
+	for _, n := range ns {
+		if rank, err := b.rankOf(n); err != nil || rank > 0 {
+			return err == nil, err
+		}
+	}
+	return false, nil
+}
+
 // usesRevoked reports whether this mailbox's own revocation of its
 // certificates covers the certificate of the statement it published last.
 // Such a mailbox takes no messages and signs none until it publishes a
