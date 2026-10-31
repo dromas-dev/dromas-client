@@ -414,7 +414,7 @@ func TestInitOfflineRegistersUnderACertificate(t *testing.T) {
 // exactly the current statement's certificate (PROTOCOL.md §8): another is
 // certificate_not_current, naming the current one where it is a certificate
 // and none where it is the identity, and one at or below the revocation of
-// certificates is certificate_revoked.
+// certificates is certificate_revoked, as is a statement under one.
 func TestThePassIsTheIdentitysOrTheCurrentCertificates(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -441,6 +441,9 @@ func TestThePassIsTheIdentitysOrTheCurrentCertificates(t *testing.T) {
 	}
 	if code := put(t, e, a, "/acl", acl, old); code != protocol.CodeCertificateRevoked {
 		t.Errorf("a revoked certificate's pass: %q", code)
+	}
+	if code := upload(t, e, a, old, numberOf(t, a)+10, old); code != protocol.CodeCertificateRevoked {
+		t.Errorf("a statement under a revoked certificate: %q", code)
 	}
 	if code := put(t, e, a, "/acl", acl, identityKey(t, a)); code != "" {
 		t.Errorf("the identity's pass after a revocation of certificates: %q", code)
@@ -556,5 +559,61 @@ func TestRevokeEarlierIsRefusedWithNoCertificate(t *testing.T) {
 		if q.Method != http.MethodGet {
 			t.Errorf("%s %s", q.Method, q.Path)
 		}
+	}
+}
+
+// A renewal its identity signed and its server never took is spent when the
+// next renewal is under a certificate (cert switch): the switch publishes a
+// new statement under one, never the identity's waiting statement.
+func TestASwitchSpendsAWaitingIdentityStatement(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	e := newEnv(t)
+	a := e.mailbox()
+	e.clock.Add(2 * time.Second)
+	e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
+		if r.Method == http.MethodPut && r.URL.Path == mailboxPath(a)+"/prekey" {
+			forge.Refuse(w, protocol.CodeUnavailable)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+	if _, err := a.Rekey(ctx); err == nil {
+		t.Fatal("the renewal was taken")
+	}
+	e.srv.SetMiddle(nil)
+	waiting := begunAt(t, a)
+	if waiting <= numberOf(t, a) {
+		t.Fatalf("no renewal waits: %d, published %d", waiting, numberOf(t, a))
+	}
+	e.clock.Add(2 * time.Second)
+	p, err := a.RenewUnderCertificate(ctx)
+	if err != nil || p == nil || p.Serial == waiting || servedCertificate(t, e, a) != p.Serial {
+		t.Fatalf("the switch: %+v, %v; waiting %d, the server serves rank %d", p, err, waiting, servedCertificate(t, e, a))
+	}
+}
+
+// A revocation of certificates covers no identity (PROTOCOL.md §10.2): a
+// mailbox whose identity signs, handed one of its own, renews nothing for it
+// and goes on sending, and its reader takes what it sends.
+func TestARevocationOfCertificatesLeavesTheIdentity(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	e := newEnv(t)
+	a, b := e.mailbox(), e.mailbox()
+	rec := certsRecord(t, a.Dir(), protocol.SerialAt(e.clock.Now(), 0)+86400)
+	publish(t, e, rec)
+	if _, _, err := a.KeepRevocation(ctx, rec); err != nil {
+		t.Fatal(err)
+	}
+	if keptThrough(t, a) == 0 {
+		t.Fatal("the revocation was not kept")
+	}
+	if res, err := a.Receive(ctx); err != nil || res.Renewed != nil || res.RenewErr != nil {
+		t.Fatalf("recv: %+v, %v", res, err)
+	}
+	send(t, a, b, "by the identity, its certificates revoked")
+	if res := receive(t, b); len(res.Delivered) != 1 || !keptList(b, a.Address()) {
+		t.Fatalf("the reader: %+v", res)
 	}
 }
