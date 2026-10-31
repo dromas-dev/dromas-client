@@ -396,7 +396,7 @@ func TestVectorsCertificate(t *testing.T) {
 	// Control: ssh-keygen alone takes the certificates whose fault is in
 	// their form, so the script's own reading of the fields is what refuses
 	// them.
-	for _, name := range []string{"bad-extension-twice", "bad-extension-value-an-empty-string", "bad-key-id", "bad-serial-zero", "bad-certifies-the-identity"} {
+	for _, name := range []string{"bad-extensions", "bad-reserved-field", "bad-nonce-of-16-bytes", "bad-key-id", "bad-serial-zero", "bad-certifies-the-identity"} {
 		verify := fmt.Sprintf(`printf '%%s cert-authority %%s\n' %s "$(sed -n 2p %s)" > "$DR/s" && ssh-keygen -Y verify -f "$DR/s" -I %s -n dromas-prekey-v1:%s -s %s -O verify-time=20261010000000Z < %s`,
 			a, aDoc, a, a, abs(t, filepath.Join(vectors, "cert", name+".sig")), stmt)
 		if _, err := bash(t, scratch(t), "mkdir -p \"$DR\"; "+verify); err != nil {
@@ -405,12 +405,15 @@ func TestVectorsCertificate(t *testing.T) {
 	}
 }
 
-// One signature in the forms sig/ holds, as the Go client judges them
-// (protocol/vectors_test.go): each ok-* taken, each bad-* refused. Control:
-// ssh-keygen -Y verify gives the same verdict on every one but those named
-// here, which it takes and a verifier here refuses: over the bound, and an
-// Ed25519 S that is not below L. So the script reads a signature as OpenSSH
-// does, and its own checks are what refuse those.
+// Each signature of sig/ gets the Go client's verdict from the script: a
+// signature has one form, the bytes the Go client and ssh-keygen -Y sign
+// write, and a verifier refuses any other (PROTOCOL.md §3.2). A's are under
+// A's certificate, over a/prekey-1.txt, and C's (c-*), by C's P-256 identity,
+// over c/prekey-1.txt, each in its mailbox's prekey namespace. ssh-keygen -Y
+// verify takes each ok-*: the one form is a signature OpenSSH reads. It takes
+// many bad-* too, which the script's own reading refuses (dr_blob,
+// dr_sshsig, dr_sigform): it checks a signature and does not define one
+// (Appendix A).
 //
 // An Ed25519 R is where OpenSSH's builds disagree (PROTOCOL.md Appendix A): Go's
 // crypto/ed25519, OpenSSL and OpenSSH's own code before 10.6p1 take a
@@ -422,37 +425,53 @@ func TestVectorsSignatureForm(t *testing.T) {
 	t.Parallel()
 	need(t, scriptTools...)
 	t.Logf("ssh-keygen: %s", sshBuild())
-	_, setNow := vectorNow(t)
-	a, aDoc := identity(t, "a")
-	stmt := abs(t, filepath.Join(vectors, "a/prekey-1.txt"))
+	now, setNow := vectorNow(t)
 	sigs, _ := filepath.Glob(filepath.Join(vectors, "sig", "*.sig"))
 	if len(sigs) < 20 {
 		t.Fatalf("%d sig/ vectors", len(sigs))
 	}
-	beyondSSHKeygen := map[string]bool{"bad-4097-bytes.sig": true, "bad-4097-bytes-before-end.sig": true, "bad-s-plus-l.sig": true, "bad-certificate-s-plus-l.sig": true, "bad-type-nul-s-plus-l.sig": true}
 	edR := map[string][2]bool{} // the script's verdict and ssh-keygen's on each R vector: taken or not
+	verdicts := map[bool]int{}
 	for _, sig := range sigs {
 		name := filepath.Base(sig)
-		ok := strings.HasPrefix(name, "ok-")
-		_, err := bash(t, scratch(t), setNow+fmt.Sprintf(`mkdir -p "$DR"; dr_signed %s %s dromas-prekey-v1:%s %s %s`, a, aDoc, a, abs(t, sig), stmt))
-		verify := fmt.Sprintf(`mkdir -p "$DR"; printf '%%s cert-authority %%s\n' %s "$(sed -n 2p %s)" > "$DR/s" && ssh-keygen -Y verify -f "$DR/s" -I %s -n dromas-prekey-v1:%s -s %s -O verify-time=20261010000000Z < %s`,
-			a, aDoc, a, a, abs(t, sig), stmt)
+		mailbox := "a"
+		if strings.HasPrefix(name, "c-") {
+			mailbox = "c"
+			if !p256() {
+				t.Logf("%s: %s reads no P-256 key, so the script refuses every signature by C: a known variance (PROTOCOL.md Appendix A)", name, sshBuild())
+				continue
+			}
+		}
+		addr, doc := identity(t, mailbox)
+		stmt := abs(t, filepath.Join(vectors, mailbox, "prekey-1.txt"))
+		id, err := protocol.ParseIdentity(mustRead(t, doc))
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, gerr := protocol.VerifySigned(id, mustRead(t, stmt), mustRead(t, sig), protocol.PrekeyNamespace(id.Address()), now)
+		_, err = bash(t, scratch(t), setNow+fmt.Sprintf(`mkdir -p "$DR"; dr_signed %s %s dromas-prekey-v1:%s %s %s`, addr, doc, addr, abs(t, sig), stmt))
+		verify := fmt.Sprintf(`mkdir -p "$DR"; printf '%%s %%s\n' %[1]s "$(sed -n 2p %[2]s)" > "$DR/s"; printf '%%s cert-authority %%s\n' %[1]s "$(sed -n 2p %[2]s)" > "$DR/c"
+for f in "$DR/s" "$DR/c"; do ssh-keygen -Y verify -f "$f" -I %[1]s -n dromas-prekey-v1:%[1]s -s %[3]s -O verify-time=20261010000000Z < %[4]s && exit 0; done; exit 1`,
+			addr, doc, abs(t, sig), stmt)
 		_, kerr := bash(t, scratch(t), verify)
 		if name == "ok-r-small-order.sig" || name == "bad-r-plus-order-2.sig" {
 			edR[name] = [2]bool{err == nil, kerr == nil}
 			continue
 		}
-		if ok != (err == nil) {
-			t.Errorf("%s: the script says %v", name, err)
+		ok := strings.Contains(name, "ok-")
+		if ok != (gerr == nil) {
+			t.Errorf("%s: the Go client's verdict is %v", name, gerr)
 		}
-		switch {
-		case beyondSSHKeygen[name] && kerr != nil && strings.Contains(name, "s-plus-l"):
-			t.Logf("%s: this ssh-keygen refuses it by itself (one built on another Ed25519 may)", name)
-		case beyondSSHKeygen[name] && kerr != nil:
-			t.Errorf("control: ssh-keygen refuses %s by itself, so the bound is not what refuses it: %v", name, kerr)
-		case !beyondSSHKeygen[name] && ok != (kerr == nil):
-			t.Errorf("control: ssh-keygen -Y verify's verdict on %s differs: %v", name, kerr)
+		if (gerr == nil) != (err == nil) {
+			t.Errorf("%s: the Go client says %v, the script %v", name, gerr, err)
 		}
+		if ok && kerr != nil {
+			t.Errorf("control: ssh-keygen -Y verify refuses %s, a signature in the one form: %v", name, kerr)
+		}
+		verdicts[ok]++
+	}
+	if verdicts[true] == 0 || verdicts[false] < 15 {
+		t.Errorf("the sig/ vectors judged: %v", verdicts)
 	}
 	small, plus2 := edR["ok-r-small-order.sig"], edR["bad-r-plus-order-2.sig"]
 	switch {
@@ -464,28 +483,76 @@ func TestVectorsSignatureForm(t *testing.T) {
 	}
 }
 
-// dr_blob reads a signature's base64 only in its one encoding: padded, and
-// the unused bits of its last character zero, as OpenSSH's decoder holds it.
-// ssh-keygen -Y verify refuses both other forms by itself, so the verdicts
-// TestVectorsSignatureForm compares cannot show the script's own check: this
-// runs dr_blob alone (#478). GNU's base64 -d refuses a set unused bit by
-// itself; where a base64 takes one, the check is what refuses it. Control: it
-// reads every ok-* vector.
-func TestTheScriptReadsASignatureInItsOneEncoding(t *testing.T) {
+// dr_blob reads a signature's armour only in its one form (PROTOCOL.md
+// §3.2): the armour written back from the blob it holds, byte for byte, and
+// the base64 in its one encoding. ssh-keygen -Y verify takes the armour's
+// other forms (Appendix A), and refuses the base64's by itself, so the
+// verdicts TestVectorsSignatureForm compares cannot show the script's own
+// check: this runs dr_blob alone (#478). Control: it reads every ok-*
+// vector.
+func TestTheScriptReadsASignatureInItsOneForm(t *testing.T) {
 	t.Parallel()
 	need(t, scriptTools...)
-	oks, _ := filepath.Glob(filepath.Join(vectors, "sig", "ok-*.sig"))
-	if len(oks) < 10 {
-		t.Fatalf("%d sig/ok-* vectors", len(oks))
+	oks, _ := filepath.Glob(filepath.Join(vectors, "sig", "*ok-*.sig"))
+	if len(oks) < 4 {
+		t.Fatalf("%d sig/*ok-* vectors", len(oks))
 	}
 	for _, sig := range oks {
 		if out, err := bash(t, scratch(t), "dr_blob "+abs(t, sig)); err != nil || out == "" {
 			t.Errorf("%s: dr_blob does not read it: %v", filepath.Base(sig), err)
 		}
 	}
-	for _, name := range []string{"bad-padding-bits.sig", "bad-no-padding.sig"} {
+	for _, name := range []string{"c-bad-padding-bits.sig", "c-bad-no-padding.sig", "bad-crlf.sig", "bad-whitespace-in-the-base64.sig", "bad-base64-on-one-line.sig",
+		"bad-no-line-feed-after-end.sig", "bad-text-after-end.sig", "bad-nul-before-end.sig", "bad-text-before-begin.sig", "bad-end-line-indented.sig"} {
 		if _, err := bash(t, scratch(t), "dr_blob "+abs(t, filepath.Join(vectors, "sig", name))); err == nil {
 			t.Errorf("%s: dr_blob reads it", name)
+		}
+	}
+}
+
+// dr_sshsig and dr_cert read a signature's blob and a certificate in their
+// one form, each field as the Go client writes it back (PROTOCOL.md §3.2,
+// §5.2). Most of these vectors are also longer than A's key type's bound,
+// which refuses them first in dr_signed, and ssh-keygen -Y verify takes many
+// (Appendix A), so the verdicts TestVectorsSignatureForm and
+// TestVectorsCertificate compare need not show the script's own reading:
+// this runs it alone, past the bound. Control: it reads sig/ok-ed25519 and
+// cert/ok-begins-now.
+func TestTheScriptReadsABlobInItsOneForm(t *testing.T) {
+	t.Parallel()
+	need(t, scriptTools...)
+	a, aDoc := identity(t, "a")
+	c, cDoc := identity(t, "c")
+	rank := func(addr, doc, sig string) error {
+		_, err := bash(t, scratch(t), fmt.Sprintf("dr_rank %s %s %s dromas-prekey-v1:%s", abs(t, filepath.Join(vectors, sig)), doc, addr, addr))
+		return err
+	}
+	cert := func(sig string) error {
+		_, err := bash(t, scratch(t), fmt.Sprintf("dr_cert %s %s %s", abs(t, filepath.Join(vectors, sig)), aDoc, a))
+		return err
+	}
+	if err := rank(a, aDoc, "sig/ok-ed25519.sig"); err != nil {
+		t.Errorf("control: dr_rank does not read sig/ok-ed25519.sig: %v", err)
+	}
+	if err := cert("cert/ok-begins-now.sig"); err != nil {
+		t.Errorf("control: dr_cert does not read cert/ok-begins-now.sig: %v", err)
+	}
+	for _, sig := range []string{"bad-version-0", "bad-reserved-not-empty", "bad-sha256", "bad-namespace-ending-in-a-nul", "bad-trailing-byte-in-the-blob", "bad-certificate-own-type-nul"} {
+		if err := rank(a, aDoc, "sig/"+sig+".sig"); err == nil {
+			t.Errorf("sig/%s: dr_rank reads it", sig)
+		}
+	}
+	if p256() {
+		if err := rank(c, cDoc, "sig/c-ok-p256.sig"); err != nil {
+			t.Errorf("control: dr_rank does not read sig/c-ok-p256.sig: %v", err)
+		}
+		if err := rank(c, cDoc, "sig/c-bad-r-padded.sig"); err == nil {
+			t.Error("sig/c-bad-r-padded: dr_rank reads it")
+		}
+	}
+	for _, sig := range []string{"bad-extensions", "bad-reserved-field", "bad-nonce-of-16-bytes"} {
+		if err := cert("cert/" + sig + ".sig"); err == nil {
+			t.Errorf("cert/%s: dr_cert reads it", sig)
 		}
 	}
 }
@@ -548,7 +615,6 @@ func TestVectorsPrekey(t *testing.T) {
 	type vector struct{ stmt, sig, mailbox string }
 	cases := []vector{
 		{"a/prekey-1.txt", "a/prekey-1.txt.sig", "a"},
-		{"a/prekey-1.txt", "a/prekey-1.txt.sha256.sig", "a"},
 		{"a/prekey-2.txt", "a/prekey-2.txt.sig", "a"},
 		{"b/prekey-1.txt", "b/prekey-1.txt.sig", "b"},
 		{"c/prekey-1.txt", "c/prekey-1.txt.sig", "c"},
@@ -1359,7 +1425,7 @@ func TestVectorsRevocation(t *testing.T) {
 	}
 	type vector struct{ addr, doc, sig string }
 	cases := []vector{
-		{a, aDoc, "a/revoke.sig"}, {a, aDoc, "a/revoke.sha256.sig"}, {c, cDoc, "c/revoke.sig"},
+		{a, aDoc, "a/revoke.sig"}, {c, cDoc, "c/revoke.sig"},
 		{b, aDoc, "a/revoke.sig"}, {a, bDoc, "a/revoke.sig"}, {b, bDoc, "revoke/bad-of-another-mailbox.sig"}, {a, aDoc, "a/prekey-1.txt.sig"},
 	}
 	bads, _ := filepath.Glob(filepath.Join(vectors, "revoke", "bad-*.sig"))
@@ -1369,24 +1435,7 @@ func TestVectorsRevocation(t *testing.T) {
 	for _, f := range bads {
 		cases = append(cases, vector{a, aDoc, "revoke/" + filepath.Base(f)})
 	}
-	// Forms every OpenSSH build reads the same way: A's with a NUL ending its
-	// key's type, and C's (c-*) with one ending its curve and with r at the
-	// most OpenSSH reads and a byte over (PROTOCOL.md §3.2).
-	oks, _ := filepath.Glob(filepath.Join(vectors, "revoke", "ok-*.sig"))
-	cs, _ := filepath.Glob(filepath.Join(vectors, "revoke", "c-*.sig"))
-	if len(oks) == 0 || len(cs) < 2 {
-		t.Fatalf("%d revoke/ok-* and %d revoke/c-* vectors", len(oks), len(cs))
-	}
-	want := 3 + len(oks)
-	for _, f := range oks {
-		cases = append(cases, vector{a, aDoc, "revoke/" + filepath.Base(f)})
-	}
-	for _, f := range cs {
-		cases = append(cases, vector{c, cDoc, "revoke/" + filepath.Base(f)})
-		if strings.HasPrefix(filepath.Base(f), "c-ok-") {
-			want++
-		}
-	}
+	want := 2
 	if !p256() {
 		t.Logf("%s reads no P-256 key, so the script refuses every revocation of mailbox C: a known variance (PROTOCOL.md Appendix A), and those are not compared", sshBuild())
 		kept := cases[:0]
@@ -1560,7 +1609,7 @@ func TestVectorsRevokedCertificates(t *testing.T) {
 	}
 	type vector struct{ addr, doc, statement, sig string }
 	cases := []vector{
-		{a, aDoc, "ok-through-4.txt", "ok-through-4.sig"}, {a, aDoc, "ok-through-4.txt", "ok-through-4.sha256.sig"},
+		{a, aDoc, "ok-through-4.txt", "ok-through-4.sig"},
 		{a, aDoc, "ok-through-the-highest.txt", "ok-through-the-highest.sig"},
 		{b, bDoc, "ok-through-4.txt", "ok-through-4.sig"}, {a, bDoc, "ok-through-4.txt", "ok-through-4.sig"}, {b, aDoc, "ok-through-4.txt", "ok-through-4.sig"},
 		{a, aDoc, "ok-through-4.txt", "ok-through-the-highest.sig"},
@@ -1606,8 +1655,8 @@ func TestVectorsRevokedCertificates(t *testing.T) {
 			four = got
 		}
 	}
-	if taken != 3 || four == nil {
-		t.Fatalf("%d vectors taken as revocations of certificates, want the three that are", taken)
+	if taken != 2 || four == nil {
+		t.Fatalf("%d vectors taken as revocations of certificates, want the two that are", taken)
 	}
 
 	// A kept one revokes the same certificates for both, at 2^53 - 1 too, and

@@ -116,7 +116,7 @@ func TestScriptTakesARevocationOnItsProofAlone(t *testing.T) {
 	ra, rb, rc, rd := w.mailbox(), w.mailbox(), w.mailbox(), w.mailbox()
 	va := strings.TrimSpace(mustReadString(t, filepath.Join(vectors, "a", "address")))
 	vdoc := abs(t, filepath.Join(vectors, "a", "identity.doc"))
-	sigs := []string{"a/revoke.sig", "a/revoke.sha256.sig"}
+	sigs := []string{"a/revoke.sig"}
 	if p256() {
 		if r := ra.sh(fmt.Sprintf("dr_revcheck %s %s %s", strings.TrimSpace(mustReadString(t, filepath.Join(vectors, "c", "address"))), abs(t, filepath.Join(vectors, "c", "identity.doc")), abs(t, filepath.Join(vectors, "c", "revoke.sig")))); r.rc != 0 {
 			t.Errorf("c/revoke.sig, by a P-256 identity, is not taken: %v", r)
@@ -252,7 +252,7 @@ func TestScriptReadsARevocationOfCertificates(t *testing.T) {
 	va := strings.TrimSpace(mustReadString(t, filepath.Join(vectors, "a", "address")))
 	vec := func(n string) string { return abs(t, filepath.Join(vectors, n)) }
 	ok4, okTop := vec("revoked/ok-through-4"), vec("revoked/ok-through-the-highest")
-	if out := p.must(fmt.Sprintf("dr_certscheck %[1]s %[2]s %[3]s.txt %[3]s.sig; dr_certscheck %[1]s %[2]s %[3]s.txt %[3]s.sha256.sig; dr_certscheck %[1]s %[2]s %[4]s.txt %[4]s.sig", va, vec("a/identity.doc"), ok4, okTop)); out != "4\n4\n9007199254740991\n" {
+	if out := p.must(fmt.Sprintf("dr_certscheck %[1]s %[2]s %[3]s.txt %[3]s.sig; dr_certscheck %[1]s %[2]s %[4]s.txt %[4]s.sig", va, vec("a/identity.doc"), ok4, okTop)); out != "4\n9007199254740991\n" {
 		t.Errorf("the vectors that are a revocation of certificates: %q", out)
 	}
 	bad, _ := filepath.Glob(filepath.Join(vectors, "revoked", "bad-*.txt"))
@@ -368,11 +368,15 @@ dr_api PUT "/v1/$A/prekey" "$W/top.json" -H "Authorization: dromas-pass address=
 	if d := ca.recv(); !slices.Equal(d.bodies(), []string{"signed by the thief, before the revocation"}) {
 		t.Errorf("control: a message the taken key signs, while nothing revokes it: %v", d)
 	}
-	// A revocation the working key signs is none; the identity's, through
-	// every certificate before the new one, is published with no pass. (What
-	// the server takes of either is dromas-server's to test.)
+	// A revocation the working key signs is none: a working key signs no
+	// revocation, so its signature in that namespace is past its type's bound
+	// and refused before it is read. The identity's, through every certificate
+	// before the new one, is published with no pass. (What the server takes of
+	// either is dromas-server's to test.)
 	cb.certs("CBw", n1, cb.file(fmt.Sprintf("work/%d-cert.pub", n2)))
-	ca.must(fmt.Sprintf(`dr_signed %s %s dromas-revoke-certs-v1:%[1]s "$W/CBw.sig" "$W/CBw.certs" > /dev/null`, cb.addr, cb.file("identity.doc")))
+	if r := ca.sh(fmt.Sprintf(`dr_signed %s %s dromas-revoke-certs-v1:%[1]s "$W/CBw.sig" "$W/CBw.certs" > /dev/null`, cb.addr, cb.file("identity.doc"))); r.rc == 0 {
+		t.Errorf("a working key's signature in the revocation namespace is read as a signature: %v", r)
+	}
 	if r := ca.sh(fmt.Sprintf(`dr_certscheck %s %s "$W/CBw.certs" "$W/CBw.sig"`, cb.addr, cb.file("identity.doc"))); r.rc == 0 {
 		t.Errorf("a revocation of certificates the working key signed is taken: %v", r)
 	}

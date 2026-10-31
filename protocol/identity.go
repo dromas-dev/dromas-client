@@ -55,7 +55,7 @@ var identityForm = regexp.MustCompile(`\A` + IdentityTag + `\n([!-+\--~]{1,64}) 
 // A defined type: the checks its key must pass beyond being a key of that
 // type in its one encoding, the type of the working keys an identity of that
 // type certifies (WorkingKeyType), and the most bytes a signature by a mailbox
-// of that type may be (SignatureBound). Its document's form is the one every
+// of that type may be (SignatureBound): the largest it makes in the one form. Its document's form is the one every
 // type shares (identityForm), with the key in its one encoding: the base64 of
 // the wire key as it is written back once parsed (PROTOCOL.md §4.1). Ed25519's
 // is 91 bytes and P-256's 171. A working key's type is itself a type defined
@@ -65,22 +65,25 @@ var identityTypes = map[string]struct {
 	work  string
 	bound int
 }{
-	// Its largest signature is 846 bytes, a prekey statement's.
+	// Its bound is exact: a prekey statement or a pass under a certificate,
+	// each 878 bytes in the one form.
 	IdentityEd25519: {
 		check: func(k ssh.PublicKey) error {
 			return checkEd25519(k.(ssh.CryptoPublicKey).CryptoPublicKey().(ed25519.PublicKey))
 		},
 		work:  IdentityEd25519,
-		bound: 4096,
+		bound: 878,
 	},
-	// Its largest signature is 939 bytes, a prekey statement's. Its key has
-	// no check of its own: the library refuses a point off the curve,
-	// compressed, at infinity or with a coordinate not below the field's
-	// size, and that is all OpenSSH from 10.3p1 holds a point to.
+	// Its bound is a prekey statement under a certificate whose signature
+	// by the identity has an r and an s of 33 bytes each, the most the one
+	// form gives them: one that has fewer is shorter. Its key has no check of
+	// its own: the library refuses a point off the curve, compressed, at
+	// infinity or with a coordinate not below the field's size, and that is
+	// all OpenSSH from 10.3p1 holds a point to.
 	IdentityP256: {
 		check: func(ssh.PublicKey) error { return nil },
 		work:  IdentityEd25519,
-		bound: 4096,
+		bound: 975,
 	},
 }
 

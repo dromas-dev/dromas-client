@@ -63,7 +63,7 @@ The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD", "S
 | age v1 | encryption to a prekey: `mlkem768x25519`, the hybrid ML-KEM-768 + X25519 recipient | C2SP age |
 | Ed25519 | the identity key of type `ssh-ed25519`; the working key of an identity of either type of Section 4.1 | RFC 8032 |
 | ECDSA P-256 | the identity key of the optional type `ecdsa-sha2-nistp256` | FIPS 186-5, RFC 5656 |
-| SSHSIG | every signature: the signer's signature over SHA-512 or SHA-256 of the message, in a namespace | OpenSSH `PROTOCOL.sshsig` |
+| SSHSIG | every signature: the signer's signature over SHA-512 of the message, in a namespace | OpenSSH `PROTOCOL.sshsig` |
 | SSH public key text | `<key type> <base64 of the wire key>` | RFC 4253 §6.6, RFC 8709, RFC 5656 |
 | OpenSSH certificate | the certificate of a working key | draft-ietf-sshm-cert |
 | SHA-384 | the address | FIPS 180-4 |
@@ -74,23 +74,22 @@ A keyed hash in this protocol is HMAC or HKDF, inside age. Plain SHA-384 and SHA
 
 ### 3.2. Signatures
 
-Every signature is an SSHSIG. For an Ed25519 key, the key signs
+Every signature is an SSHSIG (`PROTOCOL.sshsig`) in one form, the bytes `ssh-keygen -Y sign` writes. The signing key signs
 
-    "SSHSIG" ‖ str(namespace) ‖ str("") ‖ str(hash) ‖ str(HASH(message))
+    "SSHSIG" ‖ str(namespace) ‖ str("") ‖ str("sha512") ‖ str(SHA-512(message))
 
-and the signature is a PEM-armoured (`SSH SIGNATURE`) blob:
+and the signature is the blob
 
-    "SSHSIG" ‖ u32(1) ‖ str(signing key) ‖ str(namespace) ‖ str("") ‖ str(hash) ‖ str(str(key type) ‖ str(signature))
+    "SSHSIG" ‖ u32(1) ‖ str(signing key) ‖ str(namespace) ‖ str("") ‖ str("sha512") ‖ str(signature)
 
-where `hash` is `sha512` or `sha256`. A verifier MUST accept both. The signing key is the signer (Section 5): the bare identity key for what the identity signs, and the certificate for what a working key signs.
+armoured: the line `-----BEGIN SSH SIGNATURE-----`, the blob's base64 (Section 2.2) in lines of 70 characters, the last of 1 to 70, then the line `-----END SSH SIGNATURE-----`, each line ended by LF, with nothing before the first or after the last.
 
-A verifier MUST read a signature as OpenSSH's `sshsig.c`, and the key and signature code beneath it, reads one, with the two additional checks below. Where OpenSSH's builds differ, the rules below decide, and where they say nothing, the reading of OpenSSH 10.3p1 linked to an OpenSSL that has Ed25519; Appendix A lists where a build differs from them, and the `sig/` vectors (Section 16) hold each reading.
-
-- **Armour.** The BEGIN line, ending in LF or CRLF; then the base64, in which space, tab, LF, VT, FF and CR are skipped wherever they stand, and which is otherwise in its one encoding; then LF and the END line. Nothing after the END line is read. One NUL MAY be the last byte before that LF; any other NUL or byte outside the alphabet in the base64 is refused.
-- **Blob.** Its version is 0 or 1. A string read where no signature covers it (the namespace, the hash name, each signature's key type, and a bare key's type and curve) MAY end in one NUL, which is not part of it; a NUL before its last byte is refused. The signed data is built from those strings without the NUL. What an identity signed inside a certificate is read byte for byte (Section 5). An ECDSA signature's r and s are each at most 2,049 bytes.
-- **Reserved.** The signed data's reserved string is empty; the blob's reserved field is read and skipped, whatever it holds.
-- **First additional check: a bound on size, per identity key type:** 4,096 bytes for `ssh-ed25519` and 4,096 for `ecdsa-sha2-nistp256`. Everything a mailbox signs, with its identity or with a working key under its identity's certificate, is held to its identity's bound. The bound counts every byte of the field that carries the signature, anything after the END line included; in a message it is the block from its BEGIN line through its END line (Section 9.2). Every verifier, a server included, MUST refuse a longer signature before verifying it, and one longer than the largest bound of any key type before reading it, and MUST NOT shorten one. A key type added later states its own bound and leaves the others unchanged.
-- **Second additional check: an Ed25519 signature's S is below the group order L** (RFC 8032 §5.1.7), in an SSHSIG and on a certificate.
+- **The signing key** is the signer (Section 5), in SSH wire form: for what the identity signs, the bare identity key, the bytes of the identity document's line 2; for what a working key signs, the certificate.
+- **The signature** is of the signing key's type, a certificate's being its certified key's: for `ssh-ed25519`, `str("ssh-ed25519") ‖ str(R ‖ S)`, 64 bytes (RFC 8709 §6); for `ecdsa-sha2-nistp256`, `str("ecdsa-sha2-nistp256") ‖ str(mpint(r) ‖ mpint(s))` (RFC 5656 §3.1.2), each mpint as RFC 4251 §5 defines it, with no leading zero byte but the one a set high bit needs.
+- **One form.** A verifier MUST parse the armour and the blob, write the signature again in this form from what it parsed, and refuse the signature, before it verifies it, where the two differ by any byte. So a verifier refuses every other way of writing one: another line end or line length, whitespace in the base64, a byte before the BEGIN line or after the last LF, a version other than 1, a hash other than `sha512`, a reserved field that is not empty, a NUL in a string, an integer with a leading zero byte it does not need.
+- **ECDSA's two values of s.** Where (r, s) is a P-256 signature, so is (r, n − s), n the group's order (FIPS 186-5): each is a signature in the one form, a verifier MUST take both, and neither is required of a signer. Anyone who has seen one can write the other (Sections 5.2, 8). An Ed25519 signature has no second.
+- **A bound on size, per identity key type:** the longest signature in the one form that a mailbox of that type signs, with its identity or with a working key under a certificate as `ssh-keygen -s` writes one (Section 5.2): a nonce of 32 bytes, no extension and an empty reserved field. The one form fixes every other byte of a signature but its namespace's and, for ECDSA, how many bytes r and s take. For `ssh-ed25519` the bound is exact, 878 bytes: a prekey statement or a pass under a certificate. For `ecdsa-sha2-nistp256` it is 975, the same with the identity's r and s on the certificate each in 33 bytes, the most the one form gives them. Everything a mailbox signs is held to its identity's bound; in a message, the block from its BEGIN line through the LF after its END line (Section 9.2). Every verifier, a server included, MUST refuse a longer signature before verifying it, and one longer than the largest bound of any key type before reading it. A key type added later states its own bound and leaves the others unchanged.
+- **An Ed25519 signature's S is below the group order L** (RFC 8032 §5.1.7), in an SSHSIG and on a certificate.
 - **The Ed25519 equation** is RFC 8032 §5.1.7's without the cofactor, `[S]B = R + [k]A'`, compared as encodings: a neutral R is taken, and R with a point of small order added is refused.
 
 ### 3.3. JSON
@@ -182,9 +181,10 @@ A certificate is an OpenSSH user certificate, and a verifier MUST check every ro
 | Principals | exactly one: the mailbox's address |
 | Validity | `valid after` ≤ now < `valid before`, at the verifier's clock, in whole seconds, and each at or before `9999-12-31T23:59:59Z` |
 | Critical options | none. A verifier MUST refuse a certificate with any (draft-ietf-sshm-cert-01 §2.1.1) |
-| Extensions | ignored, each, but a verifier MUST refuse a certificate whose extensions are not in one encoding: each name once, in lexical order, and each value empty or one string that is not empty. A maker writes none |
-| Reserved | ignored, whatever it holds. A maker writes it empty |
-| Signed by | the key in the identity document, byte for byte |
+| Extensions | none. A verifier MUST refuse a certificate with any |
+| Reserved | empty |
+| Nonce | exactly 32 bytes |
+| Signed by | the key in the identity document, byte for byte, its signature in the one form of the key's type (Section 3.2) |
 
 - **A certificate is checked at the verifier's clock, exactly, and only once the identity's signature on it has verified.** It holds from its `valid after` and has ended at its `valid before` (Section 2.2). A date past `9999-12-31T23:59:59Z`, `ssh-keygen`'s `forever` among them, refuses it.
 - **A verifier sets no bound on how long a certificate runs.** A server bounds what it takes (Section 11.7, step 6); a reader takes any certificate within its window.
@@ -195,7 +195,7 @@ A certificate is an OpenSSH user certificate, and a verifier MUST check every ro
       ssh-keygen -s identity -I dromas-cert-v1 -n "$A" -z "$SERIAL" -V "-1h:+${DAYS}d" -O clear work.pub
 
 - **Serials.** The maker numbers a certificate by its own clock, in seconds since 1970-01-01T00:00:00Z, or one above the highest serial it knows of for the mailbox when its clock gives nothing higher: the served certificate's, what the mailbox published or signed, and the highest serial the identity has revoked (Section 10.2), so always above the address's N. A verifier MUST NOT read a serial as a time, or bound it by its clock: it compares two serials, and the higher is later. Two certificates of one identity can share a serial (made in one second, or each one above the same serial); a verifier that meets two takes either, and keeps nothing of it beyond the serial.
-- **Nothing may depend on a signature having one encoding.** A P-256 identity's signature has others, (r, n − s) and either number zero-padded up to 2,049 bytes, which anyone who has seen it can write: on a certificate it made, and on the statements, passes and messages it signs. A server takes a pass by a certificate only under exactly the certificate's bytes it has on record (Section 8); a P-256 identity's pass written so is another pass to a server that remembers passes it has verified.
+- **Nothing may depend on a P-256 identity's signature having one set of bytes.** Beside (r, s) is (r, n − s) (Section 3.2), which anyone who has seen one can write: on a certificate it made, and on the statements, passes and messages it signs. A server takes a pass by a certificate only under exactly the certificate's bytes it has on record, and one that remembers passes takes a P-256 identity's pass in either form as one pass (Section 8).
 
 ### 5.3. Order
 
@@ -250,7 +250,7 @@ dromas-pass-v1
 - **A client writes it as** `Authorization: dromas-pass address="<A>", not_after="<not_after>", signature="<base64 of the armoured signature>"`, in exactly that form, on one `Authorization` line. A request with two `Authorization` lines carries no pass.
 - **A server reads it as RFC 9110 §11 lets a recipient read credentials:** the scheme in any ASCII case, then one space or more; the three parameters in any order, each name in any ASCII case and given once, and no other parameter; optional whitespace around each comma and each `=`, and empty list elements skipped (RFC 9110 §5.6.1.2); each value a token or a quoted-string, and a quoted-string holding a backslash refused. Each value is then held to its form: the address, a time, and the base64 of the signature. The signature is verified over the statement built from those values, never over the header's text. A server MUST refuse a value longer than the form a client writes with a signature of the largest bound any identity key type has (Section 3.2), whitespace included, `401 unauthorized`, before it hashes, parses or verifies it.
 - **Lifetime.** A client signs a pass to end 10 minutes after it signs it. A server takes a pass that has not ended and ends at most an hour after its own clock reads.
-- **A client keeps its pass for every call until it is about to end.** A client MUST NOT use a kept pass with more than 10 minutes left: its clock has gone back since it signed it. A server MAY remember a pass it has verified, by one written form of it: every form a verifier reads as the same pass is one (Section 3.2).
+- **A client keeps its pass for every call until it is about to end.** A client MUST NOT use a kept pass with more than 10 minutes left: its clock has gone back since it signed it. A server MAY remember a pass it has verified, by its values with the signature in its one form (Section 3.2): that is one pass, however the header wrote it. A P-256 identity's pass is one pass with s or with n − s, and a server that remembers passes MUST compare it with s taken as the lower of the two.
 - **Which signer.** A server takes a pass by the mailbox's identity always, and a pass by a certificate only where it is exactly the certificate of the mailbox's current statement, the bytes it has on record, with one exception: a registration (Section 11.7) and a renewal (Section 11.9) take a pass by the certificate of the statement they bring. It takes a pass only for a name that is its own. The server reads a pass by its signer's form (Section 5).
 - **Refusals,** each `401`: `certificate_revoked`, where the call takes a pass by the mailbox's current certificate and the identity has revoked it (Section 11.4, rule 1), or brings a statement under a certificate the identity revoked; otherwise `pass_expired`, if at the server's clock the pass has ended or ends more than an hour ahead, or its certificate has not begun or has ended; `certificate_not_current`, if the pass is by any certificate other than the one the call takes a pass by, or the certificate on record does not verify, with `certificate_serial` naming the certificate the call takes a pass by (the mailbox's current one, or the statement's a registration or a renewal brings), or the one a new statement must be above, wherever that is a certificate, and with none where that statement is the identity's; `unauthorized`, if there is no pass, or it is not this mailbox's, or not for this server, or does not verify.
 - **A client that is refused a pass signs another and tries once more, and MUST NOT try more than once,** nor at all after a `certificate_revoked` that its own read of its mailbox shows to be final (Section 12.5). A pass refused twice for its time is the clock (Section 12.1).
@@ -905,12 +905,12 @@ Dromas protects a message's content from everyone but its recipient, and its sen
 - **[RFC 3339]** timestamps · **[RFC 4151]** the `tag` URI scheme · **[RFC 4251]**, **[RFC 4253]** SSH · **[RFC 4648]** base64 and base32 · **[RFC 5656]** ECDSA in SSH · **[RFC 6454]** origins · **[RFC 7457]** TLS attacks · **[RFC 7493]** I-JSON · **[RFC 8032]** EdDSA · **[RFC 8259]** JSON · **[RFC 8555]** ACME · **[RFC 8594]** the `Sunset` header field · **[RFC 8709]** Ed25519 in SSH · **[RFC 9110]** HTTP semantics · **[RFC 9457]** problem details · **[RFC 9562]** UUIDs · **[RFC 9651]** Structured Field Values · **[RFC 9745]** the `Deprecation` header field
 - **[SemVer]** Semantic Versioning 2.0.0, https://semver.org/spec/v2.0.0.html
 
-## Appendix A. Where OpenSSH releases differ (informative)
+## Appendix A. Where `ssh-keygen` differs (informative)
 
-A client built on `ssh-keygen` meets these variances against Section 3.2 and Section 4.1:
+`ssh-keygen -Y verify` checks a signature and does not define one: a client built on it holds a signature to Section 3.2 itself. It takes forms Section 3.2 refuses: a BEGIN line ending in CRLF, whitespace anywhere in the base64, other line lengths, a NUL before the final LF, anything after the END line, version 0, `sha256`, a reserved field that is not empty, a string that no signature covers ending in a NUL, and an ECDSA number with leading zero bytes up to 2,049 bytes in all. Its builds also differ from Sections 3.2 and 4.1:
 
 - **An Ed25519 signature's R.** OpenSSH's own Ed25519 from 10.6p1, libsodium's, used where libcrypto has none, refuses the neutral R, and takes R with a point of order 2 or 4 added; it refuses R with a point of order 8 added.
-- **An Ed25519 signature's S.** `ssh-keygen` before 10.3p1 on OpenSSL's Ed25519, and before 10.4p1 on its own, takes S + L, so a client built on it checks S itself.
+- **An Ed25519 signature's S.** `ssh-keygen` before 10.3p1 on OpenSSL's Ed25519, and before 10.4p1 on its own, takes S + L.
 - **An Ed25519 key.** Go's `crypto/ed25519`, and OpenSSH before 10.6p1, take small-order and non-canonical keys, so a client checks them itself.
 - **A P-256 key's coordinates.** OpenSSH up to 10.2p1 refuses a coordinate of 128 bits or fewer, or of n − 1 or more, which OpenSSH from 10.3p1 and `golang.org/x/crypto/ssh` take.
 - **A P-256 key at all.** OpenSSH built without OpenSSL reads none.

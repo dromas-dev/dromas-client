@@ -201,9 +201,9 @@ func FuzzParseIdentity(f *testing.F) {
 	})
 }
 
-// Dearmor takes a signature of at most MaxSignature bytes that begins with
-// the BEGIN line, and gives a blob in the one form the checks after it take:
-// so the blob armored again reads back as itself. A refusal gives no blob.
+// Dearmor takes only a signature in its one form, of at most MaxSignature
+// bytes: the blob it gives, armored, is the bytes it took, and the blob
+// written in the one form again is itself. A refusal gives no blob.
 func FuzzDearmor(f *testing.F) {
 	seeds(f, "sig/*.sig", "message/*.sig", "revoke/*.sig", "revoked/*.sig", "a/*.sig", "c/*.sig", "cert/*.sig")
 	f.Fuzz(func(t *testing.T, armored []byte) {
@@ -214,20 +214,20 @@ func FuzzDearmor(f *testing.F) {
 			}
 			return
 		}
-		if len(armored) > MaxSignature || !bytes.HasPrefix(armored, []byte(strings.TrimSuffix(armorBegin, "\n"))) {
-			t.Fatalf("took %d bytes beginning %q", len(armored), armored[:min(len(armored), 40)])
+		if len(armored) > MaxSignature || !bytes.Equal(Armor(blob), armored) {
+			t.Fatalf("took %d bytes that are not its blob armored", len(armored))
 		}
-		again, err := Dearmor(Armor(blob))
-		if err != nil || !bytes.Equal(again, blob) {
-			t.Fatalf("the blob armored again reads otherwise: %v", err)
+		if one, err := oneForm(blob); err != nil || !bytes.Equal(one, blob) {
+			t.Fatalf("took a blob not in the one form: %v", err)
 		}
 	})
 }
 
 // CheckCertificate takes only a user certificate its identity signed for a
 // working key, under the key id the protocol names, with one principal, the
-// mailbox's address, a serial from 1 to MaxSerial, no critical option, and valid
-// at now, naming no date after LastDate: its signature is the identity
+// mailbox's address, a serial from 1 to MaxSerial, no critical option, no
+// extension, an empty reserved field and a nonce of 32 bytes, and valid at
+// now, naming no date after LastDate: its signature is the identity
 // key's over the certificate's bytes (signedBytes, read apart from the
 // library's check), and its working key an Ed25519 key that is a canonical
 // point not of small order and not the identity key. A refusal is
@@ -289,8 +289,10 @@ func FuzzCheckCertificate(f *testing.F) {
 				t.Fatalf("took the serial %d", cert.Serial)
 			case len(cert.ValidPrincipals) != 1 || cert.ValidPrincipals[0] != id.Address().String():
 				t.Fatalf("took the principals %q for %s", cert.ValidPrincipals, id.Address())
-			case len(cert.CriticalOptions) != 0:
-				t.Fatal("took a critical option")
+			case len(cert.CriticalOptions) != 0 || len(cert.Extensions) != 0 || len(cert.Reserved) != 0 || len(cert.Nonce) != 32:
+				t.Fatal("took a certificate out of the one form its makers write")
+			case !bytes.Equal(ssh.Marshal(oneSignature(cert.Signature)), ssh.Marshal(cert.Signature)):
+				t.Fatal("took a certificate whose signature is not in its one form")
 			case !bytes.Equal(cert.SignatureKey.Marshal(), id.PublicKey().Marshal()):
 				t.Fatal("took a certificate another key signed")
 			case id.PublicKey().Verify(signedBytes(cert), cert.Signature) != nil:

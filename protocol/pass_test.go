@@ -522,6 +522,7 @@ var senderForm = regexp.MustCompile(`\A` + PassScheme + ` address="([a-z2-7]{77}
 func FuzzParsePass(f *testing.F) {
 	header := strings.TrimSuffix(string(read(f, "a/pass.authorization")), "\n")
 	f.Add(header)
+	f.Add(strings.TrimSuffix(string(read(f, "c/pass.authorization")), "\n"))
 	m, err := filepath.Glob(filepath.Join(vectors, "pass", "*.authorization"))
 	if err != nil || len(m) == 0 {
 		f.Fatalf("no pass/ vectors: %v", err)
@@ -554,17 +555,14 @@ func FuzzParsePass(f *testing.F) {
 	})
 }
 
-// A pass written another way that a verifier reads as the same is written
-// back as one pass, its signature too: the armor's line breaks and
-// whitespace, CRLF after the BEGIN line, a NUL before the END line, text
-// after it, SSHSIG version 0, a NUL ending the namespace and bytes in the
-// reserved field, which nothing signs. A server remembers a pass by its
-// Authorization, so each costs it one check (dromas-dev/dromas-server#69).
-// A signature that differs in a byte the verifier reads is another pass: a
-// bit of the signature itself, the hash it names, a byte after its five
-// fields (#445), and a P-256 identity's own signature written another way,
-// as (r, n − s), which verifies as well (PROTOCOL.md §5).
+// A pass has one form, and a server that remembers passes by Authorization
+// checks each once: a pass whose signature is in another form never verifies
+// (PROTOCOL.md §3.2), and C's pass, by a P-256 identity, with s written as
+// n − s, which verifies as well, is written back as the same pass, with s
+// the lower of the two (dromas-dev/dromas-server#69). A signature that
+// differs in a byte the verifier reads is another pass.
 func TestAPassWrittenAnotherWayIsOnePass(t *testing.T) {
+	now := vectorNow(t)
 	header := strings.TrimSuffix(string(read(t, "a/pass.authorization")), "\n")
 	p, err := ParsePass(header)
 	if err != nil {
@@ -578,74 +576,34 @@ func TestAPassWrittenAnotherWayIsOnePass(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// rewrite is blob with version v, a NUL after its namespace when nul,
-	// reserved in its reserved field, the hash named hash where it is not
-	// empty and tail after the five fields, armored as ssh-keygen does.
-	rewrite := func(v uint32, nul bool, reserved []byte, hash string, tail []byte) []byte {
-		r := wireReader(blob[10:])
-		key, _ := r.string()
-		ns, _ := r.string()
-		_, _ = r.string()
-		named, _ := r.string()
-		sig, _ := r.string()
-		if nul {
-			ns = append(append([]byte{}, ns...), 0)
-		}
-		if hash != "" {
-			named = []byte(hash)
-		}
-		out := binary.BigEndian.AppendUint32([]byte("SSHSIG"), v)
-		for _, s := range [][]byte{key, ns, reserved, named, sig} {
-			out = appendWireString(out, s)
-		}
-		return Armor(append(out, tail...))
-	}
-	body := bytes.IndexByte(armored, '\n') + 1
-	forms := map[string][]byte{
-		"CRLF after the BEGIN line":    bytes.Replace(armored, []byte("-----\n"), []byte("-----\r\n"), 1),
-		"text after the END line":      append(append([]byte{}, armored...), "anything"...),
-		"a tab inside the base64":      bytes.Replace(armored, []byte("-----\n"), []byte("-----\n\t"), 1),
-		"a NUL before the END line":    bytes.Replace(armored, []byte("\n-----END"), []byte("\x00\n-----END"), 1),
-		"the base64 on one line":       []byte(armorBegin + base64.StdEncoding.EncodeToString(blob) + "\n" + armorEnd + "\n"),
-		"a space inside the base64":    append(append(append([]byte{}, armored[:body+7]...), ' '), armored[body+7:]...),
-		"SSHSIG version 0":             rewrite(0, false, nil, "", nil),
-		"a NUL ending the namespace":   rewrite(1, true, nil, "", nil),
-		"a byte in the reserved field": rewrite(1, false, []byte{'x'}, "", nil),
-	}
-	for name, sig := range forms {
-		if _, err := Dearmor(sig); err != nil {
-			t.Fatalf("%s: OpenSSH's reading refuses it: %v", name, err)
-		}
-		q, err := ParsePass(strings.Replace(header, base64.StdEncoding.EncodeToString(armored), base64.StdEncoding.EncodeToString(sig), 1))
+	with := func(h string, from, to []byte) *Pass {
+		t.Helper()
+		q, err := ParsePass(strings.Replace(h, base64.StdEncoding.EncodeToString(from), base64.StdEncoding.EncodeToString(to), 1))
 		if err != nil {
-			t.Fatalf("%s: %v", name, err)
+			t.Fatal(err)
 		}
-		if got := q.Authorization(); got != header {
-			t.Errorf("%s: written back as another pass", name)
-		}
+		return q
 	}
-	// A byte the verifier reads: one bit of the signature itself, in its
-	// last string, the other hash §3.2 lets a signature name (the vector's
-	// is sha512), and a byte after the five fields, which it refuses.
-	flipped := append([]byte{}, blob...)
+	flipped := bytes.Clone(blob)
 	flipped[len(flipped)-1] ^= 1
-	others := map[string][]byte{
-		"a bit of the signature":       Armor(flipped),
-		"the hash named sha256":        rewrite(1, false, nil, "sha256", nil),
-		"a byte after the five fields": rewrite(1, false, nil, "", []byte{0}),
-	}
-	for name, sig := range others {
-		q, err := ParsePass(strings.Replace(header, base64.StdEncoding.EncodeToString(armored), base64.StdEncoding.EncodeToString(sig), 1))
-		if err != nil {
-			t.Fatalf("%s: %v", name, err)
+	for name, sig := range map[string][]byte{
+		"CRLF after the BEGIN line": bytes.Replace(armored, []byte("-----\n"), []byte("-----\r\n"), 1),
+		"text after the END line":   append(bytes.Clone(armored), "anything"...),
+		"a tab inside the base64":   bytes.Replace(armored, []byte("-----\n"), []byte("-----\n\t"), 1),
+		"the base64 on one line":    []byte(armorBegin + base64.StdEncoding.EncodeToString(blob) + "\n" + armorEnd + "\n"),
+		"a bit of the signature":    Armor(flipped),
+	} {
+		q := with(header, armored, sig)
+		if _, err := q.Verify(vectorIdentity(t, "a"), "dromas.example", now); err == nil {
+			t.Errorf("%s: verifies", name)
 		}
 		if q.Authorization() == header {
-			t.Errorf("%s: written back as the same pass", name)
+			t.Errorf("%s: written back as the pass", name)
 		}
 	}
 
 	// C's pass, by its P-256 identity, with s as n − s: it verifies, and is
-	// another pass to a server that remembers passes it has verified.
+	// the same pass.
 	cHeader := strings.TrimSuffix(string(read(t, "c/pass.authorization")), "\n")
 	cp, err := ParsePass(cHeader)
 	if err != nil {
@@ -664,34 +622,62 @@ func TestAPassWrittenAnotherWayIsOnePass(t *testing.T) {
 		}
 		fields = append(fields, f)
 	}
-	var sig struct {
-		Format string
-		Blob   []byte
-	}
+	sig := new(ssh.Signature)
 	var rs struct{ R, S *big.Int }
-	if err := ssh.Unmarshal(fields[4], &sig); err != nil {
+	if err := ssh.Unmarshal(fields[4], sig); err != nil {
 		t.Fatal(err)
 	}
 	if err := ssh.Unmarshal(sig.Blob, &rs); err != nil {
 		t.Fatal(err)
 	}
-	rs.S.Sub(elliptic.P256().Params().N, rs.S)
+	n := elliptic.P256().Params().N
+	low := new(big.Int).Set(rs.S)
+	if half := new(big.Int).Rsh(n, 1); low.Cmp(half) > 0 {
+		low.Sub(n, low)
+	}
+	rs.S.Sub(n, rs.S)
 	sig.Blob = ssh.Marshal(rs)
 	fields[4] = ssh.Marshal(sig)
 	twin := binary.BigEndian.AppendUint32([]byte("SSHSIG"), 1)
 	for _, f := range fields {
 		twin = appendWireString(twin, f)
 	}
-	tp, err := ParsePass(strings.Replace(cHeader, base64.StdEncoding.EncodeToString(cp.signature), base64.StdEncoding.EncodeToString(Armor(twin)), 1))
+	tp := with(cHeader, cp.signature, Armor(twin))
+	for _, q := range []*Pass{cp, tp} {
+		if s, err := q.Verify(vectorIdentity(t, "c"), "dromas.example", now); err != nil || !s.Identity() {
+			t.Fatalf("C's pass, its s as n − s or not: %v", err)
+		}
+	}
+	if tp.Authorization() != cp.Authorization() {
+		t.Error("C's pass, its s as n − s, is written back as another pass")
+	}
+	wb, err := base64.StdEncoding.DecodeString(strings.TrimSuffix(strings.SplitN(cp.Authorization(), `signature="`, 2)[1], `"`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s, err := tp.Verify(vectorIdentity(t, "c"), "dromas.example", vectorNow(t)); err != nil || !s.Identity() {
-		t.Fatalf("C's pass, its s as n − s: %v", err)
+	if _, s, _ := testRS(t, wb); s.Cmp(low) != 0 {
+		t.Error("C's pass is not written back with the lower s")
 	}
-	if tp.Authorization() == cHeader {
-		t.Error("C's pass, its s as n − s, is written back as the same pass")
+}
+
+// testRS is an armored ECDSA signature's r and s, and its blob.
+func testRS(t *testing.T, armored []byte) (r, s *big.Int, blob []byte) {
+	t.Helper()
+	blob, err := Dearmor(armored)
+	if err != nil {
+		t.Fatal(err)
 	}
+	f := wireReader(blob[10:])
+	for range 4 {
+		f.string()
+	}
+	raw, _ := f.string()
+	sig := new(ssh.Signature)
+	var rs struct{ R, S *big.Int }
+	if ssh.Unmarshal(raw, sig) != nil || ssh.Unmarshal(sig.Blob, &rs) != nil {
+		t.Fatal("no r and s")
+	}
+	return rs.R, rs.S, blob
 }
 
 // LowerASCII, the one fold a protocol token is compared by, lowers A to Z

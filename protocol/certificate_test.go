@@ -128,6 +128,19 @@ func TestCertificateRoundTrip(t *testing.T) {
 	}
 }
 
+// resign is a certificate's "after" in TestCertificateRules: its nonce made
+// n bytes, then signed again by identity over the bytes as they now are.
+func resign(identity ssh.Signer, n int) func(*ssh.Certificate) {
+	return func(c *ssh.Certificate) {
+		c.Nonce = bytes.Repeat([]byte{7}, n)
+		sig, err := identity.Sign(rand.Reader, signedBytes(c))
+		if err != nil {
+			panic(err)
+		}
+		c.Signature = sig
+	}
+}
+
 func TestCertificateRules(t *testing.T) {
 	b := newCertMailbox(t)
 	other := newCertMailbox(t)
@@ -170,11 +183,17 @@ func TestCertificateRules(t *testing.T) {
 		{name: "another mailbox's address", change: func(c *ssh.Certificate) { c.ValidPrincipals = []string{other.id.Address().String()} }, want: ErrCertificate},
 		{name: "two principals", change: func(c *ssh.Certificate) { c.ValidPrincipals = append(c.ValidPrincipals, other.id.Address().String()) }, want: ErrCertificate},
 		{name: "the address in capitals", change: func(c *ssh.Certificate) { c.ValidPrincipals = []string{strings.ToUpper(b.id.Address().String())} }, want: ErrCertificate},
-		{name: "an extension OpenSSH defines", change: func(c *ssh.Certificate) { c.Extensions = map[string]string{"permit-pty": ""} }},
+		// The one form its makers write: a nonce of 32 bytes, no extension,
+		// an empty reserved field. The control re-signs a certificate as the
+		// nonce's two cases do, and it passes.
+		{name: "an extension OpenSSH defines", change: func(c *ssh.Certificate) { c.Extensions = map[string]string{"permit-pty": ""} }, want: ErrCertificate},
 		{name: "an extension nobody defines, with a value", change: func(c *ssh.Certificate) {
-			c.Extensions = map[string]string{"nobody-defines@dromas.invalid": "a value", "permit-pty": ""}
-		}},
-		{name: "reserved bytes", change: func(c *ssh.Certificate) { c.Reserved = []byte("not read") }},
+			c.Extensions = map[string]string{"nobody-defines@dromas.invalid": "a value"}
+		}, want: ErrCertificate},
+		{name: "reserved bytes", change: func(c *ssh.Certificate) { c.Reserved = []byte("not read") }, want: ErrCertificate},
+		{name: "re-signed, its nonce 32 bytes", after: resign(b.identity, 32)},
+		{name: "a nonce of 16 bytes", after: resign(b.identity, 16), want: ErrCertificate},
+		{name: "a nonce of 33 bytes", after: resign(b.identity, 33), want: ErrCertificate},
 		{name: "a critical option", change: func(c *ssh.Certificate) { c.CriticalOptions = map[string]string{"force-command": "/bin/true"} }, want: ErrCertificate},
 		{name: "source-address, which the library leaves to its caller", change: func(c *ssh.Certificate) { c.CriticalOptions = map[string]string{"source-address": "127.0.0.1/32"} }, want: ErrCertificate},
 		{name: "a critical option nobody defines", change: func(c *ssh.Certificate) { c.CriticalOptions = map[string]string{"nobody-defines@dromas.invalid": ""} }, want: ErrCertificate},
@@ -304,21 +323,19 @@ func TestCertificateAgainstSSHKeygen(t *testing.T) {
 	if s, err := VerifySigned(id, msg, must(msg, "-Y", "sign", "-n", ns, "-f", "identity"), ns, now); err != nil || !s.Identity() || s.Rank() != 0 {
 		t.Errorf("ssh-keygen's signature by the identity: %v", err)
 	}
-	// Without "-O clear" ssh-keygen adds five extensions. None means
-	// anything here, and an extension a verifier does not know is ignored
-	// (draft-ietf-sshm-cert-01 §2.1.1); a critical option is refused.
+	// Without "-O clear" ssh-keygen adds five extensions, and with
+	// "-O force-command" a critical option: neither is the one form its
+	// makers write, and each is refused, the signature under it being over
+	// the bound before the certificate is read.
 	if err := os.Rename(filepath.Join(dir, "work-cert.pub"), filepath.Join(dir, "clear-cert.pub")); err != nil {
 		t.Fatal(err)
 	}
-	must(nil, "-q", "-s", "identity", "-I", CertificateKeyID, "-n", a, "-z", "8", "-V", "+64d", "work.pub")
-	sig = must(msg, "-Y", "sign", "-n", ns, "-f", "work-cert.pub")
-	if _, err := VerifySigned(id, msg, sig, ns, now); err != nil {
-		t.Errorf("a certificate with ssh-keygen's default extensions: %v", err)
-	}
-	must(nil, "-q", "-s", "identity", "-I", CertificateKeyID, "-n", a, "-z", "9", "-V", "+64d", "-O", "clear", "-O", "force-command=true", "work.pub")
-	sig = must(msg, "-Y", "sign", "-n", ns, "-f", "work-cert.pub")
-	if _, err := VerifySigned(id, msg, sig, ns, now); !errors.Is(err, ErrCertificate) {
-		t.Errorf("a certificate with a critical option: %v", err)
+	for serial, opts := range map[string][]string{"8": nil, "9": {"-O", "clear", "-O", "force-command=true"}} {
+		must(nil, append(append([]string{"-q", "-s", "identity", "-I", CertificateKeyID, "-n", a, "-z", serial, "-V", "+64d"}, opts...), "work.pub")...)
+		sig = must(msg, "-Y", "sign", "-n", ns, "-f", "work-cert.pub")
+		if _, err := VerifySigned(id, msg, sig, ns, now); err == nil {
+			t.Errorf("a certificate made with %q: taken", opts)
+		}
 	}
 
 	// A certificate and a signature made here, checked by ssh-keygen.

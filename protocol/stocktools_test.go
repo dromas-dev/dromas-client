@@ -224,7 +224,6 @@ func TestVectorsByToolsNotOurs(t *testing.T) {
 		underA := signers("a-ca", "a", true)
 		verify(t, underA, "a", ns("dromas-prekey-v1", "a"), "a/prekey-1.txt", "a/prekey-1.txt.sig")
 		verify(t, underA, "a", ns("dromas-prekey-v1", "a"), "a/prekey-2.txt", "a/prekey-2.txt.sig")
-		verify(t, underA, "a", ns("dromas-prekey-v1", "a"), "a/prekey-1.txt", "a/prekey-1.txt.sha256.sig")
 		verify(t, underA, "a", ns("dromas-pass-v1", "a"), "a/pass.txt", "a/pass.sig")
 		verify(t, underA, "a", ns("dromas-msg-v1", "b"), "message/a-to-b.line", "message/a-to-b.sig")
 		verify(t, underA, "a", ns("dromas-msg-v1", "c"), "message/a-to-c.line", "message/a-to-c.sig")
@@ -247,10 +246,9 @@ func TestVectorsByToolsNotOurs(t *testing.T) {
 			verify(t, bare, mailbox, ns("dromas-revoke-v1", mailbox), mailbox+"/revoke.txt", mailbox+"/revoke.sig")
 		}
 		bareA := signers("a-bare", "a", false)
-		verify(t, bareA, "a", ns("dromas-revoke-v1", "a"), "a/revoke.txt", "a/revoke.sha256.sig")
 		verify(t, bareA, "a", ns("dromas-revoke-certs-v1", "a"), "a/revoked-certs.txt", "a/revoked-certs.sig")
 		for _, s := range globIn(t, dir, "revoked/ok-*.sig") {
-			verify(t, bareA, "a", ns("dromas-revoke-certs-v1", "a"), strings.TrimSuffix(strings.TrimSuffix(s, ".sig"), ".sha256")+".txt", s)
+			verify(t, bareA, "a", ns("dromas-revoke-certs-v1", "a"), strings.TrimSuffix(s, ".sig")+".txt", s)
 		}
 	})
 }
