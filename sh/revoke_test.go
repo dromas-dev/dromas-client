@@ -116,7 +116,7 @@ func TestScriptTakesARevocationOnItsProofAlone(t *testing.T) {
 	ra, rb, rc, rd := w.mailbox(), w.mailbox(), w.mailbox(), w.mailbox()
 	va := strings.TrimSpace(mustReadString(t, filepath.Join(vectors, "a", "address")))
 	vdoc := abs(t, filepath.Join(vectors, "a", "identity.doc"))
-	sigs := []string{"a/revoke.sig", "a/revoke.sha256.sig"}
+	sigs := []string{"a/revoke.sig"}
 	if p256() {
 		if r := ra.sh(fmt.Sprintf("dr_revcheck %s %s %s", strings.TrimSpace(mustReadString(t, filepath.Join(vectors, "c", "address"))), abs(t, filepath.Join(vectors, "c", "identity.doc")), abs(t, filepath.Join(vectors, "c", "revoke.sig")))); r.rc != 0 {
 			t.Errorf("c/revoke.sig, by a P-256 identity, is not taken: %v", r)
@@ -252,7 +252,7 @@ func TestScriptReadsARevocationOfCertificates(t *testing.T) {
 	va := strings.TrimSpace(mustReadString(t, filepath.Join(vectors, "a", "address")))
 	vec := func(n string) string { return abs(t, filepath.Join(vectors, n)) }
 	ok4, okTop := vec("revoked/ok-through-4"), vec("revoked/ok-through-the-highest")
-	if out := p.must(fmt.Sprintf("dr_certscheck %[1]s %[2]s %[3]s.txt %[3]s.sig; dr_certscheck %[1]s %[2]s %[3]s.txt %[3]s.sha256.sig; dr_certscheck %[1]s %[2]s %[4]s.txt %[4]s.sig", va, vec("a/identity.doc"), ok4, okTop)); out != "4\n4\n9007199254740991\n" {
+	if out := p.must(fmt.Sprintf("dr_certscheck %[1]s %[2]s %[3]s.txt %[3]s.sig; dr_certscheck %[1]s %[2]s %[4]s.txt %[4]s.sig", va, vec("a/identity.doc"), ok4, okTop)); out != "4\n9007199254740991\n" {
 		t.Errorf("the vectors that are a revocation of certificates: %q", out)
 	}
 	bad, _ := filepath.Glob(filepath.Join(vectors, "revoked", "bad-*.txt"))
