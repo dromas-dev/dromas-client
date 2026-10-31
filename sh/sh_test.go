@@ -510,6 +510,53 @@ func TestTheScriptReadsASignatureInItsOneForm(t *testing.T) {
 	}
 }
 
+// dr_sshsig and dr_cert read a signature's blob and a certificate in their
+// one form, each field as the Go client writes it back (PROTOCOL.md §3.2,
+// §5.2). Most of these vectors are also longer than A's key type's bound,
+// which refuses them first in dr_signed, and ssh-keygen -Y verify takes many
+// (Appendix A), so the verdicts TestVectorsSignatureForm and
+// TestVectorsCertificate compare need not show the script's own reading:
+// this runs it alone, past the bound. Control: it reads sig/ok-ed25519 and
+// cert/ok-begins-now.
+func TestTheScriptReadsABlobInItsOneForm(t *testing.T) {
+	t.Parallel()
+	need(t, scriptTools...)
+	a, aDoc := identity(t, "a")
+	c, cDoc := identity(t, "c")
+	rank := func(addr, doc, sig string) error {
+		_, err := bash(t, scratch(t), fmt.Sprintf("dr_rank %s %s %s dromas-prekey-v1:%s", abs(t, filepath.Join(vectors, sig)), doc, addr, addr))
+		return err
+	}
+	cert := func(sig string) error {
+		_, err := bash(t, scratch(t), fmt.Sprintf("dr_cert %s %s %s", abs(t, filepath.Join(vectors, sig)), aDoc, a))
+		return err
+	}
+	if err := rank(a, aDoc, "sig/ok-ed25519.sig"); err != nil {
+		t.Errorf("control: dr_rank does not read sig/ok-ed25519.sig: %v", err)
+	}
+	if err := cert("cert/ok-begins-now.sig"); err != nil {
+		t.Errorf("control: dr_cert does not read cert/ok-begins-now.sig: %v", err)
+	}
+	for _, sig := range []string{"bad-version-0", "bad-reserved-not-empty", "bad-sha256", "bad-namespace-ending-in-a-nul", "bad-trailing-byte-in-the-blob", "bad-certificate-own-type-nul"} {
+		if err := rank(a, aDoc, "sig/"+sig+".sig"); err == nil {
+			t.Errorf("sig/%s: dr_rank reads it", sig)
+		}
+	}
+	if p256() {
+		if err := rank(c, cDoc, "sig/c-ok-p256.sig"); err != nil {
+			t.Errorf("control: dr_rank does not read sig/c-ok-p256.sig: %v", err)
+		}
+		if err := rank(c, cDoc, "sig/c-bad-r-padded.sig"); err == nil {
+			t.Error("sig/c-bad-r-padded: dr_rank reads it")
+		}
+	}
+	for _, sig := range []string{"bad-extensions", "bad-reserved-field", "bad-nonce-of-16-bytes"} {
+		if err := cert("cert/" + sig + ".sig"); err == nil {
+			t.Errorf("cert/%s: dr_cert reads it", sig)
+		}
+	}
+}
+
 // Every prekey statement of the vectors, as the Go client judges it with what
 // a reader holds of its mailbox's certificates: A's with A's revocation of
 // its certificates held, B's and C's with nothing held. A sender checks a
