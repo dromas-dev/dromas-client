@@ -1683,8 +1683,8 @@ func TestVectorsRevokedCertificates(t *testing.T) {
 	}
 }
 
-// Certificates revoked, across the two clients and one server: a Go mailbox in
-// working-key mode, made by init --offline, revokes its first certificate,
+// Certificates revoked, across the two clients and one server: a Go mailbox
+// registered under a certificate by init --offline revokes its first certificate,
 // which the script checks for itself, keeps and applies, and each follows the
 // other to a later statement, naming it by its hash.
 func TestRevokedCertificatesInBothClients(t *testing.T) {
