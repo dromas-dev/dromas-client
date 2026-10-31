@@ -351,7 +351,7 @@ func TestAFaultAfterTheRevocationWasTakenLeavesItTaken(t *testing.T) {
 			e := newWorkEnv(t)
 			b := e.mailbox()
 			e.clock.Add(2 * time.Second)
-			// A certificate after the first, which its trip revokes nothing of.
+			// A certificate after the first.
 			if _, err := b.Rekey(ctx); err != nil {
 				t.Fatal(err)
 			}

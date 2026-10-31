@@ -16,8 +16,8 @@ import (
 	"github.com/dromas-dev/dromas-client/protocol"
 )
 
-// finishedMailbox is a mailbox, in working-key mode where working is set,
-// that holds its own revocation, with nothing else changed: what sign's own
+// finishedMailbox is a mailbox, registered under a certificate where working
+// is set, that holds its own revocation, with nothing else changed: what sign's own
 // check is the last guard of is reached from it. It returns too every
 // signature the signers the mailbox handed out before then make, by name.
 func finishedMailbox(t *testing.T, working bool) (*Mailbox, map[string]func() error) {
@@ -45,16 +45,18 @@ func finishedMailbox(t *testing.T, working bool) (*Mailbox, map[string]func() er
 	}
 	p := &protocol.Prekey{Address: b.id.Address(), Serial: 1}
 	tried := map[string]func() error{
-		"Certifier.Certify": func() error {
-			_, err := b.certifier.Certify(b.id, k.PublicKey(), 1, time.Now(), 2*time.Hour)
+		"Identity.Certify": func() error {
+			_, err := b.identity.Certify(b.id, k.PublicKey(), 1, time.Now(), 2*time.Hour)
 			return err
 		},
-		"Certifier.Revocation":          func() error { _, err := b.certifier.Revocation(b.id.Address()); return err },
-		"Certifier.RevokedCertificates": func() error { _, err := b.certifier.RevokedCertificates(certs); return err },
-		"Certifier.Identity":            func() error { _, err := b.certifier.Identity(); return err },
-		"Statement":                     func() error { _, err := by.Statement(p); return err },
-		"Message":                       func() error { _, err := by.Message([]byte("x"), b.id.Address()); return err },
-		"Pass":                          func() error { _, _, err := by.Pass(b.id.Address(), "example.org", time.Now()); return err },
+		"Identity.Revocation":          func() error { _, err := b.identity.Revocation(b.id.Address()); return err },
+		"Identity.RevokedCertificates": func() error { _, err := b.identity.RevokedCertificates(certs); return err },
+		"Identity.Statement":           func() error { _, err := b.identity.Statement(p); return err },
+		"Identity.Message":             func() error { _, err := b.identity.Message([]byte("x"), b.id.Address()); return err },
+		"Identity.Pass":                func() error { _, _, err := b.identity.Pass(b.id.Address(), "example.org", time.Now()); return err },
+		"Statement":                    func() error { _, err := by.Statement(p); return err },
+		"Message":                      func() error { _, err := by.Message([]byte("x"), b.id.Address()); return err },
+		"Pass":                         func() error { _, _, err := by.Pass(b.id.Address(), "example.org", time.Now()); return err },
 	}
 	rec, err := b.Revocation(t.Context())
 	if err != nil {
@@ -66,7 +68,8 @@ func finishedMailbox(t *testing.T, working bool) (*Mailbox, map[string]func() er
 	return b, tried
 }
 
-// Every signer the mailbox hands out, in either mode, asks the mailbox's own
+// Every signer the mailbox hands out, its identity and the signer in use,
+// whichever it is, asks the mailbox's own
 // finished: once it holds its own revocation, each of their signatures is its
 // RevokedError. TestAFinishedMailboxSignsNothing holds sign to the finished it
 // is given; this holds the mailbox to giving its own (#339).
@@ -77,15 +80,15 @@ func TestEverySignerTheMailboxHandsOutAsksItsFinished(t *testing.T) {
 		var gone *RevokedError
 		for name, f := range tried {
 			if err := f(); !errors.As(err, &gone) || !gone.Own {
-				t.Errorf("working-key mode %v: %s on a mailbox that holds its own revocation: %v", working, name, err)
+				t.Errorf("under a certificate %v: %s on a mailbox that holds its own revocation: %v", working, name, err)
 			}
 		}
 		// And none is handed out after.
 		if by, _, err := b.currentSigner(); by != nil || !errors.As(err, &gone) || !gone.Own {
-			t.Errorf("working-key mode %v: a signer from a finished mailbox: %v", working, err)
+			t.Errorf("under a certificate %v: a signer from a finished mailbox: %v", working, err)
 		}
 		// Every method but PublicKey signs, and is tried above.
-		for _, typ := range []reflect.Type{reflect.TypeOf(b.certifier), reflect.TypeFor[signer]()} {
+		for _, typ := range []reflect.Type{reflect.TypeOf(b.identity), reflect.TypeFor[signer]()} {
 			for i := range typ.NumMethod() {
 				m := typ.Method(i).Name
 				if typ.Kind() == reflect.Pointer {
@@ -100,22 +103,24 @@ func TestEverySignerTheMailboxHandsOutAsksItsFinished(t *testing.T) {
 }
 
 // A prekey made on a mailbox that holds its own revocation is stopped at its
-// certificate, before any key is written: the working key and its
-// certificate come first, then the age key (#339).
+// signer, before any key is written: the working key and its certificate, or
+// the identity's check, come first, then the age key (#339).
 func TestAPrekeyOnAFinishedMailboxWritesNoKey(t *testing.T) {
 	t.Parallel()
-	b, _ := finishedMailbox(t, true)
-	files := func() int {
-		p, _ := filepath.Glob(b.path("prekeys", "*"))
-		w, _ := filepath.Glob(b.path("work", "*"))
-		return len(p) + len(w)
-	}
-	before := files()
-	n := protocol.SerialAt(b.now(), 0) + 10
-	_, err := lockedFinished(context.Background(), b, func() (*protocol.Prekey, error) { return b.makePrekey(context.Background(), n) })
-	var gone *RevokedError
-	if !errors.As(err, &gone) || !gone.Own || files() != before {
-		t.Fatalf("a prekey on a finished mailbox: %v; %d files, were %d", err, files(), before)
+	for _, certify := range []bool{false, true} {
+		b, _ := finishedMailbox(t, true)
+		files := func() int {
+			p, _ := filepath.Glob(b.path("prekeys", "*"))
+			w, _ := filepath.Glob(b.path("work", "*"))
+			return len(p) + len(w)
+		}
+		before := files()
+		n := protocol.SerialAt(b.now(), 0) + 10
+		_, err := lockedFinished(context.Background(), b, func() (*protocol.Prekey, error) { return b.makePrekey(context.Background(), n, certify) })
+		var gone *RevokedError
+		if !errors.As(err, &gone) || !gone.Own || files() != before {
+			t.Fatalf("under a certificate %v: a prekey on a finished mailbox: %v; %d files, were %d", certify, err, files(), before)
+		}
 	}
 }
 

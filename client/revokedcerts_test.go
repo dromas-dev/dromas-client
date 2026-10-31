@@ -164,14 +164,6 @@ func TestOnlyTheIdentitysHighestRevocationCounts(t *testing.T) {
 		})
 	}
 
-	// B meets A first through an honest read, and keeps its trip, without
-	// which it takes no certificate of A's: a server that withholds it costs
-	// A its messages, and forges nothing (PROTOCOL.md §15.6).
-	send(t, a, b, "before anything is forged")
-	if res := receive(t, b); len(res.Delivered) != 1 {
-		t.Fatalf("the first message: %+v", res)
-	}
-
 	// What a working key can sign: a revocation of the mailbox's own
 	// certificate.
 	forged, err := protocol.NewRevokedCertificates(a.Address(), numberOf(t, a))
@@ -182,11 +174,9 @@ func TestOnlyTheIdentitysHighestRevocationCounts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	trip, _ := stateOf(b, "peers/"+a.Address().String()+"/revoked-certs.json")
 	show(protocol.Revocations{Identity: doc, RevokedCertificates: forged.Statement(), RevokedCertificatesSignature: byWorker})
 	send(t, a, b, "under certificate 1, which a working key cannot revoke")
-	kept, _ := stateOf(b, "peers/"+a.Address().String()+"/revoked-certs.json")
-	if res := receive(t, b); len(res.Delivered) != 1 || !bytes.Equal(kept, trip) || shown.Load() == 0 {
+	if res := receive(t, b); len(res.Delivered) != 1 || keptList(b, a.Address()) || shown.Load() == 0 {
 		t.Fatalf("a revocation a working key signed was applied or kept, or never shown: %+v", res)
 	}
 	e.srv.SetMiddle(nil)
@@ -412,7 +402,7 @@ func TestAKeptRevocationOfCertificatesThatDoesNotVerifyIsAnErrorWhereTheServerSh
 }
 
 // A send names its prekey's statement by the SHA-256 of its bytes as served
-// (protocol.StatementHash), in its query, in either mode, and its body is the
+// (protocol.StatementHash), in its query, by either signer, and its body is the
 // age file itself, as an octet stream. Another statement by the same signer
 // is named apart.
 func TestASendNamesItsStatement(t *testing.T) {
@@ -437,7 +427,7 @@ func TestASendNamesItsStatement(t *testing.T) {
 		id := send(t, a, b, "names the prekey it was sealed to").ID
 		st, _ := e.srv.Prekey(b.Address())
 		if want := "statement=" + protocol.StatementHash(st); query != want {
-			t.Errorf("working-key mode %v: a send's query: %q, want %q", working, query, want)
+			t.Errorf("under a certificate %v: a send's query: %q, want %q", working, query, want)
 		}
 		h := sha256.Sum256(body)
 		if contentType != protocol.CiphertextContentType || !bytes.HasPrefix(body, []byte("age-encryption.org/v1\n")) || hex.EncodeToString(h[:]) != id {
@@ -468,7 +458,7 @@ func TestASendNamesItsStatement(t *testing.T) {
 		})
 		_, err = a.Send(context.Background(), b.Address(), "sealed to a statement five above")
 		if want := "statement=" + protocol.StatementHash(p.Statement()); query != want || client.Code(err) != protocol.CodeStalePrekey {
-			t.Errorf("working-key mode %v: a send to a statement five above: %q, %v; want %q and stale_prekey", working, query, err, want)
+			t.Errorf("under a certificate %v: a send to a statement five above: %q, %v; want %q and stale_prekey", working, query, err, want)
 		}
 	}
 }

@@ -566,7 +566,8 @@ type Remedy struct {
 // A mailbox that has no certificate, by what it keeps once it has read
 // itself, its own statement published last and the one its server serves
 // both its identity's, has none to revoke, and is refused before anything
-// is signed (certificatesOwn).
+// is signed (certificatesOwn). One restored with nothing published, whose
+// read went unanswered, goes on.
 func (b *Mailbox) RenewAndRevoke(ctx context.Context) (*Remedy, error) {
 	return locked(ctx, b, func() (*Remedy, error) { return b.renewAndRevoke(ctx) })
 }
@@ -587,9 +588,17 @@ func (b *Mailbox) renewAndRevoke(ctx context.Context) (*Remedy, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := certificatesOwn(st.certify); err != nil {
+	// One whose read went unanswered, restored with nothing published, may
+	// have certificates: the remedy goes on, as it does past every read it
+	// cannot use.
+	published, err := b.publishedSerial()
+	if err != nil {
 		return nil, err
 	}
+	if err := certificatesOwn(st.certify || st.unread != nil && published == 0); err != nil {
+		return nil, err
+	}
+	st.certify = true
 	below, _, err := b.nextNumber(st, true)
 	if err != nil {
 		return nil, err

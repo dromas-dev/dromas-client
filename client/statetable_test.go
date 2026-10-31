@@ -34,18 +34,17 @@ var update = flag.Bool("update", false, "write testdata/statetable.golden from t
 // command does in some state is a change to it, read line by line before it
 // is committed. go test ./client -run TestStateTable -update writes it anew.
 //
-// A row is the mailbox's mode (identity mode, or working-key mode, made with
-// init --offline), its directory (all of it, or the identity alone, as a
-// restore from its backup), what its server holds (never registered, an
-// active mailbox, one the server forgot), and what the
-// server holds of a revocation of its certificates (none, through the one
-// in use, or through a serial a day ahead of the clock), each revocation
-// published by another holder of the identity and not kept by the mailbox: in
-// identity mode, a trip it did not make; then three rows more of each mode:
-// the address revoked at the server, the mailbox finished (it holds its own
-// revocation); and no mailbox at all. init and init --offline restore the
-// identity alone each in its own mode, so each meets its mailbox's mode and
-// the other.
+// A row is what signs the mailbox's statements (its identity, or a working
+// key under a certificate, made with init --offline), its directory (all of
+// it, or the identity alone, as a restore from its backup), what its server
+// holds (never registered, an active mailbox, one the server forgot), and
+// what the server holds of a revocation of its certificates (none, through
+// the one in use, or through a serial a day ahead of the clock), each
+// revocation published by another holder of the identity and not kept by
+// the mailbox; then three rows more of each signer: the address revoked at
+// the server, the mailbox finished (it holds its own revocation); and no
+// mailbox at all. init and init --offline restore the identity alone, so
+// each meets a mailbox of each signer.
 //
 // Two kinds of cell are not run, since each is the same as another (#426
 // item 3): a server that is silent leaves the mailbox as one that refuses does
@@ -120,8 +119,8 @@ func TestStateTable(t *testing.T) {
 }
 
 // A stateRow puts a mailbox in its state: in dir, against e, with peer an active
-// mailbox of the same server. Its mailbox, and the env's, are in working-key
-// mode where working is set.
+// mailbox of the same server. Its mailbox, and the env's, are registered
+// under a certificate where working is set.
 type stateRow struct {
 	name    string
 	working bool
@@ -131,17 +130,17 @@ type stateRow struct {
 func stateRows() []stateRow {
 	var rows []stateRow
 	for _, working := range []bool{false, true} {
-		mode := map[bool]string{false: "identity mode, ", true: "working-key mode, "}[working]
-		for _, r := range modeRows() {
-			r.name, r.working = mode+r.name, working
+		signer := map[bool]string{false: "identity-signed, ", true: "certified, "}[working]
+		for _, r := range signerRows() {
+			r.name, r.working = signer+r.name, working
 			rows = append(rows, r)
 		}
 	}
 	return append(rows, stateRow{"no mailbox", false, func(*testing.T, *env, string, *client.Mailbox) {}})
 }
 
-// modeRows are the rows of one mode, whose env makes its mailboxes in it.
-func modeRows() []stateRow {
+// signerRows are the rows of one signer, whose env makes its mailboxes so.
+func signerRows() []stateRow {
 	var rows []stateRow
 	for _, view := range []string{"full", "identity alone"} {
 		for _, server := range []string{"never registered", "active", "forgotten"} {
@@ -326,18 +325,11 @@ func stateCommands() []stateCommand {
 			if err != nil {
 				return "", err
 			}
-			r, err := b.Switch(ctx)
-			if r == nil {
+			p, err := b.RenewUnderCertificate(ctx)
+			if p == nil {
 				return "", err
 			}
-			s := fmt.Sprintf("retried %d", len(r.Retried))
-			if r.Prekey != nil {
-				s = fmt.Sprintf("prekey %d, ", r.Prekey.Serial) + s
-			}
-			if r.NotRetried != nil {
-				s += ", not retried: " + r.NotRetried.Error()
-			}
-			return s, err
+			return fmt.Sprintf("prekey %d", p.Serial), err
 		}},
 		{"recv", func(ctx context.Context, e *env, dir string, _ *client.Mailbox) (string, error) {
 			b, err := open(e, dir)

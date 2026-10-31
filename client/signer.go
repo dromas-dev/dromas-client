@@ -36,8 +36,12 @@ type signer interface {
 }
 
 // signerOf is the signer of statement n, as this mailbox signed it: its
-// identity, or working key n under its certificate, which it returns too.
+// identity, or working key n under its certificate, which it returns too. A
+// mailbox that may sign nothing more hands out no signer.
 func (b *Mailbox) signerOf(n uint64) (signer, *protocol.Certificate, error) {
+	if err := b.finished(); err != nil {
+		return nil, nil, err
+	}
 	rank, err := b.rankOf(n)
 	if err != nil {
 		return nil, nil, err

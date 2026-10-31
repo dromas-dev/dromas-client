@@ -60,7 +60,7 @@ var crashCommands = map[string]func(ctx context.Context, b *client.Mailbox, o cr
 		return err
 	},
 	"switch": func(ctx context.Context, b *client.Mailbox, _ crashOrder) error {
-		_, err := b.Switch(ctx)
+		_, err := b.RenewUnderCertificate(ctx)
 		return err
 	},
 	"send": func(ctx context.Context, b *client.Mailbox, o crashOrder) error {
@@ -185,7 +185,7 @@ func TestARenewalKilledAtEachStepLeavesTheMailboxWhole(t *testing.T) {
 	}
 	for _, working := range []bool{false, true} {
 		for _, step := range renewalSteps(working) {
-			t.Run(fmt.Sprintf("working-key mode %v, %s", working, step), func(t *testing.T) {
+			t.Run(fmt.Sprintf("under a certificate %v, %s", working, step), func(t *testing.T) {
 				e := newEnv(t)
 				e.working = working
 				a, b := e.mailbox(), e.mailbox()
@@ -198,8 +198,8 @@ func TestARenewalKilledAtEachStepLeavesTheMailboxWhole(t *testing.T) {
 	}
 }
 
-// renewalSteps are the steps of a renewal in a mode: in identity mode no
-// working key is made.
+// renewalSteps are the steps of a renewal, under a certificate where working
+// is set: the identity's makes no working key.
 func renewalSteps(working bool) []string {
 	if working {
 		return client.Steps("renewal")
@@ -207,16 +207,15 @@ func renewalSteps(working bool) []string {
 	return slices.DeleteFunc(slices.Clone(client.Steps("renewal")), func(s string) bool { return s == "working key made" })
 }
 
-// A restore told working-key mode (init --offline) at a server that holds
-// nothing of the address, killed at each step of its trip and of its
-// renewal: run again, it goes on, keeps the trip as its own (no foreign trip
-// is said), and comes back whole in working-key mode.
-func TestAnOfflineInitKilledAtEachStepOfItsTripLeavesItsOwnTrip(t *testing.T) {
+// A restore told to register under a certificate (init --offline), at a
+// server that holds nothing of the address, killed at each step of its
+// renewal: run again, it goes on, and comes back whole under a certificate.
+func TestAnOfflineInitKilledAtEachStepComesBackUnderACertificate(t *testing.T) {
 	t.Parallel()
 	if testing.Short() {
 		t.Skip("long: -short skips it; scripts/check.sh full and CI run it")
 	}
-	for _, step := range append(client.Steps("trip"), renewalSteps(true)...) {
+	for _, step := range renewalSteps(true) {
 		t.Run(step, func(t *testing.T) {
 			e := newEnv(t)
 			a := e.mailbox()
@@ -245,57 +244,43 @@ func TestAnOfflineInitKilledAtEachStepOfItsTripLeavesItsOwnTrip(t *testing.T) {
 				t.Fatalf("init --offline again after a crash at %s: %v", step, err)
 			}
 			landAll(t, x)
-			if m, err := x.Mode(context.Background()); err != nil || m != "working_key" {
-				t.Fatalf("after a crash at %s: mode %s, %v", step, m, err)
+			if !certified(t, x) {
+				t.Fatalf("after a crash at %s: not under a certificate", step)
 			}
 			whole(t, e, x, a)
 		})
 	}
 }
 
-// A switch to working-key mode killed at each of its steps: run again, it
-// finishes, keeps the trip as its own, and posts again the message it sent,
-// which its reader takes once.
+// A switch (cert switch) killed at each step of its renewal: run again, it
+// renews under a certificate, and the message the mailbox's identity signed
+// before it is taken once.
 func TestASwitchKilledAtEachStepFinishesWhenRunAgain(t *testing.T) {
 	t.Parallel()
 	if testing.Short() {
 		t.Skip("long: -short skips it; scripts/check.sh full and CI run it")
 	}
-	// Its retries are written by the switch, then posted as a flush posts.
-	posted := slices.DeleteFunc(slices.Clone(client.Steps("post")), func(s string) bool { return s == "outbox written" })
-	steps := slices.Concat(client.Steps("switch"), client.Steps("trip"), renewalSteps(true), posted)
-	for _, step := range steps {
+	for _, step := range renewalSteps(true) {
 		t.Run(step, func(t *testing.T) {
 			ctx := context.Background()
 			e := newEnv(t)
 			a, b := e.mailbox(), e.mailbox()
-			send(t, b, a, "sent in identity mode")
+			send(t, b, a, "signed by the identity")
 			e.clock.Add(2 * time.Second)
 			crash(t, e, b, "switch", step, protocol.Address{})
 			x, err := client.Open(b.Dir(), e.opts())
 			if err != nil {
 				t.Fatal(err)
 			}
-			// Once its retries are written the switch is done, and what it
-			// did not post waits in the outbox.
-			if slices.Contains(append(posted, "retries written"), step) {
-				if _, err := x.Switch(ctx); err == nil || !strings.Contains(err.Error(), "working-key mode already") {
-					t.Fatalf("the switch again after a crash at %s: %v", step, err)
-				}
-				if _, err := x.Flush(ctx); err != nil {
-					t.Fatalf("a flush after a crash at %s: %v", step, err)
-				}
-			} else if _, err := x.Switch(ctx); err != nil {
+			e.clock.Add(2 * time.Second)
+			if _, err := x.RenewUnderCertificate(ctx); err != nil {
 				t.Fatalf("the switch again after a crash at %s: %v", step, err)
 			}
-			if m, err := x.Mode(ctx); err != nil || m != "working_key" {
-				t.Fatalf("after a crash at %s: mode %s, %v", step, m, err)
-			}
-			if got := inbox(t, a); len(got) != 0 {
-				t.Fatalf("the reader's inbox before it drains: %q", got)
+			if !certified(t, x) || servedCertificate(t, e, x) != numberOf(t, x) {
+				t.Fatalf("after a crash at %s: not under a certificate", step)
 			}
 			res := receive(t, a)
-			if len(res.Delivered) != 1 || bodyOf(t, res.Delivered[0]) != "sent in identity mode" {
+			if len(res.Delivered) != 1 || bodyOf(t, res.Delivered[0]) != "signed by the identity" {
 				t.Fatalf("the reader after a crash at %s: %+v", step, res)
 			}
 			whole(t, e, x, a)
