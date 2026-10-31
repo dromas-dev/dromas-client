@@ -482,11 +482,29 @@ func (b *Mailbox) publish(ctx context.Context, path string, req any, n uint64) (
 // unless a higher one is; the renewal under way done, with any that failed
 // before it, unless a later one is under way; and pass, which is under the
 // certificate the server now holds this mailbox to, as the pass the mailbox keeps,
-// or with none given, no pass. Then the working keys older than n go.
+// or with none given, no pass; and n on the record of a statement the mailbox
+// did not make, which its server took n above (NotMade.RenewedAbove). Then the
+// working keys older than n go.
 func (b *Mailbox) recordTaken(n uint64, pass string) error {
 	if err := b.update(func(s store) error {
 		if err := b.recordPublished(s, n); err != nil {
 			return err
+		}
+		if raw := s.get(bucketMailbox, "not-made"); raw != nil {
+			var nm NotMade
+			if err := protocol.Unmarshal(raw, &nm); err != nil {
+				return err
+			}
+			if n > nm.RenewedAbove {
+				nm.RenewedAbove = n
+				raw, err := json.Marshal(nm)
+				if err != nil {
+					return err
+				}
+				if err := s.put(bucketMailbox, "not-made", raw); err != nil {
+					return err
+				}
+			}
 		}
 		begun, err := decimal(s.get(bucketIntent, "renewal"), "renewal")
 		if err != nil {

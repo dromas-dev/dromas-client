@@ -177,8 +177,14 @@ func TestRestoreFromIdentity(t *testing.T) {
 		t.Errorf("the restored mailbox's .gitignore: %q, %v", got, err)
 	}
 	landAll(t, r)
-	if _, err := r.Rekey(context.Background()); err != nil {
+	p, err := r.Rekey(context.Background())
+	if err != nil {
 		t.Fatal(err)
+	}
+	// Its server served the lost machine's statement, which the restore did
+	// not make and renewed above: said so, by that renewal (#599).
+	if st, err := r.Status(t.Context()); err != nil || st.PrekeyNotMade == nil || st.PrekeyNotMade.RenewedAbove != p.Serial || strings.Contains(strings.Join(st.Attention, " "), "renews nothing above it") {
+		t.Fatalf("status after the restore's renewal: %+v, %v", st, err)
 	}
 	send(t, a, r, "to the restored mailbox")
 	if res := receive(t, r); len(res.Delivered) != 1 {

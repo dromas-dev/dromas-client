@@ -1390,13 +1390,17 @@ const maxRecord = 64 << 10
 
 // notMadeLine is the line that says the mailbox's server served a statement in
 // its name that it did not make.
-// A statement the identity signed has no certificate, and none is named.
+// A statement the identity signed has no certificate, and none is named; nor
+// is a renewal above it before its server took one.
 func notMadeLine(nm *client.NotMade) []byte {
-	var serial, own any
+	var serial, own, renewed any
 	if nm.CertificateSerial != 0 {
 		serial, own = nm.CertificateSerial, nm.OwnCertificate
 	}
-	return line("prekey_not_made", "serial", nm.Serial, "certificate_serial", serial, "own_certificate", own, "at", nm.At, "detail", nm.Words())
+	if nm.RenewedAbove != 0 {
+		renewed = nm.RenewedAbove
+	}
+	return line("prekey_not_made", "serial", nm.Serial, "certificate_serial", serial, "own_certificate", own, "renewed_above", renewed, "at", nm.At, "detail", nm.Words())
 }
 
 // readRecord reads a revocation record: the JSON dromas revocation make
