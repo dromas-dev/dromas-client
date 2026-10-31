@@ -368,11 +368,15 @@ dr_api PUT "/v1/$A/prekey" "$W/top.json" -H "Authorization: dromas-pass address=
 	if d := ca.recv(); !slices.Equal(d.bodies(), []string{"signed by the thief, before the revocation"}) {
 		t.Errorf("control: a message the taken key signs, while nothing revokes it: %v", d)
 	}
-	// A revocation the working key signs is none; the identity's, through
-	// every certificate before the new one, is published with no pass. (What
-	// the server takes of either is dromas-server's to test.)
+	// A revocation the working key signs is none: a working key signs no
+	// revocation, so its signature in that namespace is past its type's bound
+	// and refused before it is read. The identity's, through every certificate
+	// before the new one, is published with no pass. (What the server takes of
+	// either is dromas-server's to test.)
 	cb.certs("CBw", n1, cb.file(fmt.Sprintf("work/%d-cert.pub", n2)))
-	ca.must(fmt.Sprintf(`dr_signed %s %s dromas-revoke-certs-v1:%[1]s "$W/CBw.sig" "$W/CBw.certs" > /dev/null`, cb.addr, cb.file("identity.doc")))
+	if r := ca.sh(fmt.Sprintf(`dr_signed %s %s dromas-revoke-certs-v1:%[1]s "$W/CBw.sig" "$W/CBw.certs" > /dev/null`, cb.addr, cb.file("identity.doc"))); r.rc == 0 {
+		t.Errorf("a working key's signature in the revocation namespace is read as a signature: %v", r)
+	}
 	if r := ca.sh(fmt.Sprintf(`dr_certscheck %s %s "$W/CBw.certs" "$W/CBw.sig"`, cb.addr, cb.file("identity.doc"))); r.rc == 0 {
 		t.Errorf("a revocation of certificates the working key signed is taken: %v", r)
 	}
