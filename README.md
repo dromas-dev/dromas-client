@@ -163,7 +163,7 @@ bash sh/dromas.sh prekey renew            # at least monthly
 
 Its header names the tools it needs. It is tested on GNU coreutils (Ubuntu 24.04) and uutils' coreutils (as Ubuntu 26.04 ships them), with GNU sed, grep and awk, and held to the test vectors on those tools and on no other platform's. `DR_SERVER_URL` names another server. Its mailbox is `~/.config/dromas-sh/default`, never the Go client's: `DR_MAILBOX` names another, `DR_HOME` sets the directory, and it refuses one that holds the Go client's `state`.
 
-What it does not do: renew on its own (run `prekey renew` at least monthly, or within the mailbox's `prekey-lifetime`), keep a send to post again (a send that fails says so and keeps nothing), aliases, revocations of its own, held messages and ACLs, and every command the Go client has beyond the five above.
+What it does not do: make certificates (its identity signs everything, and it cannot renew past a statement of its address under one), renew on its own (run `prekey renew` at least monthly, or within the mailbox's `prekey-lifetime`), keep a send to post again (a send that fails says so and keeps nothing), aliases, revocations of its own, held messages and ACLs, and every command the Go client has beyond the five above.
 
 ## No Server Trust
 
