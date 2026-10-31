@@ -796,7 +796,7 @@ What version 1 fixes, and where each can grow inside it:
 
 | Fixed | Grows by |
 |---|---|
-| The signed statements, byte for byte (Sections 4.1, 6, 8, 10); a certificate's type, key id, principal and validity, a window checked at the verifier, whose longest is each server's own (Sections 5.2, 11.18) | a new format under a new tag; a new identity or prekey key type; a certificate extension, which a reader ignores |
+| The signed statements, byte for byte (Sections 4.1, 6, 8, 10); a certificate's type, key id, principal and validity, a window checked at the verifier, whose longest is each server's own, and its one form, with no critical option or extension (Sections 5.2, 11.18) | a new format under a new tag, a certificate's under a new key id; a new identity or prekey key type |
 | The two signer forms, their ranks, and the order `(c, p)` (Section 5) | nothing |
 | The namespaces, `dromas-<purpose>-v1:<address>` | a new purpose |
 | A signature's form, and its bound for each key type (Section 3.2) | a new key type, with a bound of its own |
