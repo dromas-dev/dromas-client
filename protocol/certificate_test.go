@@ -128,6 +128,19 @@ func TestCertificateRoundTrip(t *testing.T) {
 	}
 }
 
+// resign is a certificate's "after" in TestCertificateRules: its nonce made
+// n bytes, then signed again by identity over the bytes as they now are.
+func resign(identity ssh.Signer, n int) func(*ssh.Certificate) {
+	return func(c *ssh.Certificate) {
+		c.Nonce = bytes.Repeat([]byte{7}, n)
+		sig, err := identity.Sign(rand.Reader, signedBytes(c))
+		if err != nil {
+			panic(err)
+		}
+		c.Signature = sig
+	}
+}
+
 func TestCertificateRules(t *testing.T) {
 	b := newCertMailbox(t)
 	other := newCertMailbox(t)
@@ -170,11 +183,17 @@ func TestCertificateRules(t *testing.T) {
 		{name: "another mailbox's address", change: func(c *ssh.Certificate) { c.ValidPrincipals = []string{other.id.Address().String()} }, want: ErrCertificate},
 		{name: "two principals", change: func(c *ssh.Certificate) { c.ValidPrincipals = append(c.ValidPrincipals, other.id.Address().String()) }, want: ErrCertificate},
 		{name: "the address in capitals", change: func(c *ssh.Certificate) { c.ValidPrincipals = []string{strings.ToUpper(b.id.Address().String())} }, want: ErrCertificate},
-		{name: "an extension OpenSSH defines", change: func(c *ssh.Certificate) { c.Extensions = map[string]string{"permit-pty": ""} }},
+		// The one form its makers write: a nonce of 32 bytes, no extension,
+		// an empty reserved field. The control re-signs a certificate as the
+		// nonce's two cases do, and it passes.
+		{name: "an extension OpenSSH defines", change: func(c *ssh.Certificate) { c.Extensions = map[string]string{"permit-pty": ""} }, want: ErrCertificate},
 		{name: "an extension nobody defines, with a value", change: func(c *ssh.Certificate) {
-			c.Extensions = map[string]string{"nobody-defines@dromas.invalid": "a value", "permit-pty": ""}
-		}},
-		{name: "reserved bytes", change: func(c *ssh.Certificate) { c.Reserved = []byte("not read") }},
+			c.Extensions = map[string]string{"nobody-defines@dromas.invalid": "a value"}
+		}, want: ErrCertificate},
+		{name: "reserved bytes", change: func(c *ssh.Certificate) { c.Reserved = []byte("not read") }, want: ErrCertificate},
+		{name: "re-signed, its nonce 32 bytes", after: resign(b.identity, 32)},
+		{name: "a nonce of 16 bytes", after: resign(b.identity, 16), want: ErrCertificate},
+		{name: "a nonce of 33 bytes", after: resign(b.identity, 33), want: ErrCertificate},
 		{name: "a critical option", change: func(c *ssh.Certificate) { c.CriticalOptions = map[string]string{"force-command": "/bin/true"} }, want: ErrCertificate},
 		{name: "source-address, which the library leaves to its caller", change: func(c *ssh.Certificate) { c.CriticalOptions = map[string]string{"source-address": "127.0.0.1/32"} }, want: ErrCertificate},
 		{name: "a critical option nobody defines", change: func(c *ssh.Certificate) { c.CriticalOptions = map[string]string{"nobody-defines@dromas.invalid": ""} }, want: ErrCertificate},

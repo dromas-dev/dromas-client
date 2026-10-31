@@ -57,11 +57,11 @@ type Certificate struct {
 // that type's key checks and is not the identity key; signed by the identity
 // key, byte for byte; both dates at or before LastDate; begun, and not ended.
 // A verifier sets no ceiling on how long one runs: that is a server's, when it
-// takes a statement (PROTOCOL.md §11.7).
-// As the format says (draft-ietf-sshm-cert-01 §2.1.1): a critical option a
-// verifier does not know is refused, and none is known here; an extension it
-// does not know is ignored, and none is known here either; and what the
-// reserved field holds is ignored.
+// takes a statement (PROTOCOL.md §11.7). It is in the one form its makers
+// write, NewCertificate and "ssh-keygen -s … -O clear": a nonce of 32 bytes,
+// no critical option, no extension and an empty reserved field, so a
+// signature under it is as long as its identity's type gives
+// (SignatureBound), and the identity's signature on it in its one form.
 func CheckCertificate(id *Identity, key ssh.PublicKey, now time.Time) (*Certificate, error) {
 	cert, err := certificateForm(id, key)
 	if err != nil {
@@ -115,6 +115,12 @@ func certificateForm(id *Identity, key ssh.PublicKey) (*ssh.Certificate, error) 
 	}
 	if len(cert.CriticalOptions) != 0 {
 		return nil, fmt.Errorf("%w: it carries a critical option", ErrCertificate)
+	}
+	if len(cert.Extensions) != 0 {
+		return nil, fmt.Errorf("%w: it carries an extension", ErrCertificate)
+	}
+	if len(cert.Nonce) != 32 || len(cert.Reserved) != 0 {
+		return nil, fmt.Errorf("%w: its nonce is not 32 bytes, or its reserved field is not empty", ErrCertificate)
 	}
 	if cert.SignatureKey == nil || !bytes.Equal(cert.SignatureKey.Marshal(), id.PublicKey().Marshal()) {
 		return nil, fmt.Errorf("%w: it is not signed by the mailbox's identity", ErrCertificate)
