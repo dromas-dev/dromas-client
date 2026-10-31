@@ -316,7 +316,7 @@ dr_rank(){ # <signature> <identity document> <address> → the rank of its signe
   [ "$k" != "$(dr_idkey "$2")" ] || { echo 0; return 0; }
   r=$(dr_cert "$1" "$2" "$3") && echo "${r%% *}"
 }
-dr_signed(){ # <address> <identity document> <namespace> <signature> <message> [at] → the rank of its signer (dr_rank), only for a signature by that identity's own key, or by a working key under a certificate of it that holds at the time given (now, without one): begun and not ended. 1 otherwise; 2 when all that fails is that the certificate has ended, 3 that it has not begun. Whether the address's mode takes that signer is dr_mode's
+dr_signed(){ # <address> <identity document> <namespace> <signature> <message> [at] → the rank of its signer (dr_rank), only for a signature by that identity's own key, or by a working key under a certificate of it that holds at the time given (now, without one): begun and not ended. 1 otherwise; 2 when all that fails is that the certificate has ended, 3 that it has not begun. Whether the address's revocation of certificates covers that signer is dr_certrevoked's
   local A=$1 r n a b t=${6:-$(dr_now)}
   dr_bound "$4" "$2" && n=$(dr_rank "$4" "$2" "$A") || return 1
   if [ "$n" = 0 ]; then

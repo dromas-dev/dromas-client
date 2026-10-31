@@ -267,11 +267,11 @@ func TestScriptReadsARevocationOfCertificates(t *testing.T) {
 	}
 	out := p.must(fmt.Sprintf(`d="$DR/peers/%[1]s"; mkdir -p "$d"; cp %[2]s "$d/identity.doc"
 rec(){ jq -cn --arg i "$(dr_b64 %[2]s)" --arg l "$(dr_b64 "$1")" --arg g "$(dr_b64 "$2")" '{identity:$i, revoked_certificates:$l, revoked_certificates_signature:$g}' > "$d/revoked-certs.json"; }
-rec %[3]s.txt %[3]s.sig; for n in 0 1 3 4 5 9007199254740991; do dr_mode %[1]s $n; echo -n "$? "; done
-rec %[4]s.txt %[4]s.sig; dr_mode %[1]s 9007199254740991; echo -n "$? "
-rec %[3]s.txt %[4]s.sig; dr_mode %[1]s 2; echo -n "$? "
-echo '{}' > "$d/revoked-certs.json"; dr_mode %[1]s 2; echo "$?"`, va, vec("a/identity.doc"), ok4, okTop))
-	if out != "1 1 1 1 0 0 1 3 3\n" {
+rec %[3]s.txt %[3]s.sig; for n in 0 1 3 4 5 9007199254740991; do dr_certrevoked %[1]s $n; echo -n "$? "; done
+rec %[4]s.txt %[4]s.sig; dr_certrevoked %[1]s 9007199254740991; echo -n "$? "
+rec %[3]s.txt %[4]s.sig; dr_certrevoked %[1]s 2; echo -n "$? "
+echo '{}' > "$d/revoked-certs.json"; dr_certrevoked %[1]s 2; echo "$?"`, va, vec("a/identity.doc"), ok4, okTop))
+	if out != "1 0 0 0 1 1 0 3 3\n" {
 		t.Errorf("a kept revocation through 4, through the highest, under another's signature, and one that holds none: %q", out)
 	}
 }
