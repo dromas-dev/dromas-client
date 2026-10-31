@@ -250,43 +250,41 @@ dr_idcheck(){ # <identity document> [address] → 0 only for a two-line document
     ssh-ed25519) dr_keycheck "$(printf %s "${l#* }" | base64 -d | tail -c 32 | od -An -v -tx1 | tr -d ' \n')" ;;
   esac
 }
-dr_sigmax(){ case $(sed -n 2p "$1" | cut -d' ' -f1) in ssh-ed25519 | ecdsa-sha2-nistp256) echo 4096 ;; *) return 1 ;; esac; }      # <identity document> → the most bytes a signature by a mailbox of its key type may be, every byte of the file (PROTOCOL.md §3.2): each type states its own. Nothing for a type this script does not verify
+dr_sigmax(){ case $(sed -n 2p "$1" | cut -d' ' -f1) in ssh-ed25519) echo 878 ;; ecdsa-sha2-nistp256) echo 975 ;; *) return 1 ;; esac; }      # <identity document> → the most bytes a signature by a mailbox of its key type may be, every byte of the file (PROTOCOL.md §3.2): its largest in the one form, in any namespace, by the identity or under a certificate it made. Nothing for a type this script does not verify
 dr_bound(){ local m; m=$(dr_sigmax "$2") && [ "$(wc -c < "$1")" -le "$m" ]; }      # <signature file> <identity document> → 0 only for a signature no longer than its identity's key type allows
-dr_blob(){ # <signature file> → the SSHSIG blob it armors, in hex, read as ssh-keygen -Y verify reads it (OpenSSH's sshsig_dearmor), and only if the file is at most 4096 bytes in all, the most any identity key type allows (dr_sigmax): the BEGIN line first, ending in LF or CRLF; then base64 in its one encoding, with space, tab, LF, VT, FF and CR skipped wherever they are; then LF and the END line, after which nothing is read; one NUL may be the last byte before that LF, as OpenSSH's sshbuf_dup_string takes it. 1 for anything else, any other NUL included. The bytes are read as hex, never through a shell variable, which would drop a NUL
-  local h b e t B E
-  [ "$(wc -c < "$1")" -le 4096 ] || return 1      # the bound counts every byte of the file, what follows the END line too
-  B=$(printf %s '-----BEGIN SSH SIGNATURE-----' | od -An -v -tx1 | tr -s ' \n' '  '); E=$(printf '\n%s' '-----END SSH SIGNATURE-----' | od -An -v -tx1 | tr -s ' \n' '  ')
-  h=$(od -An -v -tx1 < "$1" | tr -s ' \n' '  ')      # every byte as " xx", and one space at the end: a match of " xx … xx " falls on whole bytes
-  [[ $h == "$B"* ]] || return 1; h=" ${h#"$B"}"
-  case $h in " 0d 0a "*) h=${h#" 0d 0a"} ;; " 0a "*) h=${h#" 0a"} ;; *) return 1 ;; esac
-  b=${h%%"$E"*}; [ "$b" != "$h" ] || return 1      # up to the first LF and END line
-  b=${b%" 00"}      # one NUL as its last byte
-  for e in 20 09 0a 0b 0c 0d; do b=${b// $e/}; done
-  [[ $b =~ ^( (3[0-9]|4[1-9a-f]|5[0-9a]|6[1-9a-f]|7[0-9a]|2b|2f|3d))*$ ]] || return 1      # nothing left but the base64 alphabet and its padding
-  t=$(printf "${b// /\\x}")
-  [ -n "$t" ] && [ "$(printf %s "$t" | base64 -d 2> /dev/null | base64 | tr -d '\n')" = "$t" ] || return 1      # in its one encoding: padded, and the unused bits of the last character zero, as OpenSSH's decoder holds it
-  printf %s "$t" | base64 -d | od -An -v -tx1 | tr -d ' \n'
+dr_blob(){ # <signature file> → the SSHSIG blob it armors, in hex, only for armour in its one form, the bytes ssh-keygen -Y sign and the Go client write (PROTOCOL.md §3.2), and at most 975 bytes, the most any identity key type allows (dr_sigmax): the BEGIN line, the base64 of the blob in its one encoding in lines of 70 characters, the END line, each ending in LF, and nothing before or after. The file is compared, as bytes, with the armour written back from the blob it holds, as the Go client's Dearmor compares it: any other form, CRLF, whitespace or a NUL among them, is refused. 1 for anything else
+  local t h
+  [ "$(wc -c < "$1")" -le 975 ] || return 1
+  t=$(sed '1d;$d' "$1" | tr -d '\n')      # what lies between the first line and the last, read as text: whatever it drops or a file holds besides, the comparison below refuses
+  [[ $t =~ ^[A-Za-z0-9+/]+={0,2}$ ]] && h=$(printf %s "$t" | base64 -d 2> /dev/null | od -An -v -tx1 | tr -d ' \n') && [ -n "$h" ] || return 1
+  [ "$(printf %s "$t" | base64 -d | base64 | tr -d '\n')" = "$t" ] || return 1      # the base64 in its one encoding: padded, and the unused bits of the last character zero
+  [ "$({ printf -- '-----BEGIN SSH SIGNATURE-----\n'; printf %s "$t" | fold -w 70; printf -- '\n-----END SSH SIGNATURE-----\n'; } | sha256sum)" = "$(sha256sum < "$1")" ] || return 1      # the armour written back, byte for byte
+  printf %s "$h"
 }
-dr_s(){ # <an SSH signature in hex: its type as a string, then its bytes as one> → 1 only for an Ed25519 signature that is not 64 bytes, or whose S is not below the group's order L: such a signature is invalid (RFC 8032 §5.1.7), and ssh-keygen before the cut PROTOCOL.md Appendix A gives takes one with L added to S. Its type may end in one NUL, as OpenSSH reads it. 0 for any other, which ssh-keygen judges
-  local s="" i a b o= e L=1000000000000000000000000000000014def9dea2f79cd65812631a5cf5d3ed
-  e=$(dr_asc ssh-ed25519)
-  [ "${1:0:30}" = "0000000b$e" ] && o=30; [ "${1:0:32}" = "0000000c${e}00" ] && o=32
-  [ -n "$o" ] || return 0
-  [ ${#1} -eq $((o + 136)) ] && [ "${1:o:8}" = 00000040 ] || return 1
-  for ((i = o + 134; i >= o + 72; i -= 2)); do s+=${1:i:2}; done      # S is the signature's last 32 bytes, little-endian: here it is read the other way round, to compare with L
-  for i in 0 8 16 24 32 40 48 56; do a=$((16#${s:i:8})); b=$((16#${L:i:8})); [ "$a" -lt "$b" ] && return 0; [ "$a" -gt "$b" ] && return 1; done
-  return 1
+dr_mpint(){ [[ $1 =~ ^(0[1-9a-f]|[1-7][0-9a-f]|00[89a-f][0-9a-f])([0-9a-f]{2})*$ ]]; }      # <an mpint's bytes, in hex> → 0 only for a positive number written minimally (RFC 4251 §5): no byte before its first but the one zero a set high bit needs
+dr_sigform(){ # <an SSH signature, in hex: its type as a string, then its bytes as one> → 0 only for one in its one form (PROTOCOL.md §3.2), and nothing after it: of type ssh-ed25519, 64 bytes whose S is below the group's order L (RFC 8032 §5.1.7: ssh-keygen before the cut PROTOCOL.md Appendix A gives takes one with L added to S); or of type ecdsa-sha2-nistp256, its bytes r and s, each a minimal mpint (dr_mpint), and nothing after them, s either of its two values, both of which ECDSA takes. Whether it verifies is ssh-keygen's. 1 for anything else
+  local x=$1 o=0 l v t g s="" i a b L=1000000000000000000000000000000014def9dea2f79cd65812631a5cf5d3ed
+  dr_str && t=$v && dr_str && g=$v && [ "$o" -eq "${#x}" ] || return 1
+  if [ "$t" = "$(dr_asc ssh-ed25519)" ]; then
+    [ ${#g} -eq 128 ] || return 1
+    for ((i = 126; i >= 64; i -= 2)); do s+=${g:i:2}; done      # S is the signature's last 32 bytes, little-endian: here it is read the other way round, to compare with L
+    for i in 0 8 16 24 32 40 48 56; do a=$((16#${s:i:8})); b=$((16#${L:i:8})); [ "$a" -lt "$b" ] && return 0; [ "$a" -gt "$b" ] && return 1; done
+    return 1
+  fi
+  [ "$t" = "$(dr_asc ecdsa-sha2-nistp256)" ] || return 1
+  x=$g; o=0
+  dr_str && dr_mpint "$v" && dr_str && dr_mpint "$v" && [ "$o" -eq "${#x}" ]
 }
-dr_sshsig(){ # <signature file> → 0 only for a signature dr_blob reads that is an SSHSIG of version 0 or 1 (OpenSSH refuses only a higher one), five fields and nothing after them, whose own signature passes dr_s. It leaves the blob in x and its signing key in k, both in hex, for its caller, whose locals they are. The reserved field is read and skipped, as OpenSSH does: ssh-keygen verifies over an empty one
+dr_sshsig(){ # <signature file> → 0 only for a signature dr_blob reads whose blob is an SSHSIG in its one form (PROTOCOL.md §3.2): "SSHSIG", version 1, the signing key, the namespace, an empty reserved field, sha512, and the signature in its one form (dr_sigform), with nothing after. It leaves the blob in x, its signing key in k and its namespace in ns, each in hex, for its caller, whose locals they are: the key's one form is its caller's to hold (the identity's, byte for byte, or a certificate's, dr_cert), and so is the namespace
   local o=20 l v
-  x=$(dr_blob "$1") && [[ ${x:0:20} =~ ^5353485349470000000[01]$ ]] || return 1      # "SSHSIG", version 0 or 1
-  dr_str && k=$v && dr_str && dr_str && dr_str && dr_str && dr_s "$v" && [ "$o" -eq "${#x}" ]      # the signing key, the namespace, reserved, the hash, the signature: and nothing after
+  x=$(dr_blob "$1") && [ "${x:0:20}" = 53534853494700000001 ] || return 1      # "SSHSIG", version 1
+  dr_str && k=$v && dr_str && ns=$v && dr_str && [ -z "$v" ] && dr_str && [ "$v" = "$(dr_asc sha512)" ] && dr_str && dr_sigform "$v" && [ "$o" -eq "${#x}" ]      # the signing key, the namespace, reserved, the hash, the signature: and nothing after
 }
-dr_cert(){ # <signature> <identity document> <address> → "<serial> <valid after> <valid before>", as Unix times, for the certificate the signature carries, only if it is in its one form (below, PROTOCOL.md §5.2) and names that identity as its signer. Its fields are read from its bytes, in order: ssh-keygen -Y verify takes a certificate with a critical option, or with extensions out of their order, and checks no key id. Whether the identity's signature on it is good, and whether it holds now, are dr_signed's
-  local x o=20 l v k n a b      # x: the bytes being read, in hex; o: how far into them; v: the field just read
+dr_cert(){ # <signature> <identity document> <address> → "<serial> <valid after> <valid before>", as Unix times, for the certificate the signature carries, only if it is in its one form (below, PROTOCOL.md §5.2) and names that identity as its signer. Its fields are read from its bytes, in order: ssh-keygen -Y verify takes a certificate with a critical option, an extension or bytes in its reserved field, and checks no key id. Whether the identity's signature on it is good, and whether it holds now, are dr_signed's
+  local x o=20 l v k ns n a b      # x: the bytes being read, in hex; o: how far into them; v: the field just read
   dr_sshsig "$1" || return 1; x=$k; o=0      # the signing key: here, the certificate
   dr_str && [ "$v" = "$(dr_asc ssh-ed25519-cert-v01@openssh.com)" ] || return 1      # a certificate for an Ed25519 key
-  dr_str || return 1      # the nonce
+  dr_str && [ ${#v} -eq 64 ] || return 1      # the nonce: 32 bytes, as every maker writes one
   dr_str && k=$v && dr_keycheck "$k" || return 1      # the working key, held to the identity's own key checks
   dr_u64 && n=$v && [ "$n" -ge 1 ] && [ "$n" -le 9007199254740991 ] || return 1      # the serial: from 1 to 2^53 - 1, as a prekey's
   [ "${x:o:8}" = 00000001 ] || return 1; o=$((o + 8))      # a user certificate
@@ -294,31 +292,23 @@ dr_cert(){ # <signature> <identity document> <address> → "<serial> <valid afte
   dr_str && [ "$v" = "$(printf %08x ${#3})$(dr_asc "$3")" ] || return 1      # exactly one principal: the address
   dr_u64 && a=$v && dr_u64 && b=$v && [ "$a" -le 253402300799 ] && [ "$b" -le 253402300799 ] || return 1      # valid after, valid before: each at or before 9999-12-31T23:59:59Z, so forever is refused for its form, never as not begun or not ended
   dr_str && [ -z "$v" ] || return 1      # no critical option: one a verifier does not know is refused, and none is known here
-  dr_str && dr_exts "$v" && dr_str || return 1      # the extensions, each ignored, as one a verifier does not know is; then reserved, whatever it holds, ignored too
+  dr_str && [ -z "$v" ] && dr_str && [ -z "$v" ] || return 1      # no extension, and an empty reserved field
   dr_str && [ "$v" = "$(dr_idkey "$2")" ] && [ "$v" != "0000000b$(dr_asc ssh-ed25519)00000020$k" ] || return 1      # signed by the identity's key, byte for byte, which is never the key certified: SSHSIG signs no signing key, so the identity's own signature on a statement, rank 0, wrapped in a certificate of the identity's key above N, would otherwise rank at that certificate's serial, above the statements under certificates it stands below (PROTOCOL.md §5.2)
-  dr_str && dr_s "$v" && [ "$o" -eq "${#x}" ] || return 1      # the identity's signature on it, and nothing after
+  dr_str && dr_sigform "$v" && [ "$o" -eq "${#x}" ] || return 1      # the identity's signature on it, in its one form, and nothing after
   echo "$n $a $b"
-}
-dr_exts(){ # dr_cert's: <a certificate's extensions, in hex> → 0 only for them in their one encoding, as the Go client's library reads them: each name once, in lexical order, and its value nothing or one string that is not empty. What each says is never read: none is known here
-  local x=$1 o=0 l v n p=
-  while [ "$o" -lt "${#x}" ]; do
-    dr_str && n=$v && { [ -z "$p" ] || [ "$p" \< "$n" ]; } && dr_str || return 1      # the name, after the last; [ compares bytes, as their hex compares
-    [ -z "$v" ] || { [[ ${v:0:8} =~ ^[0-9a-f]{8}$ ]] && [ $((16#${v:0:8})) -gt 0 ] && [ $((8 + 2 * 16#${v:0:8})) -eq ${#v} ]; } || return 1      # the value
-    p=$n
-  done
 }
 dr_str(){ [[ ${x:o:8} =~ ^[0-9a-f]{8}$ ]] || return 1; l=$((16#${x:o:8} * 2)); [ $((o + 8 + l)) -le ${#x} ] || return 1; v=${x:o+8:l}; o=$((o + 8 + l)); }      # dr_cert's: the next length-prefixed string of x, in hex, into v
 dr_u64(){ [[ ${x:o:16} =~ ^[0-7][0-9a-f]{15}$ ]] || return 1; v=$((16#${x:o:16})); o=$((o + 16)); }      # dr_cert's: the next 64-bit number of x into v. One with its top bit set is no time and no serial here
 dr_idkey(){ sed -n 2p "$1" | cut -d' ' -f2 | base64 -d | od -An -v -tx1 | tr -d ' \n'; }      # <identity document> → its key as the SSH wire writes it, in hex: what a signature by the identity itself carries as its signing key, byte for byte
-dr_rank(){ # <signature> <identity document> <address> → the rank of its signer (PROTOCOL.md §5), read from the SSHSIG blob: 0 for the identity's own key, byte for byte, and the serial of a certificate of that identity in its one form (dr_cert). 1 for a signing key of neither form, a bare working key among them. Whether the signature verifies is dr_signed's
-  local x k r
-  dr_sshsig "$1" || return 1
+dr_rank(){ # <signature> <identity document> <address> [namespace] → the rank of its signer (PROTOCOL.md §5), read from the SSHSIG blob in its one form (dr_sshsig): 0 for the identity's own key, byte for byte, and the serial of a certificate of that identity in its one form (dr_cert). With a namespace, only for a blob in exactly that namespace, as the signature was made: ssh-keygen -Y verify compares one as a C string, which ends at a NUL. 1 for a signing key of neither form, a bare working key among them. Whether the signature verifies is dr_signed's
+  local x k ns r
+  dr_sshsig "$1" && { [ -z "${4-}" ] || [ "$ns" = "$(dr_asc "$4")" ]; } || return 1
   [ "$k" != "$(dr_idkey "$2")" ] || { echo 0; return 0; }
   r=$(dr_cert "$1" "$2" "$3") && echo "${r%% *}"
 }
 dr_signed(){ # <address> <identity document> <namespace> <signature> <message> [at] → the rank of its signer (dr_rank), only for a signature by that identity's own key, or by a working key under a certificate of it that holds at the time given (now, without one): begun and not ended. 1 otherwise; 2 when all that fails is that the certificate has ended, 3 that it has not begun. Whether the address's revocation of certificates covers that signer is dr_certrevoked's
   local A=$1 r n a b t=${6:-$(dr_now)}
-  dr_bound "$4" "$2" && n=$(dr_rank "$4" "$2" "$A") || return 1
+  dr_bound "$4" "$2" && n=$(dr_rank "$4" "$2" "$A" "$3") || return 1
   if [ "$n" = 0 ]; then
     printf '%s %s\n' "$A" "$(sed -n 2p "$2")" > "$DR/signers"      # ONE line, built from checked bytes, chosen by the signing key's form: the identity's own key, with no cert-authority
     ssh-keygen -Y verify -f "$DR/signers" -I "$A" -n "$3" -s "$4" < "$5" > /dev/null 2>&1 && echo 0; return
@@ -414,8 +404,8 @@ dr_meet(){ local d="$DR/peers/$1"; mkdir -p "$d" && { [ -e "$d/identity.doc" ] |
 
 # recipe: revocation
 dr_revcheck(){ # <address> <identity document> <signature> → 0 only for a revocation of that address: the document hashes to it and is one this script verifies, and the signature is that identity's OWN over the fixed statement. The signers line names the identity's key with no cert-authority, so a working key's signature, which carries a certificate, is not taken: a working key can be stolen without the identity, and must not end the address
-  local x k
-  dr_idcheck "$2" "$1" && dr_bound "$3" "$2" && dr_sshsig "$3" || return 1
+  local x k ns
+  dr_idcheck "$2" "$1" && dr_bound "$3" "$2" && dr_sshsig "$3" && [ "$k" = "$(dr_idkey "$2")" ] && [ "$ns" = "$(dr_asc "dromas-revoke-v1:$1")" ] || return 1      # in its one form: the identity's key byte for byte, in exactly its namespace
   printf '%s %s\n' "$1" "$(sed -n 2p "$2")" > "$DR/signers"
   printf 'dromas-revoke-v1\n%s\n' "$1" | ssh-keygen -Y verify -f "$DR/signers" -I "$1" -n "dromas-revoke-v1:$1" -s "$3" > /dev/null 2>&1
 }
@@ -426,8 +416,8 @@ dr_gone(){ # <address> → 0 if this mailbox holds a revocation of it: peers/<ad
   dr_revcheck "$1" "$d" "$s" || return 3
 }
 dr_certscheck(){ # <address> <identity document> <statement> <signature> → the serial it revokes through, only for a revocation of that address's certificates: signed by its identity's OWN key, as a revocation of the address is (no cert-authority, so a certificate cannot revoke another, or itself), and in its one exact form, the tag, the address and a serial, each on a line ending in LF, and nothing else. The serial is from 1 to 2^53 - 1 with no leading zero, compared by bash, whose numbers are exact there where awk's are not
-  local L x k
-  dr_idcheck "$2" "$1" && dr_bound "$4" "$2" && dr_sshsig "$4" || return 1
+  local L x k ns
+  dr_idcheck "$2" "$1" && dr_bound "$4" "$2" && dr_sshsig "$4" && [ "$k" = "$(dr_idkey "$2")" ] && [ "$ns" = "$(dr_asc "dromas-revoke-certs-v1:$1")" ] || return 1      # in its one form: the identity's key byte for byte, in exactly its namespace
   printf '%s %s\n' "$1" "$(sed -n 2p "$2")" > "$DR/signers"
   ssh-keygen -Y verify -f "$DR/signers" -I "$1" -n "dromas-revoke-certs-v1:$1" -s "$4" < "$3" > /dev/null 2>&1 || return 1
   mapfile -t L < "$3"
