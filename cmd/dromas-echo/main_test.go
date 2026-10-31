@@ -516,26 +516,26 @@ func TestEchoHoldsWithAReplyPending(t *testing.T) {
 	})
 }
 
-// An echo mailbox started with --mode working-key registers under a
+// An echo mailbox started with --signer certificate registers under a
 // certificate; started again, as from a tmpfs, it restores its mailbox under
-// one, whatever --mode says, since its server serves one. Its identity signs
+// one, whatever --signer says, since its server serves one. Its identity signs
 // otherwise. It answers either way, and the reply says what was checked, by
 // the address's SHA-384.
-func TestEchoSignsAsItsModeSays(t *testing.T) {
-	for _, mode := range []string{"identity", "working-key"} {
+func TestEchoSignsAsItsSignerSays(t *testing.T) {
+	for _, signer := range []string{client.SignerIdentity, client.SignerCertificate} {
 		e := newEnv(t)
 		opt := e.opts()
-		opt.WorkingKey = mode == "working-key"
+		opt.WorkingKey = signer == client.SignerCertificate
 		for _, again := range []bool{false, true} {
 			if again {
 				opt.WorkingKey = false
 			}
 			x, err := start(context.Background(), t.TempDir(), e.key, opt, log.New(io.Discard, "", 0))
 			if err != nil {
-				t.Fatalf("%s: start: %v", mode, err)
+				t.Fatalf("%s: start: %v", signer, err)
 			}
-			if st, err := x.b.Status(context.Background()); err != nil || st.Certified != (mode == "working-key") {
-				t.Fatalf("%s, started again %v: certified %v, %v", mode, again, st.Certified, err)
+			if st, err := x.b.Status(context.Background()); err != nil || st.Signer != signer {
+				t.Fatalf("%s, started again %v: signer %q, %v", signer, again, st.Signer, err)
 			}
 			a := e.mailbox()
 			if _, err := a.Send(context.Background(), x.b.Address(), "ping"); err != nil {
@@ -544,11 +544,11 @@ func TestEchoSignsAsItsModeSays(t *testing.T) {
 			x.once(context.Background())
 			res := receive(t, a)
 			if len(res.Delivered) != 1 || !strings.Contains(body(t, res.Delivered[0]), "SHA-384") || strings.Contains(body(t, res.Delivered[0]), "SHA-256 of") {
-				t.Fatalf("%s: the reply: %+v", mode, res)
+				t.Fatalf("%s: the reply: %+v", signer, res)
 			}
 		}
 	}
-	// One that kept its state, started with --mode working-key, renews under
+	// One that kept its state, started with --signer certificate, renews under
 	// a certificate.
 	e := newEnv(t)
 	dir := t.TempDir()
@@ -561,14 +561,14 @@ func TestEchoSignsAsItsModeSays(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if st, err := x.b.Status(context.Background()); err != nil || !st.Certified {
-		t.Fatalf("a kept mailbox started with --mode working-key: %+v, %v", st, err)
+	if st, err := x.b.Status(context.Background()); err != nil || st.Signer != client.SignerCertificate {
+		t.Fatalf("a kept mailbox started with --signer certificate: %+v, %v", st, err)
 	}
 }
 
-// --mode takes identity and working-key, and nothing else.
-func TestEchoTakesOnlyItsModes(t *testing.T) {
-	if err := run(context.Background(), []string{"--identity", newKey(t), "--mode", "offline"}, io.Discard); !errors.Is(err, flag.ErrHelp) {
-		t.Fatalf("--mode offline: %v", err)
+// --signer takes identity and certificate, and nothing else.
+func TestEchoTakesOnlyItsSigners(t *testing.T) {
+	if err := run(context.Background(), []string{"--identity", newKey(t), "--signer", "working-key"}, io.Discard); !errors.Is(err, flag.ErrHelp) {
+		t.Fatalf("--signer working-key: %v", err)
 	}
 }

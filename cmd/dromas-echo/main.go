@@ -13,7 +13,7 @@
 // message a mailbox can no longer decrypt. While it runs, each Receive renews the
 // prekey once it is a day old, as for any mailbox.
 //
-// Its identity signs its replies, or with --mode working-key a working key
+// Its identity signs its replies, or with --signer certificate a working key
 // under a certificate its identity made does (PROTOCOL.md §5), so that both
 // reach the wire: such a start registers or renews the mailbox under a
 // certificate, after which it signs under certificates for good.
@@ -39,15 +39,15 @@ import (
 	"github.com/dromas-dev/dromas-client/protocol"
 )
 
-const usage = `usage: dromas-echo --identity <key file> [--mode identity|working-key] [--dir <dir>]
+const usage = `usage: dromas-echo --identity <key file> [--signer identity|certificate] [--dir <dir>]
 
 Runs an echo mailbox until interrupted: every message that passes every check
 is answered, signed, with what was checked and the body it carried.
 
   --identity  the echo mailbox's identity, an OpenSSH key file; the mailbox
               is registered at its first start
-  --mode      identity (the default), where the identity signs, or
-              working-key, where a working key it certifies signs: for good,
+  --signer    identity (the default), where the identity signs, or
+              certificate, where a working key it certifies signs: for good,
               once the mailbox is registered or renewed so
   --dir       the mailbox's state directory, which belongs in memory (a tmpfs):
               $DROMAS_HOME, or ${XDG_CONFIG_HOME:-~/.config}/dromas/${DROMAS_MAILBOX:-default}
@@ -82,11 +82,11 @@ func run(ctx context.Context, args []string, logw io.Writer) error {
 	fl.Usage = func() { _, _ = fmt.Fprint(logw, usage) }
 	identity := fl.String("identity", "", "")
 	dir := fl.String("dir", "", "")
-	mode := fl.String("mode", "identity", "")
+	signer := fl.String("signer", client.SignerIdentity, "")
 	if err := fl.Parse(args); err != nil {
 		return err
 	}
-	if *identity == "" || fl.NArg() != 0 || *mode != "identity" && *mode != "working-key" {
+	if *identity == "" || fl.NArg() != 0 || *signer != client.SignerIdentity && *signer != client.SignerCertificate {
 		fl.Usage()
 		return flag.ErrHelp
 	}
@@ -97,7 +97,7 @@ func run(ctx context.Context, args []string, logw io.Writer) error {
 		}
 		*dir = d
 	}
-	opt := client.Options{Base: os.Getenv("DROMAS_SERVER_URL"), WorkingKey: *mode == "working-key"}
+	opt := client.Options{Base: os.Getenv("DROMAS_SERVER_URL"), WorkingKey: *signer == client.SignerCertificate}
 	logger := log.New(logw, "", log.LstdFlags|log.LUTC)
 	e, err := start(ctx, *dir, *identity, opt, logger)
 	if err != nil {
@@ -144,14 +144,14 @@ func start(ctx context.Context, dir, identity string, opt client.Options, l *log
 	// A state directory in memory holds the identity alone at each start:
 	// init restores the mailbox, reading it at its server first, and
 	// registers it where the server holds none, so the first start too. One
-	// that kept its state renews, under a certificate where --mode asks for
+	// that kept its state renews, under a certificate where --signer asks for
 	// one.
 	switch {
 	case st.PrekeySerial == 0:
 		if b, err = client.Init(ctx, dir, opt); err != nil {
 			return nil, err
 		}
-	case opt.WorkingKey && !st.Certified:
+	case opt.WorkingKey && st.Signer != client.SignerCertificate:
 		if _, err := b.RenewUnderCertificate(ctx); err != nil {
 			return nil, err
 		}
