@@ -117,13 +117,13 @@ func staleProblem(w http.ResponseWriter) {
 }
 
 // The script reading, the Go client sending: the retry above the floor of
-// client/replay_retry_test.go. The owner renews the script mailbox by hand on
-// days 30 and 60; the server takes one dr_recv 1h32m ahead.
+// client/replay_retry_test.go. The owner renews the script mailbox by hand
+// two hours before the TTL and two hours before twice the TTL; the server
+// takes one dr_recv 1h32m ahead.
 func TestTheScriptTakesARetryAboveTheFloor(t *testing.T) {
 	t.Parallel()
 	need(t, append(scriptTools, "curl")...)
 	ctx := context.Background()
-	day := 24 * time.Hour
 	for _, c := range []struct {
 		name  string
 		ahead time.Duration
@@ -172,11 +172,11 @@ func TestTheScriptTakesARetryAboveTheFloor(t *testing.T) {
 			if err != nil || strings.Count(out, `"type":"message"`) != 1 {
 				t.Fatalf("the first copy: %q, %v", out, err)
 			}
-			clk.Set(30 * day) // the owner renews by hand, monthly: the script never renews on its own
-			if _, err := sh(30*day, "dr_rekey"); err != nil {
+			clk.Set(protocol.TTL - 2*time.Hour) // the owner renews by hand: the script never renews on its own
+			if _, err := sh(protocol.TTL-2*time.Hour, "dr_rekey"); err != nil {
 				t.Fatal(err)
 			}
-			clk.Set(33*day - 30*time.Minute)
+			clk.Set(protocol.TTL - 30*time.Minute)
 			if _, err := s.Receive(ctx); err != nil { // renews, so its certificate outlasts what it signs
 				t.Fatal(err)
 			}
@@ -185,11 +185,11 @@ func TestTheScriptTakesARetryAboveTheFloor(t *testing.T) {
 				t.Fatalf("the retry: %v, kept %d bytes", err, len(retry))
 			}
 			phase.Store("")
-			clk.Set(60 * day)
-			if _, err := sh(60*day, "dr_rekey"); err != nil {
+			clk.Set(2*protocol.TTL - 2*time.Hour)
+			if _, err := sh(2*protocol.TTL-2*time.Hour, "dr_rekey"); err != nil {
 				t.Fatal(err)
 			}
-			at := 66*day - 31*time.Minute
+			at := 2*protocol.TTL - 31*time.Minute
 			if c.ahead > 0 {
 				clk.Set(at + c.ahead) // a hostile server takes the pass
 				out, err := sh(at+c.ahead, "dr_recv")
@@ -200,7 +200,7 @@ func TestTheScriptTakesARetryAboveTheFloor(t *testing.T) {
 			id := sha256.Sum256(retry)
 			srv.Inject(to, hex.EncodeToString(id[:]), retry)
 			out, err = sh(at, "dr_recv")
-			t.Logf("the retry listed on day 66 less 31 minutes (floor %q): %q, %v", strings.TrimSpace(floor), out, err)
+			t.Logf("the retry listed at twice the TTL less 31 minutes (floor %q): %q, %v", strings.TrimSpace(floor), out, err)
 			if strings.Contains(out, `"type":"message"`) {
 				t.Error("the script delivered a message already delivered")
 			}
@@ -209,14 +209,13 @@ func TestTheScriptTakesARetryAboveTheFloor(t *testing.T) {
 }
 
 // The script reading a Go sender's retry that the server stretched past the
-// outbox's 33 days (59s on the mailbox read, 59s on a post answered 409
+// outbox's TTL (59s on the mailbox read, 59s on a post answered 409
 // stale_prekey), with every pass one an honest server takes: the script's
 // clock 50m fast at the drain that prunes, then 9m59s slow a second later.
 func TestTheScriptTakesAStretchedRetryAtHonestClocks(t *testing.T) {
 	t.Parallel()
 	need(t, append(scriptTools, "curl")...)
 	ctx := context.Background()
-	day := 24 * time.Hour
 	for _, stretch := range []bool{true, false} {
 		name := "stretched"
 		if !stretch {
@@ -273,8 +272,8 @@ func TestTheScriptTakesAStretchedRetryAtHonestClocks(t *testing.T) {
 			if out, err := sh(0, "dr_recv"); err != nil || !strings.Contains(out, `"type":"message"`) {
 				t.Fatalf("the first copy: %q, %v", out, err)
 			}
-			clk.Set(30 * day)
-			if _, err := sh(30*day, "dr_rekey"); err != nil {
+			clk.Set(protocol.TTL - 2*time.Hour)
+			if _, err := sh(protocol.TTL-2*time.Hour, "dr_rekey"); err != nil {
 				t.Fatal(err)
 			}
 			clk.Set(protocol.TTL - time.Hour)
@@ -292,8 +291,8 @@ func TestTheScriptTakesAStretchedRetryAtHonestClocks(t *testing.T) {
 				}
 				t.Fatalf("the retry at W+TTL: %v", err)
 			}
-			clk.Set(60 * day)
-			if _, err := sh(60*day, "dr_rekey"); err != nil {
+			clk.Set(2*protocol.TTL - 2*time.Hour)
+			if _, err := sh(2*protocol.TTL-2*time.Hour, "dr_rekey"); err != nil {
 				t.Fatal(err)
 			}
 			server := 2*protocol.TTL + 10*time.Minute + time.Second
