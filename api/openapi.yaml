@@ -1585,14 +1585,14 @@ components:
       name: If-Match
       in: header
       required: false
-      description: RFC 9110 §13.1.1's `If-Match`, evaluated as `PROTOCOL.md` §11.2 says, at the point §11.4 places it. A false one is `412`.
+      description: RFC 9110 §13.1.1's `If-Match`, evaluated as `PROTOCOL.md` §11.2 says. A false one is `412`.
       schema:
         type: string
     IfNoneMatch:
       name: If-None-Match
       in: header
       required: false
-      description: RFC 9110 §13.1.2's `If-None-Match`, evaluated as `PROTOCOL.md` §11.2 says, at the point §11.4 places it. A false one is `304` to a `GET` or a `HEAD`, and `412` to any other method.
+      description: RFC 9110 §13.1.2's `If-None-Match`, evaluated as `PROTOCOL.md` §11.2 says. A false one is `304` to a `GET` or a `HEAD`, and `412` to any other method.
       schema:
         type: string
 

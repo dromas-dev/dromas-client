@@ -758,7 +758,7 @@ Every `429` carries `Retry-After`.
 
 ### 11.4. The order of refusals
 
-A server chooses which refusal it answers first, except where the four rules below fix it. Outside those rules, where a request fails several checks, a server answers the one it finds first, and a client acts on whichever comes. The steps of Sections 11.7 and 11.10 are numbered to be cited, not to order them.
+A server chooses which refusal it answers first, except where the two rules below fix it. Outside those rules, where a request fails several checks, a server answers the one it finds first, and a client acts on whichever comes. The steps of Sections 11.7 and 11.10 are numbered to be cited, not to order them.
 
 0. **A retired version comes before everything** (Section 11.17). The server answers such a request `410 version_retired` and reads nothing else of it, its pass included. It counts against the IP address's `requests` and nothing else.
 1. **A mailbox's state comes before any pass.** Before any pass is judged, a call answers the state of the mailbox whose pass it carries, and a lookup answers the state of the mailbox it looks up. So a mailbox learns its own state whatever pass it carries.
@@ -769,21 +769,6 @@ A server chooses which refusal it answers first, except where the four rules bel
    | A send, about its sender | `403 unknown_sender`, `403 sender_revoked`, `401 certificate_revoked` |
    | A lookup | `404 no_such_mailbox`, or `410 revoked` with its revocation record |
    | Looking up revocations | `404 not_revoked`, or `200` with the revocation record |
-
-2. **A request that would change nothing is answered from what the server keeps.**
-
-   | Request | Answer |
-   |---|---|
-   | A registration of a mailbox the server keeps | from what the server holds of the mailbox (Section 11.7, step 5) |
-   | An identical retry of a registration or of a renewal | `200 {}` |
-   | A revocation of an address the server keeps revoked, or a revocation of certificates through a revocation serial no higher than the one it keeps | from what the server keeps (Section 11.15) |
-   | A send of a ciphertext its recipient stores unacked | the receipt the server kept, whatever has changed at that mailbox since (Section 11.10, step 6) |
-
-   No count of what a request would create refuses any of them. The budgets that bound any call may still defer one with a `429`: the IP address's `requests` and `misses`, and the mailbox's `calls`.
-3. **Preconditions are evaluated once the call knows its target's state, and before it acts** (RFC 9110 §13.2.1, §13.2.2). The call knows its target's state once its route and method are matched, its pass is checked where it takes one, and its target is read.
-   - A request refused before that point is answered as if it carried no preconditions.
-   - After that point, a call with a false precondition does nothing but count. A list counts as a poll, and a fetch or an ack as one of the mailbox's calls. It spends no cursor and takes no new message, marks nothing fetched and writes nothing.
-   - A send evaluates its preconditions before its dedupe (Section 11.10, step 6).
 
 ### 11.5. Limits
 
@@ -798,6 +783,7 @@ A server chooses what it limits and by how much: no limit's value is part of the
   - a revocation of the address is counted against no mailbox (Section 11.15).
 
   So whoever holds a stolen working key cannot keep the identity from revoking that key's certificate.
+- **A request that would change nothing is refused by no count of what it would make new:** a registration of a mailbox the server keeps (Section 11.7, step 5), an identical retry of a renewal (Section 11.9), a revocation the server already keeps (Section 11.15), and a send of a ciphertext its recipient stores (Section 11.10, step 6). Only the budgets that bound any call may defer one with a `429`: the IP address's `requests` and `misses`, and the mailbox's `calls`.
 
 **Who a call is counted against.** An **IP address** here is the IPv4 address or the IPv6 /64 a call comes from. No caller is exempt.
 
@@ -961,7 +947,7 @@ The server checks the steps below; only step 9 stores anything. The server takes
 3. **The body's size** is at most the sender's cap → otherwise `413 too_large`, with the cap in `limit`. The server refuses by the `Content-Length` before it reads anything, or while it reads.
 4. **It is an age file** → otherwise `bad_request`, an empty body included, with no `member`.
 5. **`B` is active:** unknown → `404 no_such_mailbox`; revoked → `410 revoked`.
-6. **Dedupe, while the message is live.** The message id is the ciphertext's SHA-256. If `B` stores a message with that message id unacked, from any sender → `200` with the receipt the server kept, whatever has changed at `B` since. Nothing of a message is kept once it is gone: the same bytes sent after that are a new message, stored and counted as any send is. A reader that accepted them once skips or refuses them (Section 12.3, check 8).
+6. **Dedupe, while the message is live.** The send's preconditions are evaluated before this step (Section 11.2). The message id is the ciphertext's SHA-256. If `B` stores a message with that message id unacked, from any sender → `200` with the receipt the server kept, whatever has changed at `B` since. Nothing of a message is kept once it is gone: the same bytes sent after that are a new message, stored and counted as any send is. A reader that accepted them once skips or refuses them (Section 12.3, check 8).
 7. **`B` accepts messages on this prekey, from this sender:**
 
    | Failure | Answer |
@@ -999,9 +985,6 @@ The server checks the steps below; only step 9 stores anything. The server takes
 
 - **`Retry-After` on every list answer, a `304` included, is the server's poll interval,** in seconds.
 - **A first page carries an `ETag`,** a strong validator of the page's body, which changes whenever a message enters or leaves the page or the count. A page after the first carries none.
-- **Preconditions** are evaluated as Section 11.2 says. For a list:
-  - a `304` to a first page's tag carries that `ETag` and `Retry-After`, and no body;
-  - a list with a cursor gets `304` only to `If-None-Match: *`.
 - **Every poll is counted** (`polls`), a `304` and a `412` included: a mailbox that polls faster than its budget is refused `429`, never answered `304`.
 - **A list with a cursor is a continuation** only if all of these hold:
   - it is a `GET` whose preconditions hold;
@@ -1031,13 +1014,8 @@ The server checks the steps below; only step 9 stores anything. The server takes
 
 `GET /v1/<B>/messages/<id>` carries the mailbox's pass → `200`, `application/octet-stream`, the ciphertext's exact bytes with a `Content-Length`, and nothing else. A message that is gone → `404 no_such_message`.
 
-- **Ranges.** The unit `bytes` is read in any ASCII case, in a `Range` and in a `Content-Range`. No answer is `416`.
-
-  | `Range` | Answer |
-  |---|---|
-  | `bytes=N-`, exactly `range-asked`: one open-ended range whose `N` is below the ciphertext's length | `206 Partial Content`, with the bytes from `N` to the end and `Content-Range: bytes N-<last>/<length>`, as `content-range-206` |
-  | any other: several ranges, a closed range, a suffix, `N` at or past the length, another unit, whitespace or an empty list element | `200`, the whole body |
-  | any `Range` beside an `If-Range` | `200`, the whole body |
+- **Ranges** are RFC 9110 §14. A server honours one form alone, `range-asked`: one open-ended range whose `N` is below the ciphertext's length. It answers it `206 Partial Content`, with the bytes from `N` to the end and `Content-Range` as `content-range-206`.
+- **A server ignores every other `Range`** (§14.2) and answers the whole body, `200`.
 
   ```abnf
   range-asked       = "bytes=" 1*DIGIT "-"
@@ -1045,7 +1023,7 @@ The server checks the steps below; only step 9 stores anything. The server takes
   range-number      = "0" / %x31-39 *DIGIT   ; no leading zero
   ```
 
-- **A fetch carries no validator.** The message id is the ciphertext's SHA-256, so the bytes under a message id never change.
+- **A fetch carries no validator.** The message id is the ciphertext's SHA-256, so the bytes under a message id never change. So an `If-Range` is false (§13.1.5), and the `Range` beside it is ignored.
 - **Counting.** A ranged fetch is counted as any fetch is.
 
   | Fetch | Spends | Past it |
@@ -1077,7 +1055,8 @@ A mailbox's ACL says which senders its server accepts the mailbox's messages fro
   - The answer is `200` with the ACL as stored, and no `ETag`. It lists `*` first, then each address once, in ascending order of its 48 bytes (not of its text, whose alphabet puts `2`–`7` after `z`).
 - **Get the ACL: `GET /v1/<B>/acl`,** with the pass, answers the ACL as stored, in that order, with its `ETag`: a strong validator that changes whenever the lists change. For a mailbox with no ACL, it answers `{"allow":["*"],"deny":[]}`, with a tag too. There is no `DELETE`.
 - **A client MUST treat an ACL answer with more than 10,000 entries,** in both lists together, as an answer that breaks its form.
-- **A `PUT` MAY carry `If-Match`,** so that it replaces only the ACL its writer read. The server compares it strongly with the tag of the ACL stored now, a mailbox with no ACL included. `If-None-Match: *`, or an `If-None-Match` naming the ACL's tag, is false, since a mailbox always has an ACL. A `PUT` without a precondition replaces whatever is stored.
+- **A `PUT` MAY carry `If-Match`** (RFC 9110 §13.1.1), so that it replaces only the ACL its writer read.
+- **Every mailbox has an ACL and its tag,** a mailbox with no ACL set included, so `If-None-Match: *` on a `PUT` is false (§13.1.2).
 - **Setting the ACL deletes no message.** A change refuses later sends only. A send that cleared the check while the ACL changed may still be stored after the change.
 - **A mailbox pauses by setting its ACL** to `{"allow":[],"deny":["*"]}`, which refuses every sender.
 - **The ACL is not signed.** Only its mailbox gets it, and only the server acts on it.
