@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"math/big"
 	"net"
 	"net/http"
@@ -2281,6 +2282,36 @@ func TestA3xxIsNoAnswerWhateverItsLines(t *testing.T) {
 		if out, err := bash(t, env, "dr_recv"); err == nil || !strings.Contains(err.Error(), `"status":`+c.status+`,`) {
 			t.Errorf("%s: a drain answered %s: %q, %v", c.name, c.status, out, err)
 		}
+	}
+}
+
+// The pass reaches curl from a file in the mailbox's directory, never as an
+// argument, which any local user reads in the process list while curl runs:
+// at a registration, a drain and a renewal, and the file is gone after each.
+func TestThePassIsNoArgumentOfCurl(t *testing.T) {
+	t.Parallel()
+	need(t, append(scriptTools, "curl")...)
+	srv := fakeserver.New(t, time.Now)
+	home, argv := t.TempDir(), filepath.Join(t.TempDir(), "argv")
+	env := []string{"DR_HOME=" + home, "DR_SERVER_URL=" + srv.URL, "ARGV=" + argv}
+	record := `curl(){ printf '%s\n' "$@" >> "$ARGV"; command curl "$@"; }` + "\n"
+	for _, c := range []string{"dr_init", "dr_recv", "dr_renew"} {
+		if _, err := bash(t, env, record+c); err != nil {
+			t.Fatalf("%s: %v", c, err)
+		}
+		if _, err := os.Stat(filepath.Join(home, "authorization")); !errors.Is(err, fs.ErrNotExist) {
+			t.Errorf("%s left the Authorization file: %v", c, err)
+		}
+	}
+	b, err := os.ReadFile(argv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), protocol.PassScheme) {
+		t.Errorf("a pass is an argument of curl:\n%s", b)
+	}
+	if n := strings.Count(string(b), "\n@"+filepath.Join(home, "authorization")+"\n"); n < 3 { // control: curl was given the file, at each command
+		t.Errorf("curl was given the Authorization file %d times, want one at each of 3 commands at least:\n%s", n, b)
 	}
 }
 

@@ -401,6 +401,11 @@ printf 'dromas-v1\necdsa-sha2-nistp256 %s\n' "$(bin "$(str "$(asc ecdsa-sha2-nis
 # A well-formed document of a key type no client verifies: a name, and a wire key that begins with that name.
 NOTYPE=no-such-key-type@dromas.invalid
 printf 'dromas-v1\n%s %s\n' "$NOTYPE" "$(bin "$(str "$(asc "$NOTYPE")")$(str "$(asc 'not a key')")" | b64)" > identity/unsupported-type.doc
+# Key type names that break RFC 4251 §6, each with a wire key that begins with that name: two at-signs, one with no
+# fully qualified domain name after it, and 65 characters.
+for t in two-at-signs:no-such@key-type@dromas.invalid at-sign-without-a-domain:no-such-key-type@dromas too-long:no-such-key-type-named-with-sixty-five-characters-one-past-the-mx; do
+  printf 'dromas-v1\n%s %s\n' "${t#*:}" "$(bin "$(str "$(asc "${t#*:}")")$(str "$(asc 'not a key')")" | b64)" > "identity/type-name-${t%%:*}.doc"
+done
 # A NUL byte, which a shell variable drops and a C string ends at. Each of the first four is as long as a good
 # document: one line feed is gone and the NUL is in its place, or elsewhere.
 printf 'dromas-v1\n%s\0' "$GOOD" > identity/nul-for-the-final-newline.doc

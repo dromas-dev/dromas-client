@@ -44,7 +44,20 @@ func RangeAsked(ranges, ifRange []string) (from int64, ok bool) {
 // ContentRange is the Content-Range of a fetch's 206 that answers the bytes
 // from byte from of a ciphertext of length bytes: "bytes <from>-<last>/<length>",
 // each number in digits with no leading zero, the one form a server writes
-// and a reader takes (PROTOCOL.md §11.12).
+// (PROTOCOL.md §11.12).
 func ContentRange(from, length int64) string {
 	return "bytes " + strconv.FormatInt(from, 10) + "-" + strconv.FormatInt(length-1, 10) + "/" + strconv.FormatInt(length, 10)
+}
+
+// IsContentRange reports whether a 206's Content-Range lines are one line
+// answering the bytes from byte from of a ciphertext of length bytes, as
+// ContentRange writes it but with the unit in any ASCII case, as a reader
+// takes it (RFC 9110 §14.1; PROTOCOL.md §11.12).
+func IsContentRange(lines []string, from, length int64) bool {
+	if len(lines) != 1 {
+		return false
+	}
+	unit, rest, _ := strings.Cut(lines[0], " ")
+	_, want, _ := strings.Cut(ContentRange(from, length), " ")
+	return LowerASCII(unit) == "bytes" && rest == want
 }

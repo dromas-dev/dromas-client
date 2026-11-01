@@ -6,7 +6,9 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"net/netip"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -54,15 +56,36 @@ var (
 // PassNamespace is the namespace of mailbox a's passes.
 func PassNamespace(a Address) string { return PassTag + ":" + a.String() }
 
-// serverNameGrammar is a host as an HTTP client names it: a lowercase name or
-// IPv4 address, or an IPv6 address in brackets, then a port if there is one.
-var serverNameGrammar = regexp.MustCompile(`\A(?:[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?|\[[0-9a-f:.]+\])(?::[0-9]{1,5})?\z`)
+// serverNameGrammar is a server name's form (PROTOCOL.md §8, server-name): a
+// host, either a lowercase DNS name of labels (an IPv4 address is one) or an
+// IPv6 address in brackets, then a port with no leading zero if there is one.
+// CheckServerName holds what a pattern cannot: the name to maxDNSName, the
+// bracketed text to an IPv6 address, and the port to 65535.
+var serverNameGrammar = regexp.MustCompile(`\A(?:(` + dnsLabel + `(?:\.` + dnsLabel + `)*)|\[([0-9a-f:.]+)\])(?::([1-9][0-9]{0,4}))?\z`)
+
+// dnsLabel is a label of a host name (RFC 1123 §2.1), in lowercase: letters,
+// digits and hyphens, at most 63, neither first nor last a hyphen. maxDNSName
+// is the longest a name of labels may be (RFC 1035 §2.3.4, less its final dot).
+const (
+	dnsLabel   = `[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?`
+	maxDNSName = 253
+)
 
 // CheckServerName checks that s can stand in a pass as the server's name: the
 // host of the server's URL, lowercase, with its port only when that is not the
 // scheme's default (PROTOCOL.md §8).
 func CheckServerName(s string) error {
-	if len(s) > 255 || !serverNameGrammar.MatchString(s) {
+	m := serverNameGrammar.FindStringSubmatch(s)
+	ok := m != nil && len(m[1]) <= maxDNSName
+	if ok && m[2] != "" {
+		a, err := netip.ParseAddr(m[2])
+		ok = err == nil && a.Is6()
+	}
+	if ok && m[3] != "" {
+		port, err := strconv.Atoi(m[3])
+		ok = err == nil && port <= 65535
+	}
+	if !ok {
 		return fmt.Errorf("%w: the server's name is its host, lowercase, with its port only when that is not the scheme's default", ErrPass)
 	}
 	return nil
@@ -157,8 +180,8 @@ func (p *Pass) armored() []byte {
 // optional whitespace around each comma and each "=", empty list elements
 // skipped (§5.6.1.2), and each value a token or a quoted-string. A
 // quoted-string holding a backslash is refused: no value's alphabet holds a
-// character that needs one. Each value is then held to its own form: 64
-// lowercase hex, a time as TimeLayout writes it, and padded standard base64
+// character that needs one. Each value is then held to its own form: an
+// address, a time as TimeLayout writes it, and padded standard base64
 // of the signature file. A sender writes the one form NewPass makes. Nothing
 // is verified yet.
 func ParsePass(authorization string) (*Pass, error) {

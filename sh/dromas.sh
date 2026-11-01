@@ -107,11 +107,16 @@ dr_bytes(){ # <answer> <member> <file> → the member's bytes into the file, onl
 }
 dr_stamp(){ jq -nr --argjson t "$1" '$t | strftime("%Y%m%d%H%M%SZ")'; }      # <Unix time> → the time as ssh-keygen takes one, in UTC
 dr_asc(){ printf %s "$1" | od -An -v -tx1 | tr -d ' \n'; }      # <text> → its bytes in hex
+dr_authed(){ # <Authorization value> <METHOD> <PATH> [body file] [curl args…] → dr_api with that Authorization, which curl reads from a file in the mailbox's directory (-H @file), written under umask 077 and gone after the call: never an argument, which any local user reads in the process list while curl runs
+  local r; printf 'Authorization: %s\n' "$1" > "$DR/authorization" || return 1
+  dr_api "$2" "$3" "${4-}" -H "@$DR/authorization" "${@:5}"; r=$?
+  rm -f "$DR/authorization"; return "$r"
+}
 dr_owner(){ # <METHOD> <PATH> [body file] [curl args…] → dr_api as this mailbox: adds its pass. If the server refuses the pass (it ran out sooner by the server's clock), signs another and tries once more. Its identity signs it, which no revocation of certificates covers (PROTOCOL.md §8), so no refusal of it is final. A pass refused twice for its time is the clock: it says what this one reads, beside the server's words
   local p; p=$(dr_pass) || return 1
-  dr_api "$1" "$2" "${3-}" -H "Authorization: $p" "${@:4}" && return 0
+  dr_authed "$p" "$@" && return 0
   case $(dr_code) in unauthorized | pass_expired | certificate_not_current | certificate_revoked) ;; *) return 1 ;; esac
-  rm -f "$DR/pass"; p=$(dr_pass) && dr_api "$1" "$2" "${3-}" -H "Authorization: $p" "${@:4}" && return 0
+  rm -f "$DR/pass"; p=$(dr_pass) && dr_authed "$p" "$@" && return 0
   dr_clock; return 1
 }
 dr_taken(){ # → the reading of this machine's clock a server took, in Unix time: the date of the pass in $DR/pass, which the call dr_owner made, or the renewal dr_renew sent, carried once the server answered it: its not_after less the ten minutes a pass is signed for. Every deletion by the clock is by one, never by a reading of the clock (PROTOCOL.md §12.4): a clock far off is stopped at its pass, and one that jumps or steps back while a call is in flight deletes nothing by where it went
@@ -212,7 +217,7 @@ dr_init(){ # → creates this mailbox, or finishes a half-done init, and registe
   fi
   dr_prekey "$n" || return 1
   jq -n --arg i "$(dr_b64 "$DR/identity.doc")" --arg p "$(dr_b64 "$p.txt")" --arg s "$(dr_b64 "$p.txt.sig")" --argjson k "$(dr_senders)" '{identity:$i, prekey:$p, prekey_signature:$s, sender_key_types:$k}' > "$DR/register.json"
-  h=$(dr_pass new) && { dr_api PUT "/v1/$A" "$DR/register.json" -H "Authorization: $h" > /dev/null || { dr_clock; dr_own; false; }; } && mv "$DR/pass.new" "$DR/pass" && dr_putline "$DR/serial" "$n" && dr_addr
+  h=$(dr_pass new) && { dr_authed "$h" PUT "/v1/$A" "$DR/register.json" > /dev/null || { dr_clock; dr_own; false; }; } && mv "$DR/pass.new" "$DR/pass" && dr_putline "$DR/serial" "$n" && dr_addr
 }
 dr_addr(){ local a; dr_held || { [ -s "$DR/identity" ] && [ -s "$DR/address" ]; } || { dr_lock dr_addr; return; }; a=$(cat "$DR/address") && dr_out mailbox --arg address "$a" --arg link "$DR_SERVER_URL/to/$a"; }      # the mailbox's address and its link: what to give whoever should write to it. Read with no lock; with no mailbox, dr_lock's refusal, and a mailbox restored from its identity alone has its files made under the lock first (dr_identity), as the Go client's Open makes them
 dr_dest(){ # <link or address> → the address: 77 characters of lowercase base32, or taken from a link to this mailbox's server, $DR_SERVER_URL/to/<address>
@@ -239,8 +244,8 @@ dr_idcheck(){ # <identity document> [address] → 0 only for a two-line document
   l=$(sed -n 2p "$f"); t=${l%% *}
   [ "$(printf 'dromas-v1\n%s\n' "$l" | sha256sum)" = "$(sha256sum < "$f")" ] || return 1      # exactly the tag line and one more, each ending in LF, and not a byte else: the file against itself rebuilt from its second line. A shell variable drops a NUL, so a test of the variable alone would pass a file that holds one
   [ -z "${2-}" ] || [ "$(dr_address "$f")" = "$2" ] || return 1
-  # the form every type shares: a key type's name (printable ASCII with no comma, at most 64 characters), one space, and the base64, in its one encoding, of a wire key that begins with that name
-  grep -Eqx '[!-+.-~-]{1,64} [A-Za-z0-9+/]+={0,2}' <<< "$l" && [ "$(printf %s "${l#* }" | base64 -d 2> /dev/null | base64 | tr -d '\n')" = "${l#* }" ] &&
+  # the form every type shares: a key type's name as RFC 4251 §6 writes one (printable ASCII with no comma, and either no at-sign or one followed by a fully qualified domain name, at most 64 characters), one space, and the base64, in its one encoding, of a wire key that begins with that name
+  grep -Eqx '[!-+.-?A-~-]+(@[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+)? [A-Za-z0-9+/]+={0,2}' <<< "$l" && [ ${#t} -le 64 ] && [ "$(printf %s "${l#* }" | base64 -d 2> /dev/null | base64 | tr -d '\n')" = "${l#* }" ] &&
     [ "$(printf %s "${l#* }" | base64 -d | head -c $((4 + ${#t})) | od -An -v -tx1 | tr -d ' \n')" = "$(printf %08x "${#t}")$(dr_asc "$t")" ] || return 1
   case $t in ssh-ed25519 | ecdsa-sha2-nistp256) ;; *) return 2 ;; esac
   # the key in its one encoding: ssh-keygen reads it, and its fingerprint, the SHA-256 of the key as OpenSSH writes it back, is the SHA-256 of these bytes. ssh-keygen refuses a P-256 point off the curve, compressed, at infinity or with a coordinate not below the field's size, which is all a P-256 key is held to (PROTOCOL.md §4.1). Up to 10.2p1 it also refuses one with a coordinate of 128 bits or fewer, or of the group's order less one or more, which the protocol takes: a known variance (PROTOCOL.md Appendix A)
@@ -769,7 +774,7 @@ dr_renew(){ # → what dr_rekey does, the lock held. A serial is signed ONCE
   [ -s "$DR/prekeys/$s.txt.sig" ] || rm -f "$DR/prekeys/$s.txt" "$DR/prekeys/$s.made"; dr_prekey "$s" || return 1
   if [ -n "$gone" ]; then u="/v1/$A"; w='{identity:$i}'; else u="/v1/$A/prekey"; w='{}'; fi      # a registration is the identity document, then what a new prekey carries
   jq -n --arg i "$(dr_b64 "$DR/identity.doc")" --arg p "$(dr_b64 "$DR/prekeys/$s.txt")" --arg g "$(dr_b64 "$DR/prekeys/$s.txt.sig")" --argjson k "$(dr_senders)" "$w"' + {prekey:$p, prekey_signature:$g, sender_key_types:$k}' > "$DR/rekey.json"
-  h=$(dr_pass new) && dr_api PUT "$u" "$DR/rekey.json" -H "Authorization: $h" > /dev/null || { dr_clock; dr_own; return 1; }      # a new pass, dated as the renewal is sent
+  h=$(dr_pass new) && dr_authed "$h" PUT "$u" "$DR/rekey.json" > /dev/null || { dr_clock; dr_own; return 1; }      # a new pass, dated as the renewal is sent
   [ "$s" -le "$(cat "$DR/serial" 2> /dev/null || echo 0)" ] || dr_putline "$DR/serial" "$s" || return 1
   mv "$DR/pass.new" "$DR/pass" || return 1
   at=$(dr_taken) && dr_prune "$at" && dr_out prekey --argjson serial "$s" --arg not_after "$(sed -n 5p "$DR/prekeys/$s.txt")"      # by the reading the server took the renewal at: the date of its pass, now $DR/pass

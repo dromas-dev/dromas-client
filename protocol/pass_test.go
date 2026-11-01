@@ -383,12 +383,15 @@ func TestParsePass(t *testing.T) {
 }
 
 func TestCheckServerName(t *testing.T) {
-	for _, s := range []string{"dromas.dev", "dromas:8080", "127.0.0.1:8013", "localhost", "[::1]:8080", "a-b.example.org:443"} {
+	longest := strings.Repeat(strings.Repeat("a", 63)+".", 3) + strings.Repeat("a", 61)
+	for _, s := range []string{"dromas.dev", "dromas:8080", "127.0.0.1:8013", "localhost", "[::1]:8080", "a-b.example.org:443", "[2001:db8::1]", "[::ffff:192.0.2.1]:8443", "dromas.dev:1", "dromas.dev:65535", longest} {
 		if err := CheckServerName(s); err != nil {
 			t.Errorf("%q: %v", s, err)
 		}
 	}
-	for _, s := range []string{"", "Dromas.dev", "https://dromas.dev", "dromas.dev/", "dromas.dev:", "dromas.dev:123456", "dromas dev", "dromas.dev\n", "-dromas.dev", "dromas.dev.:80x", strings.Repeat("a", 256)} {
+	for _, s := range []string{"", "Dromas.dev", "https://dromas.dev", "dromas.dev/", "dromas.dev:", "dromas.dev:123456", "dromas dev", "dromas.dev\n", "-dromas.dev", "dromas.dev.:80x", strings.Repeat("a", 256),
+		longest + "a", "a..b", "a-.b", "a.-b", "dromas.dev.", "_dromas.dev", "dromas~dev", "dromas%2edev", strings.Repeat("a", 64) + ".dev",
+		"dromas.dev:0", "dromas.dev:0808", "dromas.dev:65536", "[:]:8080", "[:1]:8080", "[:::::1]:808", "[::1", "[192.0.2.1]", "[::1%25en0]", "[::G]", "[::A]", "[v1.x]"} {
 		if err := CheckServerName(s); !errors.Is(err, ErrPass) {
 			t.Errorf("%q: %v", s, err)
 		}

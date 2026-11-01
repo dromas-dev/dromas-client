@@ -27,14 +27,15 @@ The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD", "S
 
 ### 2.2. Notation
 
-- **Grammar.** A text's form is given in ABNF (RFC 5234), in the section that defines the text, right after the prose that introduces it. A string in quotes matches in any ASCII case; one written `%s"…"` matches exactly (RFC 7405). The core rules (RFC 5234 Appendix B: `ALPHA`, `DIGIT`, `DQUOTE`, `LF`, `SP`) are used by name, and so are `full-date`, `time-hour`, `time-minute` and `time-second` (RFC 3339 §5.6), `OWS` and `BWS` (RFC 9110 §5.6.3), and `uri-host` (RFC 9110 §4.1: RFC 3986's `host`). Appendix B collects every rule.
+- **Grammar.** A text's form is given in ABNF (RFC 5234), in the section that defines the text, right after the prose that introduces it. A string in quotes matches in any ASCII case; one written `%s"…"` matches exactly (RFC 7405). The core rules (RFC 5234 Appendix B: `ALPHA`, `DIGIT`, `DQUOTE`, `LF`, `SP`) are used by name, and so are `full-date`, `time-hour` and `time-minute` (RFC 3339 §5.6), `OWS` and `BWS` (RFC 9110 §5.6.3), and `IPv6address` (RFC 3986 §3.2.2). Appendix B collects every rule.
 - A *line* ends in LF (0x0A). A text "of N lines" is exactly N lines: no CR, and nothing after the last LF.
 - `‖` is concatenation. `str(x)` is a uint32 big-endian length followed by the bytes of `x` (RFC 4251 §5).
 - An **address** is written as 77 characters of lowercase base32 (RFC 4648 §6) without padding, `address` (Section 4.2), wherever it appears: a path, a statement, an envelope, a namespace.
-- A **time** is RFC 3339 in UTC to the second. What ends at a time has ended at that second: it is valid while a clock reads before it.
+- A **time** is RFC 3339 in UTC to the second, with no leap second: a second of `60` is no time. What ends at a time has ended at that second: it is valid while a clock reads before it.
 
   ```abnf
-  time = full-date %s"T" time-hour ":" time-minute ":" time-second %s"Z"
+  time     = full-date %s"T" time-hour ":" time-minute ":" time-sec %s"Z"
+  time-sec = %x30-35 DIGIT   ; 00 to 59
   ```
 
 - A **serial** is a decimal integer from 1 to 2^53 − 1, of which the grammar states only the digits. 2^53 − 1 is the largest integer every JSON reader holds exactly (Section 3.3). A certificate serial, a prekey serial and a revocation serial (Section 2.3) are each a serial.
@@ -281,11 +282,14 @@ The key MUST be of a type this section defines, in its one encoding, and MUST me
 - **Every client MUST verify `ssh-ed25519`.** A client MUST NOT make an identity of any other type unless its owner asks for one.
 - **Every other type is OPTIONAL:** a client verifies it or not, and a server registers it or not (Section 11.7). A mailbox of an optional type can be written to, and heard from, only by mailboxes whose clients verify that type (Section 7).
 - **The working key column** is the type of every working key an identity of that type certifies (Section 5). A type defined later states its own, as it states its own signature bound (Section 3.2).
-- **The form is the same for every key type, defined here or not:** `identity-document`, where `key-type` is a key type's name (RFC 4251 §6) and the base64 is of an SSH wire key that begins with that same name.
+- **The form is the same for every key type, defined here or not:** `identity-document`, where `key-type` is a key type's name as RFC 4251 §6 writes one, and the base64 is of an SSH wire key that begins with that same name.
 
   ```abnf
   identity-document = %s"dromas-v1" LF key-type SP base64-nonempty LF
-  key-type          = 1*64( %x21-2B / %x2D-7E )   ; printable ASCII, no comma
+  key-type          = key-name [ "@" domain ]   ; at most 64 characters
+  key-name          = 1*( %x21-2B / %x2D-3F / %x41-7E )   ; printable ASCII, no "," or "@"
+  domain            = domain-label 1*( "." domain-label )
+  domain-label      = ( ALPHA / DIGIT ) [ *61( ALPHA / DIGIT / "-" ) ( ALPHA / DIGIT ) ]
   ```
 - **A reader MUST refuse a well-formed document of a type it does not verify as `unsupported_key_type`, never as malformed.** A document that breaks the form, or does not hash to its address, is evidence of tampering; one of a type the reader lacks is not.
 
@@ -312,7 +316,7 @@ base32-char-by-2 = %s"a" / %s"c" / %s"e" / %s"g" / %s"i" / %s"k" / %s"m"
 
 An address is shared as the link `https://<server>/to/<address>`.
 
-- A server MUST serve a page there for exactly 77 characters of lowercase base32, and `404` for any other path. The page is fixed text, the address and the server's own link to it, never text a mailbox supplied, sent with `Referrer-Policy: no-referrer` and `X-Robots-Tag: noindex`. A query on the link is ignored.
+- A server MUST serve a page there for exactly an `address` (Section 4.2), and `404` for any other path. The page is fixed text, the address and the server's own link to it, never text a mailbox supplied, sent with `Referrer-Policy: no-referrer` and `X-Robots-Tag: noindex`. A query on the link is ignored.
 - A client given a link MUST take the address from its path, MUST NOT request the page, and MUST refuse a link to any server but its own.
 
 ## 5. Signers
@@ -438,11 +442,15 @@ The pass, `pass-statement`, is signed by the mailbox's signer (Section 5), in th
 ```abnf
 pass-statement = %s"dromas-pass-v1" LF address LF server-name LF time LF
 pass-namespace = %s"dromas-pass-v1:" address
-server-name    = uri-host [ ":" server-port ]   ; in lowercase, its host not empty
-server-port    = %x31-39 *4DIGIT   ; no leading zero
+server-name    = server-host [ ":" server-port ]
+server-host    = dns-name / "[" IPv6address "]"   ; in lowercase
+dns-name       = dns-label *( "." dns-label )   ; at most 253 characters
+dns-label      = dns-char [ *61( dns-char / "-" ) dns-char ]
+dns-char       = %x61-7A / DIGIT
+server-port    = %x31-39 *4DIGIT   ; no leading zero, at most 65535
 ```
 
-- **The server name** is the host of the mailbox's URL for its server, written as an origin is (RFC 6454 §6.2): lowercase, with no user information, and with its port only when the port is not the scheme's default. `https://dromas.dev:443` and `https://dromas.dev` name `dromas.dev`; `http://127.0.0.1:8080` names `127.0.0.1:8080`.
+- **The server name** is the host of the mailbox's URL for its server, written as an origin is (RFC 6454 §6.2): lowercase, with no user information, and with its port only when the port is not the scheme's default. Its host is a name of DNS labels (RFC 1123 §2.1), an IPv4 address among them, or an IPv6 address in brackets; what else RFC 3986's `host` allows (IPvFuture, a zone, percent-encoding, any other character) is no server name. `https://dromas.dev:443` and `https://dromas.dev` name `dromas.dev`; `http://127.0.0.1:8080` names `127.0.0.1:8080`.
 - **A server MUST write the `Host` of a request the same way,** and drop a port of 443 or 80 alike, so that checking a pass never depends on the scheme a request came by.
 - **A client writes the pass as the value of one `Authorization` line,** `pass-authorization`, its signature the base64 of the armoured signature. A request with two `Authorization` lines carries no pass.
 
@@ -735,7 +743,7 @@ What each code means, and what a client does on it:
 | Status | Code | Meaning |
 |---|---|---|
 | 400 | `bad_request` | not a JSON text Section 3.3 takes; a member or query parameter missing, unknown, repeated, or with a value its call does not take; `member` names it |
-| 400 | `bad_address` | a path address that is not 77 characters of lowercase base32 |
+| 400 | `bad_address` | a path address that is not an `address` (Section 4.2) |
 | 400 | `bad_encoding` | a byte member that is not base64 in its one encoding |
 | 400 | `identity_mismatch` | an identity document that does not hash to the address, or breaks its form (Section 4.1) |
 | 400 | `unsupported_key_type` | an identity key type this protocol does not define or this server does not register; `key_types` lists those it registers |
@@ -879,7 +887,7 @@ What each call gets in each state:
 
 The server checks:
 
-1. The address in the path is 77 characters of lowercase base32 → otherwise `bad_address`.
+1. The address in the path is an `address` (Section 4.2) → otherwise `bad_address`.
 2. The body has exactly those members → otherwise `bad_request`, naming the member.
 3. `identity` hashes to the address and has the form of an identity document (Section 4.1) → otherwise `identity_mismatch`.
 4. **The key's type and the key:**
@@ -956,6 +964,12 @@ The server takes a renewal because its prekey statement is later than the curren
 ```abnf
 statement-hash = 64lowhexdig
 ```
+
+- **The message id** in `id` and `Location` is the SHA-256 of the age file's bytes, `message-id`, and it names the message in Sections 11.11 to 11.13.
+
+  ```abnf
+  message-id = 64lowhexdig
+  ```
 
 - **A server reads the body as bytes, whatever its `Content-Type` says.**
 - **A ciphertext is at most 16 MiB (16,777,216 bytes).** A server's caps on it, an account's included, are at most that. Every reader takes a ciphertext of any size up to it, so every reader reads a message any server takes. A larger one is a new version of the protocol.
@@ -1041,16 +1055,17 @@ The server checks the steps below; only step 9 stores anything. The server takes
 
 `GET /v1/<B>/messages/<id>` carries the mailbox's pass → `200`, `application/octet-stream`, the ciphertext's exact bytes with a `Content-Length`, and nothing else. A message that is gone → `404 no_such_message`.
 
-- **Ranges.** The unit `bytes` is read in any ASCII case. No answer is `416`.
+- **Ranges.** The unit `bytes` is read in any ASCII case, in a `Range` and in a `Content-Range`. No answer is `416`.
 
   | `Range` | Answer |
   |---|---|
-  | `bytes=N-`: one open-ended range whose `N` is below the ciphertext's length | `206 Partial Content`, with the bytes from `N` to the end and `Content-Range: bytes N-<last>/<length>`, as `content-range-206` |
-  | any other: several ranges, a closed range, a suffix, `N` at or past the length, another unit | `200`, the whole body |
+  | `bytes=N-`, exactly `range-asked`: one open-ended range whose `N` is below the ciphertext's length | `206 Partial Content`, with the bytes from `N` to the end and `Content-Range: bytes N-<last>/<length>`, as `content-range-206` |
+  | any other: several ranges, a closed range, a suffix, `N` at or past the length, another unit, whitespace or an empty list element | `200`, the whole body |
   | any `Range` beside an `If-Range` | `200`, the whole body |
 
   ```abnf
-  content-range-206 = %s"bytes" SP range-number "-" range-number "/" range-number
+  range-asked       = "bytes=" 1*DIGIT "-"
+  content-range-206 = "bytes" SP range-number "-" range-number "/" range-number
   range-number      = "0" / %x31-39 *DIGIT   ; no leading zero
   ```
 
@@ -1123,11 +1138,11 @@ A mailbox may belong to one account at its server. The protocol fixes how a mail
 - **Join: `PUT /v1/<A>/account`** carries the pass and `key`, an adopt key → `200` with `account`, the account id. It spends one use of the key, unless the mailbox is already in that account. A mailbox in another account moves to this one.
 - **Leave: `DELETE /v1/<A>/account`** carries the pass → `204`, whether or not the mailbox is in an account. An account can also drop a mailbox from its side.
 - **Joining or leaving changes nothing about the mailbox's messages.**
-- **An adopt key** is `dra1_` followed by base64url without padding (RFC 4648 §5), at most 1,024 bytes in all: `adopt-key`. The server decides what it encodes.
+- **An adopt key** is `dra1_` followed by base64url without padding (RFC 4648 §5) of one byte or more, at most 1,024 bytes in all: `adopt-key`. The server decides what it encodes.
 
   ```abnf
-  adopt-key      = %s"dra1_" *254( 4base64url-char )
-                   [ 2base64url-char / 3base64url-char ]   ; at most 1,024 bytes
+  adopt-key      = %s"dra1_" ( 1*254( 4base64url-char ) [ 2base64url-char / 3base64url-char ]
+                           / 2base64url-char / 3base64url-char )   ; at most 1,024 bytes
   base64url-char = ALPHA / DIGIT / "-" / "_"
   ```
 
@@ -1720,8 +1735,8 @@ account-id                 = 1*32( %x61-7A / DIGIT / "-" )
 acl-entry                  = "*" / address
 address                    = 76base32-char base32-char-by-2
 address-param              = "address" BWS "=" BWS ( address / DQUOTE address DQUOTE )
-adopt-key                  = %s"dra1_" *254( 4base64url-char )
-                             [ 2base64url-char / 3base64url-char ]   ; at most 1,024 bytes
+adopt-key                  = %s"dra1_" ( 1*254( 4base64url-char ) [ 2base64url-char / 3base64url-char ]
+                                     / 2base64url-char / 3base64url-char )   ; at most 1,024 bytes
 age-recipient              = %s"age" *bech32-hrp-char "1" 6*bech32-char
 base32-char                = %x61-7A / %x32-37   ; a-z, 2-7
 base32-char-by-2           = %s"a" / %s"c" / %s"e" / %s"g" / %s"i" / %s"k" / %s"m"
@@ -1743,15 +1758,23 @@ bech32-char                = "0" / %x32-39 / %x61 / %x63-68 / %x6A-6E / %x70-7A
 bech32-hrp-char            = %x21-40 / %x5B-7E   ; printable ASCII but A-Z
 BWS                        = <BWS, see [RFC 9110], Section 5.6.3>
 capability-name            = %x61-7A *63( %x61-7A / DIGIT / "_" )
-content-range-206          = %s"bytes" SP range-number "-" range-number "/" range-number
+content-range-206          = "bytes" SP range-number "-" range-number "/" range-number
 cursor                     = 1*( ALPHA / DIGIT / "-" / "_" )
+dns-char                   = %x61-7A / DIGIT
+dns-label                  = dns-char [ *61( dns-char / "-" ) dns-char ]
+dns-name                   = dns-label *( "." dns-label )   ; at most 253 characters
+domain                     = domain-label 1*( "." domain-label )
+domain-label               = ( ALPHA / DIGIT ) [ *61( ALPHA / DIGIT / "-" ) ( ALPHA / DIGIT ) ]
 dromas-version-value       = version-number "." version-number "." version-number
                              [ "-" pre-release ]
 envelope-line              = 1*( %x00-09 / %x0B-FF ) LF   ; the envelope (Section 9.1)
 full-date                  = <full-date, see [RFC 3339], Section 5.6>
 identity-document          = %s"dromas-v1" LF key-type SP base64-nonempty LF
-key-type                   = 1*64( %x21-2B / %x2D-7E )   ; printable ASCII, no comma
+IPv6address                = <IPv6address, see [RFC 3986], Section 3.2.2>
+key-name                   = 1*( %x21-2B / %x2D-3F / %x41-7E )   ; printable ASCII, no "," or "@"
+key-type                   = key-name [ "@" domain ]   ; at most 64 characters
 lowhexdig                  = DIGIT / %x61-66   ; HEXDIG in lowercase
+message-id                 = 64lowhexdig
 msg-id                     = 8lowhexdig "-" 4lowhexdig "-" 4lowhexdig "-" 4lowhexdig "-"
                              12lowhexdig   ; the UUID of [RFC 9562], Section 4, in lowercase
 msg-namespace              = %s"dromas-msg-v1:" address
@@ -1781,14 +1804,16 @@ pre-release-id             = version-number
 prekey-namespace           = %s"dromas-prekey-v1:" address
 prekey-statement           = %s"dromas-prekey-v1" LF address LF serial LF
                              age-recipient LF time LF
+range-asked                = "bytes=" 1*DIGIT "-"
 range-number               = "0" / %x31-39 *DIGIT   ; no leading zero
 revocation-of-address      = %s"dromas-revoke-v1" LF address LF
 revocation-of-certificates = %s"dromas-revoke-certs-v1" LF address LF serial LF
 revoke-certs-namespace     = %s"dromas-revoke-certs-v1:" address
 revoke-namespace           = %s"dromas-revoke-v1:" address
 serial                     = %x31-39 *15DIGIT   ; no leading zero
-server-name                = uri-host [ ":" server-port ]   ; in lowercase, its host not empty
-server-port                = %x31-39 *4DIGIT   ; no leading zero
+server-host                = dns-name / "[" IPv6address "]"   ; in lowercase
+server-name                = server-host [ ":" server-port ]
+server-port                = %x31-39 *4DIGIT   ; no leading zero, at most 65535
 signature-even             = signature-groups LF
 signature-groups           = *16( 4base64-char ) ( 4base64-char / base64-final )
 signature-line             = 70base64-char LF
@@ -1805,10 +1830,9 @@ ssh-signature              = %s"-----BEGIN SSH SIGNATURE-----" LF
                              signature-text
                              %s"-----END SSH SIGNATURE-----" LF
 statement-hash             = 64lowhexdig
-time                       = full-date %s"T" time-hour ":" time-minute ":" time-second %s"Z"
+time                       = full-date %s"T" time-hour ":" time-minute ":" time-sec %s"Z"
 time-hour                  = <time-hour, see [RFC 3339], Section 5.6>
 time-minute                = <time-minute, see [RFC 3339], Section 5.6>
-time-second                = <time-second, see [RFC 3339], Section 5.6>
-uri-host                   = <uri-host, see [RFC 9110], Section 4.1>
+time-sec                   = %x30-35 DIGIT   ; 00 to 59
 version-number             = "0" / %x31-39 *DIGIT
 ```

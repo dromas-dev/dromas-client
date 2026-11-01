@@ -617,7 +617,7 @@ func TestAdopt(t *testing.T) {
 		next.ServeHTTP(w, r)
 	})
 	const secret = "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjE=\n-----END OPENSSH PRIVATE KEY-----\n"
-	for _, in := range []string{"", "\n", secret, key + "\n" + key, " " + key, "dra1_" + strings.Repeat("A", 1100), "dra1_ab$cd"} {
+	for _, in := range []string{"", "\n", secret, key + "\n" + key, " " + key, "dra1_" + strings.Repeat("A", 1100), "dra1_ab$cd", "dra1_", "dra1_A", "dra1_ab-_c", "dra1_ABCD=", "dra1_ABC="} {
 		err := do(ctx, "account adopt", nil, strings.NewReader(in), &out, &errs)
 		if err == nil {
 			t.Errorf("adopt with %q on stdin was taken", in)
@@ -638,6 +638,11 @@ func TestAdopt(t *testing.T) {
 	}
 	if _, err := adoptKey(strings.NewReader(longest + "A")); err == nil {
 		t.Fatal("a key a byte over §11.16's bound was taken")
+	}
+	for _, k := range []string{"dra1_AB", "dra1_ABC", "dra1_ABCD", "dra1_ab-_cd"} { // base64url of 1, 2, 3 and 3 bytes
+		if got, err := adoptKey(strings.NewReader(k)); err != nil || got != k {
+			t.Errorf("%q, an adopt key's form: %v", k, err)
+		}
 	}
 	srv.SetMiddle(nil)
 	out.Reset()
