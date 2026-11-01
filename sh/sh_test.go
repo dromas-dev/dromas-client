@@ -681,7 +681,7 @@ var envelopeFive = map[string]bool{
 	"refuse-duplicate-key": true, "refuse-key-twice-in-the-body": true, "refuse-not-json": true, "refuse-two-objects": true,
 	"refuse-no-msg-id": true, "refuse-msg-id-grouped-wrongly": true, "refuse-msg-id-newline": true, "refuse-msg-id-uppercase": true,
 	"refuse-sent-at-ending-in-a-line-feed": true, "refuse-sent-at-ending-in-a-nul": true, "refuse-sent-at-malformed": true, "refuse-sent-at-second-60": true,
-	"refuse-33-days-and-1s-old": true, "refuse-1-hour-and-1s-ahead": true,
+	"refuse-7-days-and-1s-old": true, "refuse-1-hour-and-1s-ahead": true,
 }
 
 // sameLine holds the script's delivered line to the Go client's, byte for
@@ -786,7 +786,7 @@ func TestVectorsEnvelope(t *testing.T) {
 				t.Errorf("%s: accepted", name)
 			}
 			// The two ends of the sent_at window have a code each, the Go client's.
-			if want := map[string]string{"refuse-33-days-and-1s-old": protocol.RefusedStale, "refuse-1-hour-and-1s-ahead": protocol.RefusedFuture}[name]; want != "" && !strings.HasPrefix(line, want+": ") {
+			if want := map[string]string{"refuse-7-days-and-1s-old": protocol.RefusedStale, "refuse-1-hour-and-1s-ahead": protocol.RefusedFuture}[name]; want != "" && !strings.HasPrefix(line, want+": ") {
 				t.Errorf("%s: refused as %q, want the code %s", name, line, want)
 			}
 		case !strings.HasPrefix(name, "refuse-"):
