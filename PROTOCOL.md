@@ -845,19 +845,27 @@ A server's limit that is not one of these names none in `quota_id`.
 
 ### 11.6. Mailbox states
 
-Every call names a mailbox. This table gives what each call does in each state.
+At a server, a mailbox is in one of three states:
 
-| State | Register `PUT /v1/<A>` | Renew `PUT /v1/<A>/prekey` | A call with the mailbox's pass | Publish a revocation `PUT /v1/<A>/revocations` |
-|---|---|---|---|---|
-| **unknown** (never registered, or forgotten) | → `active`, `201` | `404 no_such_mailbox` | `404 no_such_mailbox` | kept. A revocation of the address → `revoked`, `201`; a revocation of certificates → `200`, and the address stays unknown |
-| **active** | an identical retry → `200`; otherwise `409 conflict` | `200`, stays `active` | served | a revocation of the address → `revoked`, `201`, its messages deleted; a revocation of certificates → `200` |
-| **revoked** | `410 revoked` | `410 revoked` | `410 revoked` | `410 revoked`, answered from the revocation record |
+- **unknown:** the server keeps no mailbox at the address. It was never registered, or the server has forgotten it (below).
+- **active:** registered and in use.
+- **revoked:** its identity has revoked the address (Section 10.1), for good.
 
-- **A send answers its sender's state** as `403 unknown_sender` or `403 sender_revoked` (Section 11.10, step 1), and its recipient's state as this table does.
-- **There is no delete of a mailbox.** A mailbox leaves a server for good when its identity revokes the address. It pauses through its ACL (Section 11.14).
-- **There is no pending state:** a registration carries a pass minutes old, so a mailbox is active from its first call.
-- **A mailbox is forgotten once nothing valid for it is left** (Section 13): it has stopped renewing, and the date until which Section 13 keeps it has passed. It is then unknown, and comes back by registering anew; its ACL and its account are gone. The server keeps what its identity revoked.
-- **A request that took effect, repeated byte for byte,** gets `200` and the same result, and a conflicting one gets `409 conflict`. A send of a ciphertext its recipient already stores is answered as Section 11.10, step 6, answers it.
+What each call gets in each state:
+
+| Call | unknown | active | revoked |
+|---|---|---|---|
+| Register, `PUT /v1/<A>` | `201`; the mailbox is now active | an identical retry → `200`; any other → `409 conflict` | `410 revoked` |
+| Renew, `PUT /v1/<A>/prekey` | `404 no_such_mailbox` | `200` | `410 revoked` |
+| Any other call with the mailbox's own pass (Sections 11.11 to 11.14, 11.16) | `404 no_such_mailbox` | answered as its section says | `410 revoked` |
+| Publish a revocation of the address, `PUT /v1/<A>/revocations` | the server keeps it, and the address is now revoked: `201` | the address is now revoked, and its messages are deleted: `201` | `410 revoked`, with the revocation record |
+| Publish a revocation of certificates, the same route | the server keeps it, and the address stays unknown: `200` | `200` | `410 revoked`, with the revocation record |
+
+- **A send** answers its sender's state as `403 unknown_sender` or `403 sender_revoked` (Section 11.10, step 1), and its recipient's state as the table does.
+- **There is no `DELETE` of a mailbox.** A mailbox leaves a server in one of two ways: its identity revokes the address, for good, or it stops renewing and is forgotten. To stop taking messages for a while, it sets its ACL (Section 11.14).
+- **Forgotten.** A mailbox that has stopped renewing is forgotten once the date until which Section 13 keeps it has passed. It is then unknown. It comes back by registering anew, without its ACL or its account. The server still keeps what its identity revoked.
+- **There is no pending state.** A registration carries a pass minutes old, so a mailbox is active from its first call.
+- **A request that took effect, sent again byte for byte,** gets `200` and the same result. A different request that conflicts with it gets `409 conflict`. A send of a ciphertext its recipient already stores is answered as Section 11.10, step 6, says.
 
 ### 11.7. Register
 
