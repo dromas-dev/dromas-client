@@ -13,7 +13,7 @@
 #   bash dromas.sh addr                            print it again: give it to whoever should write to this mailbox
 #   bash dromas.sh send <link> [file]             one message (the body from stdin without a file); a link or an address. Posted now or not at all: nothing waits
 #   bash dromas.sh recv                            verified messages, a "message" line each; a refused one goes to refused/, with a "refused" line
-#   bash dromas.sh prekey renew                    a new prekey, which the identity signs: at least monthly, as a prekey is valid for 33 days, or within the lifetime a prekey-lifetime file sets
+#   bash dromas.sh prekey renew                    a new prekey, which the identity signs: at least every 6 days and 22 hours, as a prekey is valid for 8 days, or within the lifetime a prekey-lifetime file sets
 #   bash dromas.sh help [<command>]                this, or a command's lines; --help after a command does the same, and runs nothing
 #   The README has the rest: https://github.com/dromas-dev/dromas-client#readme
 #
@@ -181,10 +181,10 @@ dr_identity(){ # → identity.pub, identity.doc and address, the identity as the
 }
 
 # recipe: keys and registration
-dr_lifetime(){ # → the seconds each new prekey of this mailbox is valid for: what its prekey-lifetime file names, a number of seconds alone on its line from 97200 (a day and three hours) to 2851200 (33 days), or 2851200 when it has none. A file that names anything else is a refusal, never the default: no prekey is signed until it is put right (PROTOCOL.md §12.4)
-  local l; [ -e "$DR/prekey-lifetime" ] || { echo 2851200; return 0; }
-  l=$(cat "$DR/prekey-lifetime" 2> /dev/null) && [[ $l =~ ^[1-9][0-9]{0,9}$ ]] && { printf '%s\n' "$l" | cmp -s - "$DR/prekey-lifetime" || printf '%s' "$l" | cmp -s - "$DR/prekey-lifetime"; } && [ "$l" -ge 97200 ] && [ "$l" -le 2851200 ] && echo "$l" ||      # compared with itself rebuilt: $(…) drops line feeds and NULs
-    dr_refuse "this mailbox's prekey-lifetime file names no lifetime: one is a number of seconds, alone on its line, from 97200 (a day and three hours) to 2851200 (33 days)"
+dr_lifetime(){ # → the seconds each new prekey of this mailbox is valid for: what its prekey-lifetime file names, a number of seconds alone on its line from 21600 (6 hours) to 691200 (8 days), or 691200 when it has none. A file that names anything else is a refusal, never the default: no prekey is signed until it is put right (PROTOCOL.md §12.4)
+  local l; [ -e "$DR/prekey-lifetime" ] || { echo 691200; return 0; }
+  l=$(cat "$DR/prekey-lifetime" 2> /dev/null) && [[ $l =~ ^[1-9][0-9]{0,9}$ ]] && { printf '%s\n' "$l" | cmp -s - "$DR/prekey-lifetime" || printf '%s' "$l" | cmp -s - "$DR/prekey-lifetime"; } && [ "$l" -ge 21600 ] && [ "$l" -le 691200 ] && echo "$l" ||      # compared with itself rebuilt: $(…) drops line feeds and NULs
+    dr_refuse "this mailbox's prekey-lifetime file names no lifetime: one is a number of seconds, alone on its line, from 21600 (6 hours) to 691200 (8 days)"
 }
 dr_prekey(){ # <serial> → prekeys/<serial>.agekey and its statement, signed by this mailbox's identity: a NEW key, valid for the mailbox's prekey lifetime (dr_lifetime), and prekeys/<serial>.made, when it was signed: a statement an earlier attempt left is sent again only while it was made for no longer than the mailbox's lifetime (dr_renew). A re-run reuses the key a failed attempt left, unless it is empty
   local A p="$DR/prekeys/$1" l t k; A=$(cat "$DR/address") || return 1
@@ -643,7 +643,7 @@ dr_judge(){ # <me> <message stem> → 0 only if EVERY check passes, in this orde
   age -d "${ids[@]}" < "$m.age" > "$m.T" 2> /dev/null || { echo "undecryptable: it does not decrypt with this mailbox's prekeys"; return 1; }
   A=$(dr_open "$B" "$m") || { echo "$A"; return 1; }      # the sender, proved by what was decrypted
   f=$(dr_floor 2> /dev/null) || { echo "$DR/seen-floor names no time"; return 3; }
-  [ "$f" -eq 0 ] || [ "$(dr_time "$(jq -r .sent_at "$m.P")")" -ge $((f + 33*86400)) ] || { echo "stale: sent_at is before this mailbox's replay set reaches back to, since its clock once read later than it does now"; return 1; }      # freshness has a floor too: a sent_at before the highest cutoff the replay set was pruned at may be a message whose line went, and so may one up to 33 days above it, a retry of such a message, dated afresh up to 33 days after its first copy (check 9 knows a retry by that copy's line). dr_open checked sent_at's grammar
+  [ "$f" -eq 0 ] || [ "$(dr_time "$(jq -r .sent_at "$m.P")")" -ge $((f + 7*86400)) ] || { echo "stale: sent_at is before this mailbox's replay set reaches back to, since its clock once read later than it does now"; return 1; }      # freshness has a floor too: a sent_at before the highest cutoff the replay set was pruned at may be a message whose line went, and so may one up to 7 days above it, a retry of such a message, dated afresh up to 7 days after its first copy (check 9 knows a retry by that copy's line). dr_open checked sent_at's grammar
   if ! grep -qxF -e "$A" "$DR/asked" 2> /dev/null; then      # the server is asked once for each sender in a drain. That it holds none is an answer; no answer is not, and the message then stays where it is
     dr_lookup "$A" >> "$DR/said"; case $? in 0) ;; 1) printf '%s\n' "$A" >> "$DR/asked" ;; 3) echo "what this mailbox keeps of its sender's revocations does not verify, or cannot be written"; return 3 ;; *) echo "whether its sender is revoked could not be asked"; return 4 ;; esac
   fi
@@ -692,7 +692,7 @@ dr_envform(){ # <envelope> → 0 only for one JSON object with no member named t
     jq -en --argjson n "$n" '[inputs] | length == 1 and (.[0] | type == "object" and ([.. | objects | length] | add) == $n)' "$1" > /dev/null 2>&1 ||
     { echo "bad_envelope: the envelope is not one JSON object with no member named twice"; return 1; }
 }
-dr_envcheck(){ # <envelope> <signer> <this mailbox> → 0 only for one JSON object, keys exact and none twice, checked in PROTOCOL.md §12.3 check 6's order: a body and fields that are strings, v the number 1, from the signer and to this mailbox, a msg_id, and sent_at no older than 33 days and no more than an hour ahead; otherwise the reason, and 1
+dr_envcheck(){ # <envelope> <signer> <this mailbox> → 0 only for one JSON object, keys exact and none twice, checked in PROTOCOL.md §12.3 check 6's order: a body and fields that are strings, v the number 1, from the signer and to this mailbox, a msg_id, and sent_at no older than 7 days and no more than an hour ahead; otherwise the reason, and 1
   local e=$1 sa
   dr_envform "$e" || return 1
   jq -e 'has("body") and all(.from, .to, .msg_id, .sent_at, .subject, .in_reply_to, .supersedes, .identity; . == null or type == "string") and .v == 1' "$e" > /dev/null 2>&1 ||
@@ -700,7 +700,7 @@ dr_envcheck(){ # <envelope> <signer> <this mailbox> → 0 only for one JSON obje
   jq -e --arg a "$2" --arg b "$3" '.from == $a and .to == $b' "$e" > /dev/null 2>&1 || { echo "reattributed: the inner from/to do not match the signer and this mailbox (re-attribution)"; return 1; }
   jq -e '.msg_id | type == "string" and test("\\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\z")' "$e" > /dev/null 2>&1 || { echo "bad_envelope: the envelope has no valid msg_id"; return 1; }
   jq -e '.sent_at | strings | test("\\A[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z\\z")' "$e" > /dev/null 2>&1 && sa=$(dr_time "$(jq -r .sent_at "$e")") || { echo "bad_envelope: the envelope's sent_at is not a UTC timestamp to the second"; return 1; }      # its grammar tested in jq first: $(…) drops trailing LFs and every NUL
-  [ "$sa" -ge $(($(dr_now) - 33*86400)) ] || { echo "stale: sent_at is older than 33 days"; return 1; }
+  [ "$sa" -ge $(($(dr_now) - 7*86400)) ] || { echo "stale: sent_at is older than 7 days"; return 1; }
   [ "$sa" -le $(($(dr_now) + 3600)) ] || { echo "future: sent_at is more than 60 minutes ahead of this machine's clock"; return 1; }
 }
 dr_line(){ # <checked envelope> [receipt] → the one line delivered: built from the checked fields, never the sender's bytes, with U+0085, U+2028 and U+2029 escaped (Python's splitlines and Node's readline end lines there), and every character of Unicode 18.0's Default_Ignorable_Code_Point, which nobody sees and a model reads (tag characters, BiDi controls, zero-width characters, variation selectors): the Go client's escapeUnseen, in its list and its form. With a receipt it is dr_sent's record, the envelope inside "envelope" and the receipt beside it
@@ -708,15 +708,15 @@ dr_line(){ # <checked envelope> [receipt] → the one line delivered: built from
     def dr_esc: if . > 65535 then (. - 65536) as $v | "\\u" + ((55296 + ($v / 1024 | floor)) | h4) + "\\u" + ((56320 + $v % 1024) | h4) else "\\u" + h4 end;      # a code point as JSON escapes it, lowercase, as Go writes it: a surrogate pair above U+FFFF
     ({v: 1, from, to, sent_at, msg_id, body} + ([{subject}, {in_reply_to}, {supersedes}] | map(select(.[] | . != null and . != "")) | add // {})) as $e | ($r[0] | if . then {envelope: $e, receipt: {id, received_at, expires_at}} else $e end) | tojson | gsub("(?<c>[\\x{85}\\x{2028}\\x{2029}\\x{AD}\\x{34F}\\x{61C}\\x{115F}-\\x{1160}\\x{17B4}-\\x{17B5}\\x{180B}-\\x{180F}\\x{200B}-\\x{200F}\\x{202A}-\\x{202E}\\x{2060}-\\x{206F}\\x{3164}\\x{FE00}-\\x{FE0F}\\x{FEFF}\\x{FFA0}\\x{FFF0}-\\x{FFF8}\\x{1BCA0}-\\x{1BCA3}\\x{1D173}-\\x{1D17A}\\x{E0000}-\\x{E0FFF}])"; .c | explode[0] | dr_esc)' "$1"
 }
-dr_forget(){ # <Unix time, one a server took (dr_taken)> → the replay set without the lines past 66 days and an hour from their sent_at by that reading: a retry, dated afresh, may be posted up to 33 days after a first copy that was delivered, and read up to 33 days after that, and an hour covers a clock that steps back as far as two clocks a server takes are apart. When it drops one, the floor rises to the cutoff first, so a clock that later reads further back still takes no message whose line went (dr_floor)
-  local c=$(($1 - 66*86400 - 3600)) f; [ -e "$DR/seen" ] || return 0
+dr_forget(){ # <Unix time, one a server took (dr_taken)> → the replay set without the lines past 14 days and an hour from their sent_at by that reading: a retry, dated afresh, may be posted up to 7 days after a first copy that was delivered, and read up to 7 days after that, and an hour covers a clock that steps back as far as two clocks a server takes are apart. When it drops one, the floor rises to the cutoff first, so a clock that later reads further back still takes no message whose line went (dr_floor)
+  local c=$(($1 - 14*86400 - 3600)) f; [ -e "$DR/seen" ] || return 0
   awk -v c="$c" '$2 >= c' "$DR/seen" > "$DR/seen.new" || return 1
   cmp -s "$DR/seen" "$DR/seen.new" && { rm -f "$DR/seen.new"; return 0; }      # nothing dropped: nothing written
   f=$(dr_floor) || return 1
   if [ "$f" -lt "$c" ]; then printf '%s\n' "$c" > "$DR/seen-floor.new" && sync "$DR/seen-floor.new" && mv "$DR/seen-floor.new" "$DR/seen-floor" && sync "$DR" || return 1; fi      # on disk before any line goes
   sync "$DR/seen.new" && mv "$DR/seen.new" "$DR/seen" && sync "$DR"      # on disk before it replaces the old one: a crash leaves the old set or the new, never an empty one
 }
-dr_floor(){ # → the highest cutoff a prune of the replay set has dropped a line at, from seen-floor, or 0 when it has none: a message sent before it, or less than 33 days after it, is stale whatever the clock now reads, since its line, or its first copy's, may be gone, as a Kerberos server that has lost its replay cache refuses until the window has passed (RFC 4120 §3.2.3). A file that names anything else is an error, never the default
+dr_floor(){ # → the highest cutoff a prune of the replay set has dropped a line at, from seen-floor, or 0 when it has none: a message sent before it, or less than 7 days after it, is stale whatever the clock now reads, since its line, or its first copy's, may be gone, as a Kerberos server that has lost its replay cache refuses until the window has passed (RFC 4120 §3.2.3). A file that names anything else is an error, never the default
   local f; [ -e "$DR/seen-floor" ] || { echo 0; return 0; }
   f=$(cat "$DR/seen-floor" 2> /dev/null) && [[ $f =~ ^(0|[1-9][0-9]{0,17})$ ]] && printf '%s\n' "$f" | cmp -s - "$DR/seen-floor" && echo "$f" ||      # compared with itself rebuilt: $(…) drops line feeds and NULs
     { dr_err "$DR/seen-floor names no time: it is a number of seconds and a line feed, written by recv"; return 1; }
@@ -726,7 +726,7 @@ dr_seen(){ # <sender> <message stem> <hash> → the message, in the replay set a
   printf '%s %s %s %s\n' "$3" "$(dr_time "$(jq -r .sent_at "$2.P")")" "$1" "$(jq -r .msg_id "$2.P")" >> "$DR/seen" && sync "$DR/seen" ${new:+"$new"}
 }
 
-# recipe: new prekey (monthly)
+# recipe: new prekey (at least every 6 days and 22 hours)
 dr_rekey(){ # → publishes a new prekey, signed by this mailbox's identity, under the lock: a NEW key at a new number, which this machine's clock gives, or the statement an earlier run signed and the server did not take, sent again as it is. Needs only the identity (dr_lock makes the mailbox's other files from it), so it also recovers a mailbox that lost its prekeys
   dr_held || { dr_lock dr_rekey; return; }
   dr_renew
@@ -764,7 +764,7 @@ dr_renew(){ # → what dr_rekey does, the lock held. A serial is signed ONCE
     [ "$s" -ge "$p" ] || dr_refuse "rollback: the server serves this mailbox's prekey serial $s, before serial $p, which this mailbox published" || return 1
   fi
   t=$(ls "$DR/prekeys" | sed -n 's/\.agekey$//p; s/\.txt\.sig$//p' | sort -n | tail -n 1); new=1      # s is the highest number this mailbox knows of, its own and the server's, and the new statement goes above it under the same signer (PROTOCOL.md §5.3). t is the highest number this mailbox began a prekey at
-  if [ "${t:-0}" -gt "$s" ]; then s=$t; new=; [ ! -s "$DR/prekeys/$s.txt.sig" ] || { na=$(dr_time "$(sed -n 5p "$DR/prekeys/$s.txt")") && [ "$na" -gt "$(dr_now)" ] && u=$(dr_time "$(cat "$DR/prekeys/$s.made" 2> /dev/null)") && [ "$u" -le "$(dr_now)" ] && w=$(dr_lifetime 2> /dev/null) && [ $((na - u)) -le "$w" ]; } || new=1; fi      # a number an earlier run took, and that nothing has passed since, is kept. Signed and never seen published: sent again AS IT IS until it expires, then a new number, and so is one made while the clock read ahead of where it reads now, which a server may not take until the clock catches up. Signed again, the same key would get 33 more days from a server that keeps what it refuses. Never signed: its key is used
+  if [ "${t:-0}" -gt "$s" ]; then s=$t; new=; [ ! -s "$DR/prekeys/$s.txt.sig" ] || { na=$(dr_time "$(sed -n 5p "$DR/prekeys/$s.txt")") && [ "$na" -gt "$(dr_now)" ] && u=$(dr_time "$(cat "$DR/prekeys/$s.made" 2> /dev/null)") && [ "$u" -le "$(dr_now)" ] && w=$(dr_lifetime 2> /dev/null) && [ $((na - u)) -le "$w" ]; } || new=1; fi      # a number an earlier run took, and that nothing has passed since, is kept. Signed and never seen published: sent again AS IT IS until it expires, then a new number, and so is one made while the clock read ahead of where it reads now, which a server may not take until the clock catches up. Signed again, the same key would get 8 more days from a server that keeps what it refuses. Never signed: its key is used
   if [ -n "$new" ]; then [ "$s" -lt 9007199254740991 ] || dr_refuse "this mailbox's prekey serial is the highest there is, so no later statement can be made: the address cannot renew" || return 1; t=$(dr_now); s=$((t > s ? t : s + 1)); fi      # a new number: this machine's clock, in seconds, or one above the highest this mailbox knows of when the clock gives nothing higher. A mailbox restored from its identity knows only what the server shows: by the clock, its statement is above every one made before, on whatever machine
   [ -s "$DR/prekeys/$s.txt.sig" ] || rm -f "$DR/prekeys/$s.txt" "$DR/prekeys/$s.made"; dr_prekey "$s" || return 1
   if [ -n "$gone" ]; then u="/v1/$A"; w='{identity:$i}'; else u="/v1/$A/prekey"; w='{}'; fi      # a registration is the identity document, then what a new prekey carries
@@ -774,13 +774,13 @@ dr_renew(){ # → what dr_rekey does, the lock held. A serial is signed ONCE
   mv "$DR/pass.new" "$DR/pass" || return 1
   at=$(dr_taken) && dr_prune "$at" && dr_out prekey --argjson serial "$s" --arg not_after "$(sed -n 5p "$DR/prekeys/$s.txt")"      # by the reading the server took the renewal at: the date of its pass, now $DR/pass
 }
-dr_prune(){ # <Unix time, one a server took (dr_taken)> → deletes every retired prekey past its deletion time by that reading of this machine's clock: its not_after + the 33 days a message is kept. dr_recv gives the date of the pass its list carried, dr_renew that of the renewal's: a clock a server took, never a later reading. After that, a message encrypted to it is unrecoverable. (The Go client also deletes them sooner.)
+dr_prune(){ # <Unix time, one a server took (dr_taken)> → deletes every retired prekey past its deletion time by that reading of this machine's clock: its not_after + the 7 days a message is kept. dr_recv gives the date of the pass its list carried, dr_renew that of the renewal's: a clock a server took, never a later reading. After that, a message encrypted to it is unrecoverable. (The Go client also deletes them sooner.)
   local f n top na; top=$(ls "$DR/prekeys" | sed -n 's/\.agekey$//p' | sort -n | tail -n 1); [ -n "$top" ] || return 0
   for f in "$DR"/prekeys/*.txt; do
     [ -e "$f" ] || continue
     n=$(basename "$f" .txt); [ "$n" -lt "$top" ] || continue      # never the newest
     na=$(dr_time "$(sed -n 5p "$f")") || continue
-    [ "$1" -lt $((na + 33*86400)) ] || rm -f "$DR/prekeys/$n.agekey"
+    [ "$1" -lt $((na + 7*86400)) ] || rm -f "$DR/prekeys/$n.agekey"
   done
 }
 
