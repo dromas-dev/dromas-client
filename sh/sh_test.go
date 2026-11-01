@@ -1124,20 +1124,20 @@ func TestAP256MailboxInBothClients(t *testing.T) {
 
 // The script verifies every type PROTOCOL.md §4.1 defines and no optional
 // one, so its mailbox declares no sender key type, at init and at each
-// renewal (§7).
+// renewal (§7): what it sent, kept beside the mailbox, carries none.
 func TestTheScriptDeclaresNoSenderKeyType(t *testing.T) {
 	w := newWorld(t)
-	declared := func(b *shMailbox) string {
+	sent := func(b *shMailbox, file string) string {
 		t.Helper()
-		return strings.TrimSpace(b.must(`dr_look "$(cat "$DR/address")" | jq -c .sender_key_types`))
+		return strings.TrimSpace(b.must(`jq -c 'has("sender_key_types")' "$DR/` + file + `"`))
 	}
 	b := w.mailbox()
-	if got := declared(b); got != "null" {
-		t.Errorf("init declares %s", got)
+	if got := sent(b, "register.json"); got != "false" {
+		t.Errorf("init sends a declaration: %s", got)
 	}
 	b.must("dr_rekey")
-	if got := declared(b); got != "null" {
-		t.Errorf("a renewal declares %s", got)
+	if got := sent(b, "rekey.json"); got != "false" {
+		t.Errorf("a renewal sends a declaration: %s", got)
 	}
 }
 
