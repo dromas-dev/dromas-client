@@ -1690,3 +1690,104 @@ Its builds also differ from Sections 3.2 and 4.1:
 - **A P-256 key's coordinates.** OpenSSH up to 10.2p1 refuses a coordinate of 128 bits or fewer, or of n − 1 or more, which OpenSSH from 10.3p1 and `golang.org/x/crypto/ssh` take.
 - **A P-256 key at all.** OpenSSH built without OpenSSL reads none.
 - **Certificates.** `ssh-keygen -Y verify` takes a certificate with a second principal, a critical option, extensions out of order or given twice, or a validity of `forever`, checks no key id, and knows a serial only through a revocation list, so a client built on it reads those fields from the certificate itself.
+
+## Appendix B. Collected ABNF
+
+Every rule of this document, in alphabetical order, with the rules it takes from other documents as prose (Section 2.2). The core rules of RFC 5234 Appendix B are not repeated.
+
+```abnf
+account-id                 = 1*32( %x61-7A / DIGIT / "-" )
+acl-entry                  = "*" / address
+address                    = 76base32-char base32-char-by-2
+address-param              = "address" BWS "=" BWS ( address / DQUOTE address DQUOTE )
+adopt-key                  = %s"dra1_" *254( 4base64url-char )
+                             [ 2base64url-char / 3base64url-char ]   ; at most 1,024 bytes
+age-recipient              = %s"age" *bech32-hrp-char "1" 6*bech32-char
+base32-char                = %x61-7A / %x32-37   ; a-z, 2-7
+base32-char-by-2           = %s"a" / %s"c" / %s"e" / %s"g" / %s"i" / %s"k" / %s"m"
+                             / %s"o" / %s"q" / %s"s" / %s"u" / %s"w" / %s"y"
+                             / "2" / "4" / "6"   ; its value even
+base64                     = *( 4base64-char ) [ base64-final ]
+base64-char                = ALPHA / DIGIT / "+" / "/"
+base64-char-by-16          = %s"A" / %s"Q" / %s"g" / %s"w"   ; its value a multiple of 16
+base64-char-by-4           = %s"A" / %s"E" / %s"I" / %s"M" / %s"Q" / %s"U" / %s"Y"
+                             / %s"c" / %s"g" / %s"k" / %s"o" / %s"s" / %s"w"
+                             / "0" / "4" / "8"   ; its value a multiple of 4
+base64-final               = 2base64-char base64-char-by-4 "="
+                             / base64-char base64-char-by-16 "=="
+base64-token               = 1*( 4( ALPHA / DIGIT / "+" ) )   ; base64 that is a token
+base64url-char             = ALPHA / DIGIT / "-" / "_"
+bech32-char                = "0" / %x32-39 / %x61 / %x63-68 / %x6A-6E / %x70-7A
+                             ; BIP 173's alphabet: no 1, b, i or o
+bech32-hrp-char            = %x21-40 / %x5B-7E   ; printable ASCII but A-Z
+BWS                        = <BWS, see [RFC 9110], Section 5.6.3>
+capability-name            = %x61-7A *63( %x61-7A / DIGIT / "_" )
+content-range-206          = %s"bytes" SP range-number "-" range-number "/" range-number
+cursor                     = 1*( ALPHA / DIGIT / "-" / "_" )
+Dromas-Version             = version-number "." version-number "." version-number
+                             [ "-" pre-release ]
+envelope-line              = 1*( %x00-09 / %x0B-FF ) LF   ; the envelope (Section 9.1)
+full-date                  = <full-date, see [RFC 3339], Section 5.6>
+identity-document          = %s"dromas-v1" LF key-type SP base64 LF
+key-type                   = 1*64( %x21-2B / %x2D-7E )   ; printable ASCII, no comma
+lowhexdig                  = DIGIT / %x61-66   ; HEXDIG in lowercase
+msg-id                     = 8lowhexdig "-" 4lowhexdig "-" 4lowhexdig "-" 4lowhexdig "-"
+                             12lowhexdig   ; RFC 9562's UUID (Section 4), in lowercase
+msg-namespace              = %s"dromas-msg-v1:" address
+not-after-param            = "not_after" BWS "=" BWS DQUOTE time DQUOTE
+OWS                        = <OWS, see [RFC 9110], Section 5.6.3>
+padding                    = *"."   ; Section 9.3
+pass-authorization         = %s"dromas-pass" SP
+                             %s"address=" DQUOTE address DQUOTE "," SP
+                             %s"not_after=" DQUOTE time DQUOTE "," SP
+                             %s"signature=" DQUOTE base64 DQUOTE
+pass-credentials           = pass-scheme 1*SP [ pass-gap ] pass-params [ pass-gap ]
+pass-gap                   = 1*( OWS "," ) OWS   ; empty list elements skipped
+pass-namespace             = %s"dromas-pass-v1:" address
+pass-params                = address-param pass-gap not-after-param pass-gap signature-param
+                             / address-param pass-gap signature-param pass-gap not-after-param
+                             / not-after-param pass-gap address-param pass-gap signature-param
+                             / not-after-param pass-gap signature-param pass-gap address-param
+                             / signature-param pass-gap address-param pass-gap not-after-param
+                             / signature-param pass-gap not-after-param pass-gap address-param
+pass-scheme                = "dromas-pass"
+pass-statement             = %s"dromas-pass-v1" LF address LF server-name LF time LF
+plaintext                  = envelope-line ssh-signature padding
+policy-version             = version-number "." version-number [ "." version-number ]
+port                       = <port, see [RFC 9110], Section 4.1>
+pre-release                = pre-release-id *( "." pre-release-id )
+pre-release-id             = version-number
+                             / *DIGIT ( ALPHA / "-" ) *( ALPHA / DIGIT / "-" )
+prekey-namespace           = %s"dromas-prekey-v1:" address
+prekey-statement           = %s"dromas-prekey-v1" LF address LF serial LF
+                             age-recipient LF time LF
+range-number               = "0" / %x31-39 *DIGIT   ; no leading zero
+revocation-of-address      = %s"dromas-revoke-v1" LF address LF
+revocation-of-certificates = %s"dromas-revoke-certs-v1" LF address LF serial LF
+revoke-certs-namespace     = %s"dromas-revoke-certs-v1:" address
+revoke-namespace           = %s"dromas-revoke-v1:" address
+serial                     = %x31-39 *15DIGIT   ; no leading zero
+server-name                = uri-host [ ":" port ]
+signature-even             = signature-groups LF
+signature-groups           = *16( 4base64-char ) ( 4base64-char / base64-final )
+signature-line             = 70base64-char LF
+signature-odd              = 68base64-char
+                             ( 2base64-char LF 2base64-char [ signature-groups ]
+                             / 2base64-char LF base64-char-by-4 "="
+                             / base64-char base64-char-by-16 LF "==" ) LF
+                             ; a group of 4 split across the last two lines
+signature-param            = "signature" BWS "=" BWS
+                             ( base64-token / DQUOTE base64 DQUOTE )
+signature-text             = *( 2signature-line ) ( signature-even / signature-odd )
+                             ; two lines of 70 hold 35 groups of 4
+ssh-signature              = %s"-----BEGIN SSH SIGNATURE-----" LF
+                             signature-text
+                             %s"-----END SSH SIGNATURE-----" LF
+statement-hash             = 64lowhexdig
+time                       = full-date %s"T" time-hour ":" time-minute ":" time-second %s"Z"
+time-hour                  = <time-hour, see [RFC 3339], Section 5.6>
+time-minute                = <time-minute, see [RFC 3339], Section 5.6>
+time-second                = <time-second, see [RFC 3339], Section 5.6>
+uri-host                   = <uri-host, see [RFC 9110], Section 4.1>
+version-number             = "0" / %x31-39 *DIGIT
+```
