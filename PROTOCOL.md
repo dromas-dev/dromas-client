@@ -439,14 +439,34 @@ server-name    = uri-host [ ":" port ]
 
 - **The server name** is the host of the mailbox's URL for its server, written as an origin is (RFC 6454 §6.2): lowercase, with no user information, and with its port only when the port is not the scheme's default. `https://dromas.dev:443` and `https://dromas.dev` name `dromas.dev`; `http://127.0.0.1:8080` names `127.0.0.1:8080`.
 - **A server MUST write the `Host` of a request the same way,** and drop a port of 443 or 80 alike, so that checking a pass never depends on the scheme a request came by.
-- **A client writes the pass as** `Authorization: dromas-pass address="<A>", not_after="<not_after>", signature="<base64 of the armoured signature>"`, in exactly that form, on one `Authorization` line. A request with two `Authorization` lines carries no pass.
-- **A server reads it as RFC 9110 §11 lets a recipient read credentials:**
-  - the scheme in any ASCII case, then one space or more;
-  - the three parameters in any order, each name in any ASCII case and given once, and no other parameter;
-  - optional whitespace around each comma and each `=`, and empty list elements skipped (RFC 9110 §5.6.1.2);
-  - each value a token or a quoted-string; a quoted-string holding a backslash is refused.
+- **A client writes the pass as the value of one `Authorization` line,** `pass-authorization`, its signature the base64 of the armoured signature. A request with two `Authorization` lines carries no pass.
 
-  The server then holds each value to its form: the address, a time, and the base64 of the signature. It verifies the signature over the pass built from those values, never over the header's text.
+  ```abnf
+  pass-authorization = %s"dromas-pass" SP
+                       %s"address=" DQUOTE address DQUOTE "," SP
+                       %s"not_after=" DQUOTE time DQUOTE "," SP
+                       %s"signature=" DQUOTE base64 DQUOTE
+  ```
+
+- **A server reads it as RFC 9110 §11 lets a recipient read credentials,** `pass-credentials`: the three parameters in any order, each once, as a list (RFC 9110 §5.6.1), and each value a token or a quoted-string (RFC 9110 §5.6.2, §5.6.4) that holds no backslash and is in its value's form. It verifies the signature over the pass built from those values, never over the header's text.
+
+  ```abnf
+  pass-credentials = pass-scheme 1*SP [ pass-gap ] pass-params [ pass-gap ]
+  pass-scheme      = "dromas-pass"
+  pass-params      = address-param pass-gap not-after-param pass-gap signature-param
+                   / address-param pass-gap signature-param pass-gap not-after-param
+                   / not-after-param pass-gap address-param pass-gap signature-param
+                   / not-after-param pass-gap signature-param pass-gap address-param
+                   / signature-param pass-gap address-param pass-gap not-after-param
+                   / signature-param pass-gap not-after-param pass-gap address-param
+  pass-gap         = 1*( OWS "," ) OWS   ; empty list elements skipped
+  address-param    = "address" BWS "=" BWS ( address / DQUOTE address DQUOTE )
+  not-after-param  = "not_after" BWS "=" BWS DQUOTE time DQUOTE
+  signature-param  = "signature" BWS "=" BWS
+                     ( base64-token / DQUOTE base64 DQUOTE )
+  base64-token     = 1*( 4( ALPHA / DIGIT / "+" ) )   ; base64 that is a token
+  ```
+
 - **A server MUST refuse a value longer than the form a client writes with a signature of the largest bound** any identity key type has (Section 3.2), whitespace included, with `401 unauthorized`, before it hashes, parses or verifies it.
 - **Lifetime.** A client signs a pass to end 10 minutes after it signs it. A server takes a pass that has not ended and ends at most the skew allowance after its own clock reads.
 - **A client keeps its pass for every call until it is about to end.** A client MUST NOT use a kept pass with more than 10 minutes left: its clock has gone back since it signed it.
