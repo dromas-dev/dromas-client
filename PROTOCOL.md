@@ -181,7 +181,23 @@ and the signature is the blob
 
     "SSHSIG" ‖ u32(1) ‖ str(signing key) ‖ str(namespace) ‖ str("") ‖ str("sha512") ‖ str(signature)
 
-armoured: the line `-----BEGIN SSH SIGNATURE-----`, the blob's base64 (Section 2.2) in lines of 70 characters, the last of 1 to 70, then the line `-----END SSH SIGNATURE-----`, each line ended by LF, with nothing before the first or after the last.
+armoured as `ssh-signature`: the blob's base64 (Section 2.2) in lines of 70 characters, the last of 1 to 70, between a BEGIN line and an END line.
+
+```abnf
+ssh-signature    = %s"-----BEGIN SSH SIGNATURE-----" LF
+                   signature-text
+                   %s"-----END SSH SIGNATURE-----" LF
+signature-text   = *( 2signature-line ) ( signature-even / signature-odd )
+                   ; two lines of 70 hold 35 groups of 4
+signature-line   = 70base64-char LF
+signature-even   = signature-groups LF
+signature-odd    = 68base64-char
+                   ( 2base64-char LF 2base64-char [ signature-groups ]
+                   / 2base64-char LF base64-char-by-4 "="
+                   / base64-char base64-char-by-16 LF "==" ) LF
+                   ; a group of 4 split across the last two lines
+signature-groups = *16( 4base64-char ) ( 4base64-char / base64-final )
+```
 
 - **The signing key** is the signer (Section 5), in SSH wire form. For what the identity signs, it is the bare identity key: the bytes of the identity document's line 2. For what a working key signs, it is the certificate.
 - **The signature** is of the signing key's type; for a certificate, that is the type of the key it certifies.
