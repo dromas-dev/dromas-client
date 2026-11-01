@@ -27,16 +27,17 @@ import (
 // revoked, it was made for longer than the mailbox's
 // lifetime now allows or has no record of when it was made, or this mailbox no
 // longer holds its key or its working key. A key is signed once, so no key is
-// encrypted to for longer than its lifetime, at most 33 days or the mailbox's
-// shorter one, whatever the server does with what it was sent. It needs only the identity, so it also
+// encrypted to for longer than its lifetime, at most protocol.PrekeyLifetime
+// or the mailbox's shorter one, whatever the server does with what it was sent. It needs only the identity, so it also
 // recovers a mailbox that lost its prekeys or its working key, and such a mailbox
 // needs no record of the numbers the lost machine used; one that lost its
 // allowed, blocked and policy files too takes them from the ACL its server
 // holds (adoptPending). The upload carries a pass by the statement's signer,
 // and the server then takes no pass by an older one.
-// [Mailbox.Receive] renews the prekey once it is more than a day old, so a mailbox
-// received at least monthly never lapses; Rekey is for recovery, and for
-// mailboxes that are only ever sent from.
+// [Mailbox.Receive] renews the prekey once it is more than a day old, or
+// sooner for a lifetime too short for that (renewAt), so a mailbox received at
+// least every [RecvWithin] its lifetime never lapses; Rekey is for recovery,
+// and for mailboxes that are only ever sent from.
 //
 // It holds the mailbox's lock, so two runs never make the same serial's key at
 // once, and it refuses a served serial below the highest this mailbox has
@@ -592,30 +593,60 @@ func decimal(v []byte, name string) (uint64, error) {
 	return n, nil
 }
 
-// renewAfter is how old the current prekey may get before Receive renews
-// it: a day, so a mailbox received at least monthly never lapses, and a busy
-// mailbox renews at most daily.
+// renewAfter is the oldest the current prekey gets before Receive renews it
+// (renewAt): a day, so a busy mailbox renews at most daily.
 const renewAfter = 24 * time.Hour
 
-// renewTime is the room a renewal leaves for its own calls, beside
-// protocol.MaxSkew: from the start of the Receive that renews to the server
-// taking the new prekey, the read of the mailbox's own mailbox and the upload.
-const renewTime = time.Hour
+// shortRoom is the room a renewal leaves for a prekey lifetime under a day,
+// for senders' clocks (margin) and for its own calls (renewTime) each: five
+// minutes, the room a short-lived thing leaves (PROTOCOL.md §3.4, §12.4;
+// PRECEDENTS.md § 3a).
+const shortRoom = 5 * time.Minute
 
-// MinPrekeyLifetime is the shortest a mailbox's prekeys may be valid for: the
-// day Receive waits to renew one (renewAfter), an hour of slip for when recv
-// runs, renewTime, and protocol.MaxSkew for clocks, the hour a sender's may
-// read ahead of the mailbox's (PROTOCOL.md §3.4, §12.4). At it, an hourly recv
-// renews in time.
-const MinPrekeyLifetime = renewAfter + time.Hour + renewTime + protocol.MaxSkew
+// margin is the room a renewal leaves for senders' clocks, for a prekey of
+// the given lifetime (PROTOCOL.md §3.4, §12.4): protocol.MaxSkew, the hour a
+// sender's clock may read ahead of the mailbox's, for a lifetime of a day or
+// more, and shortRoom for a shorter one.
+func margin(lifetime time.Duration) time.Duration {
+	if lifetime >= 24*time.Hour {
+		return protocol.MaxSkew
+	}
+	return shortRoom
+}
+
+// renewTime is the room a renewal leaves for its own calls, beside margin:
+// from the start of the Receive that renews to the server taking the new
+// prekey, the read of the mailbox's own mailbox and the upload. An hour for
+// a prekey lifetime of a day or more, and shortRoom for a shorter one.
+func renewTime(lifetime time.Duration) time.Duration {
+	if lifetime >= 24*time.Hour {
+		return time.Hour
+	}
+	return shortRoom
+}
+
+// renewAt is how old a prekey of the given lifetime gets before Receive
+// renews it: renewAfter, or sooner where the lifetime leaves less, with
+// margin left for senders' clocks, renewTime for the renewal's own calls and
+// renewTime again for when recv runs. So 8 days renews at a day, 25 hours at
+// 22 hours, and 6 hours at 5 hours and 45 minutes.
+func renewAt(lifetime time.Duration) time.Duration {
+	return min(renewAfter, lifetime-margin(lifetime)-2*renewTime(lifetime))
+}
+
+// MinPrekeyLifetime is the shortest a mailbox's prekeys may be valid for: 6
+// hours, at which Receive renews one every 5 hours and 45 minutes (renewAt),
+// about four times a day.
+const MinPrekeyLifetime = 6 * time.Hour
 
 // RecvWithin is how often a mailbox must run Receive for a prekey of the given
 // lifetime to be renewed while every sender whose clock a server takes still
-// takes it: Receive renews one once it is a day old, and the prekey then has
-// renewTime and protocol.MaxSkew left, the room whoever makes a time-limited
-// thing leaves (PROTOCOL.md §3.4).
+// takes it: Receive renews one once it is renewAt old, and the prekey then has
+// renewTime and margin left (PROTOCOL.md §3.4). So 8 days needs a Receive
+// every 6 days and 22 hours, 25 hours every hour, and 6 hours every 5
+// minutes.
 func RecvWithin(lifetime time.Duration) time.Duration {
-	return lifetime - renewAfter - renewTime - protocol.MaxSkew
+	return lifetime - margin(lifetime) - renewTime(lifetime) - renewAt(lifetime)
 }
 
 // lifetimeGrammar is what a mailbox's prekey-lifetime file holds: a number of
@@ -650,7 +681,7 @@ func (b *Mailbox) prekeyLifetime() (time.Duration, error) {
 }
 
 // lifetimeRule is what a prekey lifetime is, as a mailbox's owner is told it.
-var lifetimeRule = fmt.Sprintf("one is a number of seconds, alone on its line, from %d (a day and three hours) to %d (33 days)", int64(MinPrekeyLifetime/time.Second), int64(protocol.PrekeyLifetime/time.Second))
+var lifetimeRule = fmt.Sprintf("one is a number of seconds, alone on its line, from %d (%d hours) to %d (%d days)", int64(MinPrekeyLifetime/time.Second), int64(MinPrekeyLifetime/time.Hour), int64(protocol.PrekeyLifetime/time.Second), int64(protocol.PrekeyLifetime/(24*time.Hour)))
 
 // SetPrekeyLifetime writes the mailbox's prekey-lifetime file: each prekey made
 // from now on is valid for d, a whole number of seconds from
@@ -777,10 +808,11 @@ func (b *Mailbox) holdRenewal(why error) error {
 }
 
 // renewDue reports whether the current prekey is to be renewed: once it is
-// more than renewAfter old; when it, or the record of when it was made,
-// cannot be read; when it was made for longer than the mailbox's prekey
-// lifetime now allows, so a lifetime set lower holds from the next recv; when
-// that lifetime cannot be read, so that the renewal fails and says why; and
+// more than renewAt old, by the lifetime it was made for; when it, or the
+// record of when it was made, cannot be read; when it was made for longer
+// than the mailbox's prekey lifetime now allows, so a lifetime set lower
+// holds from the next recv; when that lifetime cannot be read, so that the
+// renewal fails and says why; and
 // when this mailbox's own revocation of its certificates covers the signer it
 // is using (usesRevoked): such a mailbox takes no messages until it publishes
 // under a new certificate, as [Mailbox.RenewAndRevoke] leaves it when the
@@ -791,12 +823,16 @@ func (b *Mailbox) renewDue() bool {
 		return true
 	}
 	made, err := b.made(n)
-	if err != nil || b.now().Sub(made) > renewAfter {
+	if err != nil {
 		return true
 	}
 	p, err := b.prekeyStatement(n)
 	lifetime, lerr := b.prekeyLifetime()
-	return err != nil || lerr != nil || p.NotAfter.Sub(made) > lifetime
+	if err != nil || lerr != nil {
+		return true
+	}
+	own := p.NotAfter.Sub(made)
+	return own > lifetime || b.now().Sub(made) > renewAt(own)
 }
 
 // dropRetired deletes every retired prekey but the newest, after a drain

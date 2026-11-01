@@ -138,8 +138,9 @@ func (r *Result) Again() time.Duration {
 // next one. It holds the mailbox's lock throughout ([Mailbox.hold]): a second
 // Receive, or any other command that writes the mailbox, waits for it.
 //
-// First it renews the prekey if the current one is more than a day old, so
-// a mailbox received at least monthly never lapses. Once that renewal is taken,
+// First it renews the prekey if the current one is more than a day old, or
+// sooner for a lifetime too short for that (renewAt), so a mailbox received at
+// least every [RecvWithin] its lifetime never lapses. Once that renewal is taken,
 // a read of the ACL its server holds is owed, and the first Receive that can
 // make it makes it, renewing or not, and replaces one the mailbox did not send
 // (aclAt, checkACL). A drain that empties the mailbox
