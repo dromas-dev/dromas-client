@@ -27,12 +27,35 @@ The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD", "S
 
 ### 2.2. Notation
 
+- **Grammar.** A text's form is given in ABNF (RFC 5234), in the section that defines the text, right after the prose that introduces it. A string in quotes matches in any ASCII case; one written `%s"…"` matches exactly (RFC 7405). The core rules (RFC 5234 Appendix B: `ALPHA`, `DIGIT`, `DQUOTE`, `LF`, `SP`) are used by name, and so are `full-date`, `time-hour`, `time-minute` and `time-second` (RFC 3339 §5.6), `OWS` and `BWS` (RFC 9110 §5.6.3), and `uri-host` (RFC 9110 §4.1: RFC 3986's `host`). Appendix B collects every rule.
 - A *line* ends in LF (0x0A). A text "of N lines" is exactly N lines: no CR, and nothing after the last LF.
 - `‖` is concatenation. `str(x)` is a uint32 big-endian length followed by the bytes of `x` (RFC 4251 §5).
-- An **address** is written as 77 characters of lowercase base32 (RFC 4648 §6) without padding, wherever it appears: a path, a statement, an envelope, a namespace.
-- A **time** is RFC 3339 in UTC to the second, exactly `YYYY-MM-DDTHH:MM:SSZ`. What ends at a time has ended at that second: it is valid while a clock reads before it.
-- A **serial** is a decimal integer from 1 to 2^53 − 1 with no leading zero. 2^53 − 1 is the largest integer every JSON reader holds exactly (Section 3.3). A certificate serial, a prekey serial and a revocation serial (Section 2.3) are each a serial.
-- **base64** is standard base64 (RFC 4648 §4) in its one encoding: padded, with no character outside the alphabet (a line break included), and the unused bits of its last character zero, so that encoding the bytes again gives the same text. Two places differ, and say so: the armour of a signature (Section 3.2) and an adopt key (Section 11.16).
+- An **address** is written as 77 characters of lowercase base32 (RFC 4648 §6) without padding, `address` (Section 4.2), wherever it appears: a path, a statement, an envelope, a namespace.
+- A **time** is RFC 3339 in UTC to the second. What ends at a time has ended at that second: it is valid while a clock reads before it.
+
+  ```abnf
+  time = full-date %s"T" time-hour ":" time-minute ":" time-second %s"Z"
+  ```
+
+- A **serial** is a decimal integer from 1 to 2^53 − 1, of which the grammar states only the digits. 2^53 − 1 is the largest integer every JSON reader holds exactly (Section 3.3). A certificate serial, a prekey serial and a revocation serial (Section 2.3) are each a serial.
+
+  ```abnf
+  serial = %x31-39 *15DIGIT   ; no leading zero
+  ```
+
+- **base64** is standard base64 (RFC 4648 §4) in its one encoding, so that encoding the bytes again gives the same text: padded, and the unused bits of its last character zero. Two places differ, and say so: the armour of a signature (Section 3.2) and an adopt key (Section 11.16).
+
+  ```abnf
+  base64            = *( 4base64-char ) [ base64-final ]
+  base64-nonempty   = 1*( 4base64-char ) [ base64-final ] / base64-final
+  base64-char       = ALPHA / DIGIT / "+" / "/"
+  base64-final      = 2base64-char base64-char-by-4 "="
+                    / base64-char base64-char-by-16 "=="
+  base64-char-by-4  = %s"A" / %s"E" / %s"I" / %s"M" / %s"Q" / %s"U" / %s"Y"
+                    / %s"c" / %s"g" / %s"k" / %s"o" / %s"s" / %s"w"
+                    / "0" / "4" / "8"   ; its value a multiple of 4
+  base64-char-by-16 = %s"A" / %s"Q" / %s"g" / %s"w"   ; its value a multiple of 16
+  ```
 - In a namespace or a statement, `<A>` is the address of the mailbox that signs it.
 - In a route, `<A>` is the address of the mailbox the call is about: a mailbox calling about itself, or anyone's lookup or revocation call (Sections 11.8, 11.15). `<B>` is the address of a message's recipient: a sender sends to it (Section 11.10), and the recipient calls the other message routes as itself (Sections 11.11 to 11.14).
 
@@ -159,7 +182,23 @@ and the signature is the blob
 
     "SSHSIG" ‖ u32(1) ‖ str(signing key) ‖ str(namespace) ‖ str("") ‖ str("sha512") ‖ str(signature)
 
-armoured: the line `-----BEGIN SSH SIGNATURE-----`, the blob's base64 (Section 2.2) in lines of 70 characters, the last of 1 to 70, then the line `-----END SSH SIGNATURE-----`, each line ended by LF, with nothing before the first or after the last.
+armoured as `ssh-signature`: the blob's base64 (Section 2.2) in lines of 70 characters, the last of 1 to 70, between a BEGIN line and an END line.
+
+```abnf
+ssh-signature    = %s"-----BEGIN SSH SIGNATURE-----" LF
+                   signature-text
+                   %s"-----END SSH SIGNATURE-----" LF
+signature-text   = *( 2signature-line ) ( signature-even / signature-odd )
+                   ; two lines of 70 hold 35 groups of 4
+signature-line   = 70base64-char LF
+signature-even   = signature-groups LF
+signature-odd    = 68base64-char
+                   ( 2base64-char LF 2base64-char [ signature-groups ]
+                   / 2base64-char LF base64-char-by-4 "="
+                   / base64-char base64-char-by-16 LF "==" ) LF
+                   ; a group of 4 split across the last two lines
+signature-groups = *16( 4base64-char ) ( 4base64-char / base64-final )
+```
 
 - **The signing key** is the signer (Section 5), in SSH wire form. For what the identity signs, it is the bare identity key: the bytes of the identity document's line 2. For what a working key signs, it is the certificate.
 - **The signature** is of the signing key's type; for a certificate, that is the type of the key it certifies.
@@ -239,17 +278,25 @@ The key MUST be of a type this section defines, in its one encoding, and MUST me
 - **Every client MUST verify `ssh-ed25519`.** A client MUST NOT make an identity of any other type unless its owner asks for one.
 - **Every other type is OPTIONAL:** a client verifies it or not, and a server registers it or not (Section 11.7). A mailbox of an optional type can be written to, and heard from, only by mailboxes whose clients verify that type (Section 7).
 - **The working key column** is the type of every working key an identity of that type certifies (Section 5). A type defined later states its own, as it states its own signature bound (Section 3.2).
-- **The form is the same for every key type, defined here or not.** In this order:
-  1. the tag line;
-  2. a key type's name (RFC 4251 §6: printable ASCII with no comma, at most 64 characters);
-  3. one space;
-  4. the base64 of an SSH wire key that begins with that same name;
-  5. LF.
+- **The form is the same for every key type, defined here or not:** `identity-document`, where `key-type` is a key type's name (RFC 4251 §6) and the base64 is of an SSH wire key that begins with that same name.
+
+  ```abnf
+  identity-document = %s"dromas-v1" LF key-type SP base64-nonempty LF
+  key-type          = 1*64( %x21-2B / %x2D-7E )   ; printable ASCII, no comma
+  ```
 - **A reader MUST refuse a well-formed document of a type it does not verify as `unsupported_key_type`, never as malformed.** A document that breaks the form, or does not hash to its address, is evidence of tampering; one of a type the reader lacks is not.
 
 ### 4.2. The address
 
-The address is the SHA-384 of `D`, its 48 bytes in lowercase base32 (RFC 4648 §6) without padding, as Tor writes an onion address: 77 characters of `a`–`z` and `2`–`7`, `openssl dgst -sha384 -binary < identity.doc | base32 | tr -d '=' | tr A-Z a-z`. The last character's one unused bit is zero, so each address has one text form.
+The address is the SHA-384 of `D`, its 48 bytes in lowercase base32 (RFC 4648 §6) without padding, as Tor writes an onion address: `openssl dgst -sha384 -binary < identity.doc | base32 | tr -d '=' | tr A-Z a-z`. The last character's one unused bit is zero, so each address has one text form:
+
+```abnf
+address          = 76base32-char base32-char-by-2
+base32-char      = %x61-7A / %x32-37   ; a-z, 2-7
+base32-char-by-2 = %s"a" / %s"c" / %s"e" / %s"g" / %s"i" / %s"k" / %s"m"
+                 / %s"o" / %s"q" / %s"s" / %s"u" / %s"w" / %s"y"
+                 / "2" / "4" / "6"   ; its value even
+```
 
 - **SHA-384 is NIST's category 4 for collisions** (SHA-256 is category 2), and the address is the one part of a mailbox that never changes: whatever else is renewed, a second preimage of it names the mailbox for good.
 - **It has one case and never begins with `-`:** no two addresses differ only in case, so a file named by one is that address's alone on any file system, and a command line never reads one as an option.
@@ -343,18 +390,20 @@ A certificate is an OpenSSH user certificate, and a verifier MUST check every ro
 
 ## 6. The prekey statement
 
-A prekey statement is five lines, signed by the mailbox's signer (Section 5), in the namespace `dromas-prekey-v1:<A>`:
+A prekey statement, `prekey-statement`, is signed by the mailbox's signer (Section 5), in the namespace `dromas-prekey-v1:<A>`, `prekey-namespace`:
 
-```
-dromas-prekey-v1
-<A>
-<serial>
-<age recipient>
-<not_after>
+```abnf
+prekey-statement = %s"dromas-prekey-v1" LF address LF serial LF
+                   age-recipient LF time LF
+prekey-namespace = %s"dromas-prekey-v1:" address
+age-recipient    = %s"age" *bech32-hrp-char "1" 6*bech32-char
+bech32-hrp-char  = %x21-40 / %x5B-7E   ; printable ASCII but A-Z
+bech32-char      = "0" / %x32-39 / %x61 / %x63-68 / %x6A-6E / %x70-7A
+                   ; BIP 173's alphabet: no 1, b, i or o
 ```
 
 - **Serial:** the prekey serial, a serial (Section 2.2). Under one signer, each prekey statement's prekey serial is higher than the last one's.
-- **Key:** an age recipient, whose Bech32 human-readable part names its type (BIP 173). It is written as age writes a recipient: lowercase, its checksum valid, its data whole bytes, and of any length.
+- **Key:** an age recipient, whose Bech32 human-readable part, before its last `1`, names its type (BIP 173). It is written as age writes a recipient: its checksum valid, its data whole bytes, and of any length.
   - The one prekey type is `mlkem768x25519`, named `age1pq`.
   - A key whose X25519 half is of small order breaks the prekey statement.
   - A prekey type added later is an addition inside v1 (Section 14).
@@ -381,25 +430,45 @@ A mailbox declares the identity key types its client verifies, so that a sender 
 
 A mailbox proves itself to its server, on every call it makes as itself, with a pass it signs for itself. The server issues nothing for it and stores nothing.
 
-The pass is four lines, signed by the mailbox's signer (Section 5), in the namespace `dromas-pass-v1:<A>`:
+The pass, `pass-statement`, is signed by the mailbox's signer (Section 5), in the namespace `dromas-pass-v1:<A>`, `pass-namespace`:
 
-```
-dromas-pass-v1
-<A>
-<server name>
-<not_after>
+```abnf
+pass-statement = %s"dromas-pass-v1" LF address LF server-name LF time LF
+pass-namespace = %s"dromas-pass-v1:" address
+server-name    = uri-host [ ":" server-port ]   ; in lowercase, its host not empty
+server-port    = %x31-39 *4DIGIT   ; no leading zero
 ```
 
 - **The server name** is the host of the mailbox's URL for its server, written as an origin is (RFC 6454 §6.2): lowercase, with no user information, and with its port only when the port is not the scheme's default. `https://dromas.dev:443` and `https://dromas.dev` name `dromas.dev`; `http://127.0.0.1:8080` names `127.0.0.1:8080`.
 - **A server MUST write the `Host` of a request the same way,** and drop a port of 443 or 80 alike, so that checking a pass never depends on the scheme a request came by.
-- **A client writes the pass as** `Authorization: dromas-pass address="<A>", not_after="<not_after>", signature="<base64 of the armoured signature>"`, in exactly that form, on one `Authorization` line. A request with two `Authorization` lines carries no pass.
-- **A server reads it as RFC 9110 §11 lets a recipient read credentials:**
-  - the scheme in any ASCII case, then one space or more;
-  - the three parameters in any order, each name in any ASCII case and given once, and no other parameter;
-  - optional whitespace around each comma and each `=`, and empty list elements skipped (RFC 9110 §5.6.1.2);
-  - each value a token or a quoted-string; a quoted-string holding a backslash is refused.
+- **A client writes the pass as the value of one `Authorization` line,** `pass-authorization`, its signature the base64 of the armoured signature. A request with two `Authorization` lines carries no pass.
 
-  The server then holds each value to its form: the address, a time, and the base64 of the signature. It verifies the signature over the pass built from those values, never over the header's text.
+  ```abnf
+  pass-authorization = %s"dromas-pass" SP
+                       %s"address=" DQUOTE address DQUOTE "," SP
+                       %s"not_after=" DQUOTE time DQUOTE "," SP
+                       %s"signature=" DQUOTE base64-nonempty DQUOTE
+  ```
+
+- **A server reads it as RFC 9110 §11 lets a recipient read credentials,** `pass-credentials`: the three parameters in any order, each once, as a list (RFC 9110 §5.6.1), and each value a token or a quoted-string (RFC 9110 §5.6.2, §5.6.4) that holds no backslash and is in its value's form. It verifies the signature over the pass built from those values, never over the header's text.
+
+  ```abnf
+  pass-credentials = pass-scheme 1*SP [ pass-gap ] pass-params [ pass-gap ]
+  pass-scheme      = "dromas-pass"
+  pass-params      = address-param pass-gap not-after-param pass-gap signature-param
+                   / address-param pass-gap signature-param pass-gap not-after-param
+                   / not-after-param pass-gap address-param pass-gap signature-param
+                   / not-after-param pass-gap signature-param pass-gap address-param
+                   / signature-param pass-gap address-param pass-gap not-after-param
+                   / signature-param pass-gap not-after-param pass-gap address-param
+  pass-gap         = 1*( OWS "," ) OWS   ; empty list elements skipped
+  address-param    = "address" BWS "=" BWS ( address / DQUOTE address DQUOTE )
+  not-after-param  = "not_after" BWS "=" BWS DQUOTE time DQUOTE
+  signature-param  = "signature" BWS "=" BWS
+                     ( base64-token / DQUOTE base64-nonempty DQUOTE )
+  base64-token     = 1*( 4( ALPHA / DIGIT / "+" ) )   ; base64 that is a token
+  ```
+
 - **A server MUST refuse a value longer than the form a client writes with a signature of the largest bound** any identity key type has (Section 3.2), whitespace included, with `401 unauthorized`, before it hashes, parses or verifies it.
 - **Lifetime.** A client signs a pass to end 10 minutes after it signs it. A server takes a pass that has not ended and ends at most the skew allowance after its own clock reads.
 - **A client keeps its pass for every call until it is about to end.** A client MUST NOT use a kept pass with more than 10 minutes left: its clock has gone back since it signed it.
@@ -441,12 +510,18 @@ The envelope is one line of compact JSON, its LF included, and is what the sende
 | `from` | required | the sender's address |
 | `to` | required | the recipient's address |
 | `sent_at` | required | a time: when this copy was posted (Section 12.2) |
-| `msg_id` | required | a UUID as RFC 9562 §4 writes one (hex, hyphens between its 4, 2, 2, 2 and 6 octets), lowercase, of any version. A client makes a random one (version 4) once for each message and keeps it on every copy |
+| `msg_id` | required | a UUID as RFC 9562 §4 writes one, in lowercase, of any version: `msg-id`. A client makes a random one (version 4) once for each message and keeps it on every copy |
 | `identity` | required | the sender's identity document, base64. `from` is its hash |
 | `body` | required | the message's content: any JSON value, carried as that value. Its null is a value |
 | `subject` | optional | a string |
 | `in_reply_to` | optional | a string: the `msg_id` replied to |
 | `supersedes` | optional | a string: a `msg_id` of the same sender that this message replaces. A stored message is never altered; the recipient decides |
+
+```abnf
+msg-id    = 8lowhexdig "-" 4lowhexdig "-" 4lowhexdig "-" 4lowhexdig "-"
+            12lowhexdig   ; the UUID of [RFC 9562], Section 4, in lowercase
+lowhexdig = DIGIT / %x61-66   ; HEXDIG in lowercase
+```
 
 - **An empty string in `subject`, `in_reply_to` or `supersedes` is the member left out,** and a writer leaves such a member out.
 - **A sender MUST refuse an `in_reply_to` or `supersedes` that is not a `msg_id`.** A reader checks only that each is a string.
@@ -477,6 +552,15 @@ U1NIU0lH…
 1. **Line 1 is the envelope,** and its bytes, LF included, are what is signed.
 2. **Then the signature,** as `ssh-keygen` writes it, through its END line.
 3. **Then padding,** to the end (Section 9.3).
+
+A sender writes it as `plaintext`, and signs in `msg-namespace`:
+
+```abnf
+plaintext     = envelope-line ssh-signature padding
+envelope-line = 1*( %x00-09 / %x0B-FF ) LF   ; the envelope (Section 9.1)
+padding       = *"."   ; Section 9.3
+msg-namespace = %s"dromas-msg-v1:" address
+```
 
 A reader MUST take the parts apart by these rules:
 
@@ -511,8 +595,14 @@ The plaintext is encrypted to the recipient's prekey with age (C2SP age), in the
 
 A mailbox's identity can revoke its address for good, and nothing else can.
 
-- **The revocation statement is fixed text:** `dromas-revoke-v1`, LF, the address, LF. It has no date, no reason and no number: a verifier builds it from the address, and a copy signed at any time is the same revocation statement.
-- **It is signed by the identity key,** in the namespace `dromas-revoke-v1:<A>`, with the bare identity key as the signing key. A working key's signature over the same revocation statement, under a certificate of that identity, is not a revocation: a verifier's `allowed_signers` line names the identity key with no `cert-authority`.
+- **The revocation statement is fixed text,** `revocation-of-address`. It has no date, no reason and no number: a verifier builds it from the address, and a copy signed at any time is the same revocation statement.
+- **It is signed by the identity key,** in the namespace `dromas-revoke-v1:<A>`, `revoke-namespace`, with the bare identity key as the signing key. A working key's signature over the same revocation statement, under a certificate of that identity, is not a revocation: a verifier's `allowed_signers` line names the identity key with no `cert-authority`.
+
+  ```abnf
+  revocation-of-address = %s"dromas-revoke-v1" LF address LF
+  revoke-namespace      = %s"dromas-revoke-v1:" address
+  ```
+
 - **It reaches back, and nothing undoes it.** Once a verifier has verified a revocation of the address:
   - it takes nothing signed for that address, whenever it was signed;
   - it sends the address nothing;
@@ -522,8 +612,14 @@ A mailbox's identity can revoke its address for good, and nothing else can.
 
 The identity revokes every certificate it made through a revocation serial, that serial included, and keeps its address.
 
-- **The revocation statement is three lines:** `dromas-revoke-certs-v1`, the address, the revocation serial.
-- **It is signed by the identity key,** in the namespace `dromas-revoke-certs-v1:<A>`, as `ssh-keygen -q -Y sign -n "dromas-revoke-certs-v1:$A" -f identity < statement > statement.sig`. A working key's signature is refused.
+- **The revocation statement,** `revocation-of-certificates`, carries the address and the revocation serial.
+- **It is signed by the identity key,** in the namespace `dromas-revoke-certs-v1:<A>`, `revoke-certs-namespace`, as `ssh-keygen -q -Y sign -n "dromas-revoke-certs-v1:$A" -f identity < statement > statement.sig`. A working key's signature is refused.
+
+  ```abnf
+  revocation-of-certificates = %s"dromas-revoke-certs-v1" LF address LF serial LF
+  revoke-certs-namespace     = %s"dromas-revoke-certs-v1:" address
+  ```
+
 - **It revokes every certificate of the address whose certificate serial is at or below its revocation serial.**
   - It covers certificates only (Section 5.1).
   - A verifier keeps the one with the highest revocation serial it has verified, and that one stands. One through a lower revocation serial changes nothing, whenever it arrives.
@@ -840,7 +936,11 @@ The server takes a renewal because its prekey statement is later than the curren
 
 `POST /v1/<B>/messages?statement=<hash>` carries the sender's pass, and its body is the age file's exact bytes (`Content-Type: application/octet-stream`). It is answered `201` with `id`, `received_at` and `expires_at`, and `Location: /v1/<B>/messages/<id>`. The sender is the mailbox the pass names.
 
-`statement` is REQUIRED. It names the prekey statement the age file is sealed to: the SHA-256 of the prekey statement's bytes as the lookup of `B` served them (Section 11.8), never of its signature, in 64 lowercase hex digits. Another encoding of the same signature (Section 3.2) does not change it.
+`statement` is REQUIRED. It names the prekey statement the age file is sealed to: the SHA-256 of the prekey statement's bytes as the lookup of `B` served them (Section 11.8), never of its signature, as `statement-hash`. Another encoding of the same signature (Section 3.2) does not change it.
+
+```abnf
+statement-hash = 64lowhexdig
+```
 
 - **A server reads the body as bytes, whatever its `Content-Type` says.**
 - **A ciphertext is at most 16 MiB (16,777,216 bytes).** A server's caps on it, an account's included, are at most that. Every reader takes a ciphertext of any size up to it, so every reader reads a message any server takes. A larger one is a new version of the protocol.
@@ -852,7 +952,7 @@ The server checks the steps below; only step 9 stores anything. The server takes
    1. the IP address's `sends_before_pass`;
    2. the mailbox the pass names: unknown → `403 unknown_sender`; revoked → `403 sender_revoked`;
    3. the pass's own refusals, and the sender's `calls` (Section 11.5), which every send spends, a send of a ciphertext `B` already stores (step 6) included.
-2. **The path and the query.** `<B>` is an address → otherwise `bad_address`. `statement` is given once, as 64 characters of `0`–`9` and `a`–`f`, and no other parameter is given → otherwise `bad_request`, naming the parameter.
+2. **The path and the query.** `<B>` is an address → otherwise `bad_address`. `statement` is given once, as `statement-hash`, and no other parameter is given → otherwise `bad_request`, naming the parameter.
 3. **The body's size** is at most the sender's cap → otherwise `413 too_large`, with the cap in `limit`. The server refuses by the `Content-Length` before it reads anything, or while it reads.
 4. **It is an age file** → otherwise `not_age`, an empty body included.
 5. **`B` is active:** unknown → `404 no_such_mailbox`; revoked → `410 revoked`.
@@ -886,7 +986,12 @@ The server checks the steps below; only step 9 stores anything. The server takes
 - **`count`** is the number of live messages in the mailbox.
 - **`messages`** is one page of up to 50 list entries, oldest first by `received_at`. Each list entry has the message id in `id`, `size` (its ciphertext's length, Section 11.10), `received_at` and `expires_at`, and nothing of the sender.
 - **`next_cursor`** is null after the last page. An empty mailbox is `{"count":0,"messages":[],"next_cursor":null}`.
-- **A cursor is opaque** and is one or more of `A`–`Z`, `a`–`z`, `0`–`9`, `-` and `_` (AEP-158). The next list carries it unchanged, as `?cursor=`.
+- **A cursor is opaque,** `cursor` (AEP-158). The next list carries it unchanged, as `?cursor=`.
+
+  ```abnf
+  cursor = 1*( ALPHA / DIGIT / "-" / "_" )
+  ```
+
 - **`Retry-After` on every list answer, a `304` included, is the server's poll interval,** in seconds.
 - **A first page carries an `ETag`,** a strong validator of the page's body, which changes whenever a message enters or leaves the page or the count. A page after the first carries none.
 - **Preconditions** are evaluated as Section 11.2 says. For a list:
@@ -925,9 +1030,14 @@ The server checks the steps below; only step 9 stores anything. The server takes
 
   | `Range` | Answer |
   |---|---|
-  | `bytes=N-`: one open-ended range whose `N` is below the ciphertext's length | `206 Partial Content`, with the bytes from `N` to the end and `Content-Range: bytes N-<last>/<length>`, each number in digits with no leading zero |
+  | `bytes=N-`: one open-ended range whose `N` is below the ciphertext's length | `206 Partial Content`, with the bytes from `N` to the end and `Content-Range: bytes N-<last>/<length>`, as `content-range-206` |
   | any other: several ranges, a closed range, a suffix, `N` at or past the length, another unit | `200`, the whole body |
   | any `Range` beside an `If-Range` | `200`, the whole body |
+
+  ```abnf
+  content-range-206 = %s"bytes" SP range-number "-" range-number "/" range-number
+  range-number      = "0" / %x31-39 *DIGIT   ; no leading zero
+  ```
 
 - **A fetch carries no validator.** The message id is the ciphertext's SHA-256, so the bytes under a message id never change.
 - **Counting.** A ranged fetch is counted as any fetch is.
@@ -949,7 +1059,12 @@ A mailbox's ACL says which senders its server accepts the mailbox's messages fro
 
 - **Semantics.** A mailbox with no ACL accepts messages from everyone. With one, `deny` is checked first, then `allow`, and a sender matched by neither is refused, `403 sender_not_allowed`.
 - **Set the ACL: `PUT /v1/<B>/acl`,** with the pass, replaces the ACL whole with `allow` and `deny`.
-  - Each ACL entry is an address, or `*`, which matches every address. There is no other pattern, and repeats are taken once.
+  - Each ACL entry is an address, or `*`, which matches every address: `acl-entry`. There is no other pattern, and repeats are taken once.
+
+    ```abnf
+    acl-entry = "*" / address
+    ```
+
   - `allow` is REQUIRED (`["*"]` is everyone and `[]` nobody): a document without it → `400 bad_request`.
   - `deny` may be left out, for none.
   - More entries, in both lists together, than the server accepts → `413 too_large`. A server MUST NOT accept more than 10,000, and MAY accept fewer.
@@ -993,16 +1108,38 @@ A mailbox may belong to one account at its server. The protocol fixes how a mail
 - **Join: `PUT /v1/<A>/account`** carries the pass and `key`, an adopt key → `200` with `account`, the account id. It spends one use of the key, unless the mailbox is already in that account. A mailbox in another account moves to this one.
 - **Leave: `DELETE /v1/<A>/account`** carries the pass → `204`, whether or not the mailbox is in an account. An account can also drop a mailbox from its side.
 - **Joining or leaving changes nothing about the mailbox's messages.**
-- **An adopt key** is `dra1_` followed by base64url without padding (RFC 4648 §5), at most 1,024 bytes in all. The server decides what it encodes.
+- **An adopt key** is `dra1_` followed by base64url without padding (RFC 4648 §5), at most 1,024 bytes in all: `adopt-key`. The server decides what it encodes.
+
+  ```abnf
+  adopt-key      = %s"dra1_" *254( 4base64url-char )
+                   [ 2base64url-char / 3base64url-char ]   ; at most 1,024 bytes
+  base64url-char = ALPHA / DIGIT / "-" / "_"
+  ```
+
   - A client holds an adopt key to that form and reads nothing else of it.
   - A client MUST NOT take an adopt key as a command-line argument, where process lists and transcripts keep it.
   - A key this server did not make, or that is spent, expired or revoked → `403 adopt_key_refused`.
-- **An account id** is 1 to 32 of `a`–`z`, `0`–`9` and `-`.
+- **An account id** is `account-id`.
+
+  ```abnf
+  account-id = 1*32( %x61-7A / DIGIT / "-" )
+  ```
+
 - **An account's caps on a ciphertext** are within Section 11.10's.
 
 ### 11.17. Versions
 
-- **Every request names the version of the client that makes it,** in `Dromas-Version`: the version of its release, written as SemVer 2.0.0 writes one ([SemVer] §2, §9). That is `MAJOR.MINOR.PATCH` and an optional pre-release, with no `v` and no build metadata.
+- **Every request names the version of the client that makes it,** in `Dromas-Version`: the version of its release, written as SemVer 2.0.0 writes one ([SemVer] §2, §9), with no build metadata, as `dromas-version-value` gives: its major, minor and patch and an optional pre-release.
+
+  ```abnf
+  dromas-version-value = version-number "." version-number "." version-number
+                         [ "-" pre-release ]
+  version-number = "0" / %x31-39 *DIGIT
+  pre-release    = pre-release-id *( "." pre-release-id )
+  pre-release-id = version-number
+                 / *DIGIT ( ALPHA / "-" ) *( ALPHA / DIGIT / "-" )
+  ```
+
   - A client's major and minor are those of the protocol it implements. A major of `0` marks a release from before version 1 is declared.
   - A request without the field, or with a value of another form, is read as version `0.0.0`.
 - **A server's version policy** is its own. It has four parts:
@@ -1011,7 +1148,13 @@ A mailbox may belong to one account at its server. The protocol fixes how a mail
   - its **sunsets**: the versions it has scheduled to stop accepting;
   - the **latest version** it names, if it names one.
 
-  A version in the policy is written `MAJOR.MINOR` or `MAJOR.MINOR.PATCH`. A deprecation or a sunset is a date and one of:
+  A version in the policy is `policy-version`: a major and a minor, and a patch where written.
+
+  ```abnf
+  policy-version = version-number "." version-number [ "." version-number ]
+  ```
+
+  A deprecation or a sunset is a date and one of:
   - `below` a version: it covers every version SemVer orders before that version (here a version written `MAJOR.MINOR` stands for `MAJOR.MINOR.0`);
   - `version`: it covers every version whose major, minor and, where written, patch are that version's.
 
@@ -1044,7 +1187,11 @@ A mailbox may belong to one account at its server. The protocol fixes how a mail
 - **`deprecations`** lists each deprecation as `below` or `version`, and `at`: its date, as a time (Section 2.2).
 - **`sunsets`** lists each scheduled sunset the same way. A sunset whose date has passed stays until the server raises its version floor past it.
 - **`max_certificate_lifetime`** is the server's maximum: the longest a certificate the server accepts may run, `valid before` less `valid after`, in seconds (Section 11.7, step 6). It is more than the TTL and an hour.
-- **`capabilities`** lists each capability of version 1 the server serves, by `name`. A name is 1 to 64 of `a`–`z`, `0`–`9` and `_`, beginning with a letter, and is defined in this section. A client ignores a name it does not know, and never uses a capability the server does not list. This version defines none.
+- **`capabilities`** lists each capability of version 1 the server serves, by `name`. A name is `capability-name`, and is defined in this section. A client ignores a name it does not know, and never uses a capability the server does not list. This version defines none.
+
+  ```abnf
+  capability-name = %x61-7A *63( %x61-7A / DIGIT / "_" )
+  ```
 
 A server lists at most 64 deprecations, 64 sunsets and 64 capabilities, and a client reads no more. A document with more, or with a sunset earlier than a deprecation of the same `below` or `version`, breaks its form.
 
@@ -1518,7 +1665,7 @@ Dromas protects a message's content from everyone but its recipient, and its sen
 - **[BIP 173]** Bech32
 - **[FIPS 180-4]**, **[FIPS 186-5]**
 - **[RFC 2119]**, **[RFC 8174]** BCP 14
-- **[RFC 3339]** timestamps · **[RFC 4151]** the `tag` URI scheme · **[RFC 4251]**, **[RFC 4253]** SSH · **[RFC 4648]** base64 and base32 · **[RFC 5656]** ECDSA in SSH · **[RFC 6454]** origins · **[RFC 7457]** TLS attacks · **[RFC 7493]** I-JSON · **[RFC 8032]** EdDSA · **[RFC 8259]** JSON · **[RFC 8555]** ACME · **[RFC 8594]** the `Sunset` header field · **[RFC 8709]** Ed25519 in SSH · **[RFC 9110]** HTTP semantics · **[RFC 9457]** problem details · **[RFC 9562]** UUIDs · **[RFC 9651]** Structured Field Values · **[RFC 9745]** the `Deprecation` header field
+- **[RFC 3339]** timestamps · **[RFC 3986]** URIs · **[RFC 4151]** the `tag` URI scheme · **[RFC 4251]**, **[RFC 4253]** SSH · **[RFC 4648]** base64 and base32 · **[RFC 5234]** ABNF · **[RFC 5656]** ECDSA in SSH · **[RFC 6454]** origins · **[RFC 7405]** case-sensitive strings in ABNF · **[RFC 7457]** TLS attacks · **[RFC 7493]** I-JSON · **[RFC 8032]** EdDSA · **[RFC 8259]** JSON · **[RFC 8555]** ACME · **[RFC 8594]** the `Sunset` header field · **[RFC 8709]** Ed25519 in SSH · **[RFC 9110]** HTTP semantics · **[RFC 9457]** problem details · **[RFC 9562]** UUIDs · **[RFC 9651]** Structured Field Values · **[RFC 9745]** the `Deprecation` header field
 - **[SemVer]** Semantic Versioning 2.0.0, https://semver.org/spec/v2.0.0.html
 
 ## Appendix A. Where `ssh-keygen` differs (informative)
@@ -1544,3 +1691,105 @@ Its builds also differ from Sections 3.2 and 4.1:
 - **A P-256 key's coordinates.** OpenSSH up to 10.2p1 refuses a coordinate of 128 bits or fewer, or of n − 1 or more, which OpenSSH from 10.3p1 and `golang.org/x/crypto/ssh` take.
 - **A P-256 key at all.** OpenSSH built without OpenSSL reads none.
 - **Certificates.** `ssh-keygen -Y verify` takes a certificate with a second principal, a critical option, extensions out of order or given twice, or a validity of `forever`, checks no key id, and knows a serial only through a revocation list, so a client built on it reads those fields from the certificate itself.
+
+## Appendix B. Collected ABNF
+
+Every rule of this document, in alphabetical order, with the rules it takes from other documents as prose (Section 2.2). The core rules of RFC 5234 Appendix B are not repeated.
+
+```abnf
+account-id                 = 1*32( %x61-7A / DIGIT / "-" )
+acl-entry                  = "*" / address
+address                    = 76base32-char base32-char-by-2
+address-param              = "address" BWS "=" BWS ( address / DQUOTE address DQUOTE )
+adopt-key                  = %s"dra1_" *254( 4base64url-char )
+                             [ 2base64url-char / 3base64url-char ]   ; at most 1,024 bytes
+age-recipient              = %s"age" *bech32-hrp-char "1" 6*bech32-char
+base32-char                = %x61-7A / %x32-37   ; a-z, 2-7
+base32-char-by-2           = %s"a" / %s"c" / %s"e" / %s"g" / %s"i" / %s"k" / %s"m"
+                             / %s"o" / %s"q" / %s"s" / %s"u" / %s"w" / %s"y"
+                             / "2" / "4" / "6"   ; its value even
+base64                     = *( 4base64-char ) [ base64-final ]
+base64-char                = ALPHA / DIGIT / "+" / "/"
+base64-char-by-16          = %s"A" / %s"Q" / %s"g" / %s"w"   ; its value a multiple of 16
+base64-char-by-4           = %s"A" / %s"E" / %s"I" / %s"M" / %s"Q" / %s"U" / %s"Y"
+                             / %s"c" / %s"g" / %s"k" / %s"o" / %s"s" / %s"w"
+                             / "0" / "4" / "8"   ; its value a multiple of 4
+base64-final               = 2base64-char base64-char-by-4 "="
+                             / base64-char base64-char-by-16 "=="
+base64-nonempty            = 1*( 4base64-char ) [ base64-final ] / base64-final
+base64-token               = 1*( 4( ALPHA / DIGIT / "+" ) )   ; base64 that is a token
+base64url-char             = ALPHA / DIGIT / "-" / "_"
+bech32-char                = "0" / %x32-39 / %x61 / %x63-68 / %x6A-6E / %x70-7A
+                             ; BIP 173's alphabet: no 1, b, i or o
+bech32-hrp-char            = %x21-40 / %x5B-7E   ; printable ASCII but A-Z
+BWS                        = <BWS, see [RFC 9110], Section 5.6.3>
+capability-name            = %x61-7A *63( %x61-7A / DIGIT / "_" )
+content-range-206          = %s"bytes" SP range-number "-" range-number "/" range-number
+cursor                     = 1*( ALPHA / DIGIT / "-" / "_" )
+dromas-version-value       = version-number "." version-number "." version-number
+                             [ "-" pre-release ]
+envelope-line              = 1*( %x00-09 / %x0B-FF ) LF   ; the envelope (Section 9.1)
+full-date                  = <full-date, see [RFC 3339], Section 5.6>
+identity-document          = %s"dromas-v1" LF key-type SP base64-nonempty LF
+key-type                   = 1*64( %x21-2B / %x2D-7E )   ; printable ASCII, no comma
+lowhexdig                  = DIGIT / %x61-66   ; HEXDIG in lowercase
+msg-id                     = 8lowhexdig "-" 4lowhexdig "-" 4lowhexdig "-" 4lowhexdig "-"
+                             12lowhexdig   ; the UUID of [RFC 9562], Section 4, in lowercase
+msg-namespace              = %s"dromas-msg-v1:" address
+not-after-param            = "not_after" BWS "=" BWS DQUOTE time DQUOTE
+OWS                        = <OWS, see [RFC 9110], Section 5.6.3>
+padding                    = *"."   ; Section 9.3
+pass-authorization         = %s"dromas-pass" SP
+                             %s"address=" DQUOTE address DQUOTE "," SP
+                             %s"not_after=" DQUOTE time DQUOTE "," SP
+                             %s"signature=" DQUOTE base64-nonempty DQUOTE
+pass-credentials           = pass-scheme 1*SP [ pass-gap ] pass-params [ pass-gap ]
+pass-gap                   = 1*( OWS "," ) OWS   ; empty list elements skipped
+pass-namespace             = %s"dromas-pass-v1:" address
+pass-params                = address-param pass-gap not-after-param pass-gap signature-param
+                             / address-param pass-gap signature-param pass-gap not-after-param
+                             / not-after-param pass-gap address-param pass-gap signature-param
+                             / not-after-param pass-gap signature-param pass-gap address-param
+                             / signature-param pass-gap address-param pass-gap not-after-param
+                             / signature-param pass-gap not-after-param pass-gap address-param
+pass-scheme                = "dromas-pass"
+pass-statement             = %s"dromas-pass-v1" LF address LF server-name LF time LF
+plaintext                  = envelope-line ssh-signature padding
+policy-version             = version-number "." version-number [ "." version-number ]
+pre-release                = pre-release-id *( "." pre-release-id )
+pre-release-id             = version-number
+                             / *DIGIT ( ALPHA / "-" ) *( ALPHA / DIGIT / "-" )
+prekey-namespace           = %s"dromas-prekey-v1:" address
+prekey-statement           = %s"dromas-prekey-v1" LF address LF serial LF
+                             age-recipient LF time LF
+range-number               = "0" / %x31-39 *DIGIT   ; no leading zero
+revocation-of-address      = %s"dromas-revoke-v1" LF address LF
+revocation-of-certificates = %s"dromas-revoke-certs-v1" LF address LF serial LF
+revoke-certs-namespace     = %s"dromas-revoke-certs-v1:" address
+revoke-namespace           = %s"dromas-revoke-v1:" address
+serial                     = %x31-39 *15DIGIT   ; no leading zero
+server-name                = uri-host [ ":" server-port ]   ; in lowercase, its host not empty
+server-port                = %x31-39 *4DIGIT   ; no leading zero
+signature-even             = signature-groups LF
+signature-groups           = *16( 4base64-char ) ( 4base64-char / base64-final )
+signature-line             = 70base64-char LF
+signature-odd              = 68base64-char
+                             ( 2base64-char LF 2base64-char [ signature-groups ]
+                             / 2base64-char LF base64-char-by-4 "="
+                             / base64-char base64-char-by-16 LF "==" ) LF
+                             ; a group of 4 split across the last two lines
+signature-param            = "signature" BWS "=" BWS
+                             ( base64-token / DQUOTE base64-nonempty DQUOTE )
+signature-text             = *( 2signature-line ) ( signature-even / signature-odd )
+                             ; two lines of 70 hold 35 groups of 4
+ssh-signature              = %s"-----BEGIN SSH SIGNATURE-----" LF
+                             signature-text
+                             %s"-----END SSH SIGNATURE-----" LF
+statement-hash             = 64lowhexdig
+time                       = full-date %s"T" time-hour ":" time-minute ":" time-second %s"Z"
+time-hour                  = <time-hour, see [RFC 3339], Section 5.6>
+time-minute                = <time-minute, see [RFC 3339], Section 5.6>
+time-second                = <time-second, see [RFC 3339], Section 5.6>
+uri-host                   = <uri-host, see [RFC 9110], Section 4.1>
+version-number             = "0" / %x31-39 *DIGIT
+```
