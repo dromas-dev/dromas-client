@@ -1578,7 +1578,7 @@ Dromas protects a message's content from everyone but its recipient, and its sen
 
 ### 15.2. What a hostile server can and cannot do
 
-- **It sees:** addresses, identity documents, certificates and prekeys; who sends to whom; each message's size to within a padding block (Section 9.3); times and IP addresses; ciphertext; each mailbox's passes; which account a mailbox is in; and each mailbox's ACL, whose allow list names senders the mailbox takes messages from who may never have written to it.
+- **It sees:** addresses, identity documents, certificates and prekeys; who sends to whom; each message's size to within a padding block (Section 9.3); times and IP addresses; ciphertext; each mailbox's passes; which account a mailbox is in; and each mailbox's ACL, whose allow list names senders the mailbox takes messages from who may never have written to it, and whose deny list names the senders it blocked.
 - **It never sees:** plaintext, a private key, an age file key, or any message's signature. **It keeps nothing signed that says who wrote to whom:** a pass names a mailbox and a time, and no recipient and no message.
 - **It can:**
   - deny service;
