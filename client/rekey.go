@@ -848,9 +848,11 @@ func (b *Mailbox) renewDue() bool {
 // included, by when the server took the current one (takenAt), never by when
 // it was signed: a renewal can wait. Where the mailbox does not know when the
 // server took it (a take a read of itself recorded: noteServed), the newest
-// retired prekey is kept, and those older than it go once the list was taken
-// more than retiredGrace after the newest retired prekey was made; while the
-// mailbox does not know when it made that one, every retired prekey is kept.
+// retired prekey is kept. Those older than it were retired when the server
+// took the newest retired one, and go once the list was taken more than
+// retiredGrace after that take, or, where the mailbox does not know it, after
+// the newest retired prekey was made; while the mailbox knows neither, every
+// retired prekey is kept.
 // After this, a message encrypted to a deleted prekey is unrecoverable from
 // the mailbox's keys. dromas.sh does not do this; it keeps every retired
 // prekey until prune's deletion time.
@@ -877,8 +879,8 @@ func (b *Mailbox) dropRetired(at taken) error {
 		drop = retired
 	} else if len(drop) == 0 {
 		return nil
-	} else if made, err := b.made(retired[len(retired)-1]); err != nil || at.At().Sub(made) <= retiredGrace {
-		return nil //nolint:nilerr // a newest retired prekey that cannot be read keeps every key
+	} else if since, ok := b.retiredAt(retired[len(retired)-1]); !ok || at.At().Sub(since) <= retiredGrace {
+		return nil
 	}
 	for _, n := range drop {
 		if err := b.removePrekey(n); err != nil {
@@ -886,6 +888,18 @@ func (b *Mailbox) dropRetired(at taken) error {
 		}
 	}
 	return nil
+}
+
+// retiredAt is when the prekeys older than prekey n were retired, at the
+// latest: when the server took n (takenAt), or where the mailbox does not know
+// that, when n was made, which is before the take by as long as the renewal
+// waited. It is false where the mailbox knows neither.
+func (b *Mailbox) retiredAt(n uint64) (time.Time, bool) {
+	if took, ok := b.takenAt(n); ok {
+		return took, true
+	}
+	made, err := b.made(n)
+	return made, err == nil
 }
 
 // removePrekey deletes a prekey's key and its statement, and the working key

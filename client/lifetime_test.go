@@ -150,9 +150,9 @@ func TestALowerLifetimeHoldsFromTheNextReceive(t *testing.T) {
 }
 
 // A prekey with no record of when it was made is renewed at the next
-// receive, and while the newest retired prekey has none and the mailbox does
-// not know when its server took the current one, every retired key is kept
-// until its deletion time.
+// receive, and while the mailbox knows neither when the newest retired prekey
+// was made nor when its server took it or the current one, every retired key
+// is kept until its deletion time.
 func TestAPrekeyWithNoRecordIsRenewedAndItsKeysKept(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
@@ -162,6 +162,7 @@ func TestAPrekeyWithNoRecordIsRenewedAndItsKeysKept(t *testing.T) {
 	receive(t, b)
 	k2 := numberOf(t, b)
 	b.SetRecord(t, "prekeys/"+strconv.FormatUint(k2, 10)+".made", nil)
+	b.SetRecord(t, "prekeys/"+strconv.FormatUint(k2, 10)+".taken", nil)
 	st, err := b.Status(t.Context())
 	if err != nil || st.PrekeyMade != "" {
 		t.Fatalf("status with no record: %+v, %v", st, err)

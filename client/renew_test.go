@@ -668,11 +668,54 @@ func TestTheHourBeforeTheNewestRetiredPrekeyGoesCountsFromTheTake(t *testing.T) 
 	}
 }
 
+// The prekeys older than the newest retired one go by when the server took
+// that one, never by when it was signed: a renewal that waited two hours,
+// refused once and sent again as signed, retires the prekey before it only
+// when it is taken, and a second renewal taken ten minutes later leaves that
+// prekey older than the newest retired one. A drain half an hour after the
+// late take keeps it, and one more than an hour after deletes it, while the
+// newest retired one, retired less than an hour before, stays.
+func TestTheOlderRetiredPrekeysGoByTheNewestRetiredOnesTake(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	e := newEnv(t)
+	a, b := e.mailbox(), e.mailbox()
+	k1 := numberOf(t, b)
+	e.clock.Add(25 * time.Hour)
+	forge.FailOnce(e.srv, http.MethodPut, "/prekey") // the server is down: the renewal waits, signed
+	if res := receive(t, b); res.RenewErr == nil {
+		t.Fatal("the renewal did not fail")
+	}
+	k2 := begunAt(t, b)
+	e.clock.Add(2 * time.Hour)
+	send(t, a, b, "to the first key, as the renewal is taken")
+	if res := receive(t, b); res.Renewed == nil || res.Renewed.Serial != k2 || len(res.Delivered) != 1 {
+		t.Fatalf("the renewal sent again: %+v", res)
+	}
+	e.clock.Add(10 * time.Minute)
+	if _, err := b.Rekey(ctx); err != nil { // retires the second key ten minutes after its take
+		t.Fatal(err)
+	}
+	e.clock.Add(20 * time.Minute)
+	receive(t, b)
+	if !exists(prekeyFile(b, k1, ".agekey")) {
+		t.Fatal("a retired prekey went half an hour after the take that retired it, two and a half after the renewal was signed")
+	}
+	e.clock.Add(31 * time.Minute)
+	receive(t, b)
+	if exists(prekeyFile(b, k1, ".agekey")) {
+		t.Fatal("a retired prekey outlived a list taken more than an hour after the take that retired it")
+	}
+	if !exists(prekeyFile(b, k2, ".agekey")) {
+		t.Fatal("the newest retired prekey went less than an hour after the take that retired it")
+	}
+}
+
 // Where the mailbox does not know when its server took the current prekey,
 // as when the upload's answer was lost and a read of itself showed the
 // renewal taken, an emptying drain keeps the newest retired prekey however
 // long after, and deletes those older than it once its list was taken more
-// than an hour after the newest retired one was made. Control: the same
+// than an hour after the server took the newest retired one. Control: the same
 // mailbox with the take dated deletes the newest retired one too.
 func TestTheNewestRetiredPrekeyIsKeptWhileTheTakeIsUnknown(t *testing.T) {
 	t.Parallel()
@@ -711,7 +754,7 @@ func TestTheNewestRetiredPrekeyIsKeptWhileTheTakeIsUnknown(t *testing.T) {
 	e.clock.Add(2 * time.Hour)
 	receive(t, b)
 	if exists(key(k1)) {
-		t.Error("a retired prekey older than the newest outlived a list taken two hours after the newest was made")
+		t.Error("a retired prekey older than the newest outlived a list taken two hours after the newest was taken")
 	}
 	if !exists(key(k2)) || !exists(key(k3)) {
 		t.Fatal("the newest retired prekey was deleted while the mailbox does not know when its server took the current one")
