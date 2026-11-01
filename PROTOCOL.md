@@ -517,7 +517,7 @@ The envelope is one line of compact JSON, its LF included, and is what the sende
 
 ```abnf
 msg-id    = 8lowhexdig "-" 4lowhexdig "-" 4lowhexdig "-" 4lowhexdig "-"
-            12lowhexdig   ; RFC 9562's UUID (Section 4), in lowercase
+            12lowhexdig   ; the UUID of [RFC 9562], Section 4, in lowercase
 lowhexdig = DIGIT / %x61-66   ; HEXDIG in lowercase
 ```
 
@@ -1732,7 +1732,7 @@ identity-document          = %s"dromas-v1" LF key-type SP base64 LF
 key-type                   = 1*64( %x21-2B / %x2D-7E )   ; printable ASCII, no comma
 lowhexdig                  = DIGIT / %x61-66   ; HEXDIG in lowercase
 msg-id                     = 8lowhexdig "-" 4lowhexdig "-" 4lowhexdig "-" 4lowhexdig "-"
-                             12lowhexdig   ; RFC 9562's UUID (Section 4), in lowercase
+                             12lowhexdig   ; the UUID of [RFC 9562], Section 4, in lowercase
 msg-namespace              = %s"dromas-msg-v1:" address
 not-after-param            = "not_after" BWS "=" BWS DQUOTE time DQUOTE
 OWS                        = <OWS, see [RFC 9110], Section 5.6.3>
