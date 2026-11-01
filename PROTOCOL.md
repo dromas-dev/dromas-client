@@ -147,6 +147,7 @@ Where this document uses a term below as a defined term, it has the sense given 
 - **Replay set:** what a client keeps of each message it accepted (Section 12.3, check 8).
 - **Replay floor:** the cutoff a mailbox's replay set has been pruned to (Section 12.3, check 8).
 - **Deletion time:** the time by which a client deletes a retired prekey (Section 12.4).
+- **Take:** of a renewal, the date of the pass of the upload the server took for it (Section 12.4).
 - **The remedy:** the steps of Section 12.6, for a stolen working key.
 
 **Time**
@@ -1361,8 +1362,8 @@ A client drains every page of its list (Section 11.11), and fetches the message 
 - **A mailbox MUST check its own certificate at its own clock before it signs under it:** a mailbox whose clock has gone back past its certificate's start is stopped there.
 - **Prekey lifetime.** A prekey is valid for at most 8 days, the TTL and a day, or for a shorter prekey lifetime its owner sets.
   - A client renews while enough of its prekey is left for its senders' clocks, and for the renewal's own calls. For a prekey lifetime of a day or more, that is the skew allowance (Section 3.4) and an hour for the calls; for a shorter one, five minutes for senders' clocks and five for the calls.
-  - A client times its renewals by when it signed each prekey, and the early deletion of its retired prekeys by when the server took the current prekey, or by when it signed the newest retired one where it does not know that; never by a prekey statement's `not_after`.
-  - A prekey for which the client does not know when it signed it is renewed at once. Every retired prekey is kept while the client does not know when it signed the newest.
+  - A client times its renewals by when it signed each prekey, and the early deletion of its retired prekeys by when the server took a renewal (below); never by a prekey statement's `not_after`.
+  - A prekey for which the client does not know when it signed it is renewed at once.
 - **A prekey serial is signed once.** A renewal the server did not take is sent again exactly as it was signed. A client signs a new key, at a later prekey serial, only once any one of these is true:
   1. that prekey statement has ended;
   2. it was made for longer than the prekey lifetime now allows;
@@ -1380,8 +1381,9 @@ A client drains every page of its list (Section 11.11), and fetches the message 
 - **A client MUST NOT use a kept certificate that began less than an hour before its clock:** it was made while the clock read ahead. The client makes the prekey statement and working key made with it again, by the clock as it reads: for the same prekey at a mailbox's first registration, and at a later prekey serial at a renewal.
 - **Deletion.** A retired prekey is deleted at its deletion time: at the latest, its prekey statement's `not_after` plus the TTL.
   - A drain that stopped at a bound deletes no retired prekey.
-  - A client SHOULD delete every retired prekey, the newest included, earlier, after a drain that empties the mailbox, by a list the server took under a pass dated more than an hour after the server took the current prekey.
-  - A client that does not know when the server took the current prekey keeps the newest retired prekey. It MAY delete the others earlier, after a drain that empties the mailbox, by a list the server took under a pass dated more than an hour after the newest retired prekey was made.
+  - A client SHOULD delete every retired prekey, the newest included, earlier, after a drain that empties the mailbox, by a list the server took under a pass dated more than an hour after the take of the current prekey's renewal.
+  - Otherwise it keeps the newest retired prekey, and SHOULD delete the others after such a drain by a list the server took under a pass dated more than an hour after the take of the newest retired prekey's renewal, or, where the client does not know that take, after it signed the newest retired prekey.
+  - While the client knows neither when the server took the newest retired prekey nor when it signed it, every retired prekey is kept.
   - While a renewal under a new certificate waits, a mailbox whose current statement is under a certificate has two working keys: the one under its current certificate, which signs its passes, and the one the waiting prekey statement is signed with. The working key from before such a renewal is deleted once the renewal is taken.
 - **A client deletes keys, and prunes its replay set, by its clock only once a server has taken a pass dated by that clock, and then by that pass's date** (its `not_after` less ten minutes), never by a reading of the clock.
   - A drain's pass counts once the server answers the drain's list.
