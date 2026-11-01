@@ -148,6 +148,12 @@ type NotMade struct {
 	OwnCertificate bool `json:"own_certificate"`
 	// At is this machine's clock at that read.
 	At string `json:"at"`
+	// RenewedAbove is the serial of the statement of this mailbox's own its
+	// server took since that read, which a server takes only above the one it
+	// held, and zero, and not written, while it has taken none (recordTaken).
+	// A renewal takes the address back, never the identity, so the
+	// recommendation stands (#599).
+	RenewedAbove uint64 `json:"renewed_above,omitempty"`
 }
 
 // noteServed keeps what a read served of the mailbox's own statement. One the mailbox
@@ -232,6 +238,9 @@ func (b *Mailbox) notMade() (nm *NotMade, err error) {
 // every case, revoking the address (PROTOCOL.md §12.4).
 func (nm *NotMade) Words() string {
 	tail := "recv renews nothing above it. dromas revocation publish, with the address in full, ends the address for good, and its correspondents need a new one; dromas prekey renew renews above the statement instead, for an owner who knows whose it is. The mailbox's next read of itself that serves its own clears this"
+	if nm.RenewedAbove != 0 {
+		tail = fmt.Sprintf("Its server has since taken this mailbox's own statement above it, serial %d, which takes the address back but not the identity. dromas revocation publish, with the address in full, ends the address for good, and its correspondents need a new one. The mailbox's next read of itself that serves its own clears this", nm.RenewedAbove)
+	}
 	if nm.CertificateSerial == 0 {
 		return fmt.Sprintf("at its read of itself at %s, this mailbox's server served a prekey statement in its name, serial %d, that this mailbox's identity signed and this mailbox did not make: unless it is the owner's own, from the machine this mailbox was restored from, the identity is in other hands, and only revoking the address ends that. ", nm.At, nm.Serial) + tail
 	}

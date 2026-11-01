@@ -24,8 +24,9 @@ import (
 // revoked (#74, #428): one signed with a taken working key, under the mailbox's
 // own certificate, and one under a certificate the identity made for someone
 // else's key. recv renews nothing above either; prekey renew, its owner's,
-// does, of the mailbox's own type, never the served one's (#61). A read that
-// serves the mailbox's own statement clears it.
+// does, of the mailbox's own type, never the served one's (#61), and the
+// record then names its renewal (#599). A read that serves the mailbox's own
+// statement clears it.
 func TestRecvRenewsNothingAboveAStatementTheMailboxDidNotMake(t *testing.T) {
 	t.Parallel()
 	for _, c := range []struct {
@@ -103,9 +104,18 @@ func TestRecvRenewsNothingAboveAStatementTheMailboxDidNotMake(t *testing.T) {
 			if (err != nil) != c.own {
 				t.Fatalf("a send while a statement the mailbox did not make is served: %v", err)
 			}
-			// Its owner's renewal goes above it.
-			if p, err := b.Rekey(ctx); err != nil || p.Serial <= certSerial+5 {
-				t.Fatalf("prekey renew above a statement the mailbox did not make: %+v, %v", p, err)
+			// Its owner's renewal goes above it, and the record says so, still
+			// recommending that the address be revoked (#599).
+			q, err := b.Rekey(ctx)
+			if err != nil || q.Serial <= certSerial+5 {
+				t.Fatalf("prekey renew above a statement the mailbox did not make: %+v, %v", q, err)
+			}
+			s, err := b.Status(t.Context())
+			if err != nil || s.PrekeyNotMade == nil || s.PrekeyNotMade.RenewedAbove != q.Serial {
+				t.Fatalf("status once its owner renewed above it: %+v, %v", s, err)
+			}
+			if words := strings.Join(s.Attention, " "); strings.Contains(words, "renews nothing above it") || !strings.Contains(words, "revocation publish") {
+				t.Errorf("status's words once its owner renewed above it: %s", words)
 			}
 			if c.own {
 				if sent, err := b.Flush(ctx); err != nil || len(sent) != 1 {
