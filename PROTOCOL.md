@@ -475,8 +475,9 @@ server-port    = %x31-39 *4DIGIT   ; no leading zero
 - **A server MAY remember a pass it has verified,** by its values with the signature in its one form (Section 3.2): one pass, however the header wrote it. A P-256 identity's pass is one pass with s or with n − s (Section 3.2). A server that remembers passes MUST compare a P-256 identity's pass with s taken as the lower of the two.
 - **Which signer.** A server takes a pass:
   - by the mailbox's identity, always;
-  - by a certificate only where it is exactly the current certificate, as the bytes the server keeps;
-  - with one exception: a registration (Section 11.7) and a renewal (Section 11.9) take a pass by the certificate of the prekey statement they bring.
+  - by a certificate only where it is exactly the current certificate, as the bytes the server keeps.
+
+  The exception: a registration (Section 11.7) and a renewal (Section 11.9) take a pass by the certificate of the prekey statement they bring.
 
   A server takes a pass only for a name that is its own. It reads a pass by its signer's form (Section 5).
 - **A client that is refused a pass signs another and tries once more.** It MUST NOT try more than once. It MUST NOT try at all after a `certificate_revoked` that it finds final when it looks itself up (Section 12.5). A pass refused twice for its time is the clock (Section 12.1).
@@ -504,7 +505,7 @@ It is absent where that prekey statement is the identity's.
 
 The envelope is one line of compact JSON, its LF included, and is what the sender signs. The server never sees it.
 
-| Member | | |
+| Member | Presence | Value |
 |---|---|---|
 | `v` | required | the integer `1` |
 | `from` | required | the sender's address |
@@ -853,7 +854,7 @@ Every call names a mailbox. This table gives what each call does in each state.
 | **revoked** | `410 revoked` | `410 revoked` | `410 revoked` | `410 revoked`, answered from the revocation record |
 
 - **A send answers its sender's state** as `403 unknown_sender` or `403 sender_revoked` (Section 11.10, step 1), and its recipient's state as this table does.
-- **There is no delete of a mailbox.** A mailbox leaves a server for good when its identity revokes the address. It pauses through its ACL (Section 11.14). It is forgotten once it stops renewing.
+- **There is no delete of a mailbox.** A mailbox leaves a server for good when its identity revokes the address. It pauses through its ACL (Section 11.14).
 - **There is no pending state:** a registration carries a pass minutes old, so a mailbox is active from its first call.
 - **A mailbox is forgotten once nothing valid for it is left** (Section 13): it has stopped renewing, and the date until which Section 13 keeps it has passed. It is then unknown, and comes back by registering anew; its ACL and its account are gone. The server keeps what its identity revoked.
 - **A request that took effect, repeated byte for byte,** gets `200` and the same result, and a conflicting one gets `409 conflict`. A send of a ciphertext its recipient already stores is answered as Section 11.10, step 6, answers it.
@@ -926,7 +927,7 @@ The server takes a renewal because its prekey statement is later than the curren
 
 - **A prekey equal to the current prekey, or to a retired prekey the server keeps,** → `400 prekey_not_new`. For this check alone, a server keeps the newest of a mailbox's retired prekeys (it chooses how many), each until its prekey statement's `not_after`.
 - **On success:**
-  - the new prekey becomes the current prekey, and its signer the current signer, so the server takes no pass by a signer it replaced again;
+  - the new prekey becomes the current prekey, and its signer the current signer, so the server no longer takes a pass by a certificate it replaced (Section 8);
   - its declaration (Section 7) is the mailbox's from then on;
   - the answer is `200 {}`.
 - **Counting** is Section 11.5's (`renewals`, `certificates`). An identical retry spends neither. Past either, the renewal is answered `429 rate_limited`, naming it.
@@ -1012,7 +1013,7 @@ The server checks the steps below; only step 9 stores anything. The server takes
   | the only parameters are `cursor` and `wait`, each at most once | `400 bad_request`, naming the parameter |
   | `cursor` has the form above, and the server can read it as a cursor it makes | `400 bad_request`, naming it |
   | `wait` is delay-seconds, digits alone | `400 bad_request`, naming it |
-  | a list does not carry both | `400 bad_request`, naming it |
+  | a list does not carry both `cursor` and `wait` | `400 bad_request`, naming it |
 
 - **A first page MAY be a long poll:**
   - A list without a cursor MAY carry `wait`, a number of seconds.
@@ -1487,7 +1488,7 @@ How a server stores things is its own choice. What it promises a client is this.
 
   It stores no private key, no pass, and nothing of when the mailbox was last seen.
 - **Per address, with a mailbox or none,** the server stores the identity document and the revocations its identity made (Section 10), each kept for good and served to whoever looks them up.
-- **A mailbox is kept until nothing valid for it is left:** until the later of:
+- **A mailbox is kept until nothing valid for it is left,** that is, until the later of:
   - its current prekey's `not_after` plus the TTL;
   - the latest `valid before` of any certificate the server took for it.
 
@@ -1525,7 +1526,8 @@ What version 1 fixes, and where each can grow inside it:
 
 | Fixed | Grows by |
 |---|---|
-| The signed statements, byte for byte (Sections 4.1, 6, 8, 10); a certificate's type, key id, principal and validity, a window checked at the verifier, whose longest is each server's own, and its one form, with no critical option or extension (Sections 5.2, 11.18) | a new format under a new tag, a certificate's under a new key id; a new identity or prekey key type |
+| The signed statements, byte for byte (Sections 4.1, 6, 8, 10) | a new format under a new tag; a new identity or prekey key type |
+| A certificate's type, key id, principal and one form, with no critical option or extension; its validity, a window checked at the verifier, whose longest is each server's own (Sections 5.2, 11.18) | a certificate's new format under a new key id |
 | The two signer forms, their ranks, and the order `(c, p)` (Section 5) | nothing |
 | The namespaces, `dromas-<purpose>-v1:<address>` | a new purpose |
 | A signature's form, and its bound for each key type (Section 3.2) | a new key type, with a bound of its own |
