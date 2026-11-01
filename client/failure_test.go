@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"syscall"
@@ -362,9 +363,11 @@ func TestAKilledHolderLeavesNoLock(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		_ = db
 		fmt.Println("held")
 		time.Sleep(time.Minute)
+		// db is held to here: once nothing refers to it, its file's finalizer
+		// may close the file, and bbolt's flock goes with it.
+		runtime.KeepAlive(db)
 		return
 	}
 	e := newEnv(t)
