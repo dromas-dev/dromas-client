@@ -534,7 +534,7 @@ func (b *Mailbox) seal(ctx context.Context, to protocol.Address, stem string, l 
 		} else if nm != nil && nm.OwnCertificate && nm.CertificateSerial == cert.Serial() {
 			return nil, refuse("someone else holds the working key of the certificate this mailbox signs under, as a statement its server serves in its name shows, so a message signed now would go with that certificate: dromas status says what to do, and the message waits for the mailbox's next certificate")
 		}
-		// A message may wait 33 days to be read, and its certificate must
+		// A message may wait protocol.TTL to be read, and its certificate must
 		// still be valid then.
 		if !cert.SignsMessages(b.now()) {
 			return nil, refuse("this mailbox's certificate ends within %d days, too soon to sign a message that may wait that long: dromas prekey renew makes a new one, as dromas recv does daily", protocol.TTL/(24*time.Hour))
@@ -559,7 +559,7 @@ func (b *Mailbox) seal(ctx context.Context, to protocol.Address, stem string, l 
 	wrote := env.SentAt
 	env.SentAt = b.now().UTC().Truncate(time.Second)
 	if env.SentAt.Before(wrote) {
-		return nil, refuse("its envelope is dated %s, ahead of this machine's clock: it was written while the clock read ahead of where it reads now, and the outbox counts its 33 days from when it was written, so it is posted once the clock passes that time", wrote.Format(protocol.TimeLayout))
+		return nil, refuse("its envelope is dated %s, ahead of this machine's clock: it was written while the clock read ahead of where it reads now, and the outbox counts its %d days from when it was written, so it is posted once the clock passes that time", wrote.Format(protocol.TimeLayout), protocol.TTL/(24*time.Hour))
 	}
 	if env.SentAt.After(wrote.Add(protocol.TTL)) {
 		return nil, refuse("it was written more than %d days ago, and an outbox posts a message no longer than that", protocol.TTL/(24*time.Hour))

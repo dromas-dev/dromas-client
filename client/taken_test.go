@@ -199,26 +199,32 @@ func TestDropRetiredDeletesByNoReadingLaterThanTheLists(t *testing.T) {
 	}
 }
 
-// RecvWithin's cadence leaves the prekey exactly MaxSkew by the mailbox's clock
-// when recv begins, and recv's renewal reads the mailbox's own mailbox before it
-// publishes. A mailbox 9m59s slow and a sender 50m fast, the two clocks furthest
-// apart a server takes: recv runs exactly a day after the prekey was made
-// (renewDue renews once it is more than a day old), then exactly RecvWithin
-// later. The sender sends every second from 3 seconds before the second recv
-// to 3 seconds after it, and once while the renewal's read is answered.
+// RecvWithin's cadence leaves the prekey the room for senders' clocks and for
+// the renewal's calls by the mailbox's clock when recv begins, and recv's
+// renewal reads the mailbox's own mailbox before it publishes. At a lifetime of
+// a day, the shortest that leaves an hour for clocks, a mailbox 9m59s slow and
+// a sender 50m fast, the two clocks furthest apart a server takes; at the
+// shortest lifetime, which leaves five minutes, two clocks 4m59s apart. recv
+// runs exactly RenewAt after the prekey was made (renewDue renews once it is
+// older), then exactly RecvWithin later. The sender sends every second from 3
+// seconds before the second recv to 3 seconds after it, and once while the
+// renewal's read is answered.
 func TestARenewalAtRecvWithinWhoseReadTakesSeconds(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	h := time.Hour
+	day := 24 * time.Hour
 	slow, fast := -(10*time.Minute - time.Second), 50*time.Minute
 	for _, c := range []struct {
 		name          string
+		life          time.Duration
 		mailbox, from time.Duration
 		delay         time.Duration // how long the renewal's read of the mailbox's own mailbox takes
 	}{
-		{"the shortest lifetime, the read takes 5s", slow, fast, 5 * time.Second},
-		{"control: the shortest lifetime, the read takes no time", slow, fast, 0},
-		{"control: the shortest lifetime, the read takes 5s, the mailbox right and the sender 30m fast", 0, 30 * time.Minute, 5 * time.Second},
+		{"a day, the read takes 5s", day, slow, fast, 5 * time.Second},
+		{"control: a day, the read takes no time", day, slow, fast, 0},
+		{"control: a day, the read takes 5s, the mailbox right and the sender 30m fast", day, 0, 30 * time.Minute, 5 * time.Second},
+		{"the shortest lifetime, the read takes 5s", client.MinPrekeyLifetime, -2 * time.Minute, 2*time.Minute + 59*time.Second, 5 * time.Second},
+		{"control: the shortest lifetime, the read takes 5s, the mailbox right and the sender 2m fast", client.MinPrekeyLifetime, 0, 2 * time.Minute, 5 * time.Second},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			e := newEnv(t)
@@ -232,15 +238,15 @@ func TestARenewalAtRecvWithinWhoseReadTakesSeconds(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			lifetimeOf(t, b, client.MinPrekeyLifetime)
+			lifetimeOf(t, b, c.life)
 			p, err := b.Rekey(ctx)
 			if err != nil {
 				t.Fatal(err)
 			}
 			made, _ := protocol.ParseTime(strings.TrimSpace(madeOf(t, b, p.Serial)))
-			e.clock.Add(made.Add(24 * h).Sub(e.clock.Now().Add(mailboxOff))) // the mailbox's clock reads made + 24h
+			e.clock.Add(made.Add(client.RenewAt(c.life)).Sub(e.clock.Now().Add(mailboxOff))) // the mailbox's clock reads made + RenewAt
 			if res := receive(t, b); res.Renewed != nil {
-				t.Fatal("renewed at exactly a day old")
+				t.Fatal("renewed at exactly RenewAt old")
 			}
 			var refused, sends atomic.Int32
 			sendOne := func() {
@@ -258,7 +264,7 @@ func TestARenewalAtRecvWithinWhoseReadTakesSeconds(t *testing.T) {
 				}
 				next.ServeHTTP(w, q)
 			})
-			e.clock.Add(client.RecvWithin(client.MinPrekeyLifetime) - 3*time.Second)
+			e.clock.Add(client.RecvWithin(c.life) - 3*time.Second)
 			if _, err := a.Receive(ctx); err != nil { // the sender renews, so its certificate signs messages
 				t.Fatal(err)
 			}
@@ -267,7 +273,7 @@ func TestARenewalAtRecvWithinWhoseReadTakesSeconds(t *testing.T) {
 				e.clock.Add(time.Second)
 			}
 			armed.Store(true)
-			res := receive(t, b) // at exactly made + 24h + RecvWithin by the mailbox's clock
+			res := receive(t, b) // at exactly made + RenewAt + RecvWithin by the mailbox's clock
 			for i := 0; i < 3; i++ {
 				e.clock.Add(time.Second)
 				sendOne()

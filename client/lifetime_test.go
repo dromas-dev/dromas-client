@@ -15,8 +15,9 @@ import (
 	"github.com/dromas-dev/dromas-client/protocol"
 )
 
-// A mailbox's prekeys are valid for 33 days, or for the shorter lifetime its
-// owner sets, down to a day and three hours (PROTOCOL.md §12.4). Each client
+// A mailbox's prekeys are valid for protocol.PrekeyLifetime, or for the shorter
+// lifetime its owner sets, down to client.MinPrekeyLifetime (PROTOCOL.md
+// §12.4). Each client
 // records when it signed a prekey, and the mailbox times its renewals and the
 // early deletion of its retired prekeys by that record, never by the
 // statement's not_after, which times a retired prekey's latest deletion.
@@ -67,37 +68,64 @@ func TestAPrekeyIsMadeForTheMailboxsLifetime(t *testing.T) {
 	}
 }
 
-// Receive renews a short-lived prekey once it is a day old, and not before:
-// its age is its record's, where not_after less 33 days would make it a
-// month old at once, and renew it at every receive. Senders reach the mailbox
-// throughout.
-func TestAShortLivedPrekeyIsRenewedOnceADayOld(t *testing.T) {
+// Receive renews a prekey once it is RenewAt old, and not before: a day at
+// the default lifetime, 22 hours at 25 hours, 5 hours and 45 minutes at the
+// shortest. Then RecvWithin is what is left of it, less the room for the
+// renewal's calls and senders' clocks.
+func TestRenewAtAndRecvWithin(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
-	e := newEnv(t)
-	a, b := e.mailbox(), e.mailbox()
-	lifetimeOf(t, b, client.MinPrekeyLifetime)
-	if _, err := b.Rekey(ctx); err != nil {
-		t.Fatal(err)
-	}
-	for age := 8 * time.Hour; age <= 24*time.Hour; age += 8 * time.Hour {
-		e.clock.Add(8 * time.Hour)
-		if res := receive(t, b); res.Renewed != nil {
-			t.Fatalf("renewed a prekey %v old", age)
+	h := time.Hour
+	for _, c := range []struct{ life, at, within time.Duration }{
+		{protocol.PrekeyLifetime, 24 * h, 6*24*h + 22*h},
+		{25 * h, 22 * h, h},
+		{24 * h, 21 * h, h},
+		{client.MinPrekeyLifetime, 5*h + 45*time.Minute, 5 * time.Minute},
+	} {
+		if at, within := client.RenewAt(c.life), client.RecvWithin(c.life); at != c.at || within != c.within {
+			t.Errorf("a lifetime of %v: renewed at %v, received within %v; want %v and %v", c.life, at, within, c.at, c.within)
 		}
 	}
-	e.clock.Add(time.Second)
-	send(t, a, b, "an hour before the prekey runs out")
-	res := receive(t, b)
-	if res.Renewed == nil || len(res.Delivered) != 1 {
-		t.Fatalf("no renewal of a day-old prekey with an hour left: %+v", res)
+	if client.MinPrekeyLifetime != 6*h {
+		t.Errorf("the shortest lifetime is %v", client.MinPrekeyLifetime)
 	}
-	if !res.Renewed.NotAfter.Equal(e.clock.Now().Add(client.MinPrekeyLifetime)) {
-		t.Fatalf("the renewal ends at %v", res.Renewed.NotAfter)
-	}
-	send(t, a, b, "to the renewed prekey")
-	if res := receive(t, b); res.Renewed != nil || len(res.Delivered) != 1 {
-		t.Fatalf("after the renewal: %+v", res)
+}
+
+// Receive renews a short-lived prekey once it is RenewAt old, and not before:
+// its age is its record's, where not_after less protocol.PrekeyLifetime would
+// make it old at once, and renew it at every receive. Senders reach the mailbox
+// throughout.
+func TestAShortLivedPrekeyIsRenewedAtRenewAt(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	for _, life := range []time.Duration{client.MinPrekeyLifetime, 25 * time.Hour} {
+		t.Run(life.String(), func(t *testing.T) {
+			e := newEnv(t)
+			a, b := e.mailbox(), e.mailbox()
+			lifetimeOf(t, b, life)
+			if _, err := b.Rekey(ctx); err != nil {
+				t.Fatal(err)
+			}
+			at := client.RenewAt(life)
+			for age := at / 4; age <= at; age += at / 4 {
+				e.clock.Add(at / 4)
+				if res := receive(t, b); res.Renewed != nil {
+					t.Fatalf("renewed a prekey %v old", age)
+				}
+			}
+			e.clock.Add(time.Second)
+			send(t, a, b, "with what RenewAt leaves of the prekey")
+			res := receive(t, b)
+			if res.Renewed == nil || len(res.Delivered) != 1 {
+				t.Fatalf("no renewal of a prekey RenewAt old: %+v", res)
+			}
+			if !res.Renewed.NotAfter.Equal(e.clock.Now().Add(life)) {
+				t.Fatalf("the renewal ends at %v", res.Renewed.NotAfter)
+			}
+			send(t, a, b, "to the renewed prekey")
+			if res := receive(t, b); res.Renewed != nil || len(res.Delivered) != 1 {
+				t.Fatalf("after the renewal: %+v", res)
+			}
+		})
 	}
 }
 
@@ -115,14 +143,15 @@ func TestALowerLifetimeHoldsFromTheNextReceive(t *testing.T) {
 	if res := receive(t, b); res.Renewed != nil {
 		t.Fatal("renewed again at the receive after")
 	}
-	lifetimeOf(t, b, 10*24*time.Hour)
+	lifetimeOf(t, b, protocol.PrekeyLifetime)
 	if res := receive(t, b); res.Renewed != nil {
 		t.Fatal("a higher lifetime renewed at once")
 	}
 }
 
 // A prekey with no record of when it was made is renewed at the next
-// receive, and while the newest retired prekey has none, every retired key
+// receive, and while the mailbox knows neither when the newest retired prekey
+// was made nor when its server took it or the current one, every retired key
 // is kept until its deletion time.
 func TestAPrekeyWithNoRecordIsRenewedAndItsKeysKept(t *testing.T) {
 	t.Parallel()
@@ -133,6 +162,7 @@ func TestAPrekeyWithNoRecordIsRenewedAndItsKeysKept(t *testing.T) {
 	receive(t, b)
 	k2 := numberOf(t, b)
 	b.SetRecord(t, "prekeys/"+strconv.FormatUint(k2, 10)+".made", nil)
+	b.SetRecord(t, "prekeys/"+strconv.FormatUint(k2, 10)+".taken", nil)
 	st, err := b.Status(t.Context())
 	if err != nil || st.PrekeyMade != "" {
 		t.Fatalf("status with no record: %+v, %v", st, err)
@@ -142,6 +172,7 @@ func TestAPrekeyWithNoRecordIsRenewedAndItsKeysKept(t *testing.T) {
 	if res.Renewed == nil {
 		t.Fatal("a prekey with no record was not renewed")
 	}
+	b.SetRecord(t, "prekeys/"+strconv.FormatUint(res.Renewed.Serial, 10)+".taken", nil)
 	e.clock.Add(2 * time.Hour)
 	receive(t, b)
 	if !exists(prekeyFile(b, k1, ".agekey")) || !exists(prekeyFile(b, k2, ".agekey")) {
@@ -156,7 +187,7 @@ func TestAPrekeyWithNoRecordIsRenewedAndItsKeysKept(t *testing.T) {
 func TestALifetimeOutOfFormIsNeverTheDefault(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	for _, raw := range []string{"", "\n", "abc\n", "0\n", "89999\n", "90000\n", "93599\n", "93600\n", "97199\n", "2851201\n", "090000\n", " 90000\n", "90000 \n", "90000\n\n", "90000\r\n", "9e4\n", "+90000\n", "1d1h\n", "99999999999\n"} {
+	for _, raw := range []string{"", "\n", "abc\n", "0\n", "3600\n", "18000\n", "21599\n", "691201\n", "2851200\n", "090000\n", " 90000\n", "90000 \n", "90000\n\n", "90000\r\n", "9e4\n", "+90000\n", "1d1h\n", "99999999999\n"} {
 		e := newEnv(t)
 		b := e.mailbox()
 		n := numberOf(t, b)
@@ -177,7 +208,7 @@ func TestALifetimeOutOfFormIsNeverTheDefault(t *testing.T) {
 			t.Errorf("%q: status %+v, %v", raw, st, err)
 		}
 	}
-	for raw, want := range map[string]time.Duration{"97200": client.MinPrekeyLifetime, "97200\n": client.MinPrekeyLifetime, "2851200\n": protocol.PrekeyLifetime, "172800\n": 48 * time.Hour} {
+	for raw, want := range map[string]time.Duration{"21600": client.MinPrekeyLifetime, "21600\n": client.MinPrekeyLifetime, "691200\n": protocol.PrekeyLifetime, "172800\n": 48 * time.Hour} {
 		b := newEnv(t).mailbox()
 		if err := os.WriteFile(filepath.Join(b.Dir(), "prekey-lifetime"), []byte(raw), 0o600); err != nil {
 			t.Fatal(err)
@@ -197,45 +228,55 @@ func TestALifetimeOutOfFormIsNeverTheDefault(t *testing.T) {
 	}
 }
 
-// At the shortest lifetime, the two clocks furthest apart that a server
-// takes, a mailbox 9 minutes slow and a sender 49 fast (PROTOCOL.md §15.7), still
-// meet: the mailbox renews once its prekey is a day old, which leaves that
-// sender an hour of it and two minutes.
-func TestTheShortestLifetimeAtTheClocksFurthestApart(t *testing.T) {
+// At the shortest lifetime that leaves an hour for clocks, a day, the two
+// clocks furthest apart that a server takes, a mailbox 9 minutes slow and a
+// sender 49 fast (PROTOCOL.md §15.7), still meet: the mailbox renews once its
+// prekey is RenewAt old, which leaves that sender two hours of it. At the
+// shortest lifetime, which leaves five minutes, clocks that far apart meet.
+func TestTheShortestLifetimesAtTheClocksFurthestApart(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	e := newEnv(t)
-	slow, fast := -9*time.Minute, 49*time.Minute
-	b, err := client.Init(ctx, t.TempDir(), e.skewed(&slow))
-	if err != nil {
-		t.Fatal(err)
-	}
-	landAll(t, b)
-	a, err := client.Init(ctx, t.TempDir(), e.skewed(&fast))
-	if err != nil {
-		t.Fatal(err)
-	}
-	lifetimeOf(t, b, client.MinPrekeyLifetime)
-	if _, err := b.Rekey(ctx); err != nil {
-		t.Fatal(err)
-	}
-	e.clock.Add(24*time.Hour + time.Second)
-	send(t, a, b, "with an hour and two minutes of the prekey left, by the sender's clock")
-	if res := receive(t, b); res.Renewed == nil || len(res.Delivered) != 1 {
-		t.Fatalf("the slow mailbox's receive: %+v", res)
-	}
-	e.clock.Add(2 * time.Hour)
-	send(t, a, b, "to the renewed prekey, after the first ran out")
-	if res := receive(t, b); len(res.Delivered) != 1 {
-		t.Fatalf("after the first prekey ran out: %+v", res)
+	for _, c := range []struct{ life, slow, fast time.Duration }{
+		{24 * time.Hour, -9 * time.Minute, 49 * time.Minute},
+		{client.MinPrekeyLifetime, -2 * time.Minute, 2*time.Minute + 59*time.Second},
+	} {
+		t.Run(c.life.String(), func(t *testing.T) {
+			e := newEnv(t)
+			slow, fast := c.slow, c.fast
+			b, err := client.Init(ctx, t.TempDir(), e.skewed(&slow))
+			if err != nil {
+				t.Fatal(err)
+			}
+			landAll(t, b)
+			a, err := client.Init(ctx, t.TempDir(), e.skewed(&fast))
+			if err != nil {
+				t.Fatal(err)
+			}
+			lifetimeOf(t, b, c.life)
+			if _, err := b.Rekey(ctx); err != nil {
+				t.Fatal(err)
+			}
+			e.clock.Add(client.RenewAt(c.life) + time.Second)
+			send(t, a, b, "with what RenewAt leaves of the prekey, by the sender's clock")
+			if res := receive(t, b); res.Renewed == nil || len(res.Delivered) != 1 {
+				t.Fatalf("the slow mailbox's receive: %+v", res)
+			}
+			e.clock.Add(c.life - client.RenewAt(c.life))
+			send(t, a, b, "to the renewed prekey, after the first ran out")
+			if res := receive(t, b); len(res.Delivered) != 1 {
+				t.Fatalf("after the first prekey ran out: %+v", res)
+			}
+		})
 	}
 }
 
-// PROTOCOL.md §12.4: "With a lifetime L, recv must run at least every L less
-// a day and an hour". At that cadence the renewal comes with an hour of the
-// prekey left by the mailbox's clock, so a sender up to that hour fast, which a
-// server takes (§15.7), is never refused: at the shortest lifetime and at one a
-// little longer, with recv a minute short of the day the first time.
+// The documented cadence, a recv every RecvWithin of the lifetime, renews with
+// the room for the renewal's calls and for senders' clocks left of the prekey
+// by the mailbox's clock, so a sender fast of it by up to that room for
+// clocks, which a server takes (§15.7), is never refused: at the shortest
+// lifetime, at the shortest that leaves an hour for clocks, at one a little
+// longer and at the default, with recv a minute short of RenewAt the first
+// time. Sixty sends span the room left at the second recv.
 func TestTheDocumentedCadenceLeavesRoomForAClock(t *testing.T) {
 	t.Parallel()
 	if testing.Short() {
@@ -246,9 +287,11 @@ func TestTheDocumentedCadenceLeavesRoomForAClock(t *testing.T) {
 		life          time.Duration
 		mailbox, from time.Duration // the mailbox's clock and the sender's, from the server's
 	}{
-		{client.MinPrekeyLifetime, 0, 30 * time.Minute},
-		{client.MinPrekeyLifetime, -9 * time.Minute, 49 * time.Minute},
+		{client.MinPrekeyLifetime, 0, 2 * time.Minute},
+		{client.MinPrekeyLifetime, -2 * time.Minute, 2*time.Minute + 59*time.Second},
+		{24 * time.Hour, -9 * time.Minute, 49 * time.Minute},
 		{3*24*time.Hour + time.Hour, 0, 30 * time.Minute},
+		{protocol.PrekeyLifetime, -9 * time.Minute, 49 * time.Minute},
 	} {
 		e := newEnv(t)
 		mailboxOff, fromOff := c.mailbox, c.from
@@ -266,28 +309,30 @@ func TestTheDocumentedCadenceLeavesRoomForAClock(t *testing.T) {
 			t.Fatal(err)
 		}
 		every := client.RecvWithin(c.life)
-		e.clock.Add(24*time.Hour - time.Minute) // a recv a minute short of the day
+		left := c.life - client.RenewAt(c.life) - every   // what is left of the prekey at the second recv
+		e.clock.Add(client.RenewAt(c.life) - time.Minute) // a recv a minute short of RenewAt
 		if res := receive(t, b); res.Renewed != nil {
 			t.Fatal("renewed early")
 		}
-		e.clock.Add(every - time.Hour)
+		step := left / 60
+		e.clock.Add(every - left/2)
 		refused := 0
-		for m := 2; m <= 120; m += 2 {
-			e.clock.Add(2 * time.Minute)
-			if m == 60 {
+		for i := 1; i <= 60; i++ {
+			e.clock.Add(step)
+			if i == 30 {
 				receive(t, b) // the next recv, every after the last
 			}
-			if _, err := a.Send(ctx, b.Address(), "a message every two minutes"); err != nil {
+			if _, err := a.Send(ctx, b.Address(), "a message"); err != nil {
 				refused++
 			}
 		}
 		if refused > 0 {
-			t.Errorf("lifetime %v, recv every %v, mailbox %v and sender %v off: refused %d of 60 sends, two minutes apart", c.life, every, c.mailbox, c.from, refused)
+			t.Errorf("lifetime %v, recv every %v, mailbox %v and sender %v off: refused %d of 60 sends, %v apart", c.life, every, c.mailbox, c.from, refused, step)
 		}
 	}
 }
 
-// A renewal the server never took waits, signed for 33 days, and the owner
+// A renewal the server never took waits, signed for protocol.PrekeyLifetime, and the owner
 // then sets the shortest lifetime. PROTOCOL.md §12.4: "A lifetime set lower
 // holds from the next recv, which renews a prekey made for longer." The one
 // that waited is spent, and a new key is made for the lifetime now set.

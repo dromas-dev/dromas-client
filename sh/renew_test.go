@@ -148,7 +148,7 @@ func TestScriptSaysAStatementItDidNotMake(t *testing.T) {
 }
 
 // A retired prekey is deleted by the reading of the clock a server took, at
-// its not_after and 33 days; the newest never; then its messages are unrecoverable.
+// its not_after and the TTL; the newest never; then its messages are unrecoverable.
 func TestScriptDeletesARetiredPrekey(t *testing.T) {
 	w := newWorld(t)
 	a, b := w.mailbox(), w.mailbox()
@@ -167,20 +167,20 @@ func TestScriptDeletesARetiredPrekey(t *testing.T) {
 	if !decrypts(key1) || !decrypts(b.file(fmt.Sprintf("prekeys/%d.agekey", b1))) {
 		t.Fatal("control: a message to the retired key does not decrypt while it is kept")
 	}
-	b.dated(b1, time.Now().Add(-34*24*time.Hour))
+	b.dated(b1, time.Now().Add(-protocol.TTL-24*time.Hour))
 	b.must(fmt.Sprintf("dr_prune %d", time.Now().Add(-48*time.Hour).Unix()))
 	if !b.has(fmt.Sprintf("prekeys/%d.agekey", b1)) {
 		t.Error("dr_prune by a reading of the clock before the key's deletion time deleted it")
 	}
 	b.must(fmt.Sprintf("dr_prune %d", time.Now().Unix()))
 	if b.has(fmt.Sprintf("prekeys/%d.agekey", b1)) || !b.has(fmt.Sprintf("prekeys/%d.agekey", b2)) {
-		t.Errorf("dr_prune past not_after and 33 days: %q", b.files("prekeys"))
+		t.Errorf("dr_prune past not_after and the TTL: %q", b.files("prekeys"))
 	}
 	if decrypts(b.file(fmt.Sprintf("prekeys/%d.agekey", b2))) {
 		t.Error("a message to the deleted key still decrypts with the mailbox's keys")
 	}
 	held := b.read(fmt.Sprintf("prekeys/%d.txt", b2))
-	b.dated(b2, time.Now().Add(-34*24*time.Hour))
+	b.dated(b2, time.Now().Add(-protocol.TTL-24*time.Hour))
 	b.must(fmt.Sprintf("dr_prune %d", time.Now().Unix()))
 	if !b.has(fmt.Sprintf("prekeys/%d.agekey", b2)) {
 		t.Error("dr_prune deleted the newest key")
@@ -190,7 +190,7 @@ func TestScriptDeletesARetiredPrekey(t *testing.T) {
 	p := w.mailbox()
 	p1 := p.newest()
 	p.must("dr_rekey")
-	p.dated(p1, time.Now().Add(-34*24*time.Hour))
+	p.dated(p1, time.Now().Add(-protocol.TTL-24*time.Hour))
 	if d := p.recv(); d.rc != 0 || p.has(fmt.Sprintf("prekeys/%d.agekey", p1)) || !p.has(fmt.Sprintf("prekeys/%d.agekey", p.newest())) {
 		t.Errorf("dr_recv did not delete a retired key past its deletion time: %v, %q", d, p.files("prekeys"))
 	}

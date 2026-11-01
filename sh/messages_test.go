@@ -399,13 +399,13 @@ func TestScriptRefusesForgedMessages(t *testing.T) {
 	}
 	w.put(b, randomID(), genuine)
 	refused("a replay under a new id", "replay", b.recv())
-	// A genuine new message under an id that is not its hash; one older than 33 days; a key twice.
+	// A genuine new message under an id that is not its hash; one older than the TTL; a key twice.
 	wl := a.line(b.addr, "44444444-2222-4333-8444-555555555555", "wrong id", 0)
 	w.inject(b, randomID(), wl, a.sign(b.addr, wl))
 	refused("a genuine message under an id that is not its hash", "not the SHA-256 of its ciphertext", b.recv())
-	old := a.line(b.addr, "22222222-2222-4333-8444-555555555555", "old", 34*24*time.Hour)
+	old := a.line(b.addr, "22222222-2222-4333-8444-555555555555", "old", protocol.TTL+24*time.Hour)
 	w.inject(b, "", old, a.sign(b.addr, old))
-	refused("sent_at older than 33 days", "older than 33 days", b.recv())
+	refused("sent_at older than the TTL", fmt.Sprintf("older than %d days", protocol.TTL/(24*time.Hour)), b.recv())
 	dup := fmt.Appendf(nil, `{"v":1,"from":"%s","from":"%s","to":"%s","sent_at":"%s","msg_id":"55555555-2222-4333-8444-555555555555","identity":"%s","body":"twice"}`+"\n",
 		c.addr, a.addr, b.addr, time.Now().UTC().Format(protocol.TimeLayout), b64(a.read("identity.doc")))
 	w.inject(b, "", dup, a.sign(b.addr, dup))
@@ -604,8 +604,10 @@ age-keygen -pq -o agekey 2> /dev/null`)
 	}
 }
 
-// notAfter is a prekey's not_after 33 days out, the most a server takes.
-func notAfter() string { return time.Now().Add(33 * 24 * time.Hour).UTC().Format(protocol.TimeLayout) }
+// notAfter is a prekey's not_after protocol.PrekeyLifetime out, the longest a client makes one.
+func notAfter() string {
+	return time.Now().Add(protocol.PrekeyLifetime).UTC().Format(protocol.TimeLayout)
+}
 
 // A send the server refuses or fails says so and keeps nothing to post
 // again; a server's word that a mailbox is revoked, with nothing shown, revokes

@@ -41,7 +41,7 @@ type Status struct {
 	// kept: empty if there is none, and the next recv renews it.
 	PrekeyMade string `json:"prekey_made,omitempty"`
 	// PrekeyLifetime is how long each new prekey is valid for, in seconds:
-	// the mailbox's prekey-lifetime file, or 33 days. Zero if the file names no
+	// the mailbox's prekey-lifetime file, or protocol.PrekeyLifetime. Zero if the file names no
 	// lifetime, and the mailbox then renews no prekey until it is put right.
 	PrekeyLifetime int64 `json:"prekey_lifetime"`
 	// CertificateSerial and CertificateNotAfter are the certificate of the

@@ -17,24 +17,25 @@ import (
 )
 
 // A retry is dated afresh at its post, so its sent_at is up to the outbox's
-// 33 days after the first copy's, whose line keys the msg_id (check 9). The
+// TTL after the first copy's, whose line keys the msg_id (check 9). The
 // floor (seen-floor) compares the sent_at of the message read. Once a prune
 // by a clock far enough ahead drops the first copy's line, a retry the
 // server kept is above the floor and fresh, and is delivered a second time.
 //
 // The server is hostile: it loses the answer to the first post (and lists
-// the copy), keeps a retry posted in the last 30 minutes of the outbox's 33
-// days and answers it 503, takes one pass from the reader's clock 1h32m
-// (or 3h) fast, refusing the renewal that drain makes, and lists the kept
-// retry once the reader's clock is right again. The reader runs recv
-// monthly.
+// the copy), keeps a retry posted in the last 30 minutes of the outbox's TTL
+// and answers it 503, takes one pass from the reader's clock 1h32m (or 3h)
+// fast, refusing the renewal that drain makes, and lists the kept retry once
+// the reader's clock is right again. The reader renews its prekey just
+// before the retry is sealed to it, and reads nothing more until twice the
+// TTL less 31 minutes: so that prekey is the one in use, or the newest retired
+// one within the hour after a renewal, until the retry is read.
 func TestARetryAboveTheFloorIsDeliveredAgain(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	day := 24 * time.Hour
 	for _, c := range []struct {
 		name  string
-		ahead time.Duration // the reader's clock at the one drain the server takes, on day 66 less 31 minutes
+		ahead time.Duration // the reader's clock at the one drain the server takes, at twice the TTL less 31 minutes
 	}{
 		{"one drain 1h32m ahead, then right", 92 * time.Minute},
 		{"one drain 3h ahead, then right", 3 * time.Hour},
@@ -70,18 +71,16 @@ func TestARetryAboveTheFloorIsDeliveredAgain(t *testing.T) {
 			if res := receive(t, r); len(res.Delivered) != 1 {
 				t.Fatalf("the first copy: delivered %d", len(res.Delivered))
 			}
-			e.clock.Add(30 * day)
-			receive(t, r) // monthly: renews
-			e.clock.Add(3*day - 30*time.Minute)
+			e.clock.Add(protocol.TTL - 2*time.Hour)
+			receive(t, r) // renews: the prekey the retry is sealed to
+			e.clock.Add(90 * time.Minute)
 			receive(t, s) // the sender renews, so its certificate outlasts what it signs
 			mode = "keep"
 			if _, err := s.Flush(ctx); err == nil || retry == nil {
-				t.Fatalf("the retry, posted on day 33 less 30 minutes: %v, kept %d bytes", err, len(retry))
+				t.Fatalf("the retry, posted at the TTL less 30 minutes: %v, kept %d bytes", err, len(retry))
 			}
 			mode = ""
-			e.clock.Add(27 * day)
-			receive(t, r) // monthly: renews
-			e.clock.Add(6*day - time.Minute)
+			e.clock.Add(protocol.TTL - time.Minute)
 			if c.ahead > 0 {
 				// A hostile server takes a pass from a clock an honest one
 				// refuses: the server's clock is moved with the reader's.
@@ -96,7 +95,7 @@ func TestARetryAboveTheFloorIsDeliveredAgain(t *testing.T) {
 			id := sha256.Sum256(retry)
 			e.srv.Inject(r.Address(), hex.EncodeToString(id[:]), retry)
 			res, err := r.Receive(ctx)
-			t.Logf("the retry, listed on day 66 less 31 minutes (floor %q): delivered %d, duplicates %d, refused %v, %v", bytes.TrimSpace(floor), len(res.Delivered), len(res.Duplicates), res.Refused, err)
+			t.Logf("the retry, listed at twice the TTL less 31 minutes (floor %q): delivered %d, duplicates %d, refused %v, %v", bytes.TrimSpace(floor), len(res.Delivered), len(res.Duplicates), res.Refused, err)
 			if len(res.Delivered) != 0 {
 				t.Errorf("a message already delivered was delivered again: %q", res.Delivered[0].Envelope.Body)
 			}
@@ -114,7 +113,6 @@ func TestARetryAboveTheFloorIsDeliveredAgain(t *testing.T) {
 func TestARetryAfterAStepOfTheHour(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	day := 24 * time.Hour
 	e := newEnv(t)
 	off := time.Duration(0)
 	r, err := client.Init(ctx, t.TempDir(), e.skewed(&off))
@@ -148,9 +146,9 @@ func TestARetryAfterAStepOfTheHour(t *testing.T) {
 		t.Fatalf("the first copy: %d", len(res.Delivered))
 	}
 	mode = ""
-	e.clock.Add(30 * day)
-	receive(t, r)
-	e.clock.Add(protocol.TTL - 30*day - time.Hour)
+	e.clock.Add(protocol.TTL - 2*time.Hour)
+	receive(t, r) // renews: the prekey the retry is sealed to
+	e.clock.Add(time.Hour)
 	receive(t, s)
 	e.clock.Add(time.Hour)
 	mode = "keep"
@@ -174,7 +172,7 @@ func TestARetryAfterAStepOfTheHour(t *testing.T) {
 }
 
 // The Go client's second seal after 409 stale_prekey is dated when it is
-// made, with no second look at the outbox's 33 days. The hostile server
+// made, with no second look at the outbox's TTL. The hostile server
 // answers the mailbox read and the post each after 59s (under the client's
 // one-minute request timeout), the post 409 stale_prekey, and keeps the
 // retry sealed again: dated 1m58s past W + TTL. The reader's clock is then
@@ -183,7 +181,6 @@ func TestARetryAfterAStepOfTheHour(t *testing.T) {
 func TestAStretchedRetryAtClocksAnHonestServerTakes(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	day := 24 * time.Hour
 	fast, slow := 50*time.Minute, -(9*time.Minute + 59*time.Second)
 	for _, c := range []struct {
 		name          string
@@ -191,7 +188,7 @@ func TestAStretchedRetryAtClocksAnHonestServerTakes(t *testing.T) {
 		slowRead      bool          // the mailbox read answered after 59s, the post kept, no 409
 		prune         time.Duration // true time of the drain that prunes, after W + 2TTL
 		fast, slow    time.Duration // the reader's clock at the drain that prunes, and at the replay
-		refuseRenewal bool          // the renewal the pruning drain makes is refused, so the retry's key stays the newest retired
+		refuseRenewal bool          // the renewal the pruning drain makes is refused, so the retry's key stays the one in use
 		hostile       time.Duration // the server's clock moved with the reader's at the drain that prunes: a pass an honest server refuses
 	}{
 		{"stretched, 50m fast then 9m59s slow", true, false, 10*time.Minute + time.Second, fast, slow, true, 0},
@@ -254,9 +251,9 @@ func TestAStretchedRetryAtClocksAnHonestServerTakes(t *testing.T) {
 			}
 			p1 := first.Delivered[0].Envelope.SentAt
 			mode = ""
-			e.clock.Add(30 * day)
-			receive(t, r)
-			e.clock.Add(protocol.TTL - 30*day - time.Hour)
+			e.clock.Add(protocol.TTL - 2*time.Hour)
+			receive(t, r) // renews: the prekey the retry is sealed to, which lasts past the drain that prunes
+			e.clock.Add(time.Hour)
 			receive(t, s)
 			e.clock.Add(time.Hour) // W + TTL: the outbox's last second
 			mode = "keep"
@@ -269,8 +266,6 @@ func TestAStretchedRetryAtClocksAnHonestServerTakes(t *testing.T) {
 				}
 				t.Fatalf("the retry: %v", err)
 			}
-			e.clock.Add(w.Add(60 * day).Sub(e.clock.Now()))
-			receive(t, r) // monthly
 			e.clock.Add(w.Add(2*protocol.TTL + c.prune).Sub(e.clock.Now()))
 			off = c.fast
 			if c.refuseRenewal {
@@ -300,12 +295,14 @@ func TestAStretchedRetryAtClocksAnHonestServerTakes(t *testing.T) {
 	}
 }
 
-// The Go client keeps the current and the newest retired prekey, so a reader
-// that runs recv daily has deleted, by day 66, the key a retry posted on day
-// 33 was sealed to, unless its renewals fail. The hostile server takes the
-// first renewal after the retry and refuses every later one, so that key
-// stays the newest retired. The rest is TestARetryAboveTheFloorIsDeliveredAgain's
-// timeline: one drain 1h32m ahead that the server takes.
+// The Go client deletes every retired prekey once an emptying drain's list is
+// taken more than an hour after the server took the renewal that retired it,
+// so a reader that runs recv daily has deleted, a day after a retry is posted
+// at the TTL, the key the retry was sealed to, unless its renewals fail. The
+// hostile server refuses every renewal after the retry, so that key stays
+// the one in use. The rest is TestARetryAboveTheFloorIsDeliveredAgain's
+// timeline: one drain 1h32m ahead that the server takes. Control: every
+// renewal taken, the key is gone before the retry is listed.
 func TestADailyReaderWhoseRenewalsAreRefused(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -335,7 +332,7 @@ func TestADailyReaderWhoseRenewalsAreRefused(t *testing.T) {
 					return
 				case q.Method == http.MethodPut && mode == "norenew":
 					renewals++
-					if refuse && renewals > 1 {
+					if refuse {
 						http.Error(w, "down", http.StatusServiceUnavailable)
 						return
 					}
@@ -353,7 +350,8 @@ func TestADailyReaderWhoseRenewalsAreRefused(t *testing.T) {
 				t.Fatalf("the first copy: %d", len(res.Delivered))
 			}
 			mode = ""
-			for d := 1; d <= 32; d++ {
+			days := int(protocol.TTL / day)
+			for d := 1; d < days; d++ {
 				e.clock.Add(day)
 				receive(t, r)
 			}
@@ -366,13 +364,13 @@ func TestADailyReaderWhoseRenewalsAreRefused(t *testing.T) {
 			}
 			mode = "norenew"
 			e.clock.Add(30 * time.Minute)
-			for d := 33; d <= 65; d++ {
+			for d := days; d < 2*days; d++ {
 				if _, err := r.Receive(ctx); err != nil {
 					t.Logf("day %d: %v", d, err)
 				}
 				e.clock.Add(day)
 			}
-			// day 66; the drain 1h32m ahead at day 66 less 31 minutes, taken by the server
+			// twice the TTL; the drain 1h32m ahead at twice the TTL less 31 minutes, taken by the server
 			e.clock.Add(-31*time.Minute + 92*time.Minute)
 			mode = "ahead"
 			_, err := r.Receive(ctx)
@@ -381,7 +379,7 @@ func TestADailyReaderWhoseRenewalsAreRefused(t *testing.T) {
 			id := sha256.Sum256(retry)
 			e.srv.Inject(r.Address(), hex.EncodeToString(id[:]), retry)
 			res, err := r.Receive(ctx)
-			t.Logf("the retry, listed on day 66 less 31 minutes: delivered %d, duplicates %d, refused %v, %v", len(res.Delivered), len(res.Duplicates), res.Refused, err)
+			t.Logf("the retry, listed at twice the TTL less 31 minutes: delivered %d, duplicates %d, refused %v, %v", len(res.Delivered), len(res.Duplicates), res.Refused, err)
 			if len(res.Delivered) != 0 {
 				t.Error("a message already delivered was delivered again")
 			}
@@ -402,13 +400,13 @@ func TestADailyReaderWhoseRenewalsAreRefused(t *testing.T) {
 // stepped back to right while the first post's mailbox read is in flight. The
 // server is hostile only in losing the first answer, keeping the retry the
 // sender posts at W + TTL, and listing it once the reader's line is gone;
-// every pass here is one an honest server takes. The reader runs recv
-// monthly, its clock fast at the drain that prunes (its renewal refused, so
-// the retry's key stays) and slow a second later.
+// every pass here is one an honest server takes. The reader renews just
+// before the retry is sealed to it and reads nothing more until the drain
+// that prunes, its clock fast there (its renewal refused, so the retry's key
+// stays the one in use) and slow a second later.
 func TestAFirstCopyIsNeverDatedBeforeItWasWritten(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	day := 24 * time.Hour
 	fast, slow := 50*time.Minute, -(9*time.Minute + 59*time.Second)
 	for _, c := range []struct {
 		name       string
@@ -483,8 +481,8 @@ func TestAFirstCopyIsNeverDatedBeforeItWasWritten(t *testing.T) {
 			mode = ""
 			// The sender's clock is right from here on: W + TTL by its clock
 			// is true time wrote + TTL.
-			e.clock.Add(30 * day)
-			receive(t, r)
+			e.clock.Add(wrote.Add(protocol.TTL - 2*time.Hour).Sub(e.clock.Now()))
+			receive(t, r) // renews: the prekey the retry is sealed to, which lasts past the drain that prunes
 			e.clock.Add(wrote.Add(protocol.TTL - time.Hour).Sub(e.clock.Now()))
 			receive(t, s)          // the sender renews, so its certificate signs a message that waits
 			e.clock.Add(time.Hour) // the sender's clock reads W + TTL: the outbox's last second
@@ -494,8 +492,6 @@ func TestAFirstCopyIsNeverDatedBeforeItWasWritten(t *testing.T) {
 			if retry == nil {
 				t.Fatalf("no retry was posted: %v", err)
 			}
-			e.clock.Add(firstSentAt.Add(60 * day).Sub(e.clock.Now()))
-			receive(t, r)
 			e.clock.Add(firstSentAt.Add(2*protocol.TTL + c.prune).Sub(e.clock.Now()))
 			off = c.fast
 			mode = "norenew"

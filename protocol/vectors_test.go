@@ -1328,7 +1328,7 @@ func TestVectorEnvelopes(t *testing.T) {
 		case strings.HasPrefix(name, "refuse-"):
 			// Every refusal has its code: bad_envelope, but for these.
 			want := map[string]string{
-				"refuse-33-days-and-1s-old":  RefusedStale,
+				"refuse-7-days-and-1s-old":   RefusedStale,
 				"refuse-1-hour-and-1s-ahead": RefusedFuture,
 				"refuse-from-not-signer":     RefusedAttribution,
 				"refuse-from-null":           RefusedAttribution, // null is a member left out

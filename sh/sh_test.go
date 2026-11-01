@@ -681,7 +681,7 @@ var envelopeFive = map[string]bool{
 	"refuse-duplicate-key": true, "refuse-key-twice-in-the-body": true, "refuse-not-json": true, "refuse-two-objects": true,
 	"refuse-no-msg-id": true, "refuse-msg-id-grouped-wrongly": true, "refuse-msg-id-newline": true, "refuse-msg-id-uppercase": true,
 	"refuse-sent-at-ending-in-a-line-feed": true, "refuse-sent-at-ending-in-a-nul": true, "refuse-sent-at-malformed": true, "refuse-sent-at-second-60": true,
-	"refuse-33-days-and-1s-old": true, "refuse-1-hour-and-1s-ahead": true,
+	"refuse-7-days-and-1s-old": true, "refuse-1-hour-and-1s-ahead": true,
 }
 
 // sameLine holds the script's delivered line to the Go client's, byte for
@@ -786,7 +786,7 @@ func TestVectorsEnvelope(t *testing.T) {
 				t.Errorf("%s: accepted", name)
 			}
 			// The two ends of the sent_at window have a code each, the Go client's.
-			if want := map[string]string{"refuse-33-days-and-1s-old": protocol.RefusedStale, "refuse-1-hour-and-1s-ahead": protocol.RefusedFuture}[name]; want != "" && !strings.HasPrefix(line, want+": ") {
+			if want := map[string]string{"refuse-7-days-and-1s-old": protocol.RefusedStale, "refuse-1-hour-and-1s-ahead": protocol.RefusedFuture}[name]; want != "" && !strings.HasPrefix(line, want+": ") {
 				t.Errorf("%s: refused as %q, want the code %s", name, line, want)
 			}
 		case !strings.HasPrefix(name, "refuse-"):
@@ -2398,7 +2398,7 @@ func TestTheScriptCallsThisMachineDirectly(t *testing.T) {
 	}
 }
 
-// A renewal the server did not take waits, signed for 33 days, and the owner
+// A renewal the server did not take waits, signed for 8 days, and the owner
 // then writes the shortest lifetime: the script's next renewal spends the one
 // that waited and signs a new key for the lifetime now set, as the Go client
 // does (PROTOCOL.md §12.4).
@@ -2421,7 +2421,7 @@ func TestTheScriptHoldsALowerLifetimeOverAWaitingRenewal(t *testing.T) {
 	if _, err := bash(t, env, "sleep 1; dr_rekey"); err == nil {
 		t.Fatal("the renewal went through")
 	}
-	if err := os.WriteFile(filepath.Join(dir, "prekey-lifetime"), []byte("97200\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "prekey-lifetime"), []byte("21600\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	srv.SetMiddle(nil)
@@ -2448,7 +2448,7 @@ func TestTheScriptHoldsALowerLifetimeOverAWaitingRenewal(t *testing.T) {
 		t.Fatal(err)
 	}
 	made, err := protocol.ParseTime(strings.TrimSpace(string(rawMade)))
-	if err != nil || p.NotAfter.Sub(made) > 27*time.Hour {
-		t.Errorf("the script published a prekey made for %v after the lifetime was set to 1d3h: %v", p.NotAfter.Sub(made), err)
+	if err != nil || p.NotAfter.Sub(made) > 6*time.Hour {
+		t.Errorf("the script published a prekey made for %v after the lifetime was set to 6h: %v", p.NotAfter.Sub(made), err)
 	}
 }

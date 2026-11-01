@@ -88,7 +88,8 @@ type Result struct {
 	// Retry-After.
 	PollAfter int64
 	// Renewed is the prekey this Receive published, the current one being
-	// more than a day old; nil if none was due.
+	// due (more than a day old, or sooner for a short lifetime: renewAt); nil
+	// if none was due.
 	Renewed *protocol.Prekey
 	// RenewErr is why a due renewal failed. The drain went ahead, and a
 	// later Receive tries again, at most hourly.
@@ -138,13 +139,16 @@ func (r *Result) Again() time.Duration {
 // next one. It holds the mailbox's lock throughout ([Mailbox.hold]): a second
 // Receive, or any other command that writes the mailbox, waits for it.
 //
-// First it renews the prekey if the current one is more than a day old, so
-// a mailbox received at least monthly never lapses. Once that renewal is taken,
+// First it renews the prekey if the current one is more than a day old, or
+// sooner for a lifetime too short for that (renewAt), so a mailbox received at
+// least every [RecvWithin] its lifetime never lapses. Once that renewal is taken,
 // a read of the ACL its server holds is owed, and the first Receive that can
 // make it makes it, renewing or not, and replaces one the mailbox did not send
 // (aclAt, checkACL). A drain that empties the mailbox
 // then deletes the retired prekeys no message can still need (see
-// [Mailbox.dropRetired]): all but the newest. And once the server has answered
+// [Mailbox.dropRetired]): every one, once its list was taken more than an
+// hour after the server took the current prekey, and all but the newest
+// where the mailbox does not know when it did. And once the server has answered
 // the drain's list, so has taken a pass dated by this machine's clock, the
 // prekeys whose deletion time has come by that pass's date go too.
 //
@@ -616,7 +620,7 @@ type verdict struct {
 //  5. The signature over the line as decrypted, in this mailbox's message
 //     namespace, by that identity or a working key it certified.
 //  6. The rest of the envelope: version 1, to is this mailbox, msg_id in its
-//     form, and sent_at no older than protocol.TTL (33 days), not before the
+//     form, and sent_at no older than protocol.TTL, not before the
 //     floor the seen-set was pruned at (seenFloor), and at most
 //     protocol.MaxSkew ahead.
 //  7. Revocation: this mailbox holds no revocation of the sender. The server is

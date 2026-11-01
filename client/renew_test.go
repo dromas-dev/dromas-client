@@ -37,8 +37,8 @@ func servedSerial(t *testing.T, e *env, b *client.Mailbox) uint64 {
 }
 
 // Receive renews the prekey once it is more than a day old, and not again
-// until the new one is a day old: a mailbox received at
-// least monthly never lapses, and a busy one renews at most daily.
+// until the new one is a day old: a mailbox received at least every
+// RecvWithin of its lifetime never lapses, and a busy one renews at most daily.
 func TestReceiveRenewsADayOldPrekey(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
@@ -570,66 +570,217 @@ func TestAFailureDatedAheadHoldsBackNoRenewal(t *testing.T) {
 	}
 }
 
-// After a drain that emptied the mailbox and began more than an hour after the
-// newest retired prekey was made (so every older one had been retired for an
-// hour), every retired prekey but the newest is deleted, key and statement.
-// A message encrypted to the newest retired one still decrypts.
-func TestReceiveKeepsOnePriorPrekey(t *testing.T) {
+// After a drain that emptied the mailbox, whose list the server took more
+// than an hour after it took the current prekey's renewal, every retired
+// prekey is deleted, the newest included, key and statement: by the dates of
+// the two passes, on the mailbox's clock, whatever its distance from the
+// server's. A drain within the hour keeps them, and a message encrypted to the
+// newest retired one as the renewal was taken is delivered first.
+func TestAnEmptyingDrainDeletesEveryRetiredPrekeyAnHourAfterTheTake(t *testing.T) {
 	t.Parallel()
-	e := newEnv(t)
 	ctx := context.Background()
-	a, b := e.mailbox(), e.mailbox()
-	key := func(n uint64) string { return prekeyFile(b, n, "") }
-	k1 := numberOf(t, b)
-	send(t, a, b, "to the first key")
-	e.clock.Add(25 * time.Hour)
-	if res := receive(t, b); res.Renewed == nil || len(res.Delivered) != 1 {
-		t.Fatalf("renewed %v, delivered %d", res.Renewed, len(res.Delivered))
-	}
-	k2 := numberOf(t, b)
-	send(t, a, b, "to the second key")
-	if _, err := b.Rekey(ctx); err != nil { // retires the second key at once
-		t.Fatal(err)
-	}
-	k3 := numberOf(t, b)
-	e.clock.Add(time.Hour)
-	if res := receive(t, b); len(res.Delivered) != 1 {
-		t.Fatal("a message to the newest retired prekey was not delivered")
-	}
-	if !exists(key(k1) + ".agekey") {
-		t.Fatal("deleted an hour after the newest retired prekey was made, not more")
-	}
-	// Deleted by the date of the pass the list carried: the kept pass is
-	// used until its last seconds, so the next is dated a pass's life on.
-	e.clock.Add(protocol.PassLifetime)
-	forge.FailOnce(e.srv, http.MethodGet, "/messages")
-	if _, err := b.Receive(ctx); err == nil {
-		t.Fatal("the failed drain succeeded")
-	}
-	if !exists(key(k1) + ".agekey") {
-		t.Fatal("a drain that did not empty the mailbox deleted a prekey")
-	}
-	receive(t, b)
-	if exists(key(k1)+".agekey") || has(b, "prekeys/"+strconv.FormatUint(k1, 10)+".txt") {
-		t.Fatal("the first prekey's key or statement was kept")
-	}
-	if !exists(key(k2)+".agekey") || !exists(key(k3)+".agekey") {
-		t.Fatal("deleted the newest retired prekey or the current one")
+	for _, off := range []time.Duration{0, -9 * time.Minute, 49 * time.Minute} {
+		t.Run("the mailbox "+off.String()+" off", func(t *testing.T) {
+			e := newEnv(t)
+			b, err := client.Init(ctx, t.TempDir(), e.skewed(&off))
+			if err != nil {
+				t.Fatal(err)
+			}
+			landAll(t, b)
+			a := e.mailbox()
+			key := func(n uint64) string { return prekeyFile(b, n, ".agekey") }
+			k1 := numberOf(t, b)
+			send(t, a, b, "to the first key")
+			e.clock.Add(25 * time.Hour)
+			if res := receive(t, b); res.Renewed == nil || len(res.Delivered) != 1 {
+				t.Fatalf("renewed %v, delivered %d", res.Renewed, len(res.Delivered))
+			}
+			k2 := numberOf(t, b)
+			send(t, a, b, "to the second key, as the third is taken")
+			if _, err := b.Rekey(ctx); err != nil { // retires the second key at once
+				t.Fatal(err)
+			}
+			k3 := numberOf(t, b)
+			took, ok := b.Record(t, "prekeys/"+strconv.FormatUint(k3, 10)+".taken")
+			if at, err := protocol.ParseTime(string(took)); !ok || err != nil || at.After(e.clock.Now().Add(off)) {
+				t.Fatalf("the take of the current prekey is recorded as %q", took)
+			}
+			e.clock.Add(time.Hour)
+			if res := receive(t, b); len(res.Delivered) != 1 {
+				t.Fatal("a message to the newest retired prekey was not delivered")
+			}
+			if !exists(key(k1)) || !exists(key(k2)) {
+				t.Fatal("deleted by a list taken an hour after the take, not more")
+			}
+			// Deleted by the date of the pass the list carried: the kept pass is
+			// used until its last seconds, so the next is dated a pass's life on.
+			e.clock.Add(protocol.PassLifetime)
+			forge.FailOnce(e.srv, http.MethodGet, "/messages")
+			if _, err := b.Receive(ctx); err == nil {
+				t.Fatal("the failed drain succeeded")
+			}
+			if !exists(key(k1)) || !exists(key(k2)) {
+				t.Fatal("a drain that did not empty the mailbox deleted a prekey")
+			}
+			receive(t, b)
+			for _, n := range []uint64{k1, k2} {
+				if exists(key(n)) || has(b, "prekeys/"+strconv.FormatUint(n, 10)+".txt") {
+					t.Errorf("retired prekey %d's key or statement was kept", n)
+				}
+			}
+			if !exists(key(k3)) {
+				t.Fatal("deleted the current prekey")
+			}
+		})
 	}
 }
 
-// A mailbox received monthly deletes its older prekeys at the check-in that
-// renews: a key is gone by the second renewal after it was retired.
-func TestMonthlyMailboxDeletesAtTheRenewingCheckIn(t *testing.T) {
+// The hour counts from when the server took the renewal, never from when it
+// was signed: a renewal that waited two hours, refused once and sent again as
+// signed, retires the prekey before it only when it is taken, so a drain half
+// an hour after the take keeps that prekey, signed two and a half hours
+// before, and one more than an hour after the take deletes it.
+func TestTheHourBeforeTheNewestRetiredPrekeyGoesCountsFromTheTake(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	a, b := e.mailbox(), e.mailbox()
+	k1 := numberOf(t, b)
+	e.clock.Add(25 * time.Hour)
+	forge.FailOnce(e.srv, http.MethodPut, "/prekey") // the server is down: the renewal waits, signed
+	if res := receive(t, b); res.RenewErr == nil {
+		t.Fatal("the renewal did not fail")
+	}
+	signed := begunAt(t, b)
+	e.clock.Add(2 * time.Hour)
+	send(t, a, b, "to the first key, as the renewal is taken")
+	if res := receive(t, b); res.Renewed == nil || res.Renewed.Serial != signed || len(res.Delivered) != 1 {
+		t.Fatalf("the renewal sent again: %+v", res)
+	}
+	e.clock.Add(30 * time.Minute)
+	receive(t, b)
+	if !exists(prekeyFile(b, k1, ".agekey")) {
+		t.Fatal("the newest retired prekey went half an hour after its renewal was taken, two and a half after it was signed")
+	}
+	e.clock.Add(31 * time.Minute)
+	receive(t, b)
+	if exists(prekeyFile(b, k1, ".agekey")) {
+		t.Fatal("the newest retired prekey outlived a list taken more than an hour after the renewal that retired it")
+	}
+}
+
+// The prekeys older than the newest retired one go by when the server took
+// that one, never by when it was signed: a renewal that waited two hours,
+// refused once and sent again as signed, retires the prekey before it only
+// when it is taken, and a second renewal taken ten minutes later leaves that
+// prekey older than the newest retired one. A drain half an hour after the
+// late take keeps it, and one more than an hour after deletes it, while the
+// newest retired one, retired less than an hour before, stays.
+func TestTheOlderRetiredPrekeysGoByTheNewestRetiredOnesTake(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	e := newEnv(t)
+	a, b := e.mailbox(), e.mailbox()
+	k1 := numberOf(t, b)
+	e.clock.Add(25 * time.Hour)
+	forge.FailOnce(e.srv, http.MethodPut, "/prekey") // the server is down: the renewal waits, signed
+	if res := receive(t, b); res.RenewErr == nil {
+		t.Fatal("the renewal did not fail")
+	}
+	k2 := begunAt(t, b)
+	e.clock.Add(2 * time.Hour)
+	send(t, a, b, "to the first key, as the renewal is taken")
+	if res := receive(t, b); res.Renewed == nil || res.Renewed.Serial != k2 || len(res.Delivered) != 1 {
+		t.Fatalf("the renewal sent again: %+v", res)
+	}
+	e.clock.Add(10 * time.Minute)
+	if _, err := b.Rekey(ctx); err != nil { // retires the second key ten minutes after its take
+		t.Fatal(err)
+	}
+	e.clock.Add(20 * time.Minute)
+	receive(t, b)
+	if !exists(prekeyFile(b, k1, ".agekey")) {
+		t.Fatal("a retired prekey went half an hour after the take that retired it, two and a half after the renewal was signed")
+	}
+	e.clock.Add(31 * time.Minute)
+	receive(t, b)
+	if exists(prekeyFile(b, k1, ".agekey")) {
+		t.Fatal("a retired prekey outlived a list taken more than an hour after the take that retired it")
+	}
+	if !exists(prekeyFile(b, k2, ".agekey")) {
+		t.Fatal("the newest retired prekey went less than an hour after the take that retired it")
+	}
+}
+
+// Where the mailbox does not know when its server took the current prekey,
+// as when the upload's answer was lost and a read of itself showed the
+// renewal taken, an emptying drain keeps the newest retired prekey however
+// long after, and deletes those older than it once its list was taken more
+// than an hour after the server took the newest retired one. Control: the same
+// mailbox with the take dated deletes the newest retired one too.
+func TestTheNewestRetiredPrekeyIsKeptWhileTheTakeIsUnknown(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	e := newEnv(t)
+	b := e.mailbox()
+	key := func(n uint64) string { return prekeyFile(b, n, ".agekey") }
+	k1 := numberOf(t, b)
+	e.clock.Add(25 * time.Hour)
+	if res := receive(t, b); res.Renewed == nil {
+		t.Fatal("no renewal")
+	}
+	k2 := numberOf(t, b)
+	e.clock.Add(2 * time.Second)
+	var lied atomic.Bool
+	e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
+		if r.Method == http.MethodPut && r.URL.Path == mailboxPath(b)+"/prekey" && lied.CompareAndSwap(false, true) {
+			next.ServeHTTP(httptest.NewRecorder(), r) // taken, and the answer lost
+			forge.Refuse(w, protocol.CodeNoSuchMailbox)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+	took := e.clock.Now()
+	if p, err := b.Rekey(ctx); p == nil || err != nil {
+		t.Fatalf("the renewal its read of itself showed taken: %v, %v", p, err)
+	}
+	e.srv.SetMiddle(nil)
+	k3 := numberOf(t, b)
+	if k3 <= k2 {
+		t.Fatal("no new prekey")
+	}
+	if v, ok := b.Record(t, "prekeys/"+strconv.FormatUint(k3, 10)+".taken"); ok {
+		t.Fatalf("a take learnt from a read of itself is dated %q", v)
+	}
+	e.clock.Add(2 * time.Hour)
+	receive(t, b)
+	if exists(key(k1)) {
+		t.Error("a retired prekey older than the newest outlived a list taken two hours after the newest was taken")
+	}
+	if !exists(key(k2)) || !exists(key(k3)) {
+		t.Fatal("the newest retired prekey was deleted while the mailbox does not know when its server took the current one")
+	}
+	b.SetRecord(t, "prekeys/"+strconv.FormatUint(k3, 10)+".taken", []byte(took.UTC().Format(protocol.TimeLayout)))
+	e.clock.Add(protocol.PassLifetime)
+	receive(t, b)
+	if exists(key(k2)) || !exists(key(k3)) {
+		t.Fatal("control: with the take dated, the newest retired prekey was kept, or the current one deleted")
+	}
+}
+
+// A mailbox received once every RecvWithin of the default lifetime deletes
+// its older prekeys at the check-in that renews: a key is gone by the second
+// renewal after it was retired, and the newest retired one, retired by the
+// renewal that check-in made, is kept through its drain.
+func TestAMailboxReceivedAtItsCadenceDeletesAtTheRenewingCheckIn(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
 	b := e.mailbox()
 	key1 := prekeyFile(b, numberOf(t, b), ".agekey")
 	var second uint64
 	for i := range 2 {
-		e.clock.Add(30 * 24 * time.Hour)
+		e.clock.Add(client.RecvWithin(protocol.PrekeyLifetime))
 		if res := receive(t, b); res.Renewed == nil {
-			t.Fatal("a monthly check-in did not renew")
+			t.Fatal("a check-in at the cadence did not renew")
 		}
 		if i == 0 {
 			second = numberOf(t, b)
@@ -639,7 +790,7 @@ func TestMonthlyMailboxDeletesAtTheRenewingCheckIn(t *testing.T) {
 		t.Fatal("key 1 outlived the second renewal after it was retired")
 	}
 	if !exists(prekeyFile(b, second, ".agekey")) {
-		t.Fatal("the newest retired prekey was deleted")
+		t.Fatal("the newest retired prekey was deleted by the drain of the check-in that retired it")
 	}
 }
 
@@ -696,10 +847,13 @@ func TestAFailedRenewalIsSentAgainUnchanged(t *testing.T) {
 }
 
 // A server that fails every renewal, and keeps what it is sent, gets each key
-// in ONE statement: so no key can be encrypted to for more than 33 days after
-// it was signed, whatever the server does. When a statement it holds expires,
-// the mailbox signs a new key at the next serial, and deletes a passed-over key
-// 33 days after its not_after, as it does any retired one.
+// in ONE statement: so no key can be encrypted to for more than
+// protocol.PrekeyLifetime after it was signed, whatever the server does. When
+// a statement it holds expires, the mailbox signs a new key at the next
+// serial, and deletes a passed-over key protocol.TTL after its not_after, as
+// it does any retired one, by the date of a pass a server took. The prekey it
+// published last, whose deletion time comes while every renewal fails, is not
+// retired: its statement and working key go on signing the mailbox's passes.
 func TestAServerThatFailsEveryRenewalGetsEachKeyOnce(t *testing.T) {
 	t.Parallel()
 	e := newWorkEnv(t)
@@ -713,14 +867,15 @@ func TestAServerThatFailsEveryRenewalGetsEachKeyOnce(t *testing.T) {
 	byKey := map[string]lease{}
 	var order []string
 	seen := 0
-	for day := 1; day <= 75; day++ {
+	// The certificate the server holds this mailbox to was made on day 0, an
+	// hour back, and lasts the longest the server takes. Once it has ended
+	// the mailbox can sign no pass the server takes, so it cannot poll: it
+	// still offers a new prekey, under a new certificate, each day.
+	ended := int(testCertLife / (24 * time.Hour))
+	const days = 75
+	for day := 1; day <= days; day++ {
 		e.clock.Add(24 * time.Hour)
-		// The certificate the server holds this mailbox to was made on day 0,
-		// an hour back, and lasts the longest the server takes, 45 days and an
-		// hour. Once it has ended the mailbox can sign no pass the server
-		// takes, so it cannot poll: it still offers a new prekey, under a new
-		// certificate, each day.
-		if _, err := b.Receive(context.Background()); (err != nil) != (day >= int(testCertLife/(24*time.Hour))) {
+		if _, err := b.Receive(context.Background()); (err != nil) != (day >= ended) {
 			t.Fatalf("day %d: receive: %v", day, err)
 		}
 		for ; seen < len(*kept); seen++ {
@@ -739,19 +894,26 @@ func TestAServerThatFailsEveryRenewalGetsEachKeyOnce(t *testing.T) {
 			}
 		}
 	}
-	if seen < 70 || len(order) != 3 {
-		t.Fatalf("%d uploads in 75 days, for %d keys: want one a day, for a new key every 33 days", seen, len(order))
+	if seen < days-5 {
+		t.Fatalf("%d uploads in %d days: want one a day", seen, days)
 	}
 	serials := map[uint64]bool{}
-	for _, key := range order {
+	for i, key := range order {
 		l := byKey[key]
 		if life := l.p.NotAfter.Sub(l.signed); life > protocol.PrekeyLifetime {
 			t.Errorf("serial %d could be encrypted to for %s after it was signed", l.p.Serial, life)
 		}
+		// A new key only once the one before has ended, and on the day after.
+		if i > 0 {
+			before := byKey[order[i-1]].p.NotAfter
+			if l.signed.Before(before) || l.signed.After(before.Add(24*time.Hour)) {
+				t.Errorf("serial %d signed on %s, the statement before it ending on %s", l.p.Serial, l.signed.Format(time.DateTime), before.Format(time.DateTime))
+			}
+		}
 		serials[l.p.Serial] = true
 	}
-	if len(serials) != 3 {
-		t.Errorf("three keys at %d serials: a serial is signed once", len(serials))
+	if len(order) < 2 || len(serials) != len(order) {
+		t.Errorf("%d keys at %d serials: a serial is signed once", len(order), len(serials))
 	}
 	// The first key's only statement has expired: a server that serves it
 	// is refused by a sender.
@@ -767,30 +929,48 @@ func TestAServerThatFailsEveryRenewalGetsEachKeyOnce(t *testing.T) {
 	// Its certificate, made the same day, has ended too, and that is what a
 	// sender meets first.
 	if _, err := a.Resolve(context.Background(), b.Address()); err == nil || !strings.Contains(err.Error(), "has ended") {
-		t.Fatalf("a sender given the first key's statement on day 75: %v", err)
+		t.Fatalf("a sender given the first key's statement on day %d: %v", days, err)
 	}
-	// Signed on day 2, expired on day 35, its deletion time day 68. No
-	// server has taken a pass from the mailbox since day 65, so it is kept: a
+	// A key whose deletion time came after the last pass a server took from
+	// the mailbox, on the day before its certificate ended, is kept: a
 	// mailbox deletes by its clock only what a server's answer dated by that
-	// clock lets it (PROTOCOL.md §12.4), and this mailbox cannot tell a lost pass
-	// from a clock far ahead.
+	// clock lets it (PROTOCOL.md §12.4), and this mailbox cannot tell a lost
+	// pass from a clock far ahead. One whose deletion time came before that
+	// pass went then.
 	stem := func(l lease) string { return filepath.Join(b.Dir(), "prekeys", strconv.FormatUint(l.p.Serial, 10)) }
-	if !exists(stem(first) + ".agekey") {
-		t.Error("a passed-over key was deleted by a clock no server has taken a pass dated by since day 65")
+	lastPass := e.clock.Now().Add(-time.Duration(days-ended+1) * 24 * time.Hour)
+	var waiting []lease
+	for _, key := range order {
+		l := byKey[key]
+		gone := l.p.NotAfter.Add(protocol.TTL)
+		switch {
+		case !gone.After(lastPass) && exists(stem(l)+".agekey"):
+			t.Errorf("serial %d outlived its deletion time, %s, by a pass a server took on %s", l.p.Serial, gone.Format(time.DateTime), lastPass.Format(time.DateTime))
+		case gone.After(lastPass) && !gone.After(e.clock.Now()):
+			if !exists(stem(l) + ".agekey") {
+				t.Errorf("serial %d was deleted by a clock no server has taken a pass dated by since %s", l.p.Serial, lastPass.Format(time.DateTime))
+			}
+			waiting = append(waiting, l)
+		}
+	}
+	if len(waiting) == 0 {
+		t.Fatal("no key's deletion time came between the last pass taken and now: the test shows nothing")
 	}
 	// The first time a server takes one again, here the waiting renewal
-	// (recv tries it again within the hour), it goes, with its statement. The
-	// key in service and the one before it are held.
+	// (recv tries it again within the hour), they go, with their statements.
+	// The key in service and every one a message may still wait for are held.
 	e.srv.SetMiddle(nil)
 	if _, err := b.Rekey(context.Background()); err != nil {
-		t.Fatalf("day 75, the server back: prekey renew: %v", err)
+		t.Fatalf("day %d, the server back: prekey renew: %v", days, err)
 	}
-	if exists(stem(first)+".agekey") || has(b, "prekeys/"+strconv.FormatUint(first.p.Serial, 10)+".txt.sig") {
-		t.Error("a passed-over key outlived its not_after + 33 days once a server took a pass again")
+	for _, l := range waiting {
+		if exists(stem(l)+".agekey") || has(b, "prekeys/"+strconv.FormatUint(l.p.Serial, 10)+".txt.sig") {
+			t.Errorf("serial %d, a passed-over key, outlived its not_after + protocol.TTL once a server took a pass again", l.p.Serial)
+		}
 	}
-	for _, key := range order[1:] {
-		if !exists(stem(byKey[key]) + ".agekey") {
-			t.Errorf("serial %d's key is gone while a message to it may still wait", byKey[key].p.Serial)
+	for _, key := range order {
+		if l := byKey[key]; l.p.NotAfter.Add(protocol.TTL).After(e.clock.Now()) && !exists(stem(l)+".agekey") {
+			t.Errorf("serial %d's key is gone while a message to it may still wait", l.p.Serial)
 		}
 	}
 }

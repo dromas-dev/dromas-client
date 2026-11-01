@@ -61,11 +61,11 @@ which print this client's words only: the files keep what the server served,
 with each of its strings in base64 that is not of its form.`,
 			e.refusedListCmd(), e.refusedRmCmd()),
 		e.group("prekey", "the key senders encrypt to: renew, lifetime",
-			`A prekey is valid for 33 days, or the shorter lifetime this mailbox is set to,
+			fmt.Sprintf(`A prekey is valid for %d days, or the shorter lifetime this mailbox is set to,
 signed by its identity, or under a working key and a certificate made with it.
-dromas recv renews it
-once it is a day old, so run recv at least monthly, and the mailbox never lapses;
-dromas prekey lifetime --help says how often for a shorter lifetime.`,
+dromas recv renews it once it is a day old, so run recv at least every %s,
+and the mailbox never lapses; dromas prekey lifetime --help says how often for
+a shorter lifetime.`, protocol.PrekeyLifetime/(24*time.Hour), formatTime(client.RecvWithin(protocol.PrekeyLifetime))),
 			e.renewCmd(), e.lifetimeCmd()),
 		e.group("cert", "this mailbox's certificates: switch, revoke-earlier, publish-revoked",
 			`A mailbox's identity signs what it says, unless it was made with dromas init
@@ -260,10 +260,10 @@ func (e *cli) recvCmd() *cobra.Command {
 	var wait, drain time.Duration
 	var headers bool
 	c := command("recv [flags]", "receive, verify and ack every message: one line of JSON each",
-		`Receive, verify and ack every message: a "message" line for each, built from the
+		fmt.Sprintf(`Receive, verify and ack every message: a "message" line for each, built from the
 verified fields, with this mailbox's name for its sender as "alias" when it
 named one (dromas alias add). It also renews the prekey once a day, so run it at least
-monthly and the mailbox never lapses. It prints a "refused" line for each message
+every %s and the mailbox never lapses. It prints a "refused" line for each message
 it refused, keeping it in refused/, and a "held" line for each it held,
 keeping it in held/.
 
@@ -275,7 +275,7 @@ message is kept in inbox/ as ever, and dromas inbox show <id> prints its
 
 One drain runs for at most --drain-time, holding the mailbox's lock: there it
 stops with a "more" line, as at its other limits, and keeps what it read of
-the message it was fetching, which the next recv goes on from.`,
+the message it was fetching, which the next recv goes on from.`, formatTime(client.RecvWithin(protocol.PrekeyLifetime))),
 		checked(nargs(0, 0), func(c *cobra.Command, _ []string) error {
 			if drain <= 0 {
 				return wrong(c, "%s --drain-time takes a duration above zero, such as 15m", c.CommandPath())
@@ -853,14 +853,16 @@ const shortLifetime = 2*24*time.Hour + time.Hour + protocol.MaxSkew
 
 func (e *cli) lifetimeCmd() *cobra.Command {
 	return command("lifetime [<time>]", "how long each new prekey is valid for: print it, or set it",
-		`Print how long each new prekey of this mailbox is valid for, or set it, from
-1d3h to 33d, the default. A time is written as sshd writes one: numbers, each
+		fmt.Sprintf(`Print how long each new prekey of this mailbox is valid for, or set it, from
+%s to %s, the default. A time is written as sshd writes one: numbers, each
 with its unit, s, m, h, d or w, added together, as in 2d2h or 90m; a number
-with no unit is seconds. recv renews the prekey once it is a day old, so with
-a lifetime L it must run at least every L less a day and two hours, or the
-prekey runs out, or comes so near it that a sender whose clock is ahead
-refuses it, and senders are refused until the mailbox renews. A lifetime set
-lower holds from the next recv, which renews a prekey made for longer.`,
+with no unit is seconds. recv renews the prekey once it is a day old, or
+sooner where the lifetime is too short for that. With a lifetime of %s or
+more, a recv once a day renews it in time; under that, this command says how
+often recv must run, or the prekey runs out, or comes so near it that a sender
+whose clock is ahead refuses it, and senders are refused until the mailbox
+renews. A lifetime set lower holds from the next recv, which renews a prekey
+made for longer.`, formatTime(client.MinPrekeyLifetime), formatTime(protocol.PrekeyLifetime), formatTime(shortLifetime)),
 		checked(nargs(0, 1), func(c *cobra.Command, args []string) error {
 			if len(args) == 0 {
 				return nil
@@ -972,7 +974,7 @@ func parseTime(s string) (time.Duration, error) {
 }
 
 // formatTime writes d as parseTime reads it, in days, hours, minutes and
-// seconds, as in 1d1h or 33d.
+// seconds, as in 1d1h or 8d.
 func formatTime(d time.Duration) string {
 	var b strings.Builder
 	for _, u := range []struct {

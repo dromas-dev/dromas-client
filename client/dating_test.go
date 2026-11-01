@@ -14,9 +14,9 @@ import (
 )
 
 // Each post dates its envelope afresh: sent_at is the time of the post, and
-// the outbox keeps the envelope as written, for its 33 days. So a message
-// that waited 20 days in the outbox is fresh to its reader for the 33 days
-// after it was posted, as long as the server keeps it (PROTOCOL.md §12.2, §13).
+// the outbox keeps the envelope as written, for its TTL. So a message that
+// waited 4 days in the outbox is fresh to its reader for the TTL after it was
+// posted, as long as the server keeps it (PROTOCOL.md §12.2, §13).
 func TestAPostIsDatedAtThePost(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -30,7 +30,7 @@ func TestAPostIsDatedAtThePost(t *testing.T) {
 		next.ServeHTTP(w, q)
 	})
 	written := e.clock.Now()
-	if _, err := s.Send(ctx, r.Address(), "written 20 days before it was posted"); err == nil {
+	if _, err := s.Send(ctx, r.Address(), "written 4 days before it was posted"); err == nil {
 		t.Fatal("the post went through")
 	}
 	outbox, err := filepath.Glob(filepath.Join(s.Dir(), "outbox", "*.P"))
@@ -42,7 +42,7 @@ func TestAPostIsDatedAtThePost(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	e.clock.Add(20 * 24 * time.Hour)
+	e.clock.Add(4 * 24 * time.Hour)
 	receive(t, r) // renews its prekey, which a send needs
 	e.srv.SetMiddle(nil)
 	posted := e.clock.Now()
@@ -61,10 +61,10 @@ func TestAPostIsDatedAtThePost(t *testing.T) {
 		t.Errorf("the receipt's expires_at %s, want the TTL less the hour after the post", sent[0].ExpiresAt)
 	}
 
-	e.clock.Add(30 * 24 * time.Hour)
+	e.clock.Add(5 * 24 * time.Hour)
 	res := receive(t, r)
 	if len(res.Delivered) != 1 || !res.Delivered[0].Envelope.SentAt.Equal(posted) {
-		t.Fatalf("read 30 days after its post, 50 after it was written: delivered %d, refused %v", len(res.Delivered), res.Refused)
+		t.Fatalf("read 5 days after its post, 9 after it was written: delivered %d, refused %v", len(res.Delivered), res.Refused)
 	}
 	d := res.Delivered[0].Envelope
 	w, err := protocol.OpenEnvelopeRecord(kept, s.Address(), r.Address())
@@ -77,9 +77,9 @@ func TestAPostIsDatedAtThePost(t *testing.T) {
 }
 
 // A retry dated afresh is still dropped by its msg_id: a post whose answer
-// was lost on day 0, delivered, and posted again on day 32 and a half, is
-// read once, at day 33 and two hours too, since the reader keeps its line
-// 66 days and an hour (protocol.SeenFor).
+// was lost on day 0, delivered, and posted again half a day before its TTL
+// is out, is read once, at the TTL and 14 hours too, since the reader keeps
+// its line twice the TTL and an hour (protocol.SeenFor).
 func TestARetryDatedAfreshIsDeliveredOnce(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -100,7 +100,7 @@ func TestARetryDatedAfreshIsDeliveredOnce(t *testing.T) {
 		t.Fatalf("the first copy: delivered %d", len(res.Delivered))
 	}
 	e.srv.SetMiddle(nil)
-	e.clock.Add(32*24*time.Hour + 12*time.Hour)
+	e.clock.Add(protocol.TTL - 12*time.Hour)
 	receive(t, s) // renews, so its certificate outlasts what it signs
 	if sent, err := s.Flush(ctx); err != nil || len(sent) != 1 {
 		t.Fatalf("the retry: %v, %v", sent, err)
@@ -108,6 +108,6 @@ func TestARetryDatedAfreshIsDeliveredOnce(t *testing.T) {
 	e.clock.Add(26 * time.Hour)
 	res := receive(t, r)
 	if len(res.Delivered) != 0 || len(res.Duplicates) != 1 || len(res.Refused) != 0 {
-		t.Errorf("the retry, read at day 33 and two hours: delivered %d, duplicates %d, refused %v; want one duplicate", len(res.Delivered), len(res.Duplicates), res.Refused)
+		t.Errorf("the retry, read at the TTL and 14 hours: delivered %d, duplicates %d, refused %v; want one duplicate", len(res.Delivered), len(res.Duplicates), res.Refused)
 	}
 }

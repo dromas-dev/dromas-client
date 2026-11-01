@@ -145,7 +145,7 @@ func TestAFromTheServerListsDecidesNothing(t *testing.T) {
 //	rollback of the mailbox's own prekey      the mailbox's own older prekey served     → rekey refuses (it published a higher one)
 //	its own lower, the same certificate       its working key signs one below           → rekey refuses (it published a higher one)
 //	replay under a new id                     a delivered ciphertext, stored again      → refused as a replay
-//	sent_at older than 33 days                an envelope dated 33 days and 1 s ago     → refused as stale
+//	sent_at older than the TTL                an envelope dated the TTL and 1 s ago     → refused as stale
 //	not encrypted to this mailbox             A's message to C, stored in B's mailbox   → refused: it does not decrypt
 //	an id that is not the hash                a message listed under another id         → refused; files are named by the hash
 func TestForgeries(t *testing.T) {
@@ -396,7 +396,7 @@ func TestForgeries(t *testing.T) {
 		refusedFor(t, receive(t, b), client.RefusedReplay, "replay")
 	})
 
-	t.Run("sent_at older than 33 days", func(t *testing.T) {
+	t.Run("sent_at older than the TTL", func(t *testing.T) {
 		e := newEnv(t)
 		a, b := e.mailbox(), e.mailbox()
 		env, err := protocol.NewEnvelope(a.Address(), b.Address(), "stale", e.clock.Now().Add(-protocol.TTL-time.Second))
@@ -409,7 +409,7 @@ func TestForgeries(t *testing.T) {
 			t.Fatal(err)
 		}
 		e.seal(b, line, sig)
-		refusedFor(t, receive(t, b), protocol.RefusedStale, "older than 33 days")
+		refusedFor(t, receive(t, b), protocol.RefusedStale, fmt.Sprintf("older than %d days", protocol.TTL/(24*time.Hour)))
 	})
 
 	t.Run("not encrypted to this mailbox", func(t *testing.T) {

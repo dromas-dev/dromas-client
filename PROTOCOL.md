@@ -136,7 +136,7 @@ Where this document uses a term below as a defined term, it has the sense given 
 - **Outbox entry:** a message a client keeps to send, with its envelope (Section 12.2).
 - **Post:** one attempt to send an outbox entry (Section 12.2). A **copy** is the message as one post delivers it.
 - **Live:** of a message, stored at its server and not yet **gone**: acked or expired (Sections 11.12, 11.13).
-- **TTL:** 33 days (Sections 12.3, check 6; 13).
+- **TTL:** 7 days (Sections 12.2; 12.3, check 6; 13).
 
 **Clients**
 
@@ -147,6 +147,7 @@ Where this document uses a term below as a defined term, it has the sense given 
 - **Replay set:** what a client keeps of each message it accepted (Section 12.3, check 8).
 - **Replay floor:** the cutoff a mailbox's replay set has been pruned to (Section 12.3, check 8).
 - **Deletion time:** the time by which a client deletes a retired prekey (Section 12.4).
+- **Take:** of a renewal, the date of the pass of the upload the server took for it (Section 12.4).
 - **The remedy:** the steps of Section 12.6, for a stolen working key.
 
 **Time**
@@ -254,8 +255,10 @@ Every check of a time is exact at the clock of whoever makes the check: the chec
 - a prekey statement's ceiling, at a server (Section 6);
 - a pass's lifetime (Section 8);
 - a reader's limit on `sent_at` (Section 12.3, check 6);
-- when a client renews (Section 12.4);
+- when a client renews a prekey whose prekey lifetime is a day or more (Section 12.4);
 - how long a server keeps a message (Section 13).
+
+A client that renews a prekey whose prekey lifetime is less than a day leaves five minutes instead (Section 12.4).
 
 ## 4. Identity and address
 
@@ -409,7 +412,7 @@ bech32-char      = "0" / %x32-39 / %x61 / %x63-68 / %x6A-6E / %x70-7A
   - A prekey type added later is an addition inside v1 (Section 14).
 - **`not_after`:** a time.
   - A client signs a prekey statement to end one prekey lifetime after it makes it (Section 12.4).
-  - A server takes a prekey statement that ends at most 33 days and the skew allowance after its own clock reads.
+  - A server takes a prekey statement that ends at most 8 days, the longest prekey lifetime (Section 12.4), and the skew allowance after its own clock reads.
 - **A sender MUST NOT encrypt to a prekey past its `not_after`.** There is no grace period.
 - **A sender MUST keep, for each mailbox, the latest `(c, p)` it has seen on the mailbox's prekey statements.** It MUST refuse an earlier prekey statement (Section 5.3).
 - **A sender MUST check a prekey statement against every other rule before its key's type.** A prekey statement that meets every other rule, and whose key is a well-formed Bech32 string whose human-readable part begins `age` and is not `age1pq` (X25519's `age` among them), is refused as `unsupported_prekey_type`, never as one that does not verify. Nothing is sealed or posted to it.
@@ -738,7 +741,7 @@ What each code means, and what a client does on it:
 | 400 | `unsupported_key_type` | an identity key type this protocol does not define or this server does not register; `key_types` lists those it registers |
 | 400 | `bad_key` | an identity key that fails its type's key checks; a malformed or badly signed prekey statement or certificate |
 | 400 | `prekey_not_new` | a prekey equal to the current one or a retired one the server keeps (Section 11.9) |
-| 400 | `prekey_time` | at the server's clock, a certificate not yet begun or ended, or a prekey statement ended or ending more than 33 days and an hour ahead: nearly always the client's clock |
+| 400 | `prekey_time` | at the server's clock, a certificate not yet begun or ended, or a prekey statement ended or ending more than 8 days and an hour ahead: nearly always the client's clock |
 | 400 | `certificate_too_long` | a certificate that runs longer than the server's maximum (Section 11.7, step 6); `max_certificate_lifetime` gives the maximum |
 | 400 | `not_age` | a send's body that is not an age file |
 | 400 | `wrong_recipient_type` | a send's age file without exactly one native stanza of the current prekey's type (Section 11.10, step 7) |
@@ -903,7 +906,7 @@ The server checks:
    - line 4 is a valid age recipient of the prekey type, its X25519 half not of small order;
    - the signer is that identity, or a certificate of it that meets every rule of Section 5.2;
    - the namespace is `dromas-prekey-v1:<A>`;
-   - the prekey statement's `not_after` is after now and at most 33 days and an hour after now.
+   - the prekey statement's `not_after` is after now and at most 8 days and an hour after now.
 
    Further:
    - a certificate that runs longer than the server's maximum (Section 11.18), measured as `valid before` less `valid after`, unless it is the current certificate → `400 certificate_too_long`;
@@ -1258,7 +1261,7 @@ A server lists at most 64 deprecations, 64 sunsets and 64 capabilities, and a cl
 
   A message that waited therefore goes to what the sender knows at its post.
 - **A post is dated after the lookup, and never earlier than when its outbox entry was written.** If, when it dates a post, the client's clock reads earlier than that, the entry waits until the clock passes that time.
-- **An outbox entry is posted for 33 days from when it was written, and never after,** as the clock reads each time a post is dated. So no copy of a message is dated more than 33 days after the first.
+- **An outbox entry is posted for the TTL from when it was written, and never after,** as the clock reads each time a post is dated. So no copy of a message is dated more than the TTL after the first.
 - **On `409 stale_prekey`, the sender posts the same envelope again at once, rather than leaving it in the outbox:** it looks the recipient up, then dates and seals the envelope anew, as above.
 - **Final refusals.** A refusal that no later post of the message can clear is final, and the message is never posted again:
 
@@ -1314,10 +1317,10 @@ A client drains every page of its list (Section 11.11), and fetches the message 
 
 8. **Check 8, replay.** The SHA-256 of the ciphertext, computed by the reader, is not in the replay set (`replay`).
    - A listed `id` that differs from it is refused (`bad_id`).
-   - The replay set keeps each message's hash, with its `sent_at`, `from` and `msg_id`, until `sent_at` + 66 days and an hour.
-   - **A prune that drops a line first raises the mailbox's replay floor to its cutoff,** in the same write or before it. The cutoff is the date of the pass the prune goes by (Section 12.4), less 66 days and an hour.
+   - The replay set keeps each message's hash, with its `sent_at`, `from` and `msg_id`, until `sent_at` + 14 days and an hour.
+   - **A prune that drops a line first raises the mailbox's replay floor to its cutoff,** in the same write or before it. The cutoff is the date of the pass the prune goes by (Section 12.4), less 14 days and an hour.
    - A prune that drops nothing leaves the replay floor as it is.
-   - A `sent_at` before the replay floor, or less than 33 days above it, is `stale` whatever the clock reads.
+   - A `sent_at` before the replay floor, or less than the TTL above it, is `stale` whatever the clock reads.
 9. **Check 9, duplicate.** `(from, msg_id)` is not in the replay set. A match is a copy of a message already delivered: the reader acks it and does not deliver it again.
 
 **A reader never asks the server who a sender is:** the message carries what proves it, and the reader pins the sender's identity only once the message clears every check.
@@ -1357,10 +1360,10 @@ A client drains every page of its list (Section 11.11), and fetches the message 
   - A mailbox whose current statement its identity signed renews under its identity, or under a certificate (below).
   - A mailbox whose current statement is under a certificate renews under a certificate, since a prekey statement its identity signs is earlier than it (Section 5.3). A client that has its identity SHOULD make a new working key and certificate with each renewal, its certificate serial above that revocation serial (Section 5.2).
 - **A mailbox MUST check its own certificate at its own clock before it signs under it:** a mailbox whose clock has gone back past its certificate's start is stopped there.
-- **Prekey lifetime.** A prekey is valid for 33 days, or for a shorter prekey lifetime its owner sets, down to a day and three hours.
-  - A client renews while at least two hours of its prekey are left: an hour for the renewal's own calls, and the skew allowance (Section 3.4).
-  - A client times its renewals, and the early deletion of its retired prekeys, by when it signed each prekey, never by the prekey statement's `not_after`.
-  - A prekey for which the client does not know when it signed it is renewed at once. Every retired prekey is kept while the client does not know when it signed the newest.
+- **Prekey lifetime.** A prekey is valid for at most 8 days, the TTL and a day, or for a shorter prekey lifetime its owner sets.
+  - A client renews while enough of its prekey is left for its senders' clocks, and for the renewal's own calls. For a prekey lifetime of a day or more, that is the skew allowance (Section 3.4) and an hour for the calls; for a shorter one, five minutes for senders' clocks and five for the calls.
+  - A client times its renewals by when it signed each prekey, and the early deletion of its retired prekeys by when the server took a renewal (below); never by a prekey statement's `not_after`.
+  - A prekey for which the client does not know when it signed it is renewed at once.
 - **A prekey serial is signed once.** A renewal the server did not take is sent again exactly as it was signed. A client signs a new key, at a later prekey serial, only once any one of these is true:
   1. that prekey statement has ended;
   2. it was made for longer than the prekey lifetime now allows;
@@ -1378,7 +1381,9 @@ A client drains every page of its list (Section 11.11), and fetches the message 
 - **A client MUST NOT use a kept certificate that began less than an hour before its clock:** it was made while the clock read ahead. The client makes the prekey statement and working key made with it again, by the clock as it reads: for the same prekey at a mailbox's first registration, and at a later prekey serial at a renewal.
 - **Deletion.** A retired prekey is deleted at its deletion time: at the latest, its prekey statement's `not_after` plus the TTL.
   - A drain that stopped at a bound deletes no retired prekey.
-  - A client MAY delete all but the newest retired prekey earlier, after a drain that empties the mailbox, by a list the server took under a pass dated more than an hour after the newest retired prekey was made.
+  - A client SHOULD delete every retired prekey, the newest included, earlier, after a drain that empties the mailbox, by a list the server took under a pass dated more than an hour after the take of the current prekey's renewal.
+  - Otherwise it keeps the newest retired prekey, and SHOULD delete the others after such a drain by a list the server took under a pass dated more than an hour after the take of the newest retired prekey's renewal, or, where the client does not know that take, after it signed the newest retired prekey.
+  - While the client knows neither when the server took the newest retired prekey nor when it signed it, every retired prekey is kept.
   - While a renewal under a new certificate waits, a mailbox whose current statement is under a certificate has two working keys: the one under its current certificate, which signs its passes, and the one the waiting prekey statement is signed with. The working key from before such a renewal is deleted once the renewal is taken.
 - **A client deletes keys, and prunes its replay set, by its clock only once a server has taken a pass dated by that clock, and then by that pass's date** (its `not_after` less ten minutes), never by a reading of the clock.
   - A drain's pass counts once the server answers the drain's list.
@@ -1504,7 +1509,7 @@ How a server stores things is its own choice. What it promises a client is this.
   A registration and every renewal raise that date, and nothing lowers it. Past that date a server MAY forget the mailbox at any moment, and the mailbox is then unknown (Section 11.6).
 - **Per message,** the server stores the ciphertext exactly as the send's body carried it, its size, `received_at` and `expires_at`. Its message id is the ciphertext's SHA-256. The server stores no sender and no signature: the message's signature, which names its sender, is inside the ciphertext.
 - **A `200` or `201` to a send means the message is stored.**
-- **A message expires 33 days less an hour and two minutes after it is received,** read or not:
+- **A message expires 7 days less an hour and two minutes after it is received,** read or not:
 
       TTL − skew allowance − 2 minutes
 
@@ -1579,12 +1584,15 @@ Dromas protects a message's content from everyone but its recipient, and its sen
 ### 15.3. Forward secrecy
 
 - **Every mailbox has forward secrecy, bounded by how often it renews and deletes,** given a client that deletes retired prekeys (Section 12.4).
-  - A message cannot be recovered from the mailbox's keys once every prekey it could be encrypted to is deleted: at the latest its prekey statement's `not_after` plus the TTL, 66 days after that prekey statement was made (Section 6).
-  - A client that renews and empties its mailbox often, and deletes all but the newest retired prekey after a drain that empties it, brings that to its second renewal after the message arrived.
+  - A message cannot be recovered from the mailbox's keys once every prekey it could be encrypted to is deleted: at the latest its prekey statement's `not_after` plus the TTL, 15 days after that prekey statement was made (Section 6).
+  - A client that deletes every retired prekey after a drain that empties its mailbox brings that to its first such drain more than an hour after its next renewal is taken: about a day after the message arrives for a mailbox that renews daily, and about six hours for one that renews every six hours.
+  - The hour is for sends in flight: a server takes a send only to the current prekey statement (Section 11.10, step 7), so once a renewal is taken a send to the prekey it replaced is refused, and one the server took before is stored as its request ends, which a list an hour later lists.
+  - The bound asks nothing of the server, and keeps no state per peer: the mailbox renews, drains and deletes on its own.
 - **A message waiting on the server is exposed until the mailbox fetches it.** A mailbox that stops renewing keeps its ended prekey as its current one, and its last messages stay exposed until it renews.
 - **A mailbox that no server takes a pass from keeps its retired prekeys** past their deletion time, until one does: it cannot tell its clock far ahead from a server that refuses it, and deletes by that clock no key a message may wait for.
 - **Forward secrecy depends on real deletion.** A key kept in a backup, a synced folder or a store with version history survives its deletion.
 - **There is no per-message forward secrecy and no post-compromise security:** version 1 has no ratchet. A leaked prekey reads every message encrypted to it until the mailbox renews and deletes it.
+- **Forward secrecy per reply can be added as an optional envelope member** (not yet defined in v1, but not precluded): the envelope is inside the encryption, where the server cannot see it, and a reader ignores a member it does not know (Sections 3.3, 14).
 
 ### 15.4. Sender authentication
 

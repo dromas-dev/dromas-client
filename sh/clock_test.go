@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/dromas-dev/dromas-client/protocol"
 )
 
 // The clock: every check is exact at the clock of whoever makes it, and what
@@ -79,7 +81,7 @@ func TestScriptAfterAClockAhead(t *testing.T) {
 	for _, c := range []struct {
 		ahead time.Duration
 		code  string
-	}{{61 * time.Minute, "prekey_time"}, {55 * time.Minute, "pass_expired"}} { // a statement ending more than 33 days and an hour after the server's clock, which it reads before the pass; then a pass ending more than an hour after it
+	}{{61 * time.Minute, "prekey_time"}, {55 * time.Minute, "pass_expired"}} { // a statement ending more than the longest prekey lifetime and an hour after the server's clock, which it reads before the pass; then a pass ending more than an hour after it
 		b := at{w.empty(), c.ahead}
 		if r := b.sh("dr_init"); r.rc == 0 || !strings.Contains(r.err, c.code) {
 			t.Fatalf("a mailbox %v fast registered: %v", c.ahead, r)
@@ -153,18 +155,18 @@ func TestScriptSendsAndReadsByItsClock(t *testing.T) {
 }
 
 // The replay set: pruned by the mailbox's clock only once the server has taken a
-// pass dated by it, a line kept 66 days and an hour from its sent_at, and a
+// pass dated by it, a line kept twice the TTL and an hour from its sent_at (protocol.SeenFor), and a
 // floor below which a message is stale whatever the clock reads.
 func TestScriptKeepsItsReplaySetByItsClock(t *testing.T) {
 	w := newWorld(t)
 	p, q := w.mailbox(), w.mailbox()
-	l := p.line(q.addr, "00000000-0000-4000-8000-0000000000f2", "pay invoice 7 once", 33*24*time.Hour-49*time.Minute)
+	l := p.line(q.addr, "00000000-0000-4000-8000-0000000000f2", "pay invoice 7 once", protocol.TTL-49*time.Minute)
 	sig := p.sign(q.addr, l)
 	oid := w.inject(q, "", l, sig)
 	if d := q.recv(); d.rc != 0 || !slices.Equal(d.bodies(), []string{"pay invoice 7 once"}) {
 		t.Fatalf("the first delivery: %v", d)
 	}
-	if d := (at{q, 50 * time.Minute}).recv(); d.rc != 0 { // 33 days and a minute old by this clock, which a server takes
+	if d := (at{q, 50 * time.Minute}).recv(); d.rc != 0 { // the TTL and a minute old by this clock, which a server takes
 		t.Fatalf("a drain 50 minutes fast: %v", d)
 	}
 	w.inject(q, oid, l, sig)
@@ -176,8 +178,8 @@ func TestScriptKeepsItsReplaySetByItsClock(t *testing.T) {
 		t.Errorf("a recv refused for a clock 70 days fast pruned: %v", d)
 	}
 	old := fmt.Sprintf("%064d", 7)
-	q.must(fmt.Sprintf(`printf '%%s %%s %%s %%s\n' %s %d %s 00000000-0000-4000-8000-0000000000f3 >> "$DR/seen"`, old, time.Now().Add(-67*24*time.Hour).Unix(), p.addr))
-	t0 := time.Now().Add(-66*24*time.Hour - time.Hour).Unix()
+	q.must(fmt.Sprintf(`printf '%%s %%s %%s %%s\n' %s %d %s 00000000-0000-4000-8000-0000000000f3 >> "$DR/seen"`, old, time.Now().Add(-protocol.SeenFor-24*time.Hour).Unix(), p.addr))
+	t0 := time.Now().Add(-protocol.SeenFor).Unix()
 	q.recv()
 	f, err := strconv.ParseInt(strings.TrimSpace(q.read("seen-floor")), 10, 64)
 	if err != nil || f < t0 || f > t0+5 || strings.Contains(q.read("seen"), old+" ") || !strings.Contains(q.read("seen"), oid+" ") {

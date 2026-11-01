@@ -4,3 +4,6 @@
 CLAUDE.md
 # What goreleaser builds (.goreleaser.yaml).
 /dist/
+# What `go build ./cmd/...` writes at the root.
+/dromas
+/dromas-echo

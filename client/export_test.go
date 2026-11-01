@@ -20,6 +20,10 @@ import (
 // which call answered.
 func Code(err error) protocol.Code { return code(err) }
 
+// RenewAt is how old a prekey of the given lifetime gets before Receive
+// renews it (renewAt).
+func RenewAt(lifetime time.Duration) time.Duration { return renewAt(lifetime) }
+
 // PassRefused reports whether c refuses the pass a call carried, so that the
 // mailbox signs another and tries once more (passRefused).
 func PassRefused(c protocol.Code) bool { return passRefused(c) }
@@ -164,7 +168,7 @@ func PutRevocations(ctx context.Context, opt Options, a protocol.Address, rec *p
 // replay set's lines, "<hash> <sent_at> <from> <msg_id>", by sent_at),
 // "peers/<address>/<part>" (identity.doc, serial, rank, prekey.txt,
 // prekey.sig, revoke.sig, revoked-certs.json), "prekeys/<serial>.<part>"
-// (txt, txt.sig, made) and "refused/<id>.reason" ("<code>: <reason>"),
+// (txt, txt.sig, made, and taken where it keeps one) and "refused/<id>.reason" ("<code>: <reason>"),
 // each a record's bytes as that file held them; and the records no file held,
 // "renewal" (the number of the renewal under way), "acl-read" (the read of
 // the server's ACL a renewal recv began owes), "adopt-acl" (a restore's
@@ -238,6 +242,9 @@ func (b *Mailbox) Records() (map[string][]byte, error) {
 			}
 			stem := "prekeys/" + strconv.FormatUint(n, 10)
 			out[stem+".txt"], out[stem+".txt.sig"], out[stem+".made"] = p.Statement, p.Signature, []byte(p.Made)
+			if p.Taken != "" {
+				out[stem+".taken"] = []byte(p.Taken)
+			}
 			return nil
 		}); err != nil {
 			return err
@@ -357,6 +364,8 @@ func (b *Mailbox) SetRecord(t *testing.T, name string, v []byte) {
 					p.Signature = v
 				case "made":
 					p.Made = string(v)
+				case "taken":
+					p.Taken = string(v)
 				default:
 					return fmt.Errorf("no record %s", name)
 				}

@@ -17,7 +17,7 @@ set -euo pipefail
 umask 077
 cd "$(dirname "$0")"
 NOW=2026-10-10T00:00:00Z
-NOT_AFTER=2026-11-12T00:00:00Z # NOW + 33 days exactly: what a client asks for. A server takes one that ends up to an hour later
+NOT_AFTER=2026-10-18T00:00:00Z # NOW + 8 days exactly: what a client asks for. A server takes one that ends up to an hour later
 MSG_ID=6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b
 # A's revocation of its certificates runs through its clock at NOW (1791590400) less one. Its certificates are
 # numbered above it: SA is its clock at NOW, the serial SerialAt gives, and B's and C's take the same.
@@ -27,7 +27,7 @@ SA=1791590400
 # the server's maximum, which a client asks for, the reference server's default being 45 days and the hour.
 V_OK=20261009230000Z:20261124000000Z # made at NOW: from an hour back to 45 days after NOW
 V_BEGINS_NOW=20261010000000Z:20261124000000Z # begins at NOW: begun
-V_SHORT=20261009230000Z:20261020000000Z    # ends 10 days after NOW: a 33-day prekey statement outlives it
+V_SHORT=20261009230000Z:20261015000000Z    # ends 5 days after NOW: an 8-day prekey statement outlives it
 V_ENDED=20260801000000Z:20261010000000Z    # ends at NOW
 V_NOT_BEGUN=20261010000001Z:20261124000000Z
 V_LONG=20261009230000Z:20261124000001Z     # a second longer than 45 days and the hour: a reader sets no ceiling
@@ -411,7 +411,7 @@ printf 'dromas-v1\n%s\0' "$(sed -n 2p identity/unsupported-type.doc)" > identity
 
 # Prekey statements of mailbox A. bad-*: signature or format must be refused. expired-*: valid, but
 # expired at ./now, so a sender must not encrypt to it. longest: valid, and the longest a server
-# takes, an hour past the 33 days a client asks for. too-long: a second past that, so valid and not
+# takes, an hour past the 8 days a client asks for. too-long: a second past that, so valid and not
 # expired, but a server must refuse to publish it. Each is signed by A in A's prekey namespace
 # unless its name says otherwise; signed-by-the-identity is A's identity's own, rank 0, which A's revocation of
 # certificates does not cover: valid, and below every statement of A's under a certificate.
@@ -422,7 +422,7 @@ cp a/prekey-1.txt prekey/bad-signed-by-b.txt; under b-work b/work-cert.pub "drom
 cp a/prekey-1.txt prekey/signed-by-the-identity.txt; sign a "dromas-prekey-v1:$A" < a/prekey-1.txt > prekey/signed-by-the-identity.txt.sig
 cp a/prekey-1.txt prekey/bad-signed-by-a-bare-working-key.txt; sign a-work "dromas-prekey-v1:$A" < a/prekey-1.txt > prekey/bad-signed-by-a-bare-working-key.txt.sig
 # A statement may outlive the certificate it is signed under, whose end a sender reads apart: this one's certificate,
-# a later one of A's second working key, ends in 10 days.
+# a later one of A's second working key, ends in 5 days.
 cert prekey/outlives-its-certificate.cert.pub a a-work-2 $(good "$A" $((SA + 1)) "$V_SHORT")
 cp a/prekey-1.txt prekey/outlives-its-certificate.txt; under a-work-2 prekey/outlives-its-certificate.cert.pub "dromas-prekey-v1:$A" < a/prekey-1.txt > prekey/outlives-its-certificate.txt.sig
 # B's and C's own statements, each signed under its own mailbox's certificate in its own namespace: valid for each,
@@ -436,9 +436,9 @@ bad bad-serial-19-digits 'dromas-prekey-v1\n%s\n1000000000000000000\n%s\n%s\n' "
 bad bad-serial-above-2-53 'dromas-prekey-v1\n%s\n9007199254740992\n%s\n%s\n' "$A" "$PQ" "$NOT_AFTER" # an answer names a serial as a JSON number, and 2^53 - 1 is the most one holds exactly
 bad bad-serial-negative 'dromas-prekey-v1\n%s\n-1\n%s\n%s\n' "$A" "$PQ" "$NOT_AFTER"
 bad bad-never 'dromas-prekey-v1\n%s\n1\n%s\nnever\n' "$A" "$PQ"
-bad bad-time-lowercase-z 'dromas-prekey-v1\n%s\n1\n%s\n2026-11-11T00:00:00z\n' "$A" "$PQ"
-bad bad-time-fraction 'dromas-prekey-v1\n%s\n1\n%s\n2026-11-11T00:00:00.5Z\n' "$A" "$PQ"
-bad bad-time-offset 'dromas-prekey-v1\n%s\n1\n%s\n2026-11-11T00:00:00+00:00\n' "$A" "$PQ"
+bad bad-time-lowercase-z 'dromas-prekey-v1\n%s\n1\n%s\n2026-10-17T00:00:00z\n' "$A" "$PQ"
+bad bad-time-fraction 'dromas-prekey-v1\n%s\n1\n%s\n2026-10-17T00:00:00.5Z\n' "$A" "$PQ"
+bad bad-time-offset 'dromas-prekey-v1\n%s\n1\n%s\n2026-10-17T00:00:00+00:00\n' "$A" "$PQ"
 bad bad-tag 'dromas-prekey-v2\n%s\n1\n%s\n%s\n' "$A" "$PQ" "$NOT_AFTER"
 bad bad-address-uppercase 'dromas-prekey-v1\n%s\n1\n%s\n%s\n' "$(printf '%s' "$A" | tr a-z A-Z)" "$PQ" "$NOT_AFTER"
 bad bad-four-lines 'dromas-prekey-v1\n%s\n1\n%s\n' "$A" "$PQ"
@@ -457,8 +457,8 @@ bad bad-recipient-uppercase-pq 'dromas-prekey-v1\n%s\n1\n%s\n%s\n' "$A" "$(print
 bad bad-recipient-not-age 'dromas-prekey-v1\n%s\n1\n%s\n%s\n' "$A" "$GOOD" "$NOT_AFTER"
 bad bad-recipient-small-order-pq 'dromas-prekey-v1\n%s\n1\n%s\n%s\n' "$A" "$(cat input/small-order.pq)" "$NOT_AFTER"
 bad expired 'dromas-prekey-v1\n%s\n1\n%s\n%s\n' "$A" "$PQ" "$NOW"
-bad longest 'dromas-prekey-v1\n%s\n1\n%s\n2026-11-12T01:00:00Z\n' "$A" "$PQ"
-bad too-long 'dromas-prekey-v1\n%s\n1\n%s\n2026-11-12T01:00:01Z\n' "$A" "$PQ"
+bad longest 'dromas-prekey-v1\n%s\n1\n%s\n2026-10-18T01:00:00Z\n' "$A" "$PQ"
+bad too-long 'dromas-prekey-v1\n%s\n1\n%s\n2026-10-18T01:00:01Z\n' "$A" "$PQ"
 # A well-formed age recipient of a type nobody defines, so no client has it: RFC 7748 §6.1's published X25519 test key
 # (Alice's public key) under the human-readable part age1nosuchtype. Good in every other way, so a sender refuses it as
 # unsupported_prekey_type, never as a statement that does not verify.
@@ -479,8 +479,8 @@ case_env accept-unknown-field "{$H,\"sent_at\":\"$NOW\",\"msg_id\":\"$MSG_ID\",\
 # other character, in a string body, and in a body's member name and value and the subject.
 case_env accept-line-separators-raw-in-a-string-body "{$H,\"sent_at\":\"$NOW\",\"msg_id\":\"$MSG_ID\",\"body\":\"a\xe2\x80\xa8b\xe2\x80\xa9c\"}" "$A" "$B"
 case_env accept-line-separators-raw-in-a-member "{$H,\"sent_at\":\"$NOW\",\"msg_id\":\"$MSG_ID\",\"body\":{\"a\xe2\x80\xa8b\":\"c\xe2\x80\xa9d\"},\"subject\":\"e\xe2\x80\xa8f\"}" "$A" "$B"
-case_env accept-33-days-old "{$H,\"sent_at\":\"2026-09-07T00:00:00Z\",\"msg_id\":\"$MSG_ID\",\"body\":\"hello\"}" "$A" "$B"
-case_env refuse-33-days-and-1s-old "{$H,\"sent_at\":\"2026-09-06T23:59:59Z\",\"msg_id\":\"$MSG_ID\",\"body\":\"hello\"}" "$A" "$B"
+case_env accept-7-days-old "{$H,\"sent_at\":\"2026-10-03T00:00:00Z\",\"msg_id\":\"$MSG_ID\",\"body\":\"hello\"}" "$A" "$B"
+case_env refuse-7-days-and-1s-old "{$H,\"sent_at\":\"2026-10-02T23:59:59Z\",\"msg_id\":\"$MSG_ID\",\"body\":\"hello\"}" "$A" "$B"
 case_env accept-1-hour-ahead "{$H,\"sent_at\":\"2026-10-10T01:00:00Z\",\"msg_id\":\"$MSG_ID\",\"body\":\"hello\"}" "$A" "$B"
 case_env refuse-1-hour-and-1s-ahead "{$H,\"sent_at\":\"2026-10-10T01:00:01Z\",\"msg_id\":\"$MSG_ID\",\"body\":\"hello\"}" "$A" "$B"
 case_env refuse-from-not-signer "{$H,\"sent_at\":\"$NOW\",\"msg_id\":\"$MSG_ID\",\"body\":\"hello\"}" "$B" "$B"
@@ -724,7 +724,7 @@ at mailbox-bad-sender-key-types-a-string '{"identity":"%s","prekey":"%s","prekey
 at mailbox-bad-signature-unpadded '{"identity":"%s","prekey":"%s","prekey_signature":"%s"}' "$ID_A" "$P1" "$NOPAD"
 at mailbox-bad-prekey-a-number '{"identity":"%s","prekey":1,"prekey_signature":"%s"}' "$ID_A" "$P1S"
 at mailbox-bad-revoked-certificates-a-number '{"identity":"%s","prekey":"%s","prekey_signature":"%s","revoked_certificates":4}' "$ID_A" "$P1" "$P1S"
-at list-ok '{"count":1,"messages":[{"id":"%s","size":%s,"received_at":"%s","expires_at":"2026-11-12T00:00:00Z"}],"next_cursor":null}' "$HASH" "$(wc -c < message/a-to-b.age)" "$NOW"
+at list-ok '{"count":1,"messages":[{"id":"%s","size":%s,"received_at":"%s","expires_at":"2026-10-16T22:58:00Z"}],"next_cursor":null}' "$HASH" "$(wc -c < message/a-to-b.age)" "$NOW"
 at list-ok-empty '{"count":0,"messages":[],"next_cursor":null}'
 at list-bad-count-negative '{"count":-1,"messages":[],"next_cursor":null}'
 at list-bad-count-above-2-53 '{"count":9007199254740992,"messages":[],"next_cursor":null}'
@@ -733,8 +733,8 @@ at list-bad-count-written-with-a-fraction '{"count":1.0,"messages":[],"next_curs
 at list-bad-count-written-with-an-exponent '{"count":1e0,"messages":[],"next_cursor":null}' # jq gives it back as 1, so the script takes it: how jq reads a number, a difference that guards none of the five (AGENTS.md § The shell client)
 at list-bad-size-a-string '{"count":1,"messages":[{"id":"%s","size":"2048"}],"next_cursor":null}' "$HASH"
 # A size is at most 16 MiB, the largest ciphertext (PROTOCOL.md §11.10, §12.3): a list that gives a larger one is no answer, before anything is fetched
-at list-ok-size-the-largest '{"count":1,"messages":[{"id":"%s","size":16777216,"received_at":"%s","expires_at":"2026-11-12T00:00:00Z"}],"next_cursor":null}' "$HASH" "$NOW"
-at list-bad-size-past-the-largest '{"count":1,"messages":[{"id":"%s","size":16777217,"received_at":"%s","expires_at":"2026-11-12T00:00:00Z"}],"next_cursor":null}' "$HASH" "$NOW"
+at list-ok-size-the-largest '{"count":1,"messages":[{"id":"%s","size":16777216,"received_at":"%s","expires_at":"2026-10-16T22:58:00Z"}],"next_cursor":null}' "$HASH" "$NOW"
+at list-bad-size-past-the-largest '{"count":1,"messages":[{"id":"%s","size":16777217,"received_at":"%s","expires_at":"2026-10-16T22:58:00Z"}],"next_cursor":null}' "$HASH" "$NOW"
 at list-bad-messages-an-object '{"count":0,"messages":{},"next_cursor":null}'
 at list-bad-cursor-a-number '{"count":0,"messages":[],"next_cursor":7}'
 # A cursor is opaque and URL-safe (AEP-158): one or more of A-Z, a-z, 0-9, - and _, pasted into the next query as it is
@@ -743,7 +743,7 @@ at list-bad-cursor-a-slash '{"count":2,"messages":[],"next_cursor":"a/b"}'
 at list-bad-cursor-a-percent '{"count":2,"messages":[],"next_cursor":"a%%2Fb"}'
 at list-bad-cursor-empty '{"count":2,"messages":[],"next_cursor":""}'
 at list-bad-id-a-number '{"count":1,"messages":[{"id":5,"size":%s}],"next_cursor":null}' "$(wc -c < message/a-to-b.age)" # the id names what is fetched and acked
-at receipt-ok '{"id":"%s","received_at":"%s","expires_at":"2026-11-12T00:00:00Z"}' "$HASH" "$NOW"
+at receipt-ok '{"id":"%s","received_at":"%s","expires_at":"2026-10-16T22:58:00Z"}' "$HASH" "$NOW"
 at receipt-bad-id-an-array '{"id":["%s"],"received_at":"%s"}' "$HASH" "$NOW"
 at problem-ok '{"type":"tag:dromas.dev,2026-10-26:errors/not_revoked","title":"Not revoked","status":404,"detail":"no revocation of this address is held here","code":"not_revoked","hint":"nothing to do"}'
 at problem-bad-code-twice '{"type":"tag:dromas.dev,2026-10-26:errors/not_revoked","status":404,"code":"not_revoked","code":"revoked"}'

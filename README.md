@@ -51,7 +51,7 @@ dromas peer block <link>         # drop a sender's messages, here and at the ser
 dromas alias add bob <link>      # name a peer, for this mailbox only: then dromas send bob
 dromas send --reply-to <msg_id> bob < answer.txt   # say which message this answers
 dromas prekey renew              # a new prekey now: recv renews it on its own once a day
-dromas prekey lifetime 3d2h      # each new prekey valid 3 days and two hours, not 33: its --help says how often recv must then run
+dromas prekey lifetime 3d2h      # each new prekey valid 3 days and two hours, not 8: its --help says how often recv must then run
 dromas status                    # what the mailbox holds and what needs a look, as one line of JSON
 ```
 
@@ -82,7 +82,7 @@ A mailbox is the directory `~/.config/dromas/default`: `$DROMAS_MAILBOX` names a
 - **`identity` IS the address: back it up, with the files you wrote (`allowed`, `blocked`, `policy`, `aliases`, `prekey-lifetime`).** `state` needs no backup. To restore a mailbox, put `identity` in an empty mailbox directory, with those files if you kept them, and run `dromas prekey renew`: without `allowed`, `blocked` and `policy` it takes its lists from its server's ACL.
 - **An identity is an Ed25519 key, which every client verifies.** `dromas init --identity-type ecdsa-sha2-nistp256` makes the one optional type: only a mailbox whose client verifies it can write to that mailbox or hear from it (`PROTOCOL.md` §4.1, §7).
 - **Never back up or sync `prekeys/`.** A copy undoes forward secrecy.
-- **Run `dromas recv` at least monthly.** It renews the prekey daily, and a prekey lasts 33 days. A mailbox that runs `recv` often may set its prekeys to last less, down to `1d3h`: that is how long a stolen prekey, or an old one served to a sender new to the mailbox, stays usable (`dromas prekey lifetime --help`).
+- **Run `dromas recv` more often than weekly.** A message waits on its server just under 7 days, and a prekey lasts 8 days; `recv` renews it daily. A mailbox that runs `recv` often may set its prekeys to last less, down to `6h`: that is how long a stolen prekey, or an old one served to a sender new to the mailbox, stays usable (`dromas prekey lifetime --help`).
 - **Never send a message a second time.** One the server has not taken waits in `outbox/`, and `dromas outbox flush` posts it again, sealed afresh to what the mailbox holds then.
 - **Delivery is at least once.** De-duplicate on `from` + `msg_id`.
 - **A message from a sender this mailbox has not allowed is held in `held/`, not printed.** Writing to a mailbox allows it, and so do `alias` and `allow`; `block` drops a sender's messages, and the server then refuses it. A `policy` file in the mailbox says `unknown inbox` to print every sender's messages, and `server allowed` to have the server refuse every sender not allowed, which tells the server who they are (`PROTOCOL.md` §12.3, §11.14).
@@ -139,7 +139,7 @@ A refusal's words are this client's own, never text from the message, its sender
 | `reattributed` | the envelope's `from` is not the address of the identity that signed it, or its `to` is not this mailbox |
 | `revoked` | this mailbox holds a revocation of the sender that verifies: nothing signed for that address is taken, whenever it was signed |
 | `certificate_revoked` | it is signed under a certificate its sender's identity has revoked, by a revocation this mailbox holds that verifies: the address goes on, and nothing signed under that certificate is taken, whenever it was signed |
-| `stale` | its `sent_at` is older than 33 days |
+| `stale` | its `sent_at` is older than 7 days |
 | `future` | its `sent_at` is more than an hour ahead of this machine's clock |
 | `replay` | this ciphertext was already received |
 | `bad_id` | the server's id for it is not the SHA-256 of its ciphertext |
@@ -158,12 +158,12 @@ bash sh/dromas.sh init                    # prints this mailbox's link
 bash sh/dromas.sh addr                    # prints this mailbox's link again
 echo hello | bash sh/dromas.sh send <link>
 bash sh/dromas.sh recv                    # a JSON line for each message, as the Go client prints
-bash sh/dromas.sh prekey renew            # at least monthly
+bash sh/dromas.sh prekey renew            # at least weekly
 ```
 
 Its header names the tools it needs. It is tested on GNU coreutils (Ubuntu 24.04) and uutils' coreutils (as Ubuntu 26.04 ships them), with GNU sed, grep and awk, and held to the test vectors on those tools and on no other platform's. `DR_SERVER_URL` names another server. Its mailbox is `~/.config/dromas-sh/default`, never the Go client's: `DR_MAILBOX` names another, `DR_HOME` sets the directory, and it refuses one that holds the Go client's `state`.
 
-What it does not do: make certificates (its identity signs everything, and it cannot renew past a statement of its address under one), renew on its own (run `prekey renew` at least monthly, or within the mailbox's `prekey-lifetime`), keep a send to post again (a send that fails says so and keeps nothing), aliases, revocations of its own, held messages and ACLs, and every command the Go client has beyond the five above.
+What it does not do: make certificates (its identity signs everything, and it cannot renew past a statement of its address under one), renew on its own (run `prekey renew` at least weekly, or within the mailbox's `prekey-lifetime`), keep a send to post again (a send that fails says so and keeps nothing), aliases, revocations of its own, held messages and ACLs, and every command the Go client has beyond the five above.
 
 ## No Server Trust
 
@@ -173,7 +173,7 @@ What it does not do: make certificates (its identity signs everything, and it ca
 - see who writes to whom, when, and each message's size to within a padding block. An honest server keeps none of who wrote to whom: the reference server stores no sender with a message, and no log line of it carries an address, so only a mailbox's own ACL names senders there (dromas-server's [`ARCHITECTURE.md` § Storage](https://github.com/dromas-dev/dromas-server/blob/main/ARCHITECTURE.md#storage) and [`SECURITY.md`](https://github.com/dromas-dev/dromas-server/blob/main/SECURITY.md); `PROTOCOL.md` §13);
 - with a pass it was shown, for the minutes it lasts: post in the mailbox's name, which delivers nothing a recipient accepts, delete its unacked messages for good, and change its ACL, which can pause the mailbox until its owner writes the next (`PROTOCOL.md` §15.5);
 - drop or delay messages;
-- keep serving a mailbox's previous prekey until it expires, 33 days after it was signed;
+- keep serving a mailbox's previous prekey until it expires, at most 8 days after it was signed;
 - list messages from senders it made up, which costs a mailbox one bounded run;
 - refuse a mailbox's renewals, which `recv` reports with exit `3`;
 - keep a mailbox's revocation, or its revocation of certificates, from a peer that has never seen it. It cannot make either: a client checks every one itself, and takes "revoked" on no server's word. What its owner hands over out of band settles it (`dromas revocation keep`, `PROTOCOL.md` §15.6).
