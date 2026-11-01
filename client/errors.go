@@ -100,8 +100,6 @@ func (e *APIError) words() string {
 		return "the server could not read the request: a bug in this client, or a server that reads the protocol otherwise"
 	case protocol.CodeBadAddress:
 		return "the server does not take that as an address, which is \"d_\" and 64 characters of base64url"
-	case protocol.CodeBadEncoding:
-		return "the server read a byte field as not base64 in its one encoding: a bug in this client, or in the server"
 	case protocol.CodeIdentityMismatch:
 		return "the server finds that the identity document does not hash to the address, or is not in its one form"
 	case protocol.CodeBadKey:
@@ -122,8 +120,6 @@ func (e *APIError) words() string {
 			s += "; it registers " + t
 		}
 		return s + ". dromas init makes an ssh-ed25519 identity unless told otherwise"
-	case protocol.CodeNotAge:
-		return "the server does not read the ciphertext as an age file: a bug in this client, or in the server"
 	case protocol.CodeWrongRecipientType:
 		return "the server finds the ciphertext not encrypted to one recipient of the type of the mailbox's prekey: a prekey is post-quantum, which needs age 1.3 or later"
 	case protocol.CodeBadRevocation:
@@ -192,9 +188,7 @@ func (e *APIError) words() string {
 	case protocol.CodeRateLimited:
 		return rateLimited(p)
 	case protocol.CodeFetchPaced:
-		return "the server paces the new messages the mailbox takes out: the rest wait on the server"
-	case protocol.CodeRefetchSpent:
-		return "the message was fetched before, and the server takes no more fetches of it for now: a client keeps each message when it fetches it"
+		return "the server paces the messages the mailbox fetches, new ones and ones fetched before: the rest wait on the server"
 	case protocol.CodeMailboxFull:
 		s := "the recipient's mailbox is full"
 		if p.Count != nil {

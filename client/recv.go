@@ -81,7 +81,7 @@ type Result struct {
 	// Receive, which goes on from what a fetch the time cut kept.
 	More bool
 	// Paced is how long the server asked the mailbox to wait before taking out
-	// more, when it paced the drain (a 429 fetch_paced or refetch_spent with
+	// more, when it paced the drain (a 429 fetch_paced with
 	// Retry-After, on a fetch); zero otherwise.
 	Paced time.Duration
 	// PollAfter is the server's poll interval, in seconds: the list's
@@ -463,7 +463,7 @@ func (b *Mailbox) drainPages(ctx context.Context, asked *lookups, res *Result) e
 }
 
 // pacedError is the server pacing a drain, as only the answer to a fetch
-// says it (PROTOCOL.md §11.12): a 429 fetch_paced or refetch_spent, with how
+// says it (PROTOCOL.md §11.12): a 429 fetch_paced, with how
 // long to wait.
 type pacedError struct {
 	wait time.Duration
@@ -512,7 +512,7 @@ func (b *Mailbox) receiveOne(ctx context.Context, m protocol.MessageInfo, res *R
 		switch {
 		case code(err) == protocol.CodeNoSuchMessage:
 			return 0, p.drop() // already gone
-		case errors.As(err, &api) && (api.Problem.Code == protocol.CodeFetchPaced || api.Problem.Code == protocol.CodeRefetchSpent) && api.RetryAfter > 0:
+		case errors.As(err, &api) && api.Problem.Code == protocol.CodeFetchPaced && api.RetryAfter > 0:
 			return 0, &pacedError{wait: api.RetryAfter, err: err}
 		case err != nil:
 			return fetched, err

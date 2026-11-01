@@ -1791,10 +1791,10 @@ components:
     BadRequest:
       description: |
         Not a request this call takes: `bad_request` (naming what is wrong in
-        `member`) · `bad_address` · `bad_encoding` · `identity_mismatch` ·
-        `unsupported_key_type` (with the server's `key_types`) · `bad_key` ·
-        `prekey_not_new` · `prekey_time` · `certificate_too_long` (with the
-        server's `max_certificate_lifetime`) · `not_age` ·
+        `member`, where it is a member or a query parameter) · `bad_address` ·
+        `identity_mismatch` · `unsupported_key_type` (with the server's
+        `key_types`) · `bad_key` · `prekey_not_new` · `prekey_time` ·
+        `certificate_too_long` (with the server's `max_certificate_lifetime`) ·
         `wrong_recipient_type` · `bad_revocation`. `PROTOCOL.md` §11.3 has what
         each means.
       headers:
@@ -1825,7 +1825,7 @@ components:
                   status:
                     const: 400
                   code:
-                    enum: [bad_request, bad_address, bad_encoding, identity_mismatch, unsupported_key_type, bad_key, prekey_not_new, prekey_time, certificate_too_long, not_age, wrong_recipient_type, bad_revocation]
+                    enum: [bad_request, bad_address, identity_mismatch, unsupported_key_type, bad_key, prekey_not_new, prekey_time, certificate_too_long, wrong_recipient_type, bad_revocation]
     Unauthorized:
       description: |
         The pass is refused: `unauthorized` · `pass_expired` ·
@@ -2132,7 +2132,7 @@ components:
         Past a limit: `rate_limited` (with `subject`, whom it was counted
         against, and `quota_id`, which limit, from a closed set; a limit
         counted by the day also with its `limit`) · `fetch_paced` ·
-        `refetch_spent` · `mailbox_full` (with `count`) · `mailbox_busy`.
+        `mailbox_full` (with `count`) · `mailbox_busy`.
         `PROTOCOL.md` §11.3 and §11.5 have what each means.
       headers:
         Date:
@@ -2164,7 +2164,7 @@ components:
                   status:
                     const: 429
                   code:
-                    enum: [rate_limited, fetch_paced, refetch_spent, mailbox_full, mailbox_busy]
+                    enum: [rate_limited, fetch_paced, mailbox_full, mailbox_busy]
     Unavailable:
       description: '`unavailable`: the server is not ready to answer (`PROTOCOL.md` §11.2).'
       headers:
@@ -2692,7 +2692,7 @@ components:
           description: '`sender_key_type`: the sender''s key type, an optional one the mailbox did not declare.'
           type: [string, 'null']
         member:
-          description: '`bad_request`: the request member or query parameter that is missing, unknown or given twice, or holds a value its call does not take.'
+          description: '`bad_request`: the request member or query parameter that is missing, unknown or given twice, or holds a value its call does not take, a byte member not base64 in its one encoding among them. A send''s body that is not an age file names none.'
           type: [string, 'null']
         min_version:
           description: '`version_retired`: the lowest version the server takes, where it sets a floor, `MAJOR.MINOR` or `MAJOR.MINOR.PATCH` (`PROTOCOL.md` §11.17).'

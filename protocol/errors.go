@@ -16,16 +16,14 @@ type Code string
 // The error codes, grouped by HTTP status.
 const (
 	// 400
-	CodeBadRequest         Code = "bad_request"          // not JSON, a missing or unknown field, a bad cursor
+	CodeBadRequest         Code = "bad_request"          // not JSON, a missing, unknown or ill-formed field (a byte field not base64 among them), a bad cursor, a send's body that is not an age file
 	CodeBadAddress         Code = "bad_address"          // not "d_" and 64 characters of base64url
-	CodeBadEncoding        Code = "bad_encoding"         // a byte field that is not base64
 	CodeIdentityMismatch   Code = "identity_mismatch"    // the identity does not hash to the address, or breaks its grammar
 	CodeBadKey             Code = "bad_key"              // an identity key, certificate or prekey statement that is malformed or does not verify
 	CodePrekeyNotNew       Code = "prekey_not_new"       // the prekey was published before: every prekey is a new key
 	CodePrekeyTime         Code = "prekey_time"          // the statement or its certificate is not valid at the server's clock
 	CodeCertificateTooLong Code = "certificate_too_long" // the certificate runs longer than the server's maximum: max_certificate_lifetime
 	CodeUnsupportedKeyType Code = "unsupported_key_type" // an identity of a key type this server does not register
-	CodeNotAge             Code = "not_age"              // the ciphertext is not an age file
 	CodeWrongRecipientType Code = "wrong_recipient_type" // not exactly one stanza of a live prekey type
 	CodeBadRevocation      Code = "bad_revocation"       // not a revocation of the address: the document does not hash to it, or the signature is not its identity's own
 
@@ -67,11 +65,10 @@ const (
 	CodeTooLarge Code = "too_large"
 
 	// 429, all with Retry-After
-	CodeRateLimited  Code = "rate_limited"  // a limit takes no more for now: which one is quota_id, and whom it counted against subject
-	CodeFetchPaced   Code = "fetch_paced"   // the mailbox has taken out all the new messages it may for now: the rest wait
-	CodeRefetchSpent Code = "refetch_spent" // the message was fetched before, and fetching again is spent for now
-	CodeMailboxFull  Code = "mailbox_full"
-	CodeMailboxBusy  Code = "mailbox_busy" // the mailbox has taken all the new messages it takes for now
+	CodeRateLimited Code = "rate_limited" // a limit takes no more for now: which one is quota_id, and whom it counted against subject
+	CodeFetchPaced  Code = "fetch_paced"  // the mailbox has fetched all it may for now, new messages or again: the rest wait
+	CodeMailboxFull Code = "mailbox_full"
+	CodeMailboxBusy Code = "mailbox_busy" // the mailbox has taken all the new messages it takes for now
 
 	// 503, with Retry-After
 	CodeUnavailable Code = "unavailable"
@@ -83,14 +80,12 @@ var codes = map[Code]struct {
 }{
 	CodeBadRequest:            {http.StatusBadRequest, "Bad request"},
 	CodeBadAddress:            {http.StatusBadRequest, "Bad address"},
-	CodeBadEncoding:           {http.StatusBadRequest, "Bad encoding"},
 	CodeIdentityMismatch:      {http.StatusBadRequest, "Identity mismatch"},
 	CodeBadKey:                {http.StatusBadRequest, "Bad key"},
 	CodePrekeyNotNew:          {http.StatusBadRequest, "Prekey not new"},
 	CodePrekeyTime:            {http.StatusBadRequest, "Prekey not valid now"},
 	CodeCertificateTooLong:    {http.StatusBadRequest, "Certificate too long"},
 	CodeUnsupportedKeyType:    {http.StatusBadRequest, "Unsupported key type"},
-	CodeNotAge:                {http.StatusBadRequest, "Not an age file"},
 	CodeWrongRecipientType:    {http.StatusBadRequest, "Wrong recipient type"},
 	CodeBadRevocation:         {http.StatusBadRequest, "Bad revocation"},
 	CodeUnauthorized:          {http.StatusUnauthorized, "Unauthorized"},
@@ -116,7 +111,6 @@ var codes = map[Code]struct {
 	CodeTooLarge:              {http.StatusRequestEntityTooLarge, "Too large"},
 	CodeRateLimited:           {http.StatusTooManyRequests, "Rate limited"},
 	CodeFetchPaced:            {http.StatusTooManyRequests, "Fetch paced"},
-	CodeRefetchSpent:          {http.StatusTooManyRequests, "Refetch spent"},
 	CodeMailboxFull:           {http.StatusTooManyRequests, "Mailbox full"},
 	CodeMailboxBusy:           {http.StatusTooManyRequests, "Mailbox busy"},
 	CodeUnavailable:           {http.StatusServiceUnavailable, "Unavailable"},

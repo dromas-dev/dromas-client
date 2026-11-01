@@ -235,7 +235,7 @@ A server and a client read every JSON text the protocol carries by these rules: 
 
 | Text | Refused as |
 |---|---|
-| a request | `400 bad_request`, or `400 bad_encoding` for a byte member |
+| a request | `400 bad_request` |
 | an answer | no answer |
 | an envelope | `bad_envelope` |
 
@@ -688,35 +688,15 @@ A revocation record carries what an identity revoked, and proves itself: anyone 
 - **`Date`.** Every answer under `/v1/` carries `Date`, set by the clock the server's checks read.
 - **No caching.** Every answer under `/v1/` carries `Cache-Control: no-store`.
 - **Compression.** A lookup (Section 11.8) MAY be answered with gzip (RFC 9110 §8.4.1.3), and only when the request's `Accept-Encoding` accepts gzip. A server MUST NOT compress any other answer: a list sets values senders chose beside the mailbox's own (BREACH, RFC 7457 §2.6).
-- **`HEAD`** is answered on every route that answers `GET`, as that `GET` without content (RFC 9110 §9.3.2): the same status and header fields, with its preconditions evaluated as the `GET`'s are.
-  - A list's `HEAD` is a poll, whatever its cursor. It does not spend the cursor and hands out no new one.
-  - A message's `HEAD` is not a fetch. It checks only whether the mailbox stores the message; spends none of the first-fetch budget and marks nothing fetched (Section 11.12); is one of the mailbox's calls; carries no `Content-Length`; and ignores a `Range`.
-- **Preconditions.** Every call evaluates `If-Match` and `If-None-Match` as RFC 9110 §13.1.1 and §13.1.2 have an origin server evaluate them, at the point Section 11.4, rule 3, places them. The target is what the path names.
+- **`HEAD`** is answered on every route that answers `GET` (RFC 9110 §9.1, §9.3.2).
+  - A `HEAD` changes nothing: it spends no cursor, marks nothing fetched, and spends none of the first-fetch budget.
+  - A list's `HEAD` is counted as a poll (Section 11.11), and a fetch's as one of the mailbox's calls.
+- **Preconditions** are RFC 9110 §13: a server evaluates `If-Match` and `If-None-Match` on every call (§13.1.1, §13.1.2), at the point §13.2.1 gives, in the order §13.2.2 gives. Where Dromas narrows them:
+  - **A call's normal request checks** (§13.2.1) are the match of its route and method, its pass where it takes one, and the read of its target.
   - **Which targets carry an `ETag`:** only a list's first page (Section 11.11) and an ACL (Section 11.14).
-  - **A target with no `ETag`** matches no listed tag, so each condition is:
-
-    | Condition | Target exists | Target does not exist |
-    |---|---|---|
-    | `If-Match: *` | true | false |
-    | `If-Match` with a list of tags | false | false |
-    | `If-None-Match: *` | false | true |
-    | `If-None-Match` with a list of tags | true | true |
-
-  - **Parsing.** `*` is read as `*` only when it is the whole value. Otherwise the value is a list of entity-tags, each read through its closing quote. A value of any other form, `*` among tags included, matches nothing.
-  - **Comparison.** `If-Match` compares strongly, and `If-None-Match` weakly.
-  - **Outcomes:**
-
-    | Condition | Answer |
-    |---|---|
-    | a false `If-Match` | `412 precondition_failed` |
-    | a false `If-None-Match`, to a `GET` or a `HEAD` | `304` |
-    | a false `If-None-Match`, to any other method | `412 precondition_failed` |
-
-  - **A write that carries `If-Match` or `If-None-Match: *`** (a registration, a renewal, publishing a revocation, setting the ACL, a join, a leave) writes only while its conditions still hold. Otherwise it is answered `409 mailbox_changed`, and nothing changes. Two cases are answered otherwise:
-    - a registration that meets a mailbox registered meanwhile is answered as a registration of a registered mailbox is (Section 11.7, step 5);
-    - an ack that meets its message acked meanwhile → `404 no_such_message`.
-  - **Dates.** The conditions on dates are not evaluated, and no answer carries `Last-Modified`.
-  - **`If-Range`** is read only beside a fetch's `Range`, and is false (Section 11.12).
+  - **No target has a modification date.** No answer carries `Last-Modified`, so a condition on a date is ignored (§13.1.3, §13.1.4).
+  - **A call refused by a false precondition does nothing but count.** A list counts as a poll, and a fetch or an ack as one of the mailbox's calls.
+  - **A write whose conditions held when they were evaluated, and no longer hold when it writes,** is answered `409 mailbox_changed`, and nothing changes. Two operations answer that case their own way: a registration (Section 11.7, step 8) and an ack (Section 11.13).
 - **An unknown route** is answered with the router's plain `404` or `405`, with no code. Past a limit, it is answered `429 rate_limited`, as any call is. A client reads a plain `404` or `405` as a route that server does not offer, and a `404` with a code as that code.
 - **A body that does not arrive in time** → `408 request_timeout`.
 - **A server that cannot complete a request,** or is not ready to answer, answers `503 unavailable` with `Retry-After` rather than answer wrong. A client takes any other `5xx` as the same failure, with no wait given.
@@ -740,16 +720,14 @@ What each code means, and what a client does on it:
 
 | Status | Code | Meaning |
 |---|---|---|
-| 400 | `bad_request` | not a JSON text Section 3.3 takes; a member or query parameter missing, unknown, repeated, or with a value its call does not take; `member` names it |
+| 400 | `bad_request` | not a JSON text Section 3.3 takes; a member or query parameter missing, unknown, repeated, or with a value its call does not take, a byte member not base64 in its one encoding among them, which `member` names; a send's body that is not an age file (Section 11.10, step 4) |
 | 400 | `bad_address` | a path address that is not an `address` (Section 4.2) |
-| 400 | `bad_encoding` | a byte member that is not base64 in its one encoding |
 | 400 | `identity_mismatch` | an identity document that does not hash to the address, or breaks its form (Section 4.1) |
 | 400 | `unsupported_key_type` | an identity key type this protocol does not define or this server does not register; `key_types` lists those it registers |
 | 400 | `bad_key` | an identity key that fails its type's key checks; a malformed or badly signed prekey statement or certificate |
 | 400 | `prekey_not_new` | a prekey equal to the current one or a retired one the server keeps (Section 11.9) |
 | 400 | `prekey_time` | at the server's clock, a certificate not yet begun or ended, or a prekey statement ended or ending more than 8 days and an hour ahead: nearly always the client's clock |
 | 400 | `certificate_too_long` | a certificate that runs longer than the server's maximum (Section 11.7, step 6); `max_certificate_lifetime` gives the maximum |
-| 400 | `not_age` | a send's body that is not an age file |
 | 400 | `wrong_recipient_type` | a send's age file without exactly one native stanza of the current prekey's type (Section 11.10, step 7) |
 | 400 | `bad_revocation` | a revocation whose signature is not the identity's over its revocation statement (Section 11.15) |
 | 401 | `unauthorized`, `pass_expired`, `certificate_not_current`, `certificate_revoked` | the pass is refused; Section 8's table gives when each is answered. On `certificate_not_current`, `certificate_serial` names the certificate concerned (Section 8) |
@@ -771,7 +749,7 @@ What each code means, and what a client does on it:
 | 412 | `precondition_failed` | a precondition was false (Section 11.2) |
 | 413 | `too_large` | a body or ciphertext over its cap, or an ACL with more entries than the server accepts; `limit` gives the cap |
 | 429 | `rate_limited` | past a limit (Section 11.5); `subject`, `quota_id`, and for a number a day `limit` |
-| 429 | `fetch_paced`, `refetch_spent` | the mailbox's fetches are paced (Section 11.12) |
+| 429 | `fetch_paced` | the mailbox's fetches are paced, of new messages or of messages fetched before (Section 11.12) |
 | 429 | `mailbox_full` | the mailbox stores as many messages as it may; `count` is how many, as its list counts them |
 | 429 | `mailbox_busy` | the mailbox has spent its intake budget for now |
 | 503 | `unavailable` | the server is not ready to answer |
@@ -832,7 +810,7 @@ A server chooses what it limits and by how much: no limit's value is part of the
 
 **How a refusal names its limit.**
 
-- A limit with no code of its own is answered `429 rate_limited`. (The limits with codes of their own are `fetch_paced`, `refetch_spent`, `mailbox_busy` and `mailbox_full`.) `subject` says whom the call was counted against (`mailbox` or `ip`), and `quota_id` says which limit.
+- A limit with no code of its own is answered `429 rate_limited`. (The limits with codes of their own are `fetch_paced`, `mailbox_busy` and `mailbox_full`.) `subject` says whom the call was counted against (`mailbox` or `ip`), and `quota_id` says which limit.
 - Where one call would spend several limits, `Retry-After` is the time when every limit the server can check without doing the call's work lets the same call through (RFC 8555 §6.6), and the name given is that limit's.
 - A limit the server can check only after that work, after it reads storage or checks a signature, can still refuse the call once that wait is over.
 - A send's `sends` is checked only after its dedupe, so a send past its `calls` is told the wait for `calls`.
@@ -981,7 +959,7 @@ The server checks the steps below; only step 9 stores anything. The server takes
    3. the pass's own refusals, and the sender's `calls` (Section 11.5), which every send spends, a send of a ciphertext `B` already stores (step 6) included.
 2. **The path and the query.** `<B>` is an address → otherwise `bad_address`. `statement` is given once, as `statement-hash`, and no other parameter is given → otherwise `bad_request`, naming the parameter.
 3. **The body's size** is at most the sender's cap → otherwise `413 too_large`, with the cap in `limit`. The server refuses by the `Content-Length` before it reads anything, or while it reads.
-4. **It is an age file** → otherwise `not_age`, an empty body included.
+4. **It is an age file** → otherwise `bad_request`, an empty body included, with no `member`.
 5. **`B` is active:** unknown → `404 no_such_mailbox`; revoked → `410 revoked`.
 6. **Dedupe, while the message is live.** The message id is the ciphertext's SHA-256. If `B` stores a message with that message id unacked, from any sender → `200` with the receipt the server kept, whatever has changed at `B` since. Nothing of a message is kept once it is gone: the same bytes sent after that are a new message, stored and counted as any send is. A reader that accepted them once skips or refuses them (Section 12.3, check 8).
 7. **`B` accepts messages on this prekey, from this sender:**
@@ -1073,7 +1051,7 @@ The server checks the steps below; only step 9 stores anything. The server takes
   | Fetch | Spends | Past it |
   |---|---|---|
   | a message's first fetch | the mailbox's first-fetch budget | `429 fetch_paced` |
-  | a refetch | an allowance the size of its poll budget, the mailbox's alone and apart from its polls | `429 refetch_spent` |
+  | a refetch | an allowance the size of its poll budget, the mailbox's alone and apart from its polls | `429 fetch_paced` |
 
 - **Bodies are served by the API itself, never by a redirect.**
 
@@ -1360,7 +1338,7 @@ A client drains every page of its list (Section 11.11), and fetches the message 
 **The drain.**
 
 - **The client bounds a drain** in messages, bytes, list pages and time. A drain that reaches a bound stops and says so. A fetch cut at the time bound goes on by range at the next drain.
-- **A `429 fetch_paced` or `refetch_spent` stops the drain** as the client's own bounds do: what it delivered stays delivered, and the rest waits on the server.
+- **A `429 fetch_paced` stops the drain** as the client's own bounds do: what it delivered stays delivered, and the rest waits on the server.
 - **A message id already handled is skipped.** `404 no_such_message` to a fetch or an ack means the message is already gone.
 - **A client SHOULD keep a list's `ETag` only from an empty mailbox's answer,** so that a `304` means the mailbox is still empty. A client that keeps the tag of a page with messages MUST act on the page it kept when it is answered `304`.
 - **A `304` whose `ETag`, compared weakly, is not the tag the poll sent is no answer:** the drain stops, and the client drops the tag it kept.

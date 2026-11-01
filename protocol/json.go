@@ -81,7 +81,7 @@ type typeChecked interface{ checkType() error }
 // Unmarshal reads data, a JSON text the protocol carries, into v: the rules
 // of PROTOCOL.md §3.3, then encoding/json/v2's with names matched exactly. A
 // member v does not name is ignored, as a client ignores one in a response.
-// A byte field (Bytes) is base64 in its one encoding, or ErrNotBase64. An
+// A byte field (Bytes) is base64 in its one encoding, or ErrNotBase64 naming it (Member). An
 // integer field holds an integer from 0 to MaxInteger, written as one. JSON
 // null is the same as leaving the member out.
 func Unmarshal(data []byte, v any) error {
@@ -105,19 +105,20 @@ func unmarshal(data []byte, v any, request bool) error {
 			return c.checkType()
 		}
 		return nil
-	case errors.Is(err, ErrNotBase64):
-		return ErrNotBase64
 	case ok && serr.Err == jsonv2.ErrUnknownName:
 		return newUnknownMember(serr.JSONPointer.LastToken())
 	}
 	// A member the protocol knows that holds a value it does not take, of
-	// another JSON type or a number that is no integer of its range, is named
-	// by its name in the body: the first token of the error's JSON pointer,
-	// always a name the Go type declares, never one a sender chose
-	// (PROTOCOL.md §11.3; #272).
+	// another JSON type, a number that is no integer of its range, or bytes not
+	// in their one base64 encoding, is named by its name in the body: the first
+	// token of the error's JSON pointer, always a name the Go type declares,
+	// never one a sender chose (PROTOCOL.md §11.3; #272).
 	why := errNotOfItsType
-	if errors.Is(err, errNotInteger) {
+	switch {
+	case errors.Is(err, errNotInteger):
 		why = errNotInteger
+	case errors.Is(err, ErrNotBase64):
+		why = ErrNotBase64
 	}
 	if serr, ok := errors.AsType[*jsonv2.SemanticError](err); ok {
 		for name := range serr.JSONPointer.Tokens() {
