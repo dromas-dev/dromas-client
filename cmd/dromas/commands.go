@@ -1260,7 +1260,7 @@ line is the record as every server takes it: dromas revocation publish
 
 func (e *cli) publishCmd() *cobra.Command {
 	var record string
-	const how = "dromas revocation publish takes the 77-character address, in full: it is the confirmation, and a revocation cannot be undone"
+	const how = "dromas revocation publish takes the 66-character address, in full: it is the confirmation, and a revocation cannot be undone"
 	c := command("publish [flags] <address>", "revoke this mailbox's address, FOR GOOD",
 		`Revoke this mailbox's address, FOR GOOD: nothing undoes it. The address written
 out in full is the confirmation. --record <file> publishes a record made

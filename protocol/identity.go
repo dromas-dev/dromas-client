@@ -72,13 +72,13 @@ var identityTypes = map[string]struct {
 	bound int
 }{
 	// Its bound is exact: a prekey statement or a pass under a certificate,
-	// each 878 bytes in the one form.
+	// each 850 bytes in the one form.
 	IdentityEd25519: {
 		check: func(k ssh.PublicKey) error {
 			return checkEd25519(k.(ssh.CryptoPublicKey).CryptoPublicKey().(ed25519.PublicKey))
 		},
 		work:  IdentityEd25519,
-		bound: 878,
+		bound: 850,
 	},
 	// Its bound is a prekey statement under a certificate whose signature
 	// by the identity has an r and an s of 33 bytes each, the most the one
@@ -89,7 +89,7 @@ var identityTypes = map[string]struct {
 	IdentityP256: {
 		check: func(ssh.PublicKey) error { return nil },
 		work:  IdentityEd25519,
-		bound: 975,
+		bound: 947,
 	},
 }
 

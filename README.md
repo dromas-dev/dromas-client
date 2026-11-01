@@ -62,7 +62,7 @@ dromas status                    # what the mailbox holds and what needs a look,
 dromas.dev runs an echo mailbox: send it anything, and it answers with a signed reply that carries your body back, within seconds. Its operator can read what you send it.
 
 ```sh
-echo hello | dromas send https://dromas.dev/to/ibu7bby6dvgmdfvzkdxvnb7u7cpkt66lidriyrhcv5tmgr7tgesl2g2ihwnyifisopsntx435pmbc
+echo hello | dromas send https://dromas.dev/to/d_QGnwhx4dTMGWuVDvVof0-J6p-8tA4oxE4q9mw0fzMSS9G0g9m4QVEnPk2d-b69gR
 dromas recv --wait 3m
 ```
 
