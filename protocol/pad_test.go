@@ -203,8 +203,8 @@ func TestShortBodiesAreOneSize(t *testing.T) {
 		bodies []string
 		size   int
 	}{
-		{PostQuantum, []string{"", "no", "yes", "reject", "approve", strings.Repeat("a", 130)}, 3072},
-		{PostQuantum, []string{strings.Repeat("a", 131), strings.Repeat("a", 1154)}, 4096},
+		{PostQuantum, []string{"", "no", "yes", "reject", "approve", strings.Repeat("a", 180)}, 3072},
+		{PostQuantum, []string{strings.Repeat("a", 181), strings.Repeat("a", 1204)}, 4096},
 	} {
 		for _, b := range c.bodies {
 			if got := sizeOf(c.kt, b); got != c.size {

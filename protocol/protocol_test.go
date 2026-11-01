@@ -12,7 +12,7 @@ import (
 )
 
 func TestParseAddress(t *testing.T) {
-	good := "cbrb6ck7k2vh2znucm3wkwmuocegzjcavroysduydtdy53u3bk7gd6lny37mbmjumes7kjvky7d6a" // testdata/vectors/a/address
+	good := "d_EGIfCV9Wqn1ltBM3ZVmUcIhspECsXYkOmBzHju6bCr5h-W3G_sCxNGEl9Saqx8fg" // testdata/vectors/a/address
 	a, err := ParseAddress(good)
 	if err != nil || a.String() != good || len(good) != AddressLen {
 		t.Fatalf("ParseAddress(%q) = %v, %v", good, a, err)
@@ -20,16 +20,36 @@ func TestParseAddress(t *testing.T) {
 	if a != AddressOf(read(t, "a/identity.doc")) {
 		t.Fatal("vector a's address is not the SHA-384 of its identity document")
 	}
-	// The last character carries a zero bit: "b" is "a" with it set, the
-	// same 48 bytes to a decoder that drops it.
-	for _, s := range []string{"", good[:76], good + "a", strings.ToUpper(good), good[:76] + "b", good[:76] + "=", good[:75] + "1a", good[:75] + "8a", " " + good[1:]} {
+	// What follows the first "_" may begin with "-" or "_": it is the
+	// address's 48 bytes, whatever they are.
+	for _, s := range []string{"d_-" + good[3:], "d__" + good[3:]} {
+		if b, err := ParseAddress(s); err != nil || b.String() != s {
+			t.Errorf("ParseAddress(%q) = %v, %v", s, b, err)
+		}
+	}
+	// A form this version does not define, the bytes bare, the other case,
+	// base64's alphabet or its padding: none is an address.
+	for _, s := range []string{"", good[2:], good[:65], good + "A", "e_" + good[2:], "D_" + good[2:], "d-" + good[2:], "dd_" + good[3:],
+		"d_" + good[2:] + "==", good[:65] + "=", good[:21] + "+" + good[22:], good[:21] + "/" + good[22:], good[:21] + "." + good[22:], " " + good[1:]} {
 		if _, err := ParseAddress(s); err == nil {
 			t.Errorf("accepted %q", s)
 		}
 	}
+	other := strings.Map(func(r rune) rune {
+		switch {
+		case 'a' <= r && r <= 'z':
+			return r - 'a' + 'A'
+		case 'A' <= r && r <= 'Z':
+			return r - 'A' + 'a'
+		}
+		return r
+	}, good[2:])
+	if b, err := ParseAddress("d_" + other); err != nil || b == a {
+		t.Errorf("the address with its letters in the other case is not another address: %v, %v", b, err)
+	}
 	var got struct{ A Address }
-	if err := json.Unmarshal([]byte(`{"A":"`+strings.ToUpper(good)+`"}`), &got); err == nil {
-		t.Error("JSON accepted an uppercase address")
+	if err := json.Unmarshal([]byte(`{"A":"`+good[2:]+`"}`), &got); err == nil {
+		t.Error("JSON accepted an address without its form")
 	}
 }
 

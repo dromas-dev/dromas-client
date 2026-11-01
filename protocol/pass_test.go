@@ -307,7 +307,7 @@ func TestPassVerifyUnder(t *testing.T) {
 }
 
 func TestParsePass(t *testing.T) {
-	a := strings.Repeat("abcdefgh234567", 5) + "abcdefa"
+	a := "d_" + strings.Repeat("abcdEFGH-_123456", 4)
 	sig := base64.StdEncoding.EncodeToString([]byte("-----BEGIN SSH SIGNATURE-----\nAAAA\n-----END SSH SIGNATURE-----\n"))
 	good := `dromas-pass address="` + a + `", not_after="2026-10-12T21:40:15Z", signature="` + sig + `"`
 	p, err := ParsePass(good)
@@ -515,7 +515,7 @@ func TestPassAgainstSSHKeygen(t *testing.T) {
 
 // senderForm is the one form a sender writes a pass in (PROTOCOL.md §8),
 // the only one a server took before it read passes as RFC 9110 lets it.
-var senderForm = regexp.MustCompile(`\A` + PassScheme + ` address="([a-z2-7]{77})", not_after="([0-9TZ:-]{20})", signature="([A-Za-z0-9+/]+={0,2})"\z`)
+var senderForm = regexp.MustCompile(`\A` + PassScheme + ` address="(d_[A-Za-z0-9_-]{64})", not_after="([0-9TZ:-]{20})", signature="([A-Za-z0-9+/]+={0,2})"\z`)
 
 // Whatever ParsePass takes, in any form, it reads as the values of a pass in
 // the one form a sender writes: those values, written in that form, are

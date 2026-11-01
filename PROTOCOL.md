@@ -30,7 +30,7 @@ The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD", "S
 - **Grammar.** A text's form is given in ABNF (RFC 5234), in the section that defines the text, right after the prose that introduces it. A string in quotes matches in any ASCII case; one written `%s"…"` matches exactly (RFC 7405). The core rules (RFC 5234 Appendix B: `ALPHA`, `DIGIT`, `DQUOTE`, `LF`, `SP`) are used by name, and so are `full-date`, `time-hour` and `time-minute` (RFC 3339 §5.6), `OWS` and `BWS` (RFC 9110 §5.6.3), and `IPv6address` (RFC 3986 §3.2.2). Appendix B collects every rule.
 - A *line* ends in LF (0x0A). A text "of N lines" is exactly N lines: no CR, and nothing after the last LF.
 - `‖` is concatenation. `str(x)` is a uint32 big-endian length followed by the bytes of `x` (RFC 4251 §5).
-- An **address** is written as 77 characters of lowercase base32 (RFC 4648 §6) without padding, `address` (Section 4.2), wherever it appears: a path, a statement, an envelope, a namespace.
+- An **address** is written as `d_` and 64 characters of base64url (RFC 4648 §5) without padding, `address` (Section 4.2), wherever it appears: a path, a statement, an envelope, a namespace, a certificate's principal.
 - A **time** is RFC 3339 in UTC to the second, with no leap second: a second of `60` is no time. What ends at a time has ended at that second: it is valid while a clock reads before it.
 
   ```abnf
@@ -219,8 +219,8 @@ signature-groups = *16( 4base64-char ) ( 4base64-char / base64-final )
 
   | Identity key type | Bound | What reaches it |
   |---|---|---|
-  | `ssh-ed25519` | exactly 878 bytes | a prekey statement or a pass under a certificate |
-  | `ecdsa-sha2-nistp256` | 975 bytes | the same, with the identity's r and s on the certificate each in 33 bytes, the most the one form gives them |
+  | `ssh-ed25519` | exactly 850 bytes | a prekey statement or a pass under a certificate |
+  | `ecdsa-sha2-nistp256` | 947 bytes | the same, with the identity's r and s on the certificate each in 33 bytes, the most the one form gives them |
 
   - Everything a mailbox signs is held to its identity's bound. In a message, the bound is on the block from its BEGIN line through the LF after its END line (Section 9.2).
   - Every verifier, a server included, MUST refuse a signature longer than the signing mailbox's bound before it verifies it.
@@ -295,22 +295,20 @@ The key MUST be of a type this section defines, in its one encoding, and MUST me
 
 ### 4.2. The address
 
-The address is the SHA-384 of `D`, its 48 bytes in lowercase base32 (RFC 4648 §6) without padding, as Tor writes an onion address: `openssl dgst -sha384 -binary < identity.doc | base32 | tr -d '=' | tr A-Z a-z`. The last character's one unused bit is zero, so each address has one text form:
+The address is the SHA-384 of `D`: the name of its form, `d`, then `_`, then those 48 bytes in base64url (RFC 4648 §5) without padding, 66 characters in all: `printf d_; openssl dgst -sha384 -binary < identity.doc | openssl base64 -A | tr '+/' '-_'`. 48 bytes take no padding and leave no unused bit, so each address has one text form:
 
 ```abnf
-address          = 76base32-char base32-char-by-2
-base32-char      = %x61-7A / %x32-37   ; a-z, 2-7
-base32-char-by-2 = %s"a" / %s"c" / %s"e" / %s"g" / %s"i" / %s"k" / %s"m"
-                 / %s"o" / %s"q" / %s"s" / %s"u" / %s"w" / %s"y"
-                 / "2" / "4" / "6"   ; its value even
+address      = address-form "_" 64base64url-char
+address-form = %s"d"   ; the one form this version defines
 ```
 
 - **SHA-384 is NIST's category 4 for collisions** (SHA-256 is category 2), and the address is the one part of a mailbox that never changes: whatever else is renewed, a second preimage of it names the mailbox for good.
-- **It has one case and never begins with `-`:** no two addresses differ only in case, so a file named by one is that address's alone on any file system, and a command line never reads one as an option.
+- **The text before the first `_` names the address's form, and that `_` is the delimiter, whatever follows it:** the name of a form never contains `_`, and the 64 characters after it may begin with `-` or `_`. This version defines one form, `d`, and a reader MUST refuse an address of any other form as no address.
+- **It begins with its form's name, so a command line never reads an address as an option.**
+- **It is compared as an exact string, case and all:** two addresses that differ only in case are two addresses.
 - It commits to the identity key alone: renewing the prekey, or changing its type, never changes it.
 - It has no checksum: a mistyped address names no mailbox.
 - Line 1 of `D` is the protocol's version. Another deployment uses its own tag, and so its own address space.
-- A client MUST write `from` (Section 9.1) in lowercase: a reader compares it with the verified signer as an exact string.
 
 ### 4.3. The link
 
@@ -545,6 +543,7 @@ lowhexdig = DIGIT / %x61-66   ; HEXDIG in lowercase
 - **A sender MUST refuse whole an envelope that breaks a rule,** never repairing it, before the outbox keeps it. An envelope that meets the rules is written compact, its members in the order given, and its strings and numbers the values given.
 - **A reader takes any JSON text on the line that Section 3.3 takes as the envelope,** whatever spelling the sender's encoder chose. It MUST read the members from the line exactly as it decrypted it.
 - **`v` changes only for a breaking change,** and a reader MUST refuse a `v` it does not know.
+- **A reader ignores a member this version does not define (Section 3.3), so two clients may agree on members of their own.** A member this protocol defines has a plain name; one it does not define SHOULD have a collision-resistant name, one containing a domain its writer controls (`example.com/compress`), as RFC 7519 §4.2 has a public claim name, and never an `x-` prefix (RFC 6648). Such a member adds to a message and never changes what a defined member means, so content two clients transform between themselves goes inside `body`.
 
 ### 9.2. The plaintext: envelope, signature and padding
 
@@ -1699,7 +1698,7 @@ Dromas protects a message's content from everyone but its recipient, and its sen
 - **[BIP 173]** Bech32
 - **[FIPS 180-4]**, **[FIPS 186-5]**
 - **[RFC 2119]**, **[RFC 8174]** BCP 14
-- **[RFC 3339]** timestamps · **[RFC 3986]** URIs · **[RFC 4151]** the `tag` URI scheme · **[RFC 4251]**, **[RFC 4253]** SSH · **[RFC 4648]** base64 and base32 · **[RFC 5234]** ABNF · **[RFC 5656]** ECDSA in SSH · **[RFC 6454]** origins · **[RFC 7405]** case-sensitive strings in ABNF · **[RFC 7457]** TLS attacks · **[RFC 7493]** I-JSON · **[RFC 8032]** EdDSA · **[RFC 8259]** JSON · **[RFC 8555]** ACME · **[RFC 8594]** the `Sunset` header field · **[RFC 8709]** Ed25519 in SSH · **[RFC 9110]** HTTP semantics · **[RFC 9457]** problem details · **[RFC 9562]** UUIDs · **[RFC 9651]** Structured Field Values · **[RFC 9745]** the `Deprecation` header field
+- **[RFC 3339]** timestamps · **[RFC 3986]** URIs · **[RFC 4151]** the `tag` URI scheme · **[RFC 4251]**, **[RFC 4253]** SSH · **[RFC 4648]** base64 and base64url · **[RFC 5234]** ABNF · **[RFC 5656]** ECDSA in SSH · **[RFC 6454]** origins · **[RFC 6648]** deprecating the `X-` prefix · **[RFC 7405]** case-sensitive strings in ABNF · **[RFC 7457]** TLS attacks · **[RFC 7493]** I-JSON · **[RFC 7519]** JSON Web Token · **[RFC 8032]** EdDSA · **[RFC 8259]** JSON · **[RFC 8555]** ACME · **[RFC 8594]** the `Sunset` header field · **[RFC 8709]** Ed25519 in SSH · **[RFC 9110]** HTTP semantics · **[RFC 9457]** problem details · **[RFC 9562]** UUIDs · **[RFC 9651]** Structured Field Values · **[RFC 9745]** the `Deprecation` header field
 - **[SemVer]** Semantic Versioning 2.0.0, https://semver.org/spec/v2.0.0.html
 
 ## Appendix A. Where `ssh-keygen` differs (informative)
@@ -1733,15 +1732,12 @@ Every rule of this document, in alphabetical order, with the rules it takes from
 ```abnf
 account-id                 = 1*32( %x61-7A / DIGIT / "-" )
 acl-entry                  = "*" / address
-address                    = 76base32-char base32-char-by-2
+address                    = address-form "_" 64base64url-char
+address-form               = %s"d"   ; the one form this version defines
 address-param              = "address" BWS "=" BWS ( address / DQUOTE address DQUOTE )
 adopt-key                  = %s"dra1_" ( 1*254( 4base64url-char ) [ 2base64url-char / 3base64url-char ]
                                      / 2base64url-char / 3base64url-char )   ; at most 1,024 bytes
 age-recipient              = %s"age" *bech32-hrp-char "1" 6*bech32-char
-base32-char                = %x61-7A / %x32-37   ; a-z, 2-7
-base32-char-by-2           = %s"a" / %s"c" / %s"e" / %s"g" / %s"i" / %s"k" / %s"m"
-                             / %s"o" / %s"q" / %s"s" / %s"u" / %s"w" / %s"y"
-                             / "2" / "4" / "6"   ; its value even
 base64                     = *( 4base64-char ) [ base64-final ]
 base64-char                = ALPHA / DIGIT / "+" / "/"
 base64-char-by-16          = %s"A" / %s"Q" / %s"g" / %s"w"   ; its value a multiple of 16

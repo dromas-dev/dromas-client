@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Regenerates the dromas v1 test vectors with stock tools only: bash, od, base64, fold,
-# sha256sum, ssh-keygen, openssl (dgst -sha384) and base32, plus age >= 1.3 for the three ciphertexts.
+# sha256sum, ssh-keygen and openssl (dgst -sha384, base64), plus age >= 1.3 for the three ciphertexts.
 # Everything is deterministic (Ed25519 signatures are), except what is made once and kept:
 # each certificate (ssh-keygen puts a random nonce in one), each signature by C's P-256 identity (an
 # ECDSA signature differs each time it is made) and each message/*.age.
@@ -42,7 +42,7 @@ asc() { printf '%s' "$1" | od -An -tx1 | tr -d ' \n'; }
 str() { printf '%08x%s' $(( ${#1} / 2 )) "$1"; }           # an RFC 4251 string, from hex
 bin() { printf "$(printf '%s' "$1" | sed 's/../\\x&/g')"; } # hex → bytes on stdout
 b64() { base64 | tr -d '\n'; }
-address() { openssl dgst -sha384 -binary | base32 -w 0 | tr -d = | tr A-Z a-z; echo; } # stdin → its SHA-384 in base32 (RFC 4648 §6), lowercase, without padding, as an address file holds it
+address() { printf d_; openssl dgst -sha384 -binary | openssl base64 -A | tr "+/" "-_"; echo; } # stdin → "d_" and its SHA-384 in base64url (RFC 4648 §5; 48 bytes take no padding), as an address file holds it
 # An age recipient as age writes one: Bech32 (BIP 173) of bytes under a human-readable part, in lowercase, with no
 # limit on its length (age has none).
 bech32() { # <human-readable part> <bytes, hex>
@@ -242,9 +242,9 @@ pv bad-an-address-of-63-hex 'dromas-pass address="%s", not_after="%s", signature
 pv bad-not-after-not-a-time 'dromas-pass address="%s", not_after="%s", signature="%s"' "$A" 2026-13-10T00:10:00Z "$PS" # month 13, quoted, so it is read to its form
 pv bad-the-signature-with-padding-bits-set 'dromas-pass address="%s", not_after="%s", signature="%sLR=="' "$A" "$PT" "${PS:0:${#PS}-4}" # the pattern's, and no writer's: "LQ==" is that byte (RFC 4648 §3.5)
 # The longest a value may be (§8: the form a client writes with a signature of the most any identity key type
-# allows, 975 bytes, P-256's), made so with empty list elements, one for each byte that signature's base64 is longer
+# allows, 947 bytes, P-256's), made so with empty list elements, one for each byte that signature's base64 is longer
 # than A's, and a byte longer.
-printf -v PC '%*s' $(( (975 + 2) / 3 * 4 - ${#PS} )) ''
+printf -v PC '%*s' $(( (947 + 2) / 3 * 4 - ${#PS} )) ''
 pv ok-as-long-as-a-pass-can-be 'dromas-pass address="%s", not_after="%s", signature="%s"%s' "$A" "$PT" "$PS" "${PC// /,}"
 pv bad-a-byte-longer-than-a-pass-can-be 'dromas-pass address="%s", not_after="%s", signature="%s"%s,' "$A" "$PT" "$PS" "${PC// /,}"
 
@@ -697,11 +697,12 @@ mkdir -p answer
 at() { local name=$1; shift; printf "$@" > "answer/$name.json"; }
 REV=$(b64 < a/revoke.sig); RC=$(b64 < revoked/ok-through-4.txt); RCS=$(b64 < revoked/ok-through-4.sig); P1=$(b64 < a/prekey-1.txt); P1S=$(b64 < a/prekey-1.txt.sig); HASH=$(sha256sum < message/a-to-b.age | cut -c1-64)
 wrap() { printf '%s' "$1" | fold -w 64 | sed 's/$/\\n/' | tr -d '\n' | sed 's/\\n$//'; } # base64 with a JSON \n escape after each 64 characters
-# The answers whose signature member is base64 out of its one encoding take a signature whose base64 has padding: a/revoke.sig
-# (399 bytes) and a/prekey-1.txt.sig (846) are written with none, so they take revoked/ok-through-4.sig, 407 bytes: one = of
-# padding, and 2 unused bits, the lowest of which LASTBITS sets.
-NOPAD=${RCS%%=*}; c=${NOPAD: -1}; i=${B64%%"$c"*}; LASTBITS=${NOPAD%?}${B64:${#i}+1:1}${RCS#"$NOPAD"}
-[ "$NOPAD" != "$RCS" ] && [ $(( ${#i} % 4 )) -eq 0 ] || { echo "revoked/ok-through-4.sig is not base64 with padding and unused bits, which the bad answers need" >&2; exit 1; }
+# The answers whose signature member is base64 out of its one encoding take the first of these signatures whose base64 has
+# padding, one = or two (their lengths move with the address's): NOPAD is it without the padding, and LASTBITS it with the
+# lowest of its last character's unused bits set.
+for f in revoked/ok-through-4.sig a/revoke.sig a/prekey-1.txt.sig; do PADDED=$(b64 < "$f"); [ "${PADDED%=}" != "$PADDED" ] && break; done
+NOPAD=${PADDED%%=*}; p=${PADDED#"$NOPAD"}; c=${NOPAD: -1}; i=${B64%%"$c"*}; LASTBITS=${NOPAD%?}${B64:${#i}+1:1}$p
+[ -n "$p" ] && [ $(( ${#i} % (${#p} == 1 ? 4 : 16) )) -eq 0 ] || { echo "no signature here is base64 with padding and unused bits, which the bad answers need" >&2; exit 1; }
 at record-ok-revocation-signature '{"identity":"%s","revocation_signature":"%s"}' "$ID_A" "$REV"
 at record-ok-null-members '{"identity":null,"revocation_signature":null,"revoked_certificates":null,"revoked_certificates_signature":null}'
 at record-ok-unknown-member '{"identity":"%s","revocation_signature":"%s","later":[1,{"x":true}]}' "$ID_A" "$REV"

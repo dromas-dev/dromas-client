@@ -599,7 +599,7 @@ func changes(before, after map[string][32]byte) string {
 }
 
 var (
-	hex64     = regexp.MustCompile(`[0-9a-z]{64,}`) // an id, 64 hex, or an address, 77 of base32
+	hex64     = regexp.MustCompile(`[0-9A-Za-z_-]{64,}`) // an id, 64 hex, or an address, d_ and 64 of base64url
 	uuid      = regexp.MustCompile(`[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}`)
 	serial    = regexp.MustCompile(`\b1[0-9]{9}\b`)
 	temp      = regexp.MustCompile(`\.tmp-[0-9]+`)

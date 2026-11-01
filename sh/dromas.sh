@@ -43,8 +43,8 @@ dr_out(){ jq -cn --arg type "$1" "${@:2}" '$ARGS.named'; }      # <type> [--arg 
 dr_err(){ jq -cn --arg m "$*" '{type:"error", detail:$m}' >&2; }      # <words> → the line on stderr that says a command failed, in this script's own words
 dr_refuse(){ dr_err "REFUSED: $*"; return 1; }
 dr_hex(){ [[ $1 =~ ^[0-9a-f]{64}$ ]]; }      # a message's id: the SHA-256 of its ciphertext, 64 lowercase hex
-dr_isaddr(){ [[ $1 =~ ^[a-z2-7]{76}[acegikmoqsuwy246]$ ]]; }      # an address: 77 characters of lowercase base32 (RFC 4648 §6), the last carrying 4 bits and a zero bit, so each address has one spelling, in one case
-dr_address(){ local h b= o= i c a=abcdefghijklmnopqrstuvwxyz234567; h=$(sha384sum < "$1" | cut -c1-96) && [[ $h =~ ^[0-9a-f]{96}$ ]] || return 1; for ((i = 0; i < 96; i++)); do c=$((16#${h:i:1})); b+=$((c >> 3 & 1))$((c >> 2 & 1))$((c >> 1 & 1))$((c & 1)); done; b+=0000; for ((i = 0; i + 5 <= ${#b}; i += 5)); do o+=${a:$((2#${b:i:5})):1}; done; printf %s "$o"; }      # <file> → its address: the SHA-384 of its bytes in lowercase base32 without padding, 384 bits read 5 at a time with a zero bit after the last, in bash alone
+dr_isaddr(){ [[ $1 =~ ^d_[A-Za-z0-9_-]{64}$ ]]; }      # an address: "d_", the one form of address v1 defines, then 64 characters of unpadded base64url, each string of them the one encoding of 48 bytes (RFC 4648 §5), compared exactly
+dr_address(){ local h; h=$(sha384sum < "$1" | cut -c1-96) && [[ $h =~ ^[0-9a-f]{96}$ ]] || return 1; printf d_; printf "$(printf %s "$h" | sed 's/../\\x&/g')" | base64 | tr -d '\n' | tr '+/' '-_'; }      # <file> → its address: "d_" and the SHA-384 of its bytes in base64url. 48 bytes are 64 characters with no padding to strip
 dr_b64(){ base64 < "$1" | tr -d '\n'; }
 dr_now(){ date -u +%s; }   # the one clock every check reads
 dr_time(){ # <timestamp> → its Unix time, only for exactly YYYY-MM-DDTHH:MM:SSZ naming a real time
@@ -220,7 +220,7 @@ dr_init(){ # → creates this mailbox, or finishes a half-done init, and registe
   h=$(dr_pass new) && { dr_authed "$h" PUT "/v1/$A" "$DR/register.json" > /dev/null || { dr_clock; dr_own; false; }; } && mv "$DR/pass.new" "$DR/pass" && dr_putline "$DR/serial" "$n" && dr_addr
 }
 dr_addr(){ local a; dr_held || { [ -s "$DR/identity" ] && [ -s "$DR/address" ]; } || { dr_lock dr_addr; return; }; a=$(cat "$DR/address") && dr_out mailbox --arg address "$a" --arg link "$DR_SERVER_URL/to/$a"; }      # the mailbox's address and its link: what to give whoever should write to it. Read with no lock; with no mailbox, dr_lock's refusal, and a mailbox restored from its identity alone has its files made under the lock first (dr_identity), as the Go client's Open makes them
-dr_dest(){ # <link or address> → the address: 77 characters of lowercase base32, or taken from a link to this mailbox's server, $DR_SERVER_URL/to/<address>
+dr_dest(){ # <link or address> → the address, "d_" and 64 characters of base64url, or taken from a link to this mailbox's server, $DR_SERVER_URL/to/<address>
   local a=${1#"$DR_SERVER_URL/to/"}
   dr_isaddr "$a" && { printf '%s\n' "$a"; return 0; }
   [[ $1 != *://* || $1 = "$DR_SERVER_URL/"* ]] || { dr_refuse "a link to another server: this mailbox's server is $DR_SERVER_URL"; return 1; }
@@ -255,11 +255,11 @@ dr_idcheck(){ # <identity document> [address] → 0 only for a two-line document
     ssh-ed25519) dr_keycheck "$(printf %s "${l#* }" | base64 -d | tail -c 32 | od -An -v -tx1 | tr -d ' \n')" ;;
   esac
 }
-dr_sigmax(){ case $(sed -n 2p "$1" | cut -d' ' -f1) in ssh-ed25519) echo 878 ;; ecdsa-sha2-nistp256) echo 975 ;; *) return 1 ;; esac; }      # <identity document> → the most bytes a signature by a mailbox of its key type may be, every byte of the file (PROTOCOL.md §3.2): its largest in the one form, in any namespace, by the identity or under a certificate it made. Nothing for a type this script does not verify
+dr_sigmax(){ case $(sed -n 2p "$1" | cut -d' ' -f1) in ssh-ed25519) echo 850 ;; ecdsa-sha2-nistp256) echo 947 ;; *) return 1 ;; esac; }      # <identity document> → the most bytes a signature by a mailbox of its key type may be, every byte of the file (PROTOCOL.md §3.2): its largest in the one form, in any namespace, by the identity or under a certificate it made. Nothing for a type this script does not verify
 dr_bound(){ local m; m=$(dr_sigmax "$2") && [ "$(wc -c < "$1")" -le "$m" ]; }      # <signature file> <identity document> → 0 only for a signature no longer than its identity's key type allows
 dr_blob(){ # <signature file> → the SSHSIG blob it armors, in hex, only for armour in its one form, the bytes ssh-keygen -Y sign and the Go client write (PROTOCOL.md §3.2), and at most 975 bytes, the most any identity key type allows (dr_sigmax): the BEGIN line, the base64 of the blob in its one encoding in lines of 70 characters, the END line, each ending in LF, and nothing before or after. The file is compared, as bytes, with the armour written back from the blob it holds, as the Go client's Dearmor compares it: any other form, CRLF, whitespace or a NUL among them, is refused. 1 for anything else
   local t h
-  [ "$(wc -c < "$1")" -le 975 ] || return 1
+  [ "$(wc -c < "$1")" -le 947 ] || return 1
   t=$(sed '1d;$d' "$1" | tr -d '\n')      # what lies between the first line and the last, read as text: whatever it drops or a file holds besides, the comparison below refuses
   [[ $t =~ ^[A-Za-z0-9+/]+={0,2}$ ]] && h=$(printf %s "$t" | base64 -d 2> /dev/null | od -An -v -tx1 | tr -d ' \n') && [ -n "$h" ] || return 1
   [ "$(printf %s "$t" | base64 -d | base64 | tr -d '\n')" = "$t" ] || return 1      # the base64 in its one encoding: padded, and the unused bits of the last character zero
