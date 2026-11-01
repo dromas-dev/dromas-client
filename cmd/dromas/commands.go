@@ -1209,9 +1209,10 @@ func adoptKey(r io.Reader) (string, error) {
 	return key, nil
 }
 
-// adoptKeyForm is an adopt key's form, and maxAdoptKey the most bytes one
-// may be (PROTOCOL.md §11.16).
-var adoptKeyForm = regexp.MustCompile(`\Adra1_[A-Za-z0-9_-]+\z`)
+// adoptKeyForm is an adopt key's form, "dra1_" and base64url without
+// padding, of at least one byte: groups of four characters, then two or
+// three; and maxAdoptKey the most bytes one may be (PROTOCOL.md §11.16).
+var adoptKeyForm = regexp.MustCompile(`\Adra1_(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-]{4}|[A-Za-z0-9_-]{2,3})\z`)
 
 const maxAdoptKey = 1024
 

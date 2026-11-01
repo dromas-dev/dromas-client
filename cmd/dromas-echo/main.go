@@ -28,6 +28,8 @@ import (
 	"io"
 	"io/fs"
 	"log"
+	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -99,11 +101,59 @@ func run(ctx context.Context, args []string, logw io.Writer) error {
 	}
 	opt := client.Options{Base: os.Getenv("DROMAS_SERVER_URL"), WorkingKey: *signer == client.SignerCertificate}
 	logger := log.New(logw, "", log.LstdFlags|log.LUTC)
-	e, err := start(ctx, *dir, *identity, opt, logger)
-	if err != nil {
+	e, err := startAgain(ctx, sleep, logger, func() (*echo, error) { return start(ctx, *dir, *identity, opt, logger) })
+	if err != nil || e == nil {
 		return err
 	}
 	return e.run(ctx)
+}
+
+// startAgain runs start until it works, waiting between tries while the
+// server system cannot take the mailbox yet, as a client is told to
+// (PROTOCOL.md §11.3): a 5xx or a 429, for its Retry-After or else
+// defaultPause, or no answer at all, for defaultPause. Any other error ends
+// it, and so does ctx, with neither an echo nor an error.
+func startAgain(ctx context.Context, wait func(context.Context, time.Duration) bool, l *log.Logger, start func() (*echo, error)) (*echo, error) {
+	for {
+		e, err := start()
+		pause, again := whenAgain(err)
+		if err == nil || !again {
+			return e, err
+		}
+		l.Printf("start: %v: trying again in %s", err, pause)
+		if !wait(ctx, pause) {
+			return nil, nil
+		}
+	}
+}
+
+// whenAgain is how long to wait before a start that failed with err is tried
+// again, and whether it is (startAgain).
+func whenAgain(err error) (time.Duration, bool) {
+	var ae *client.APIError
+	if errors.As(err, &ae) {
+		if ae.Status < 500 && ae.Status != http.StatusTooManyRequests {
+			return 0, false
+		}
+		if ae.RetryAfter > 0 {
+			return ae.RetryAfter, true
+		}
+		return defaultPause, true
+	}
+	var ne net.Error
+	return defaultPause, errors.As(err, &ne)
+}
+
+// sleep waits d, and reports whether ctx is still live after it.
+func sleep(ctx context.Context, d time.Duration) bool {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-t.C:
+		return true
+	}
 }
 
 type echo struct {

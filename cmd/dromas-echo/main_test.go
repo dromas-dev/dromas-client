@@ -13,8 +13,10 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -129,6 +131,64 @@ func left(t *testing.T, dir string, sub ...string) []string {
 		t.Fatal(err)
 	}
 	return names
+}
+
+// A start the server system cannot take yet, a 503 or no answer at all, is
+// tried again after the wait it names, or defaultPause, until it works; a
+// start it refuses for another reason is not tried again.
+func TestEchoStartsOnceTheServerCanTakeIt(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	quiet := log.New(io.Discard, "", 0)
+	var mu sync.Mutex
+	unready := 3
+	e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
+		mu.Lock()
+		down := unready > 0
+		unready--
+		mu.Unlock()
+		if down {
+			w.Header().Set("Retry-After", "7")
+			http.Error(w, "down", http.StatusServiceUnavailable)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+	var waits []time.Duration
+	wait := func(_ context.Context, d time.Duration) bool { waits = append(waits, d); return true }
+	dir := t.TempDir()
+	x, err := startAgain(ctx, wait, quiet, func() (*echo, error) { return start(ctx, dir, e.key, e.opts(), quiet) })
+	if err != nil || x == nil {
+		t.Fatalf("a start that met 503s: %v", err)
+	}
+	if len(waits) == 0 || slices.ContainsFunc(waits, func(d time.Duration) bool { return d != 7*time.Second }) {
+		t.Errorf("waits %v, want each of the 503s' 7s", waits)
+	}
+
+	// No answer at all: the server system is not there yet.
+	gone := httptest.NewServer(http.NotFoundHandler())
+	gone.Close()
+	waits = nil
+	stop := func(_ context.Context, d time.Duration) bool { waits = append(waits, d); return len(waits) < 2 }
+	opt := client.Options{Base: gone.URL, Now: e.clock.Now}
+	if x, err := startAgain(ctx, stop, quiet, func() (*echo, error) { return start(ctx, t.TempDir(), e.key, opt, quiet) }); x != nil || err != nil {
+		t.Fatalf("a start with no server, stopped while it waits: %v, %v", x, err)
+	}
+	if !slices.Equal(waits, []time.Duration{defaultPause, defaultPause}) {
+		t.Errorf("waits %v with no answer, want defaultPause each time", waits)
+	}
+
+	// Refused: another mailbox's identity in the state directory, and a 403.
+	waits = nil
+	if _, err := startAgain(ctx, wait, quiet, func() (*echo, error) { return start(ctx, dir, newKey(t), e.opts(), quiet) }); err == nil || len(waits) != 0 {
+		t.Errorf("a start refused for another mailbox's identity: %v, after waits %v", err, waits)
+	}
+	e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
+		http.Error(w, "no", http.StatusForbidden)
+	})
+	if _, err := startAgain(ctx, wait, quiet, func() (*echo, error) { return start(ctx, t.TempDir(), e.key, e.opts(), quiet) }); err == nil || len(waits) != 0 {
+		t.Errorf("a start refused with a 403: %v, after waits %v", err, waits)
+	}
 }
 
 // A message that passes every check is answered once, signed by the echo

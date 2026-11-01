@@ -230,7 +230,7 @@ func (ct *ciphertext) read(name string, resp *http.Response) (readErr, err error
 	p := ct.keep
 	from := int64(0)
 	if resp.StatusCode == http.StatusPartialContent {
-		if v := resp.Header.Values("Content-Range"); p.kept == 0 || len(v) != 1 || v[0] != protocol.ContentRange(p.kept, ct.size) {
+		if p.kept == 0 || !protocol.IsContentRange(resp.Header.Values("Content-Range"), p.kept, ct.size) {
 			return nil, errors.Join(notListed(name, ct.size), p.drop())
 		}
 		from = p.kept

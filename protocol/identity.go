@@ -16,9 +16,6 @@ import (
 const (
 	// IdentityTag is line 1 of every v1 identity document.
 	IdentityTag = "dromas-v1"
-	// IdentityDocumentSize is the exact size of an ssh-ed25519 identity
-	// document. Another key type's document has another size, as exact.
-	IdentityDocumentSize = 93
 )
 
 // The identity key types this package defines: the SSH name on line 2 of an
@@ -46,11 +43,20 @@ var (
 )
 
 // identityForm is the form every identity document has, whatever its key
-// type: the tag line, then an SSH key type's name (RFC 4251 §6: printable
-// ASCII with no comma, at most 64 characters), one space and base64, each line
-// ending in LF, nothing after. It is what lets a client tell a document of a
-// type it lacks from something that is no document.
-var identityForm = regexp.MustCompile(`\A` + IdentityTag + `\n([!-+\--~]{1,64}) ([A-Za-z0-9+/]+={0,2})\n\z`)
+// type: the tag line, then an SSH key type's name, one space and base64, each
+// line ending in LF, nothing after. It is what lets a client tell a document of
+// a type it lacks from something that is no document. A name is as RFC 4251 §6
+// writes one: printable ASCII with no comma, and either no at-sign or one,
+// followed by a fully qualified domain name; at most maxKeyTypeName
+// characters, which a pattern cannot count beside the domain's.
+var identityForm = regexp.MustCompile(`\A` + IdentityTag + `\n([!-+\--?A-~]+(?:@` + domainLabel + `(?:\.` + domainLabel + `)+)?) ([A-Za-z0-9+/]+={0,2})\n\z`)
+
+// domainLabel is a label of a domain name (RFC 1123 §2.1): letters, digits and
+// hyphens, at most 63, neither first nor last a hyphen.
+const (
+	domainLabel    = `[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?`
+	maxKeyTypeName = 64
+)
 
 // A defined type: the checks its key must pass beyond being a key of that
 // type in its one encoding, the type of the working keys an identity of that
@@ -113,7 +119,7 @@ type Identity struct {
 // checked here.
 func ParseIdentity(doc []byte) (*Identity, error) {
 	m := identityForm.FindSubmatch(doc)
-	if m == nil {
+	if m == nil || len(m[1]) > maxKeyTypeName {
 		return nil, fmt.Errorf("%w: it is \"dromas-v1\", LF, one SSH public key with no comment, LF (look for a comment, CRLF, or a missing final newline)", ErrIdentityFormat)
 	}
 	name, b64 := string(m[1]), string(m[2])
