@@ -137,7 +137,7 @@ func TestVectorIdentities(t *testing.T) {
 	}
 }
 
-// Mailbox C's identity is of the optional type, and everything a mailbox says is
+// Mailbox C's identity is P-256, and everything a mailbox says is
 // checked under it as under an Ed25519 one.
 func TestVectorP256Identity(t *testing.T) {
 	now := vectorNow(t)

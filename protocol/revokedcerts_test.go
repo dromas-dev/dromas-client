@@ -94,7 +94,7 @@ func TestRevokedCertificatesAreBuiltInOneForm(t *testing.T) {
 	}
 }
 
-// An identity of the optional key type signs a revocation of its
+// An identity of type P-256 signs a revocation of its
 // certificates as it signs one of its address, and the revocation is as
 // bound to its address under one as under Ed25519.
 func TestAP256IdentityRevokesCertificates(t *testing.T) {

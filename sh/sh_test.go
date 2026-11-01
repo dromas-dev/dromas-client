@@ -1052,7 +1052,7 @@ func TestPaddingIsTheGoClients(t *testing.T) {
 	}
 }
 
-// A mailbox whose identity is a P-256 key, the optional type, run by either
+// A mailbox whose identity is a P-256 key, run by either
 // client, exchanges messages with a mailbox of the other client on an Ed25519 key:
 // each verifies what the other's P-256 identity certified. The script takes
 // the identity key it finds, so its mailbox's key is made with ssh-keygen first.
