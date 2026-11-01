@@ -2134,7 +2134,7 @@ func TestCertRevokeEarlierSaysARevocationTakenAndNotKeptIsRevoked(t *testing.T) 
 		t.Fatal(err)
 	}
 	full := &os.PathError{Op: "write", Path: "state", Err: syscall.ENOSPC}
-	p := &protocol.Prekey{Address: own, Serial: 42, NotAfter: time.Now().Add(33 * 24 * time.Hour)}
+	p := &protocol.Prekey{Address: own, Serial: 42, NotAfter: time.Now().Add(protocol.PrekeyLifetime)}
 	for _, c := range []struct {
 		name  string
 		r     *client.Remedy
@@ -2177,7 +2177,7 @@ func TestCertRevokeEarlierSaysAFaultOfTheMailboxAfterWhatBecameOfEach(t *testing
 		t.Fatal(err)
 	}
 	full := &os.PathError{Op: "write", Path: "state", Err: syscall.ENOSPC}
-	p := &protocol.Prekey{Address: own, Serial: 42, NotAfter: time.Now().Add(33 * 24 * time.Hour)}
+	p := &protocol.Prekey{Address: own, Serial: 42, NotAfter: time.Now().Add(protocol.PrekeyLifetime)}
 	notRenewed, notRevoked := errors.New("the renewal was refused"), errors.New("the revocation was refused")
 	for _, c := range []struct {
 		name  string
@@ -2311,7 +2311,7 @@ func TestHeldAndPeerCommands(t *testing.T) {
 }
 
 // prekey lifetime prints the mailbox's prekey lifetime, or sets it: a time as
-// sshd writes one, from 1d3h to 33d, with a warning under 2d2h that says how
+// sshd writes one, from 6h to 8d, with a warning under 2d2h that says how
 // often recv must then run. A time out of form or out of range is a usage
 // error, and changes nothing.
 func TestPrekeyLifetime(t *testing.T) {
@@ -2336,20 +2336,23 @@ func TestPrekeyLifetime(t *testing.T) {
 		}
 		return ls[0]
 	}
-	if l := say(); l["seconds"] != json.Number("2851200") || l["lifetime"] != "33d" || l["detail"] != nil {
+	if l := say(); l["seconds"] != json.Number("691200") || l["lifetime"] != "8d" || l["detail"] != nil {
 		t.Fatalf("the default: %v", l)
 	}
 	for _, c := range []struct{ arg, seconds, shown, every string }{
-		{"1d3h", "97200", "1d3h", "1h"},
-		{"27h", "97200", "1d3h", "1h"},
-		{"97200", "97200", "1d3h", "1h"},
-		{"1D3H", "97200", "1d3h", "1h"},
+		{"6h", "21600", "6h", "5m"},
+		{"360m", "21600", "6h", "5m"},
+		{"21600", "21600", "6h", "5m"},
+		{"6H", "21600", "6h", "5m"},
+		{"23h", "82800", "23h", "5m"},
+		{"1d", "86400", "1d", "1h"},
+		{"25h", "90000", "1d1h", "1h"},
 		{"3h30m24h", "99000", "1d3h30m", "1h30m"},
 		{"2d", "172800", "2d", "22h"},
 		{"2d1h59m59s", "179999", "2d1h59m59s", "23h59m59s"},
 		{"2d2h", "180000", "2d2h", ""},
 		{"1w", "604800", "7d", ""},
-		{"4w5d", "2851200", "33d", ""},
+		{"1w1d", "691200", "8d", ""},
 	} {
 		l := say(c.arg)
 		if l["seconds"] != json.Number(c.seconds) || l["lifetime"] != c.shown {
@@ -2364,7 +2367,7 @@ func TestPrekeyLifetime(t *testing.T) {
 		}
 	}
 	for arg, why := range map[string]string{
-		"1d": "is from", "1d59m59s": "is from", "1d1h": "is from", "1d2h": "is from", "1d2h59m59s": "is from", "93600": "is from", "33d1s": "is from", "34d": "is from", "10000000000s": "longer than any", "9999999999w": "longer than any",
+		"1h": "is from", "5h59m59s": "is from", "21599": "is from", "8d1s": "is from", "9d": "is from", "2851200": "is from", "10000000000s": "longer than any", "9999999999w": "longer than any",
 		"0": "is from", "0s": "is from", "": "no time", "-1h": "flag", "+1h": "no time", "1.5h": "no time", "1x": "no time", "90000x": "no time", "2d1hx": "no time",
 		"h": "no time", "1h ": "no time", " 1h": "no time", "1dd": "no time",
 	} {
@@ -2372,7 +2375,7 @@ func TestPrekeyLifetime(t *testing.T) {
 		if err := do(ctx, "prekey lifetime", []string{arg}, strings.NewReader(""), io.Discard, io.Discard); !errors.As(err, &wrong) || !strings.Contains(err.Error(), why) {
 			t.Errorf("%q: %v", arg, err)
 		}
-		if got, err := os.ReadFile(file); err != nil || string(got) != "2851200\n" {
+		if got, err := os.ReadFile(file); err != nil || string(got) != "691200\n" {
 			t.Errorf("%q changed the file to %q, %v", arg, got, err)
 		}
 	}

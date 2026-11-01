@@ -904,20 +904,29 @@ func (b *Mailbox) removePrekey(n uint64) error {
 	return b.update(func(s store) error { return s.del(bucketPrekeys, serialKey(n)) })
 }
 
-// prune deletes every prekey but the newest this mailbox holds whose deletion
-// time has come by the reading at, one a server took: its not_after plus
-// protocol.TTL. Every message encrypted to it arrived by its not_after and has
-// expired by then; after this, those messages are unrecoverable from the mailbox's
-// keys. A drain's list taken, and a renewal taken, each run it, by the date
-// of the pass that call carried: a clock far ahead is stopped at that pass,
-// and one that moves while the call is in flight deletes nothing by where it
-// went.
+// prune deletes every retired prekey, and every key a renewal passed over,
+// whose deletion time has come by the reading at, one a server took: its
+// not_after plus protocol.TTL. Every message encrypted to it arrived by its
+// not_after and has expired by then; after this, those messages are
+// unrecoverable from the mailbox's keys. It keeps the newest this mailbox
+// holds, and the one it published last, which is not retired: its statement
+// and its working key sign the mailbox's passes until a renewal is taken. A
+// drain's list taken, and a renewal taken, each run it, by the date of the
+// pass that call carried: a clock far ahead is stopped at that pass, and one
+// that moves while the call is in flight deletes nothing by where it went.
 func (b *Mailbox) prune(at taken) error {
 	signed, err := b.prekeys()
 	if err != nil || len(signed) == 0 {
 		return err
 	}
+	cur, err := b.publishedSerial()
+	if err != nil {
+		return err
+	}
 	for _, n := range signed[:len(signed)-1] {
+		if n == cur {
+			continue
+		}
 		p, err := b.prekeyStatement(n)
 		if err != nil {
 			continue

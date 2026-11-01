@@ -974,7 +974,7 @@ func parseTime(s string) (time.Duration, error) {
 }
 
 // formatTime writes d as parseTime reads it, in days, hours, minutes and
-// seconds, as in 1d1h or 33d.
+// seconds, as in 1d1h or 8d.
 func formatTime(d time.Duration) string {
 	var b strings.Builder
 	for _, u := range []struct {

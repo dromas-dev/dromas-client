@@ -393,8 +393,8 @@ func TestAKilledHolderLeavesNoLock(t *testing.T) {
 	receive(t, b)
 }
 
-// A retired prekey decrypts messages until its deletion time, not_after + 33
-// days, and is deleted then: the forward-secrecy bound. A renewal deletes by
+// A retired prekey decrypts messages until its deletion time, not_after +
+// protocol.TTL, and is deleted then: the forward-secrecy bound. A renewal deletes by
 // the date of its own pass, which the server took, and it signs a new one.
 func TestPruneDeletesRetiredKeys(t *testing.T) {
 	t.Parallel()
@@ -420,7 +420,7 @@ func TestPruneDeletesRetiredKeys(t *testing.T) {
 		t.Fatal(err)
 	}
 	if exists(key1) {
-		t.Fatal("not deleted at not_after + 33 days")
+		t.Fatal("not deleted at not_after + protocol.TTL")
 	}
 	if !exists(prekeyFile(b, numberOf(t, b), ".agekey")) {
 		t.Fatal("the current key was deleted")
@@ -506,19 +506,19 @@ func TestFlushNeverStopsAtABadEntry(t *testing.T) {
 	if failed, _ := filepath.Glob(filepath.Join(outbox, "failed", c.Address().String()+".*.P")); len(failed) != 1 {
 		t.Fatal("the revoked mailbox's entry did not move to outbox/failed/")
 	}
-	// Written more than 33 days ago, it is posted no more: it moves to
+	// Written more than a TTL ago, it is posted no more: it moves to
 	// failed/ too.
 	e.clock.Add(protocol.TTL + time.Second)
 	if _, err := a.Flush(ctx); err == nil {
 		t.Fatal("flush of an undeliverable entry reported nothing")
 	}
 	if left, _ := filepath.Glob(filepath.Join(outbox, "*.P")); len(left) != 0 {
-		t.Fatalf("an entry written more than 33 days ago stayed: %v", left)
+		t.Fatalf("an entry written more than a TTL ago stayed: %v", left)
 	}
 }
 
-// An entry written more than 33 days ago is never posted, even when the
-// server would take it: an outbox posts one for 33 days from when it was
+// An entry written more than a TTL ago is never posted, even when the
+// server would take it: an outbox posts one for a TTL from when it was
 // written, the window a reader's replay set reaches back over past a first
 // post. It moves to outbox/failed/, with no receipt.
 func TestStaleOutboxEntryIsNotPosted(t *testing.T) {
@@ -532,11 +532,11 @@ func TestStaleOutboxEntryIsNotPosted(t *testing.T) {
 	}
 	e.clock.Add(protocol.TTL + time.Second)
 	rs, err := a.Flush(ctx)
-	if len(rs) != 0 || err == nil || !strings.Contains(err.Error(), "outbox/failed") || !strings.Contains(err.Error(), "written more than 33 days ago") {
+	if len(rs) != 0 || err == nil || !strings.Contains(err.Error(), "outbox/failed") || !strings.Contains(err.Error(), fmt.Sprintf("written more than %d days ago", protocol.TTL/(24*time.Hour))) {
 		t.Fatalf("flush: %d sent, %v", len(rs), err)
 	}
 	if e.srv.Count(b.Address()) != 0 {
-		t.Fatal("an entry written more than 33 days ago was posted")
+		t.Fatal("an entry written more than a TTL ago was posted")
 	}
 	if failed, _ := filepath.Glob(filepath.Join(a.Dir(), "outbox", "failed", b.Address().String()+".*.P")); len(failed) != 1 {
 		t.Fatal("the stale entry did not move to outbox/failed/")
