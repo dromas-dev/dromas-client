@@ -696,8 +696,9 @@ func (b *Mailbox) SetPrekeyLifetime(ctx context.Context, d time.Duration) error 
 	})
 }
 
-// retiredGrace is how long after a renewal a drain must begin before it may
-// delete prekeys: room for a send the server took as the renewal landed.
+// retiredGrace is how long after the server took a renewal the list of a
+// drain must be taken before the drain may delete retired prekeys
+// (dropRetired): room for a send the server took as the renewal landed.
 const retiredGrace = time.Hour
 
 // renewRetry is how long Receive waits to try a failed renewal again, so a
@@ -835,16 +836,24 @@ func (b *Mailbox) renewDue() bool {
 	return own > lifetime || b.now().Sub(made) > renewAt(own)
 }
 
-// dropRetired deletes every retired prekey but the newest, after a drain
-// that emptied the mailbox and whose list the server took at a reading more than
-// retiredGrace after the newest retired prekey was made: every older one was
-// retired by then. A send must
-// name the recipient's current prekey serial, so a message encrypted to a retired
-// prekey reached the server before the renewal that retired it, or with a
-// send already in progress: such a drain collected all of it. The newest
-// retired prekey is kept regardless. After this, a message encrypted to a deleted
-// prekey is unrecoverable from the mailbox's keys. dromas.sh does not do this;
-// it keeps every retired prekey until prune's deletion time.
+// dropRetired deletes retired prekeys before their deletion time, after a
+// drain that emptied the mailbox, by at, the reading the server took that
+// drain's list at (PROTOCOL.md §12.4). A send must name the recipient's
+// current prekey statement, so a message encrypted to a retired prekey reached
+// the server before the renewal that retired it was taken, or with a send
+// already in progress then, which the server stores within that request's own
+// bound, far under retiredGrace: a list the server took more than
+// retiredGrace after it took the current prekey's renewal lists all of it, and
+// such a drain collected it. So every retired prekey goes, the newest
+// included, by when the server took the current one (takenAt), never by when
+// it was signed: a renewal can wait. Where the mailbox does not know when the
+// server took it (a take a read of itself recorded: noteServed), the newest
+// retired prekey is kept, and those older than it go once the list was taken
+// more than retiredGrace after the newest retired prekey was made; while the
+// mailbox does not know when it made that one, every retired prekey is kept.
+// After this, a message encrypted to a deleted prekey is unrecoverable from
+// the mailbox's keys. dromas.sh does not do this; it keeps every retired
+// prekey until prune's deletion time.
 func (b *Mailbox) dropRetired(at taken) error {
 	cur, err := b.publishedSerial()
 	if err != nil {
@@ -860,14 +869,18 @@ func (b *Mailbox) dropRetired(at taken) error {
 			retired = append(retired, n)
 		}
 	}
-	if len(retired) < 2 {
+	if len(retired) == 0 {
 		return nil
 	}
-	newest := retired[len(retired)-1]
-	if made, err := b.made(newest); err != nil || at.At().Sub(made) <= retiredGrace {
+	drop := retired[:len(retired)-1]
+	if took, ok := b.takenAt(cur); ok && at.At().Sub(took) > retiredGrace {
+		drop = retired
+	} else if len(drop) == 0 {
+		return nil
+	} else if made, err := b.made(retired[len(retired)-1]); err != nil || at.At().Sub(made) <= retiredGrace {
 		return nil //nolint:nilerr // a newest retired prekey that cannot be read keeps every key
 	}
-	for _, n := range retired[:len(retired)-1] {
+	for _, n := range drop {
 		if err := b.removePrekey(n); err != nil {
 			return err
 		}

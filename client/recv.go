@@ -145,7 +145,9 @@ func (r *Result) Again() time.Duration {
 // make it makes it, renewing or not, and replaces one the mailbox did not send
 // (aclAt, checkACL). A drain that empties the mailbox
 // then deletes the retired prekeys no message can still need (see
-// [Mailbox.dropRetired]): all but the newest. And once the server has answered
+// [Mailbox.dropRetired]): every one, once its list was taken more than an
+// hour after the server took the current prekey, and all but the newest
+// where the mailbox does not know when it did. And once the server has answered
 // the drain's list, so has taken a pass dated by this machine's clock, the
 // prekeys whose deletion time has come by that pass's date go too.
 //
