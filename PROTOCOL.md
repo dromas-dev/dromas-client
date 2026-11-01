@@ -689,10 +689,10 @@ A revocation record carries what an identity revoked, and proves itself: anyone 
 - **No caching.** Every answer under `/v1/` carries `Cache-Control: no-store`.
 - **Compression.** A lookup (Section 11.8) MAY be answered with gzip (RFC 9110 §8.4.1.3), and only when the request's `Accept-Encoding` accepts gzip. A server MUST NOT compress any other answer: a list sets values senders chose beside the mailbox's own (BREACH, RFC 7457 §2.6).
 - **`HEAD`** is answered on every route that answers `GET` (RFC 9110 §9.1, §9.3.2).
-  - A `HEAD` changes nothing: it spends no cursor, marks nothing fetched, and spends none of the first-fetch budget.
+  - A `HEAD` changes nothing: it spends no cursor and hands out none, marks nothing fetched, and spends none of the first-fetch budget.
   - A list's `HEAD` is counted as a poll (Section 11.11), and a fetch's as one of the mailbox's calls.
 - **Preconditions** are RFC 9110 §13: a server evaluates `If-Match` and `If-None-Match` on every call (§13.1.1, §13.1.2), at the point §13.2.1 gives, in the order §13.2.2 gives. Where Dromas narrows them:
-  - **A call's normal request checks** (§13.2.1) are the match of its route and method, its pass where it takes one, and the read of its target.
+  - **A call's normal request checks** (§13.2.1) are the match of its route and method, its pass where it takes one, and the read of its target. A registration's and a renewal's pass is by the signer of the prekey statement they bring, so that statement is checked among them.
   - **Which targets carry an `ETag`:** only a list's first page (Section 11.11) and an ACL (Section 11.14).
   - **No target has a modification date.** No answer carries `Last-Modified`, so a condition on a date is ignored (§13.1.3, §13.1.4).
   - **A call refused by a false precondition does nothing but count.** A list counts as a poll, and a fetch or an ack as one of the mailbox's calls.
@@ -861,7 +861,7 @@ The server checks:
    | the key meets its type's key checks | `bad_key` |
 
    A server registers `ssh-ed25519` and whichever other defined types its operator chooses, and answers the rest `unsupported_key_type`, naming its list.
-5. **A registration never changes a registered mailbox.** A registration of a mailbox the server keeps is answered from what the server holds of the mailbox:
+5. **A registration never changes a registered mailbox.** A registration of a mailbox the server keeps is answered from what the server holds of the mailbox, whatever step 6 would answer:
 
    | The server holds | The request | Answer |
    |---|---|---|
@@ -900,7 +900,7 @@ The server checks:
 
 The server takes a renewal because its prekey statement is later than the current statement and is signed by the identity or by a working key the identity certified. No pass by the current signer is needed. So a mailbox that lost its working key comes back by renewing under a new certificate, and a mailbox moves to a new certificate, its first included, by renewing.
 
-- **An identical retry** is answered from what the server holds of the mailbox: `200 {}` once its pass is verified, or `401 certificate_revoked` while the current signer is revoked.
+- **An identical retry** is answered from what the server holds of the mailbox, whatever the checks below would answer: `200 {}` once its pass is verified, or `401 certificate_revoked` while the current signer is revoked.
 - **Any other prekey statement** is verified as at registration (Section 11.7, steps 6 and 7), and MUST be later than the current statement by `(c, p)` (Section 5.3): signed by a signer of higher rank, at any prekey serial, or by the current signer at a higher prekey serial. Otherwise:
 
   | The new prekey statement is signed | Answer |
