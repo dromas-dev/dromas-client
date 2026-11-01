@@ -760,6 +760,7 @@ paths:
         '503':
           $ref: '#/components/responses/HeadUnavailable'
   /v1/{addr}/account:
+    description: Optional. A server without accounts does not offer this path, and answers it as a route it does not offer (`PROTOCOL.md` §11.2, §11.16).
     parameters:
       - $ref: '#/components/parameters/DromasVersion'
       - $ref: '#/components/parameters/addr'

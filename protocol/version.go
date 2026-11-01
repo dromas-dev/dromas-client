@@ -199,7 +199,8 @@ func (p PolicyVersion) Names(v Version) bool {
 // for a client of version v (PROTOCOL.md §11.17): the two compared in the
 // parts p writes, from the major on, p higher in one of them. Equal in every
 // part p writes is no upgrade, whatever v writes past them: 1.5.2 against 1.5
-// is none, against 1.5.3 or 1.6 one.
+// is none, against 1.5.3 or 1.6 one. Nor is a v higher than p: a client may be
+// released before its server names that release.
 func (p PolicyVersion) Upgrade(v Version) bool {
 	c := cmp.Or(cmp.Compare(p.Major, v.Major), cmp.Compare(p.Minor, v.Minor))
 	if c == 0 && p.HasPatch {

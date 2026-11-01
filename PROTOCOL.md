@@ -772,7 +772,7 @@ A server chooses which refusal it answers first, except where the two rules belo
 
 ### 11.5. Limits
 
-A server chooses what it limits and by how much: no limit's value is part of the protocol, and a server may add limits. A client meets a limit as a `429` with `Retry-After`. Unless the code says otherwise, the client waits that long and then retries. Every server keeps these promises:
+A server chooses what it limits and by how much: no limit's value is part of the protocol, and a server may add limits. A client meets a limit as a `429` (RFC 6585 §4) with `Retry-After`. Unless the code says otherwise, the client waits that long and then retries. Every server keeps these promises:
 
 - **A drain of a full mailbox always completes.** Its list pages are never refused. Its fetches may be paced, each `429 fetch_paced` saying when to go on, but are never stopped for good.
 - **A mailbox's counts are spent only** by calls that carried its pass, by messages sent to it, and by each revocation of certificates its identity publishes through a higher revocation serial. An IP address's counts are spent only by calls from it.
@@ -1144,24 +1144,15 @@ A mailbox may belong to one account at its server. The protocol fixes how a mail
   - `version`: it covers every version whose major, minor and, where written, patch are that version's.
 
   A server MUST NOT schedule a sunset earlier than a deprecation of the same `below` or `version` (RFC 9745 §4).
-- **`Deprecation`.** An answer under `/v1/` to a request whose version a deprecation covers carries `Deprecation` (RFC 9745), written as RFC 9745 §2.1 writes it: a Date (RFC 9651 §3.3.7), `@` and the date's Unix time in seconds. The date is the earliest of the deprecations that cover the version. A date that has passed says the version is deprecated; a date to come says it will be from then.
+- **`Deprecation`.** An answer under `/v1/` to a request whose version a deprecation covers carries `Deprecation` (RFC 9745 §2.1). The date is the earliest of the deprecations that cover the version.
   - The field's scope is the version the request names, on every route under `/v1/`. That is wider than the resource RFC 9745 §2.2 gives the field by default.
   - No other answer carries it.
   - No answer carries a `deprecation` link (RFC 9745 §3): a URL is a server's text, which a client never shows (Section 11.3).
-- **`Sunset`.** An answer under `/v1/` to a request whose version a sunset covers carries `Sunset` (RFC 8594), with the same scope. The date is the earliest of the sunsets that cover the version. No other answer carries it.
+- **`Sunset`.** An answer under `/v1/` to a request whose version a sunset covers carries `Sunset` (RFC 8594 §3), with the same scope. The date is the earliest of the sunsets that cover the version. No other answer carries it.
 - **A retired version.** A request whose version is below the version floor, or covered by a sunset whose date has passed at the server's clock, is answered `410 version_retired`, with `min_version` where the server sets a version floor. Section 11.4, rule 0, places it first. The server's document accepts every version.
-- **A client reads `Deprecation` and `Sunset` on every answer, and nothing more of them:**
-  - `Deprecation` as a Date: `@` and an Integer, which is an optional `-` and 1 to 15 digits (RFC 9651 §3.3.1, §3.3.7);
-  - `Sunset` as an HTTP-date (RFC 9110 §5.6.7).
-
-  A value of any other form counts as absent, and a client shows neither as the server's words (Section 11.3). On every command that meets a deprecation or a sunset of the client's own version, the client tells its owner, with the date.
-- **The latest version.** A client SHOULD get the server's document (Section 11.18) at most once a day. It compares its own version with the document's `latest_version`, in the parts `latest_version` writes, from the major on:
-
-  | Comparison | The client |
-  |---|---|
-  | `latest_version` is higher in one of the parts | SHOULD tell its owner an upgrade is available |
-  | the two are equal in every part `latest_version` writes | MUST NOT tell its owner so |
-  | its own version is the higher | MUST NOT tell its owner so: a client may be released before its server names that release |
+- **A client reads `Deprecation` and `Sunset` on every answer, and nothing more of them.** A value of another form than RFC 9745 §2.1's or RFC 8594 §3's counts as absent, and a client shows neither as the server's words (Section 11.3).
+- **A client SHOULD get the server's document** (Section 11.18) at most once a day.
+- **A client SHOULD tell its owner** of a deprecation or a sunset of its own version, and of a `latest_version` higher than its own version by SemVer precedence ([SemVer] §11) in the parts `latest_version` writes.
 
 ### 11.18. The server's document
 
