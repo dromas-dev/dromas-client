@@ -18,10 +18,11 @@ import (
 const (
 	// PrekeyTag is line 1 of every v1 prekey statement.
 	PrekeyTag = "dromas-prekey-v1"
-	// PrekeyLifetime is how long a client makes a prekey statement valid for:
-	// 31 days, the longest month, plus a day a renewal may wait and a day of
-	// slip, so a mailbox checked at least monthly never lapses.
-	PrekeyLifetime = 33 * 24 * time.Hour
+	// PrekeyLifetime is the longest a client makes a prekey statement valid
+	// for: the TTL plus a day, the day a client waits to renew one, so a
+	// mailbox whose client goes down keeps a prekey senders take for as long
+	// as a message waits for it (PROTOCOL.md §12.4).
+	PrekeyLifetime = TTL + 24*time.Hour
 	// MaxPrekeyLifetime is the longest a prekey statement may still have to
 	// run when a server takes it: MaxSkew more than a client asks for, so
 	// that a client whose clock is ahead of the server's is not refused. It

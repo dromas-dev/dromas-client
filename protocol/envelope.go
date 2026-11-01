@@ -19,13 +19,14 @@ const (
 	// change, and a receiver rejects a version it does not know.
 	EnvelopeVersion = 1
 	// TTL is how old a message may be, counted from its sent_at, which its
-	// sender dates afresh at every post: 33 days, a prekey's longest life, so
-	// a mailbox that checks in at least monthly loses neither new messages nor held
-	// messages. Every window of a message's age derives from it: the recipient's
-	// sent_at window, how long a server keeps a message (Retention), the replay
-	// set (SeenFor), how long the sender's outbox posts an entry, and the
-	// latest a retired prekey can still be needed.
-	TTL = 33 * 24 * time.Hour
+	// sender dates afresh at every post: 7 days, a delivery window, how long a
+	// message waits for a mailbox whose client is down. Every window of a
+	// message's age derives from it: the recipient's sent_at window, how long a
+	// server keeps a message (Retention), the replay set (SeenFor), how long
+	// the sender's outbox posts an entry, how long a client makes a prekey
+	// for (PrekeyLifetime), and the latest a retired prekey can still be
+	// needed.
+	TTL = 7 * 24 * time.Hour
 	// PostTime is the room the maker of a time-limited thing leaves for a
 	// post's own time, beside MaxSkew: what comes between the post's dating
 	// and the server's receipt that no pass bounds, its seal and the second
