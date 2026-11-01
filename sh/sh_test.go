@@ -98,6 +98,15 @@ func p256() bool {
 	return cmd.Run() == nil
 }
 
+// needP256 skips a test that runs the script as a command where ssh-keygen
+// reads no P-256 key: every command refuses that build (dr_p256).
+func needP256(t *testing.T) {
+	t.Helper()
+	if !p256() {
+		t.Skipf("%s reads no P-256 key, and the script needs an OpenSSH built with OpenSSL", sshBuild())
+	}
+}
+
 // mustRead reads a file the test needs.
 func mustRead(t *testing.T, name string) []byte {
 	t.Helper()
@@ -1113,35 +1122,48 @@ func TestAP256MailboxInBothClients(t *testing.T) {
 	}
 }
 
-// A mailbox declares the identity key types its build verifies, at init and at
-// each renewal (PROTOCOL.md §7; #358): ecdsa-sha2-nistp256 only where its
-// ssh-keygen reads a P-256 key. A build without OpenSSL reads none, and the
-// script refuses every P-256 identity there; here an ssh-keygen that reads
-// no P-256 key stands for one.
-func TestTheScriptDeclaresTheKeyTypesItsBuildVerifies(t *testing.T) {
+// The script verifies every type PROTOCOL.md §4.1 defines and no optional
+// one, so its mailbox declares no sender key type, at init and at each
+// renewal (§7).
+func TestTheScriptDeclaresNoSenderKeyType(t *testing.T) {
 	w := newWorld(t)
 	declared := func(b *shMailbox) string {
 		t.Helper()
 		return strings.TrimSpace(b.must(`dr_look "$(cat "$DR/address")" | jq -c .sender_key_types`))
 	}
-	noP256 := `ssh-keygen(){ local k; if [ "$1" = -l ]; then k=$(cat); case $k in "ecdsa-sha2-nistp256 "*) return 255 ;; esac; command ssh-keygen "$@" <<< "$k"; else command ssh-keygen "$@"; fi; }` + "\n"
-	both, ed := `["ssh-ed25519","ecdsa-sha2-nistp256"]`, `["ssh-ed25519"]`
-	here := both
-	if !p256() {
-		here = ed
-		t.Logf("%s reads no P-256 key, so the script declares ssh-ed25519 alone: a known variance (PROTOCOL.md Appendix A)", sshBuild())
-	}
 	b := w.mailbox()
-	n := w.empty()
-	n.must(noP256 + "dr_init")
-	n.addr = mustAddress(t, n.dir)
-	if got, gotN := declared(b), declared(n); got != here || gotN != ed {
-		t.Errorf("init declares %s here and %s on a build that reads no P-256 key, want %s and %s", got, gotN, here, ed)
+	if got := declared(b); got != "null" {
+		t.Errorf("init declares %s", got)
 	}
-	b.must(noP256 + "dr_rekey")
-	n.must("dr_rekey")
-	if got, gotN := declared(b), declared(n); got != ed || gotN != here {
-		t.Errorf("a renewal declares %s on a build that reads no P-256 key and %s here, want %s and %s", got, gotN, ed, here)
+	b.must("dr_rekey")
+	if got := declared(b); got != "null" {
+		t.Errorf("a renewal declares %s", got)
+	}
+}
+
+// A build of ssh-keygen that reads no P-256 key, as OpenSSH built without
+// OpenSSL is (PROTOCOL.md Appendix A), cannot verify every type §4.1
+// defines, so every command refuses it before anything else: one in PATH
+// that refuses every P-256 key stands for it.
+func TestTheScriptRefusesAnSSHKeygenThatReadsNoP256Key(t *testing.T) {
+	t.Parallel()
+	need(t, scriptTools...)
+	bin := t.TempDir()
+	real, err := exec.LookPath("ssh-keygen")
+	if err != nil {
+		t.Fatal(err)
+	}
+	shim := "#!/usr/bin/env bash\nif [ \"$1\" = -l ]; then k=$(cat); case $k in \"ecdsa-sha2-nistp256 \"*) exit 255 ;; esac; exec " + real + " \"$@\" <<< \"$k\"; fi\nexec " + real + " \"$@\"\n"
+	if err := os.WriteFile(filepath.Join(bin, "ssh-keygen"), []byte(shim), 0o700); err != nil { //nolint:gosec // the test's own shim
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"init"}, {"addr"}, {"recv"}, {"prekey", "renew"}} {
+		cmd := exec.Command("bash", append([]string{abs(t, "dromas.sh")}, args...)...)
+		cmd.Env = append(os.Environ(), "DR_HOME="+t.TempDir(), "DR_SERVER_URL=http://127.0.0.1:9", "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+		out, err := cmd.CombinedOutput()
+		if err == nil || !strings.Contains(string(out), "this ssh-keygen reads no P-256 key") || strings.Contains(string(out), "curl") {
+			t.Errorf("dromas.sh %s on an ssh-keygen that reads no P-256 key: %v %q", strings.Join(args, " "), err, out)
+		}
 	}
 }
 
@@ -1916,6 +1938,7 @@ func landAll(t *testing.T, b *client.Mailbox) {
 func TestTheCommandLine(t *testing.T) {
 	t.Parallel()
 	need(t, append(scriptTools, "curl")...)
+	needP256(t)
 	ctx := context.Background()
 	srv := fakeserver.New(t, time.Now)
 	home := t.TempDir()

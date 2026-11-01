@@ -23,8 +23,8 @@
 # It gives up conveniences the Go client has: recv drains once and never waits for a message, and each step runs several
 # programs. And certificates: its own mailbox's identity signs its prekey statements, passes and messages (PROTOCOL.md §5),
 # and it makes no working key. It reads and writes to mailboxes that sign either way. Needs bash >= 4, age >= 1.3 (the first with post-quantum keys, the one prekey type; Ubuntu to 26.04 and Debian 13
-# ship older, and go install filippo.io/age/cmd/...@v1.3.2 is current), OpenSSH >= 9.1 (the first to take a
-# certificate's validity and a time to verify at in UTC), curl >= 7.84 (--fail-with-body, and -w with %header),
+# ship older, and go install filippo.io/age/cmd/...@v1.3.2 is current), OpenSSH >= 9.1 built with OpenSSL (the first to take a
+# certificate's validity and a time to verify at in UTC; without OpenSSL it reads no P-256 key, which every client verifies), curl >= 7.84 (--fail-with-body, and -w with %header),
 # jq >= 1.7.1 (1.7.0 can abort on a number a sender writes, CVE-2023-50246; Ubuntu 24.04's fixed jq prints jq-1.7),
 # iconv, and coreutils (sha256sum, sha384sum, base64, fold, od, sync). Dates go through jq, never date -d, and base64 is never -w0.
 
@@ -35,9 +35,9 @@ DR_SERVER_URL=${DR_SERVER_URL:-https://dromas.dev}
 DR=${DR_HOME:-${XDG_CONFIG_HOME:-$HOME/.config}/dromas-sh/${DR_MAILBOX:-default}}   # one mailbox per directory, of this script's own: never the Go client's (its DROMAS_HOME and ~/.config/dromas/, dr_ownmailbox), and never the working directory
 DR_VERSION=0.1.0   # the version every request names in Dromas-Version (PROTOCOL.md §11.17): the Go client's release minor this script implements, at patch 0
 DR_LOCK_WAIT=${DR_LOCK_WAIT:-120}   # how many seconds a command waits for the mailbox's lock while another command of the mailbox holds it: what apt waits for its own lock when no one is at a terminal
-DR_P256='ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBGD+1LolWp0xyWHrdMY1bWjASbiSO2H6bOZpYi5g8p+2eQP+EAi4vJmkGunpVii8ZPLxsgwtfp9Rd6PClNRGIpk='   # a P-256 key, mailbox C's identity in this repo's testdata/vectors/ (RFC 6979 §A.2.5's published test key), for dr_senders to ask ssh-keygen to read
-dr_senders(){ # → the identity key types dr_idcheck verifies on this build, as a JSON list. A mailbox declares them with each prekey it publishes, and the server then refuses it messages from a mailbox whose identity is of any other type (PROTOCOL.md §7): ssh-ed25519, and ecdsa-sha2-nistp256 only where this build's ssh-keygen reads a P-256 key. One built without OpenSSL reads none, so dr_idcheck refuses every P-256 identity there (PROTOCOL.md Appendix A), and a mailbox that declared the type would be sent messages it then refuses
-  if ssh-keygen -l -f - <<< "$DR_P256" > /dev/null 2>&1; then echo '["ssh-ed25519","ecdsa-sha2-nistp256"]'; else echo '["ssh-ed25519"]'; fi
+DR_P256='ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBGD+1LolWp0xyWHrdMY1bWjASbiSO2H6bOZpYi5g8p+2eQP+EAi4vJmkGunpVii8ZPLxsgwtfp9Rd6PClNRGIpk='   # a P-256 key, mailbox C's identity in this repo's testdata/vectors/ (RFC 6979 §A.2.5's published test key), for dr_p256 to ask ssh-keygen to read
+dr_p256(){ # → 0 only where this build's ssh-keygen reads a P-256 key. Every client verifies every identity key type the protocol defines, ecdsa-sha2-nistp256 among them (PROTOCOL.md §4.1), and an OpenSSH built without OpenSSL reads none (PROTOCOL.md Appendix A): the script needs one built with it
+  ssh-keygen -l -f - <<< "$DR_P256" > /dev/null 2>&1 || dr_refuse "this ssh-keygen reads no P-256 key, and every client verifies one: the script needs an OpenSSH built with OpenSSL (PROTOCOL.md §4.1)"
 }
 dr_out(){ jq -cn --arg type "$1" "${@:2}" '$ARGS.named'; }      # <type> [--arg <name> <text> | --argjson <name> <JSON>]… → one line of JSON on stdout, its type first and then each member in turn, as the Go client prints one: what a command did or met on the way
 dr_err(){ jq -cn --arg m "$*" '{type:"error", detail:$m}' >&2; }      # <words> → the line on stderr that says a command failed, in this script's own words
@@ -216,7 +216,7 @@ dr_init(){ # → creates this mailbox, or finishes a half-done init, and registe
     rm -f "$p.txt" "$p.made" "$p.txt.sig" "$DR/pass.new"
   fi
   dr_prekey "$n" || return 1
-  jq -n --arg i "$(dr_b64 "$DR/identity.doc")" --arg p "$(dr_b64 "$p.txt")" --arg s "$(dr_b64 "$p.txt.sig")" --argjson k "$(dr_senders)" '{identity:$i, prekey:$p, prekey_signature:$s, sender_key_types:$k}' > "$DR/register.json"
+  jq -n --arg i "$(dr_b64 "$DR/identity.doc")" --arg p "$(dr_b64 "$p.txt")" --arg s "$(dr_b64 "$p.txt.sig")" '{identity:$i, prekey:$p, prekey_signature:$s}' > "$DR/register.json"
   h=$(dr_pass new) && { dr_authed "$h" PUT "/v1/$A" "$DR/register.json" > /dev/null || { dr_clock; dr_own; false; }; } && mv "$DR/pass.new" "$DR/pass" && dr_putline "$DR/serial" "$n" && dr_addr
 }
 dr_addr(){ local a; dr_held || { [ -s "$DR/identity" ] && [ -s "$DR/address" ]; } || { dr_lock dr_addr; return; }; a=$(cat "$DR/address") && dr_out mailbox --arg address "$a" --arg link "$DR_SERVER_URL/to/$a"; }      # the mailbox's address and its link: what to give whoever should write to it. Read with no lock; with no mailbox, dr_lock's refusal, and a mailbox restored from its identity alone has its files made under the lock first (dr_identity), as the Go client's Open makes them
@@ -773,7 +773,7 @@ dr_renew(){ # → what dr_rekey does, the lock held. A serial is signed ONCE
   if [ -n "$new" ]; then [ "$s" -lt 9007199254740991 ] || dr_refuse "this mailbox's prekey serial is the highest there is, so no later statement can be made: the address cannot renew" || return 1; t=$(dr_now); s=$((t > s ? t : s + 1)); fi      # a new number: this machine's clock, in seconds, or one above the highest this mailbox knows of when the clock gives nothing higher. A mailbox restored from its identity knows only what the server shows: by the clock, its statement is above every one made before, on whatever machine
   [ -s "$DR/prekeys/$s.txt.sig" ] || rm -f "$DR/prekeys/$s.txt" "$DR/prekeys/$s.made"; dr_prekey "$s" || return 1
   if [ -n "$gone" ]; then u="/v1/$A"; w='{identity:$i}'; else u="/v1/$A/prekey"; w='{}'; fi      # a registration is the identity document, then what a new prekey carries
-  jq -n --arg i "$(dr_b64 "$DR/identity.doc")" --arg p "$(dr_b64 "$DR/prekeys/$s.txt")" --arg g "$(dr_b64 "$DR/prekeys/$s.txt.sig")" --argjson k "$(dr_senders)" "$w"' + {prekey:$p, prekey_signature:$g, sender_key_types:$k}' > "$DR/rekey.json"
+  jq -n --arg i "$(dr_b64 "$DR/identity.doc")" --arg p "$(dr_b64 "$DR/prekeys/$s.txt")" --arg g "$(dr_b64 "$DR/prekeys/$s.txt.sig")" "$w"' + {prekey:$p, prekey_signature:$g}' > "$DR/rekey.json"
   h=$(dr_pass new) && dr_authed "$h" PUT "$u" "$DR/rekey.json" > /dev/null || { dr_clock; dr_own; return 1; }      # a new pass, dated as the renewal is sent
   [ "$s" -le "$(cat "$DR/serial" 2> /dev/null || echo 0)" ] || dr_putline "$DR/serial" "$s" || return 1
   mv "$DR/pass.new" "$DR/pass" || return 1
@@ -822,6 +822,7 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
     dr_send) for a; do [[ $a != -* ]] || dr_wrong "dromas.sh send takes no option: $a" "$dr_use" "bash dromas.sh help send"; done ;;
   esac
   dr_tls "$DR_SERVER_URL" || exit 1      # refused before anything, as the Go client refuses to open a mailbox whose server it would not call
+  dr_p256 || exit 1      # refused before anything: a build that cannot verify every type the protocol defines takes part in no exchange
   rm -f "$DR/met.deprecation" "$DR/met.sunset"
   "$dr_cmd" "$@"; dr_rc=$?
   dr_said; exit $dr_rc
