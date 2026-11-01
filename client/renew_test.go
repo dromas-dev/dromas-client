@@ -635,6 +635,39 @@ func TestAnEmptyingDrainDeletesEveryRetiredPrekeyAnHourAfterTheTake(t *testing.T
 	}
 }
 
+// The hour counts from when the server took the renewal, never from when it
+// was signed: a renewal that waited two hours, refused once and sent again as
+// signed, retires the prekey before it only when it is taken, so a drain half
+// an hour after the take keeps that prekey, signed two and a half hours
+// before, and one more than an hour after the take deletes it.
+func TestTheHourBeforeTheNewestRetiredPrekeyGoesCountsFromTheTake(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	a, b := e.mailbox(), e.mailbox()
+	k1 := numberOf(t, b)
+	e.clock.Add(25 * time.Hour)
+	forge.FailOnce(e.srv, http.MethodPut, "/prekey") // the server is down: the renewal waits, signed
+	if res := receive(t, b); res.RenewErr == nil {
+		t.Fatal("the renewal did not fail")
+	}
+	signed := begunAt(t, b)
+	e.clock.Add(2 * time.Hour)
+	send(t, a, b, "to the first key, as the renewal is taken")
+	if res := receive(t, b); res.Renewed == nil || res.Renewed.Serial != signed || len(res.Delivered) != 1 {
+		t.Fatalf("the renewal sent again: %+v", res)
+	}
+	e.clock.Add(30 * time.Minute)
+	receive(t, b)
+	if !exists(prekeyFile(b, k1, ".agekey")) {
+		t.Fatal("the newest retired prekey went half an hour after its renewal was taken, two and a half after it was signed")
+	}
+	e.clock.Add(31 * time.Minute)
+	receive(t, b)
+	if exists(prekeyFile(b, k1, ".agekey")) {
+		t.Fatal("the newest retired prekey outlived a list taken more than an hour after the renewal that retired it")
+	}
+}
+
 // Where the mailbox does not know when its server took the current prekey,
 // as when the upload's answer was lost and a read of itself showed the
 // renewal taken, an emptying drain keeps the newest retired prekey however
