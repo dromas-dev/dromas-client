@@ -27,7 +27,7 @@ The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD", "S
 
 ### 2.2. Notation
 
-- **Grammar.** A text's form is given in ABNF (RFC 5234), in the section that defines the text, right after the prose that introduces it. A string in quotes matches in any ASCII case; one written `%s"…"` matches exactly (RFC 7405). The core rules (RFC 5234 Appendix B: `ALPHA`, `DIGIT`, `DQUOTE`, `LF`, `SP`) are used by name, and so are `full-date`, `time-hour`, `time-minute` and `time-second` (RFC 3339 §5.6), `OWS` and `BWS` (RFC 9110 §5.6.3), and `uri-host` and `port` (RFC 9110 §4.1: RFC 3986's `host` and `port`). Appendix B collects every rule.
+- **Grammar.** A text's form is given in ABNF (RFC 5234), in the section that defines the text, right after the prose that introduces it. A string in quotes matches in any ASCII case; one written `%s"…"` matches exactly (RFC 7405). The core rules (RFC 5234 Appendix B: `ALPHA`, `DIGIT`, `DQUOTE`, `LF`, `SP`) are used by name, and so are `full-date`, `time-hour`, `time-minute` and `time-second` (RFC 3339 §5.6), `OWS` and `BWS` (RFC 9110 §5.6.3), and `uri-host` (RFC 9110 §4.1: RFC 3986's `host`). Appendix B collects every rule.
 - A *line* ends in LF (0x0A). A text "of N lines" is exactly N lines: no CR, and nothing after the last LF.
 - `‖` is concatenation. `str(x)` is a uint32 big-endian length followed by the bytes of `x` (RFC 4251 §5).
 - An **address** is written as 77 characters of lowercase base32 (RFC 4648 §6) without padding, `address` (Section 4.2), wherever it appears: a path, a statement, an envelope, a namespace.
@@ -47,6 +47,7 @@ The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD", "S
 
   ```abnf
   base64            = *( 4base64-char ) [ base64-final ]
+  base64-nonempty   = 1*( 4base64-char ) [ base64-final ] / base64-final
   base64-char       = ALPHA / DIGIT / "+" / "/"
   base64-final      = 2base64-char base64-char-by-4 "="
                     / base64-char base64-char-by-16 "=="
@@ -280,7 +281,7 @@ The key MUST be of a type this section defines, in its one encoding, and MUST me
 - **The form is the same for every key type, defined here or not:** `identity-document`, where `key-type` is a key type's name (RFC 4251 §6) and the base64 is of an SSH wire key that begins with that same name.
 
   ```abnf
-  identity-document = %s"dromas-v1" LF key-type SP base64 LF
+  identity-document = %s"dromas-v1" LF key-type SP base64-nonempty LF
   key-type          = 1*64( %x21-2B / %x2D-7E )   ; printable ASCII, no comma
   ```
 - **A reader MUST refuse a well-formed document of a type it does not verify as `unsupported_key_type`, never as malformed.** A document that breaks the form, or does not hash to its address, is evidence of tampering; one of a type the reader lacks is not.
@@ -434,7 +435,8 @@ The pass, `pass-statement`, is signed by the mailbox's signer (Section 5), in th
 ```abnf
 pass-statement = %s"dromas-pass-v1" LF address LF server-name LF time LF
 pass-namespace = %s"dromas-pass-v1:" address
-server-name    = uri-host [ ":" port ]
+server-name    = uri-host [ ":" server-port ]   ; in lowercase, its host not empty
+server-port    = %x31-39 *4DIGIT   ; no leading zero
 ```
 
 - **The server name** is the host of the mailbox's URL for its server, written as an origin is (RFC 6454 §6.2): lowercase, with no user information, and with its port only when the port is not the scheme's default. `https://dromas.dev:443` and `https://dromas.dev` name `dromas.dev`; `http://127.0.0.1:8080` names `127.0.0.1:8080`.
@@ -445,7 +447,7 @@ server-name    = uri-host [ ":" port ]
   pass-authorization = %s"dromas-pass" SP
                        %s"address=" DQUOTE address DQUOTE "," SP
                        %s"not_after=" DQUOTE time DQUOTE "," SP
-                       %s"signature=" DQUOTE base64 DQUOTE
+                       %s"signature=" DQUOTE base64-nonempty DQUOTE
   ```
 
 - **A server reads it as RFC 9110 §11 lets a recipient read credentials,** `pass-credentials`: the three parameters in any order, each once, as a list (RFC 9110 §5.6.1), and each value a token or a quoted-string (RFC 9110 §5.6.2, §5.6.4) that holds no backslash and is in its value's form. It verifies the signature over the pass built from those values, never over the header's text.
@@ -463,7 +465,7 @@ server-name    = uri-host [ ":" port ]
   address-param    = "address" BWS "=" BWS ( address / DQUOTE address DQUOTE )
   not-after-param  = "not_after" BWS "=" BWS DQUOTE time DQUOTE
   signature-param  = "signature" BWS "=" BWS
-                     ( base64-token / DQUOTE base64 DQUOTE )
+                     ( base64-token / DQUOTE base64-nonempty DQUOTE )
   base64-token     = 1*( 4( ALPHA / DIGIT / "+" ) )   ; base64 that is a token
   ```
 
@@ -1127,11 +1129,11 @@ A mailbox may belong to one account at its server. The protocol fixes how a mail
 
 ### 11.17. Versions
 
-- **Every request names the version of the client that makes it,** in `Dromas-Version`: the version of its release, written as SemVer 2.0.0 writes one ([SemVer] §2, §9), with no build metadata: `Dromas-Version`, its major, minor and patch and an optional pre-release.
+- **Every request names the version of the client that makes it,** in `Dromas-Version`: the version of its release, written as SemVer 2.0.0 writes one ([SemVer] §2, §9), with no build metadata, as `dromas-version-value` gives: its major, minor and patch and an optional pre-release.
 
   ```abnf
-  Dromas-Version = version-number "." version-number "." version-number
-                   [ "-" pre-release ]
+  dromas-version-value = version-number "." version-number "." version-number
+                         [ "-" pre-release ]
   version-number = "0" / %x31-39 *DIGIT
   pre-release    = pre-release-id *( "." pre-release-id )
   pre-release-id = version-number
@@ -1190,7 +1192,6 @@ A mailbox may belong to one account at its server. The protocol fixes how a mail
   ```abnf
   capability-name = %x61-7A *63( %x61-7A / DIGIT / "_" )
   ```
-
 
 A server lists at most 64 deprecations, 64 sunsets and 64 capabilities, and a client reads no more. A document with more, or with a sunset earlier than a deprecation of the same `below` or `version`, breaks its form.
 
@@ -1715,6 +1716,7 @@ base64-char-by-4           = %s"A" / %s"E" / %s"I" / %s"M" / %s"Q" / %s"U" / %s"
                              / "0" / "4" / "8"   ; its value a multiple of 4
 base64-final               = 2base64-char base64-char-by-4 "="
                              / base64-char base64-char-by-16 "=="
+base64-nonempty            = 1*( 4base64-char ) [ base64-final ] / base64-final
 base64-token               = 1*( 4( ALPHA / DIGIT / "+" ) )   ; base64 that is a token
 base64url-char             = ALPHA / DIGIT / "-" / "_"
 bech32-char                = "0" / %x32-39 / %x61 / %x63-68 / %x6A-6E / %x70-7A
@@ -1724,11 +1726,11 @@ BWS                        = <BWS, see [RFC 9110], Section 5.6.3>
 capability-name            = %x61-7A *63( %x61-7A / DIGIT / "_" )
 content-range-206          = %s"bytes" SP range-number "-" range-number "/" range-number
 cursor                     = 1*( ALPHA / DIGIT / "-" / "_" )
-Dromas-Version             = version-number "." version-number "." version-number
+dromas-version-value       = version-number "." version-number "." version-number
                              [ "-" pre-release ]
 envelope-line              = 1*( %x00-09 / %x0B-FF ) LF   ; the envelope (Section 9.1)
 full-date                  = <full-date, see [RFC 3339], Section 5.6>
-identity-document          = %s"dromas-v1" LF key-type SP base64 LF
+identity-document          = %s"dromas-v1" LF key-type SP base64-nonempty LF
 key-type                   = 1*64( %x21-2B / %x2D-7E )   ; printable ASCII, no comma
 lowhexdig                  = DIGIT / %x61-66   ; HEXDIG in lowercase
 msg-id                     = 8lowhexdig "-" 4lowhexdig "-" 4lowhexdig "-" 4lowhexdig "-"
@@ -1740,7 +1742,7 @@ padding                    = *"."   ; Section 9.3
 pass-authorization         = %s"dromas-pass" SP
                              %s"address=" DQUOTE address DQUOTE "," SP
                              %s"not_after=" DQUOTE time DQUOTE "," SP
-                             %s"signature=" DQUOTE base64 DQUOTE
+                             %s"signature=" DQUOTE base64-nonempty DQUOTE
 pass-credentials           = pass-scheme 1*SP [ pass-gap ] pass-params [ pass-gap ]
 pass-gap                   = 1*( OWS "," ) OWS   ; empty list elements skipped
 pass-namespace             = %s"dromas-pass-v1:" address
@@ -1754,7 +1756,6 @@ pass-scheme                = "dromas-pass"
 pass-statement             = %s"dromas-pass-v1" LF address LF server-name LF time LF
 plaintext                  = envelope-line ssh-signature padding
 policy-version             = version-number "." version-number [ "." version-number ]
-port                       = <port, see [RFC 9110], Section 4.1>
 pre-release                = pre-release-id *( "." pre-release-id )
 pre-release-id             = version-number
                              / *DIGIT ( ALPHA / "-" ) *( ALPHA / DIGIT / "-" )
@@ -1767,7 +1768,8 @@ revocation-of-certificates = %s"dromas-revoke-certs-v1" LF address LF serial LF
 revoke-certs-namespace     = %s"dromas-revoke-certs-v1:" address
 revoke-namespace           = %s"dromas-revoke-v1:" address
 serial                     = %x31-39 *15DIGIT   ; no leading zero
-server-name                = uri-host [ ":" port ]
+server-name                = uri-host [ ":" server-port ]   ; in lowercase, its host not empty
+server-port                = %x31-39 *4DIGIT   ; no leading zero
 signature-even             = signature-groups LF
 signature-groups           = *16( 4base64-char ) ( 4base64-char / base64-final )
 signature-line             = 70base64-char LF
@@ -1777,7 +1779,7 @@ signature-odd              = 68base64-char
                              / base64-char base64-char-by-16 LF "==" ) LF
                              ; a group of 4 split across the last two lines
 signature-param            = "signature" BWS "=" BWS
-                             ( base64-token / DQUOTE base64 DQUOTE )
+                             ( base64-token / DQUOTE base64-nonempty DQUOTE )
 signature-text             = *( 2signature-line ) ( signature-even / signature-odd )
                              ; two lines of 70 hold 35 groups of 4
 ssh-signature              = %s"-----BEGIN SSH SIGNATURE-----" LF
