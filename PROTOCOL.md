@@ -498,7 +498,7 @@ A `certificate_not_current` answer carries `certificate_serial`, the certificate
 |---|---|
 | any call but a registration or a renewal | the current certificate's |
 | a registration or a renewal, refused for its pass | that of the certificate under the prekey statement it brings |
-| a renewal refused because its prekey statement's signer ranks too low (Section 11.9) | the one its prekey statement must be above |
+| a renewal whose prekey statement is signed by a signer of lower rank, or by another certificate with the current certificate's serial (Section 11.9) | the one its prekey statement must be above |
 
 Where that signer is the identity, not a certificate, the member is absent.
 
