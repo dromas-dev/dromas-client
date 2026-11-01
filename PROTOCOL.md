@@ -492,7 +492,7 @@ server-port    = %x31-39 *4DIGIT   ; no leading zero
 | `certificate_not_current` | the pass is by any certificate other than the one the call takes a pass by, or the certificate the server keeps for the mailbox does not verify |
 | `unauthorized` | there is no pass, or it is not this mailbox's, or it is not for this server, or it does not verify |
 
-A `certificate_not_current` answer carries `certificate_serial`, the certificate serial the call is held to:
+A `certificate_not_current` answer names, in `certificate_serial`, the certificate the call should have used:
 
 | Call | `certificate_serial` |
 |---|---|
@@ -500,7 +500,7 @@ A `certificate_not_current` answer carries `certificate_serial`, the certificate
 | a registration or a renewal, refused for its pass | that of the certificate under the prekey statement it brings |
 | a renewal whose prekey statement is signed by a signer of lower rank, or by another certificate with the current certificate's serial (Section 11.9) | the one its prekey statement must be above |
 
-Where that signer is the identity, not a certificate, the member is absent.
+The member is absent where the signer in question is the identity.
 
 ## 9. Messages
 
@@ -860,7 +860,7 @@ What each call gets in each state:
 |---|---|---|---|
 | Register, `PUT /v1/<A>` | `201`; the mailbox is now active | an identical retry → `200`; any other → `409 conflict` | `410 revoked` |
 | Renew, `PUT /v1/<A>/prekey` | `404 no_such_mailbox` | `200` | `410 revoked` |
-| Any other call with the mailbox's own pass (Sections 11.11 to 11.14, 11.16) | `404 no_such_mailbox` | answered as its section says | `410 revoked` |
+| Any other call with the mailbox's own pass (list, fetch, ack, the ACL, joining or leaving an account: Sections 11.11 to 11.14, 11.16) | `404 no_such_mailbox` | answered as its section says | `410 revoked` |
 | Publish a revocation of the address, `PUT /v1/<A>/revocations` | the server keeps it, and the address is now revoked: `201` | the address is now revoked, and its messages are deleted: `201` | `410 revoked`, with the revocation record |
 | Publish a revocation of certificates, the same route | the server keeps it, and the address stays unknown: `200` | `200` | `410 revoked`, with the revocation record |
 
@@ -914,7 +914,7 @@ The server checks:
 
 ### 11.8. Look up a mailbox
 
-`GET /v1/<A>` takes no pass (Section 8). It answers what a sender needs before it posts, and what a mailbox checks of itself when it renews (Section 12.4).
+`GET /v1/<A>` takes no pass (Section 8). It answers what a sender needs before it posts, and what a mailbox checks of itself (Sections 12.4, 12.5).
 
 - **An active mailbox** → `200` with `identity`, `prekey` and `prekey_signature`, `sender_key_types` if the mailbox declared any, and `revoked_certificates` with `revoked_certificates_signature` if the server keeps a revocation of its certificates.
 - **An unknown address** → `404 no_such_mailbox`, whatever certificates its identity has revoked (looking up revocations serves those: Section 11.15).
@@ -1330,7 +1330,7 @@ A client drains every page of its list (Section 11.11), and fetches the message 
 - **A refused message is kept with what the checks established when they judged it,** each a value whose form the client checked, never text the sender wrote and never the body:
   - the reader's clock;
   - the address of the identity document the envelope carries, recorded as one of:
-    - **who signed the message,** only if the signature verified, by that identity or by a working key it certified, at its certificate's own start, under a certificate the reader keeps no revocation of; and the reader keeps no revocation of that address;
+    - **who signed the message,** only if both hold: the signature verified (by that identity, or by a working key it certified, at its certificate's own start, under a certificate the reader keeps no revocation of), and the reader keeps no revocation of that address;
     - **the identity it claims,** otherwise;
   - only where it is recorded as who signed the message: the envelope's `sent_at` and `msg_id`, and, for a certificate, its certificate serial, start and end.
 - **A transient failure** (a fetch that errors) and **a fault of the mailbox** (an unreadable key or replay set) are errors, never verdicts: nothing is acked, and the message waits for the next drain.
@@ -1622,7 +1622,7 @@ Dromas protects a message's content from everyone but its recipient, and its sen
 ### 15.6. Revocation's limits
 
 - **A server can keep a revocation from a peer that has never seen it,** answering that it keeps none, and nothing tells the peer otherwise. The lookup before every post narrows that in time and no further: what a client was shown while its server answered truly, it keeps after that server stops. Only a revocation record from the mailbox's owner, handed over out of band, answers a server that hides a revocation record from its first answer.
-- **A mailbox checks revocations at its own server alone** (Section 12.5). Another server, such as another implementation's, would help against one that withholds a revocation only where the revoked mailbox's owner and the reader both use it. This version defines no second server.
+- **A mailbox checks revocations at its own server alone** (Section 12.5). Asking another server too, such as one running another implementation, would help against a server that withholds a revocation, but only if the revoked mailbox's owner and the reader both use that other server. This version defines no second server.
 - **This protocol bounds no time a revocation can go unseen by a peer whose server hides it.** The usual answer is key transparency, a log of what a server serves that clients check, which this protocol does not have.
 
 ### 15.7. Clocks
