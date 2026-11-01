@@ -389,18 +389,20 @@ A certificate is an OpenSSH user certificate, and a verifier MUST check every ro
 
 ## 6. The prekey statement
 
-A prekey statement is five lines, signed by the mailbox's signer (Section 5), in the namespace `dromas-prekey-v1:<A>`:
+A prekey statement, `prekey-statement`, is signed by the mailbox's signer (Section 5), in the namespace `dromas-prekey-v1:<A>`, `prekey-namespace`:
 
-```
-dromas-prekey-v1
-<A>
-<serial>
-<age recipient>
-<not_after>
+```abnf
+prekey-statement = %s"dromas-prekey-v1" LF address LF serial LF
+                   age-recipient LF time LF
+prekey-namespace = %s"dromas-prekey-v1:" address
+age-recipient    = %s"age" *bech32-hrp-char "1" 6*bech32-char
+bech32-hrp-char  = %x21-40 / %x5B-7E   ; printable ASCII but A-Z
+bech32-char      = "0" / %x32-39 / %x61 / %x63-68 / %x6A-6E / %x70-7A
+                   ; BIP 173's alphabet: no 1, b, i or o
 ```
 
 - **Serial:** the prekey serial, a serial (Section 2.2). Under one signer, each prekey statement's prekey serial is higher than the last one's.
-- **Key:** an age recipient, whose Bech32 human-readable part names its type (BIP 173). It is written as age writes a recipient: lowercase, its checksum valid, its data whole bytes, and of any length.
+- **Key:** an age recipient, whose Bech32 human-readable part, before its last `1`, names its type (BIP 173). It is written as age writes a recipient: its checksum valid, its data whole bytes, and of any length.
   - The one prekey type is `mlkem768x25519`, named `age1pq`.
   - A key whose X25519 half is of small order breaks the prekey statement.
   - A prekey type added later is an addition inside v1 (Section 14).
@@ -427,13 +429,12 @@ A mailbox declares the identity key types its client verifies, so that a sender 
 
 A mailbox proves itself to its server, on every call it makes as itself, with a pass it signs for itself. The server issues nothing for it and stores nothing.
 
-The pass is four lines, signed by the mailbox's signer (Section 5), in the namespace `dromas-pass-v1:<A>`:
+The pass, `pass-statement`, is signed by the mailbox's signer (Section 5), in the namespace `dromas-pass-v1:<A>`, `pass-namespace`:
 
-```
-dromas-pass-v1
-<A>
-<server name>
-<not_after>
+```abnf
+pass-statement = %s"dromas-pass-v1" LF address LF server-name LF time LF
+pass-namespace = %s"dromas-pass-v1:" address
+server-name    = uri-host [ ":" port ]
 ```
 
 - **The server name** is the host of the mailbox's URL for its server, written as an origin is (RFC 6454 §6.2): lowercase, with no user information, and with its port only when the port is not the scheme's default. `https://dromas.dev:443` and `https://dromas.dev` name `dromas.dev`; `http://127.0.0.1:8080` names `127.0.0.1:8080`.
@@ -524,6 +525,15 @@ U1NIU0lH…
 2. **Then the signature,** as `ssh-keygen` writes it, through its END line.
 3. **Then padding,** to the end (Section 9.3).
 
+A sender writes it as `plaintext`, and signs in `msg-namespace`:
+
+```abnf
+plaintext     = envelope-line ssh-signature padding
+envelope-line = 1*( %x00-09 / %x0B-FF ) LF   ; the envelope (Section 9.1)
+padding       = *"."   ; Section 9.3
+msg-namespace = %s"dromas-msg-v1:" address
+```
+
 A reader MUST take the parts apart by these rules:
 
 1. **The signature is verified over line 1 exactly as decrypted,** and the envelope's members are read from those bytes, never from anything rebuilt.
@@ -557,8 +567,14 @@ The plaintext is encrypted to the recipient's prekey with age (C2SP age), in the
 
 A mailbox's identity can revoke its address for good, and nothing else can.
 
-- **The revocation statement is fixed text:** `dromas-revoke-v1`, LF, the address, LF. It has no date, no reason and no number: a verifier builds it from the address, and a copy signed at any time is the same revocation statement.
-- **It is signed by the identity key,** in the namespace `dromas-revoke-v1:<A>`, with the bare identity key as the signing key. A working key's signature over the same revocation statement, under a certificate of that identity, is not a revocation: a verifier's `allowed_signers` line names the identity key with no `cert-authority`.
+- **The revocation statement is fixed text,** `revocation-of-address`. It has no date, no reason and no number: a verifier builds it from the address, and a copy signed at any time is the same revocation statement.
+- **It is signed by the identity key,** in the namespace `dromas-revoke-v1:<A>`, `revoke-namespace`, with the bare identity key as the signing key. A working key's signature over the same revocation statement, under a certificate of that identity, is not a revocation: a verifier's `allowed_signers` line names the identity key with no `cert-authority`.
+
+  ```abnf
+  revocation-of-address = %s"dromas-revoke-v1" LF address LF
+  revoke-namespace      = %s"dromas-revoke-v1:" address
+  ```
+
 - **It reaches back, and nothing undoes it.** Once a verifier has verified a revocation of the address:
   - it takes nothing signed for that address, whenever it was signed;
   - it sends the address nothing;
@@ -568,8 +584,14 @@ A mailbox's identity can revoke its address for good, and nothing else can.
 
 The identity revokes every certificate it made through a revocation serial, that serial included, and keeps its address.
 
-- **The revocation statement is three lines:** `dromas-revoke-certs-v1`, the address, the revocation serial.
-- **It is signed by the identity key,** in the namespace `dromas-revoke-certs-v1:<A>`, as `ssh-keygen -q -Y sign -n "dromas-revoke-certs-v1:$A" -f identity < statement > statement.sig`. A working key's signature is refused.
+- **The revocation statement,** `revocation-of-certificates`, carries the address and the revocation serial.
+- **It is signed by the identity key,** in the namespace `dromas-revoke-certs-v1:<A>`, `revoke-certs-namespace`, as `ssh-keygen -q -Y sign -n "dromas-revoke-certs-v1:$A" -f identity < statement > statement.sig`. A working key's signature is refused.
+
+  ```abnf
+  revocation-of-certificates = %s"dromas-revoke-certs-v1" LF address LF serial LF
+  revoke-certs-namespace     = %s"dromas-revoke-certs-v1:" address
+  ```
+
 - **It revokes every certificate of the address whose certificate serial is at or below its revocation serial.**
   - It covers certificates only (Section 5.1).
   - A verifier keeps the one with the highest revocation serial it has verified, and that one stands. One through a lower revocation serial changes nothing, whenever it arrives.
