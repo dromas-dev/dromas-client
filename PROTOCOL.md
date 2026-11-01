@@ -27,12 +27,34 @@ The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD", "S
 
 ### 2.2. Notation
 
+- **Grammar.** A text's form is given in ABNF (RFC 5234), in the section that defines the text, right after the prose that introduces it. A string in quotes matches in any ASCII case; one written `%s"…"` matches exactly (RFC 7405). The core rules (RFC 5234 Appendix B: `ALPHA`, `DIGIT`, `DQUOTE`, `LF`, `SP`) are used by name, and so are `full-date`, `time-hour`, `time-minute` and `time-second` (RFC 3339 §5.6), `OWS` and `BWS` (RFC 9110 §5.6.3), and `uri-host` and `port` (RFC 9110 §4.1: RFC 3986's `host` and `port`). Appendix B collects every rule.
 - A *line* ends in LF (0x0A). A text "of N lines" is exactly N lines: no CR, and nothing after the last LF.
 - `‖` is concatenation. `str(x)` is a uint32 big-endian length followed by the bytes of `x` (RFC 4251 §5).
-- An **address** is written as 77 characters of lowercase base32 (RFC 4648 §6) without padding, wherever it appears: a path, a statement, an envelope, a namespace.
-- A **time** is RFC 3339 in UTC to the second, exactly `YYYY-MM-DDTHH:MM:SSZ`. What ends at a time has ended at that second: it is valid while a clock reads before it.
-- A **serial** is a decimal integer from 1 to 2^53 − 1 with no leading zero. 2^53 − 1 is the largest integer every JSON reader holds exactly (Section 3.3). A certificate serial, a prekey serial and a revocation serial (Section 2.3) are each a serial.
-- **base64** is standard base64 (RFC 4648 §4) in its one encoding: padded, with no character outside the alphabet (a line break included), and the unused bits of its last character zero, so that encoding the bytes again gives the same text. Two places differ, and say so: the armour of a signature (Section 3.2) and an adopt key (Section 11.16).
+- An **address** is written as 77 characters of lowercase base32 (RFC 4648 §6) without padding, `address` (Section 4.2), wherever it appears: a path, a statement, an envelope, a namespace.
+- A **time** is RFC 3339 in UTC to the second. What ends at a time has ended at that second: it is valid while a clock reads before it.
+
+  ```abnf
+  time = full-date %s"T" time-hour ":" time-minute ":" time-second %s"Z"
+  ```
+
+- A **serial** is a decimal integer from 1 to 2^53 − 1, of which the grammar states only the digits. 2^53 − 1 is the largest integer every JSON reader holds exactly (Section 3.3). A certificate serial, a prekey serial and a revocation serial (Section 2.3) are each a serial.
+
+  ```abnf
+  serial = %x31-39 *15DIGIT   ; no leading zero
+  ```
+
+- **base64** is standard base64 (RFC 4648 §4) in its one encoding, so that encoding the bytes again gives the same text: padded, and the unused bits of its last character zero. Two places differ, and say so: the armour of a signature (Section 3.2) and an adopt key (Section 11.16).
+
+  ```abnf
+  base64            = *( 4base64-char ) [ base64-final ]
+  base64-char       = ALPHA / DIGIT / "+" / "/"
+  base64-final      = 2base64-char base64-char-by-4 "="
+                    / base64-char base64-char-by-16 "=="
+  base64-char-by-4  = %s"A" / %s"E" / %s"I" / %s"M" / %s"Q" / %s"U" / %s"Y"
+                    / %s"c" / %s"g" / %s"k" / %s"o" / %s"s" / %s"w"
+                    / "0" / "4" / "8"   ; its value a multiple of 4
+  base64-char-by-16 = %s"A" / %s"Q" / %s"g" / %s"w"   ; its value a multiple of 16
+  ```
 - In a namespace or a statement, `<A>` is the address of the mailbox that signs it.
 - In a route, `<A>` is the address of the mailbox the call is about: a mailbox calling about itself, or anyone's lookup or revocation call (Sections 11.8, 11.15). `<B>` is the address of a message's recipient: a sender sends to it (Section 11.10), and the recipient calls the other message routes as itself (Sections 11.11 to 11.14).
 
@@ -1518,7 +1540,7 @@ Dromas protects a message's content from everyone but its recipient, and its sen
 - **[BIP 173]** Bech32
 - **[FIPS 180-4]**, **[FIPS 186-5]**
 - **[RFC 2119]**, **[RFC 8174]** BCP 14
-- **[RFC 3339]** timestamps · **[RFC 4151]** the `tag` URI scheme · **[RFC 4251]**, **[RFC 4253]** SSH · **[RFC 4648]** base64 and base32 · **[RFC 5656]** ECDSA in SSH · **[RFC 6454]** origins · **[RFC 7457]** TLS attacks · **[RFC 7493]** I-JSON · **[RFC 8032]** EdDSA · **[RFC 8259]** JSON · **[RFC 8555]** ACME · **[RFC 8594]** the `Sunset` header field · **[RFC 8709]** Ed25519 in SSH · **[RFC 9110]** HTTP semantics · **[RFC 9457]** problem details · **[RFC 9562]** UUIDs · **[RFC 9651]** Structured Field Values · **[RFC 9745]** the `Deprecation` header field
+- **[RFC 3339]** timestamps · **[RFC 3986]** URIs · **[RFC 4151]** the `tag` URI scheme · **[RFC 4251]**, **[RFC 4253]** SSH · **[RFC 4648]** base64 and base32 · **[RFC 5234]** ABNF · **[RFC 5656]** ECDSA in SSH · **[RFC 6454]** origins · **[RFC 7405]** case-sensitive strings in ABNF · **[RFC 7457]** TLS attacks · **[RFC 7493]** I-JSON · **[RFC 8032]** EdDSA · **[RFC 8259]** JSON · **[RFC 8555]** ACME · **[RFC 8594]** the `Sunset` header field · **[RFC 8709]** Ed25519 in SSH · **[RFC 9110]** HTTP semantics · **[RFC 9457]** problem details · **[RFC 9562]** UUIDs · **[RFC 9651]** Structured Field Values · **[RFC 9745]** the `Deprecation` header field
 - **[SemVer]** Semantic Versioning 2.0.0, https://semver.org/spec/v2.0.0.html
 
 ## Appendix A. Where `ssh-keygen` differs (informative)
