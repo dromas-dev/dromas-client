@@ -55,20 +55,6 @@ func (b *Bytes) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// AnySender is the one entry of a declaration of sender key types that is no
-// key type's name: the mailbox does not say which types its client verifies, and
-// a server makes no check for it.
-const AnySender = "any"
-
-// AcceptsSender reports whether a mailbox that declared the sender key types
-// declared takes messages from a mailbox whose identity is of type t, as far as the
-// declaration says: IdentityEd25519 always, whatever was declared; any type
-// if it declared AnySender; otherwise only a type it listed. A mailbox that
-// declared nothing takes IdentityEd25519 only (PROTOCOL.md §7).
-func AcceptsSender(declared []string, t string) bool {
-	return t == IdentityEd25519 || slices.Contains(declared, t) || slices.Contains(declared, AnySender)
-}
-
 // RegisterRequest is the body of PUT /v1/<address>: the identity document, and
 // the first prekey statement with the signature over it of a working key the
 // identity certified. The call carries a pass under that certificate.
@@ -76,9 +62,10 @@ type RegisterRequest struct {
 	Identity        Bytes `json:"identity"`
 	Prekey          Bytes `json:"prekey"`
 	PrekeySignature Bytes `json:"prekey_signature"`
-	// SenderKeyTypes declares the identity key types the mailbox's client
-	// verifies: the senders the mailbox takes messages from (AcceptsSender). It is
-	// not signed, and it stands until the mailbox's next prekey replaces it.
+	// SenderKeyTypes declares the optional identity key types the mailbox's
+	// client verifies (OptionalTypes): with every type of PROTOCOL.md §4.1, the
+	// senders the mailbox takes messages from (AcceptsSender). It is not
+	// signed, and it stands until the mailbox's next prekey replaces it.
 	SenderKeyTypes []string `json:"sender_key_types,omitempty"`
 }
 

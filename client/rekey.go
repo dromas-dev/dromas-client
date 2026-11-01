@@ -477,7 +477,9 @@ func (b *Mailbox) makeRenewal(ctx context.Context, st *ownRead, next uint64, p *
 	if rec == nil {
 		return nil, out, fmt.Errorf("the mailbox's state file keeps no statement of prekey %d", next)
 	}
-	req.SenderKeyTypes, req.Prekey, req.PrekeySignature = b.senderKeyTypes, rec.Statement, rec.Signature
+	// The declaration is what this client verifies beyond PROTOCOL.md §4.1's
+	// types, which every mailbox takes (§7).
+	req.SenderKeyTypes, req.Prekey, req.PrekeySignature = protocol.OptionalTypes(), rec.Statement, rec.Signature
 	return p, out, nil
 }
 

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 
 	"filippo.io/edwards25519"
 	"golang.org/x/crypto/ssh"
@@ -18,18 +19,58 @@ const (
 	IdentityTag = "dromas-v1"
 )
 
-// The identity key types this package defines: the SSH name on line 2 of an
-// identity document. Every client verifies IdentityEd25519. Every other type
-// is optional: a mailbox of one is reached only by clients that verify it
-// (PROTOCOL.md §4.1).
+// The identity key types PROTOCOL.md §4.1 defines: the SSH name on line 2 of
+// an identity document. Every client verifies both. A type defined after them
+// is optional: a mailbox of one is reached only by clients that verify it,
+// which declare it (§7).
 const (
 	IdentityEd25519 = ssh.KeyAlgoED25519
 	IdentityP256    = ssh.KeyAlgoECDSA256
 )
 
-// IdentityTypes returns the identity key types this package verifies, the one
-// every client must verify first.
-func IdentityTypes() []string { return []string{IdentityEd25519, IdentityP256} }
+// IdentityTypes returns the identity key types this package verifies, those of
+// PROTOCOL.md §4.1 first.
+func IdentityTypes() []string { return slices.Clone(identityOrder) }
+
+// identityOrder is IdentityTypes' list, each a type identityTypes defines.
+var identityOrder = []string{IdentityEd25519, IdentityP256}
+
+// OptionalTypes returns the identity key types this package verifies that
+// PROTOCOL.md §4.1 does not define, in IdentityTypes' order: the declaration
+// a mailbox makes with each prekey (§7). It is empty while every type this
+// package verifies is one of §4.1's.
+func OptionalTypes() []string {
+	var o []string
+	for _, t := range IdentityTypes() {
+		if identityTypes[t].optional {
+			o = append(o, t)
+		}
+	}
+	return o
+}
+
+// Declaration returns what a server keeps of a mailbox's declaration of
+// sender key types: the optional types of this package that it names, in
+// OptionalTypes' order, and none of the rest, a type of §4.1 among them
+// (PROTOCOL.md §7).
+func Declaration(types []string) []string {
+	var kept []string
+	for _, t := range OptionalTypes() {
+		if slices.Contains(types, t) {
+			kept = append(kept, t)
+		}
+	}
+	return kept
+}
+
+// AcceptsSender reports whether a mailbox that declared the sender key types
+// declared takes messages from a mailbox whose identity is of type t, as far
+// as the declaration says: a type of PROTOCOL.md §4.1 always, and an optional
+// type only where it was declared (§7).
+func AcceptsSender(declared []string, t string) bool {
+	k, defined := identityTypes[t]
+	return defined && !k.optional || slices.Contains(declared, t)
+}
 
 // Every ParseIdentity error wraps one of these: the document breaks its
 // format, its key fails the key checks, or it is a well-formed document of a
@@ -70,6 +111,9 @@ var identityTypes = map[string]struct {
 	check func(ssh.PublicKey) error
 	work  string
 	bound int
+	// optional is a type PROTOCOL.md §4.1 does not define: one a mailbox
+	// declares (§7).
+	optional bool
 }{
 	// Its bound is exact: a prekey statement or a pass under a certificate,
 	// each 850 bytes in the one form.

@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"math/big"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -214,5 +215,53 @@ func TestEveryIdentityTypeNamesADefinedWorkingKeyType(t *testing.T) {
 	}
 	if WorkingKeyType("no-such-key-type@dromas.invalid") != "" {
 		t.Error("a key type not defined here names a working key's type")
+	}
+}
+
+// A sender of a type PROTOCOL.md §4.1 defines is taken whatever a mailbox
+// declared, and one of an optional type only where it was declared; what a
+// server keeps of a declaration is the optional types this package knows,
+// and none of §4.1's, nor a name it does not know (§7). The optional type is
+// one this test defines, so it runs alone.
+func TestADeclarationNamesOnlyOptionalTypes(t *testing.T) {
+	const opt = "optional-test-type@dromas.invalid"
+	for _, ty := range IdentityTypes() {
+		if identityTypes[ty].optional {
+			t.Fatalf("%s is optional, and §4.1 defines every type this package verifies", ty)
+		}
+		if !AcceptsSender(nil, ty) {
+			t.Errorf("a mailbox that declared nothing does not take a sender of %s", ty)
+		}
+	}
+	if len(OptionalTypes()) != 0 || len(Declaration([]string{IdentityEd25519, IdentityP256, opt, "any"})) != 0 {
+		t.Fatalf("with no optional type, OptionalTypes is %v and a declaration of every name keeps %v", OptionalTypes(), Declaration([]string{IdentityEd25519, IdentityP256, opt, "any"}))
+	}
+	if AcceptsSender([]string{opt}, "no-such-key-type@dromas.invalid") || !AcceptsSender([]string{opt}, opt) {
+		t.Fatal("a declaration takes a type it does not name, or not one it names")
+	}
+
+	order := identityOrder
+	identityTypes[opt] = struct {
+		check    func(ssh.PublicKey) error
+		work     string
+		bound    int
+		optional bool
+	}{work: IdentityEd25519, bound: 850, optional: true}
+	identityOrder = append(slices.Clone(order), opt)
+	t.Cleanup(func() {
+		delete(identityTypes, opt)
+		identityOrder = order
+	})
+	if got := OptionalTypes(); !slices.Equal(got, []string{opt}) {
+		t.Fatalf("OptionalTypes is %v", got)
+	}
+	if got := Declaration([]string{"any", IdentityP256, opt, IdentityEd25519, "no-such-key-type@dromas.invalid"}); !slices.Equal(got, []string{opt}) {
+		t.Errorf("a server keeps %v of a declaration", got)
+	}
+	if AcceptsSender(nil, opt) || AcceptsSender([]string{IdentityEd25519, IdentityP256}, opt) || !AcceptsSender([]string{opt}, opt) {
+		t.Error("a sender of an optional type is taken where it was not declared, or not where it was")
+	}
+	if !AcceptsSender(nil, IdentityP256) || !AcceptsSender([]string{opt}, IdentityEd25519) {
+		t.Error("a sender of a §4.1 type is not taken")
 	}
 }

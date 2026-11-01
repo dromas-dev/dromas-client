@@ -164,7 +164,7 @@ Where this document uses a term below as a defined term, it has the sense given 
 |---|---|---|
 | age v1 | encryption to a prekey: `mlkem768x25519`, the hybrid ML-KEM-768 + X25519 recipient | C2SP age |
 | Ed25519 | the identity key of type `ssh-ed25519`; the working key of an identity of either type of Section 4.1 | RFC 8032 |
-| ECDSA P-256 | the identity key of the optional type `ecdsa-sha2-nistp256` | FIPS 186-5, RFC 5656 |
+| ECDSA P-256 | the identity key of type `ecdsa-sha2-nistp256` | FIPS 186-5, RFC 5656 |
 | SSHSIG | every signature: the signer's signature over SHA-512 of the message, in a namespace | OpenSSH `PROTOCOL.sshsig` |
 | SSH public key text | `<key type> <base64 of the wire key>` | RFC 4253 §6.6, RFC 8709, RFC 5656 |
 | OpenSSH certificate | the certificate of a working key | draft-ietf-sshm-cert |
@@ -279,8 +279,8 @@ The key MUST be of a type this section defines, in its one encoding, and MUST me
 | `ssh-ed25519` | 91 bytes | the key's length, 32 (RFC 8709 §4) | a canonical point, not of small order | `ssh-ed25519` |
 | `ecdsa-sha2-nistp256` | 171 bytes | the curve's name, `nistp256`, and an uncompressed point | the point on the curve, not the point at infinity, each coordinate below the field's size | `ssh-ed25519` |
 
-- **Every client MUST verify `ssh-ed25519`.** A client MUST NOT make an identity of any other type unless its owner asks for one.
-- **Every other type is OPTIONAL:** a client verifies it or not, and a server registers it or not (Section 11.7). A mailbox of an optional type can be written to, and heard from, only by mailboxes whose clients verify that type (Section 7).
+- **Every client MUST verify every key type this section defines.** A client MUST NOT make an identity of a type other than `ssh-ed25519` unless its owner asks for one.
+- **A key type defined after this version is OPTIONAL** (Section 14): a client verifies it or not, and a server registers it or not (Section 11.7). A mailbox of an optional type can be written to, and heard from, only by mailboxes whose clients verify that type (Section 7). This version defines no optional type.
 - **The working key column** is the type of every working key an identity of that type certifies (Section 5). A type defined later states its own, as it states its own signature bound (Section 3.2).
 - **The form is the same for every key type, defined here or not:** `identity-document`, where `key-type` is a key type's name as RFC 4251 §6 writes one, and the base64 is of an SSH wire key that begins with that same name.
 
@@ -421,15 +421,14 @@ bech32-char      = "0" / %x32-39 / %x61 / %x63-68 / %x6A-6E / %x70-7A
 
 ## 7. Sender key types
 
-A mailbox declares the identity key types its client verifies, so that a sender of an optional type does not write to a mailbox that cannot read it.
+A mailbox declares the optional identity key types its client verifies (Section 4.1), so that a sender of an optional type does not write to a mailbox that cannot read it. Every mailbox takes senders of every type Section 4.1 defines.
 
-- **A mailbox SHOULD declare every identity key type its client verifies, in its registration (Section 11.7) and in each renewal (Section 11.9),** in `sender_key_types`, a list of key type names. A lookup carries the list (Section 11.8).
-- **Every mailbox takes `ssh-ed25519`, whatever it declared.** A mailbox that declared nothing takes `ssh-ed25519` senders only.
-- **A sender whose identity key's type is not on the recipient's list MUST NOT send.** A server refuses such a send, `403 sender_key_type` (Section 11.10, step 7).
-- **The one entry `any`** says that the mailbox does not say which types its client verifies. A server then makes no check for that mailbox. A client declares `any` only when its owner tells it to.
+- **A mailbox SHOULD declare every optional key type its client verifies, in its registration (Section 11.7) and in each renewal (Section 11.9),** in `sender_key_types`, a list of key type names. A lookup carries the list (Section 11.8).
+- **A mailbox MUST NOT list a type Section 4.1 defines.**
+- **A sender whose identity key is of an optional type that the recipient did not list MUST NOT send.** A server refuses such a send, `403 sender_key_type` (Section 11.10, step 7).
 - **The declaration is the current prekey's.** A renewal replaces it, with nothing if it carries none. An identical retry changes nothing (Sections 11.7, step 5; 11.9).
 - **It is not signed.** What a recipient takes is decided by what its client verifies (Section 12.3), never by this list.
-- **A server keeps the names it knows and ignores the rest.**
+- **A server keeps the names of the optional types it knows and ignores the rest,** a type Section 4.1 defines among them.
 
 ## 8. The pass
 
@@ -990,7 +989,7 @@ The server checks the steps below; only step 9 stores anything. The server takes
    | Failure | Answer |
    |---|---|
    | `B`'s current prekey is past its `not_after`, or the current signer is one `B`'s identity has revoked | `409 prekey_expired` |
-   | The sender's identity key is not `ssh-ed25519`, and `B` declared neither that type nor `any` (Section 7) | `403 sender_key_type` |
+   | The sender's identity key is of an optional type (Section 4.1) that `B` did not declare (Section 7) | `403 sender_key_type` |
    | `statement` is not the hash of `B`'s current statement | `409 stale_prekey` |
    | The age file does not have **exactly one native stanza** (`mlkem768x25519`) of the current prekey's type | `wrong_recipient_type` |
 
@@ -1547,7 +1546,7 @@ Until version 1 is declared stable, nothing is final. From that declaration:
   - `410 version_retired` once it has stopped taking it.
 - **A feature that is not in version 1.0** is a capability the server lists in the server's document (Section 11.18), or a later minor version's. A client uses it only where the server lists it, or names that minor version as its latest.
 - **`dromas-revoke-v1` stays valid for good,** so a revocation signed in advance keeps working.
-- **A new identity key type is an addition inside v1:** the identity document has one form for every type (Section 4.1), so a type defined later takes no new tag, and a mailbox declares the types its client verifies (Section 7).
+- **A new identity key type is an addition inside v1:** the identity document has one form for every type (Section 4.1), so a type defined later takes no new tag. It is optional, and a mailbox declares it once its client verifies it (Section 7).
 - **A new prekey type is an addition inside v1** the same way (Section 6).
 
 What version 1 fixes, and where each can grow inside it:
@@ -1722,7 +1721,7 @@ Its builds also differ from Sections 3.2 and 4.1:
 - **An Ed25519 signature's S.** `ssh-keygen` before 10.3p1 on OpenSSL's Ed25519, and before 10.4p1 on its own, takes S + L.
 - **An Ed25519 key.** Go's `crypto/ed25519`, and OpenSSH before 10.6p1, take small-order and non-canonical keys, so a client checks them itself.
 - **A P-256 key's coordinates.** OpenSSH up to 10.2p1 refuses a coordinate of 128 bits or fewer, or of n − 1 or more, which OpenSSH from 10.3p1 and `golang.org/x/crypto/ssh` take.
-- **A P-256 key at all.** OpenSSH built without OpenSSL reads none.
+- **A P-256 key at all.** OpenSSH built without OpenSSL reads none, so a client built on it does not verify every type Section 4.1 defines.
 - **Certificates.** `ssh-keygen -Y verify` takes a certificate with a second principal, a critical option, extensions out of order or given twice, or a validity of `forever`, checks no key id, and knows a serial only through a revocation list, so a client built on it reads those fields from the certificate itself.
 
 ## Appendix B. Collected ABNF

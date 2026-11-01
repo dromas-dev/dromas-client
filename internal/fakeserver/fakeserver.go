@@ -74,7 +74,7 @@ type mailbox struct {
 	key       []byte           // that signer's key's wire bytes: the identity's key, or the certificate
 	keep      time.Time        // the latest it is kept until (PROTOCOL.md §13): raised, never lowered
 	account   string           // the account it is in, or ""
-	senders   []string         // the sender key types it declared with its current prekey
+	senders   []string         // what it declared with its current prekey, as a server keeps it (protocol.Declaration)
 	revocations
 	acl      *protocol.ACL // its sender ACL; nil: none, which admits everyone
 	messages map[string]*message
@@ -566,7 +566,7 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 	}
 	delete(s.held, a)
 	b := &mailbox{identity: req.Identity, statement: req.Prekey, signature: req.PrekeySignature, prekey: p, signer: by, key: keyOf(req.Identity, by),
-		senders: req.SenderKeyTypes, revocations: kept, messages: map[string]*message{}}
+		senders: protocol.Declaration(req.SenderKeyTypes), revocations: kept, messages: map[string]*message{}}
 	b.kept()
 	s.mailboxes[a] = b
 	WriteJSON(w, http.StatusCreated, struct{}{})
@@ -764,7 +764,7 @@ func (s *Server) newPrekey(w http.ResponseWriter, r *http.Request) {
 	if !s.pass(w, r, b.identity, by, b.listed) {
 		return
 	}
-	b.statement, b.signature, b.prekey, b.signer, b.key, b.senders = req.Prekey, req.PrekeySignature, p, by, keyOf(b.identity, by), req.SenderKeyTypes
+	b.statement, b.signature, b.prekey, b.signer, b.key, b.senders = req.Prekey, req.PrekeySignature, p, by, keyOf(b.identity, by), protocol.Declaration(req.SenderKeyTypes)
 	b.kept()
 	WriteJSON(w, http.StatusOK, struct{}{})
 }
