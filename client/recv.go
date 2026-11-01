@@ -88,7 +88,8 @@ type Result struct {
 	// Retry-After.
 	PollAfter int64
 	// Renewed is the prekey this Receive published, the current one being
-	// more than a day old; nil if none was due.
+	// due (more than a day old, or sooner for a short lifetime: renewAt); nil
+	// if none was due.
 	Renewed *protocol.Prekey
 	// RenewErr is why a due renewal failed. The drain went ahead, and a
 	// later Receive tries again, at most hourly.
