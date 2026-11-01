@@ -508,12 +508,18 @@ The envelope is one line of compact JSON, its LF included, and is what the sende
 | `from` | required | the sender's address |
 | `to` | required | the recipient's address |
 | `sent_at` | required | a time: when this copy was posted (Section 12.2) |
-| `msg_id` | required | a UUID as RFC 9562 §4 writes one (hex, hyphens between its 4, 2, 2, 2 and 6 octets), lowercase, of any version. A client makes a random one (version 4) once for each message and keeps it on every copy |
+| `msg_id` | required | a UUID as RFC 9562 §4 writes one, in lowercase, of any version: `msg-id`. A client makes a random one (version 4) once for each message and keeps it on every copy |
 | `identity` | required | the sender's identity document, base64. `from` is its hash |
 | `body` | required | the message's content: any JSON value, carried as that value. Its null is a value |
 | `subject` | optional | a string |
 | `in_reply_to` | optional | a string: the `msg_id` replied to |
 | `supersedes` | optional | a string: a `msg_id` of the same sender that this message replaces. A stored message is never altered; the recipient decides |
+
+```abnf
+msg-id    = 8lowhexdig "-" 4lowhexdig "-" 4lowhexdig "-" 4lowhexdig "-"
+            12lowhexdig   ; RFC 9562's UUID (Section 4), in lowercase
+lowhexdig = DIGIT / %x61-66   ; HEXDIG in lowercase
+```
 
 - **An empty string in `subject`, `in_reply_to` or `supersedes` is the member left out,** and a writer leaves such a member out.
 - **A sender MUST refuse an `in_reply_to` or `supersedes` that is not a `msg_id`.** A reader checks only that each is a string.
@@ -928,7 +934,11 @@ The server takes a renewal because its prekey statement is later than the curren
 
 `POST /v1/<B>/messages?statement=<hash>` carries the sender's pass, and its body is the age file's exact bytes (`Content-Type: application/octet-stream`). It is answered `201` with `id`, `received_at` and `expires_at`, and `Location: /v1/<B>/messages/<id>`. The sender is the mailbox the pass names.
 
-`statement` is REQUIRED. It names the prekey statement the age file is sealed to: the SHA-256 of the prekey statement's bytes as the lookup of `B` served them (Section 11.8), never of its signature, in 64 lowercase hex digits. Another encoding of the same signature (Section 3.2) does not change it.
+`statement` is REQUIRED. It names the prekey statement the age file is sealed to: the SHA-256 of the prekey statement's bytes as the lookup of `B` served them (Section 11.8), never of its signature, as `statement-hash`. Another encoding of the same signature (Section 3.2) does not change it.
+
+```abnf
+statement-hash = 64lowhexdig
+```
 
 - **A server reads the body as bytes, whatever its `Content-Type` says.**
 - **A ciphertext is at most 16 MiB (16,777,216 bytes).** A server's caps on it, an account's included, are at most that. Every reader takes a ciphertext of any size up to it, so every reader reads a message any server takes. A larger one is a new version of the protocol.
@@ -940,7 +950,7 @@ The server checks the steps below; only step 9 stores anything. The server takes
    1. the IP address's `sends_before_pass`;
    2. the mailbox the pass names: unknown → `403 unknown_sender`; revoked → `403 sender_revoked`;
    3. the pass's own refusals, and the sender's `calls` (Section 11.5), which every send spends, a send of a ciphertext `B` already stores (step 6) included.
-2. **The path and the query.** `<B>` is an address → otherwise `bad_address`. `statement` is given once, as 64 characters of `0`–`9` and `a`–`f`, and no other parameter is given → otherwise `bad_request`, naming the parameter.
+2. **The path and the query.** `<B>` is an address → otherwise `bad_address`. `statement` is given once, as `statement-hash`, and no other parameter is given → otherwise `bad_request`, naming the parameter.
 3. **The body's size** is at most the sender's cap → otherwise `413 too_large`, with the cap in `limit`. The server refuses by the `Content-Length` before it reads anything, or while it reads.
 4. **It is an age file** → otherwise `not_age`, an empty body included.
 5. **`B` is active:** unknown → `404 no_such_mailbox`; revoked → `410 revoked`.
@@ -974,7 +984,12 @@ The server checks the steps below; only step 9 stores anything. The server takes
 - **`count`** is the number of live messages in the mailbox.
 - **`messages`** is one page of up to 50 list entries, oldest first by `received_at`. Each list entry has the message id in `id`, `size` (its ciphertext's length, Section 11.10), `received_at` and `expires_at`, and nothing of the sender.
 - **`next_cursor`** is null after the last page. An empty mailbox is `{"count":0,"messages":[],"next_cursor":null}`.
-- **A cursor is opaque** and is one or more of `A`–`Z`, `a`–`z`, `0`–`9`, `-` and `_` (AEP-158). The next list carries it unchanged, as `?cursor=`.
+- **A cursor is opaque,** `cursor` (AEP-158). The next list carries it unchanged, as `?cursor=`.
+
+  ```abnf
+  cursor = 1*( ALPHA / DIGIT / "-" / "_" )
+  ```
+
 - **`Retry-After` on every list answer, a `304` included, is the server's poll interval,** in seconds.
 - **A first page carries an `ETag`,** a strong validator of the page's body, which changes whenever a message enters or leaves the page or the count. A page after the first carries none.
 - **Preconditions** are evaluated as Section 11.2 says. For a list:
@@ -1013,9 +1028,14 @@ The server checks the steps below; only step 9 stores anything. The server takes
 
   | `Range` | Answer |
   |---|---|
-  | `bytes=N-`: one open-ended range whose `N` is below the ciphertext's length | `206 Partial Content`, with the bytes from `N` to the end and `Content-Range: bytes N-<last>/<length>`, each number in digits with no leading zero |
+  | `bytes=N-`: one open-ended range whose `N` is below the ciphertext's length | `206 Partial Content`, with the bytes from `N` to the end and `Content-Range: bytes N-<last>/<length>`, as `content-range-206` |
   | any other: several ranges, a closed range, a suffix, `N` at or past the length, another unit | `200`, the whole body |
   | any `Range` beside an `If-Range` | `200`, the whole body |
+
+  ```abnf
+  content-range-206 = %s"bytes" SP range-number "-" range-number "/" range-number
+  range-number      = "0" / %x31-39 *DIGIT   ; no leading zero
+  ```
 
 - **A fetch carries no validator.** The message id is the ciphertext's SHA-256, so the bytes under a message id never change.
 - **Counting.** A ranged fetch is counted as any fetch is.
@@ -1037,7 +1057,12 @@ A mailbox's ACL says which senders its server accepts the mailbox's messages fro
 
 - **Semantics.** A mailbox with no ACL accepts messages from everyone. With one, `deny` is checked first, then `allow`, and a sender matched by neither is refused, `403 sender_not_allowed`.
 - **Set the ACL: `PUT /v1/<B>/acl`,** with the pass, replaces the ACL whole with `allow` and `deny`.
-  - Each ACL entry is an address, or `*`, which matches every address. There is no other pattern, and repeats are taken once.
+  - Each ACL entry is an address, or `*`, which matches every address: `acl-entry`. There is no other pattern, and repeats are taken once.
+
+    ```abnf
+    acl-entry = "*" / address
+    ```
+
   - `allow` is REQUIRED (`["*"]` is everyone and `[]` nobody): a document without it → `400 bad_request`.
   - `deny` may be left out, for none.
   - More entries, in both lists together, than the server accepts → `413 too_large`. A server MUST NOT accept more than 10,000, and MAY accept fewer.
@@ -1081,16 +1106,38 @@ A mailbox may belong to one account at its server. The protocol fixes how a mail
 - **Join: `PUT /v1/<A>/account`** carries the pass and `key`, an adopt key → `200` with `account`, the account id. It spends one use of the key, unless the mailbox is already in that account. A mailbox in another account moves to this one.
 - **Leave: `DELETE /v1/<A>/account`** carries the pass → `204`, whether or not the mailbox is in an account. An account can also drop a mailbox from its side.
 - **Joining or leaving changes nothing about the mailbox's messages.**
-- **An adopt key** is `dra1_` followed by base64url without padding (RFC 4648 §5), at most 1,024 bytes in all. The server decides what it encodes.
+- **An adopt key** is `dra1_` followed by base64url without padding (RFC 4648 §5), at most 1,024 bytes in all: `adopt-key`. The server decides what it encodes.
+
+  ```abnf
+  adopt-key      = %s"dra1_" *254( 4base64url-char )
+                   [ 2base64url-char / 3base64url-char ]   ; at most 1,024 bytes
+  base64url-char = ALPHA / DIGIT / "-" / "_"
+  ```
+
   - A client holds an adopt key to that form and reads nothing else of it.
   - A client MUST NOT take an adopt key as a command-line argument, where process lists and transcripts keep it.
   - A key this server did not make, or that is spent, expired or revoked → `403 adopt_key_refused`.
-- **An account id** is 1 to 32 of `a`–`z`, `0`–`9` and `-`.
+- **An account id** is `account-id`.
+
+  ```abnf
+  account-id = 1*32( %x61-7A / DIGIT / "-" )
+  ```
+
 - **An account's caps on a ciphertext** are within Section 11.10's.
 
 ### 11.17. Versions
 
-- **Every request names the version of the client that makes it,** in `Dromas-Version`: the version of its release, written as SemVer 2.0.0 writes one ([SemVer] §2, §9). That is `MAJOR.MINOR.PATCH` and an optional pre-release, with no `v` and no build metadata.
+- **Every request names the version of the client that makes it,** in `Dromas-Version`: the version of its release, written as SemVer 2.0.0 writes one ([SemVer] §2, §9), with no build metadata: `Dromas-Version`, its major, minor and patch and an optional pre-release.
+
+  ```abnf
+  Dromas-Version = version-number "." version-number "." version-number
+                   [ "-" pre-release ]
+  version-number = "0" / %x31-39 *DIGIT
+  pre-release    = pre-release-id *( "." pre-release-id )
+  pre-release-id = version-number
+                 / *DIGIT ( ALPHA / "-" ) *( ALPHA / DIGIT / "-" )
+  ```
+
   - A client's major and minor are those of the protocol it implements. A major of `0` marks a release from before version 1 is declared.
   - A request without the field, or with a value of another form, is read as version `0.0.0`.
 - **A server's version policy** is its own. It has four parts:
@@ -1099,7 +1146,13 @@ A mailbox may belong to one account at its server. The protocol fixes how a mail
   - its **sunsets**: the versions it has scheduled to stop accepting;
   - the **latest version** it names, if it names one.
 
-  A version in the policy is written `MAJOR.MINOR` or `MAJOR.MINOR.PATCH`. A deprecation or a sunset is a date and one of:
+  A version in the policy is `policy-version`: a major and a minor, and a patch where written.
+
+  ```abnf
+  policy-version = version-number "." version-number [ "." version-number ]
+  ```
+
+  A deprecation or a sunset is a date and one of:
   - `below` a version: it covers every version SemVer orders before that version (here a version written `MAJOR.MINOR` stands for `MAJOR.MINOR.0`);
   - `version`: it covers every version whose major, minor and, where written, patch are that version's.
 
@@ -1132,7 +1185,12 @@ A mailbox may belong to one account at its server. The protocol fixes how a mail
 - **`deprecations`** lists each deprecation as `below` or `version`, and `at`: its date, as a time (Section 2.2).
 - **`sunsets`** lists each scheduled sunset the same way. A sunset whose date has passed stays until the server raises its version floor past it.
 - **`max_certificate_lifetime`** is the server's maximum: the longest a certificate the server accepts may run, `valid before` less `valid after`, in seconds (Section 11.7, step 6). It is more than the TTL and an hour.
-- **`capabilities`** lists each capability of version 1 the server serves, by `name`. A name is 1 to 64 of `a`–`z`, `0`–`9` and `_`, beginning with a letter, and is defined in this section. A client ignores a name it does not know, and never uses a capability the server does not list. This version defines none.
+- **`capabilities`** lists each capability of version 1 the server serves, by `name`. A name is `capability-name`, and is defined in this section. A client ignores a name it does not know, and never uses a capability the server does not list. This version defines none.
+
+  ```abnf
+  capability-name = %x61-7A *63( %x61-7A / DIGIT / "_" )
+  ```
+
 
 A server lists at most 64 deprecations, 64 sunsets and 64 capabilities, and a client reads no more. A document with more, or with a sunset earlier than a deprecation of the same `below` or `version`, breaks its form.
 
