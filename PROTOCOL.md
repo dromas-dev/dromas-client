@@ -213,7 +213,7 @@ signature-groups = *16( 4base64-char ) ( 4base64-char / base64-final )
   - a NUL in a string;
   - an integer with a leading zero byte it does not need.
 - **ECDSA's two values of s.** Where (r, s) is a P-256 signature, so is (r, n − s), where n is the group's order (FIPS 186-5). Each is a signature in the one form. A verifier MUST take both, and a signer may write either. Anyone who has seen one can write the other (Sections 5.2, 8). An Ed25519 signature has no second form.
-- **A bound on size, per identity key type.** A key type's bound is the longest signature in the one form that a mailbox of that type signs, with its identity or with a working key under a certificate as `ssh-keygen -s` writes one (Section 5.2): a nonce of 32 bytes, no extension and an empty reserved field. The one form fixes every other byte of a signature but its namespace's and, for ECDSA, how many bytes r and s take.
+- **A bound on size, per identity key type.** Each identity key type has a bound: the longest signature, in the one form, that a mailbox of that type can make, with its identity or with a working key under a certificate as `ssh-keygen -s` makes one (Section 5.2: a 32-byte nonce, no extension, an empty reserved field). In the one form, only the namespace and, for ECDSA, the lengths of r and s change a signature's size.
 
   | Identity key type | Bound | What reaches it |
   |---|---|---|
@@ -492,12 +492,15 @@ server-port    = %x31-39 *4DIGIT   ; no leading zero
 | `certificate_not_current` | the pass is by any certificate other than the one the call takes a pass by, or the certificate the server keeps for the mailbox does not verify |
 | `unauthorized` | there is no pass, or it is not this mailbox's, or it is not for this server, or it does not verify |
 
-On `certificate_not_current`, `certificate_serial` names, wherever that is a certificate:
+A `certificate_not_current` answer carries `certificate_serial`, the certificate serial the call is held to:
 
-- the certificate the call takes a pass by: the current certificate, or the certificate of the prekey statement a registration or a renewal brings; or
-- the one a new prekey statement must be above.
+| Call | `certificate_serial` |
+|---|---|
+| any call but a registration or a renewal | the current certificate's |
+| a registration or a renewal, refused for its pass | that of the certificate under the prekey statement it brings |
+| a renewal refused because its prekey statement's signer ranks too low (Section 11.9) | the one its prekey statement must be above |
 
-It is absent where that prekey statement is the identity's.
+Where that signer is the identity, not a certificate, the member is absent.
 
 ## 9. Messages
 
@@ -1012,7 +1015,7 @@ The server checks the steps below; only step 9 stores anything. The server takes
   - the mailbox stores messages after the cursor;
   - the cursor is the `next_cursor` the server last handed the mailbox.
 
-  A continuation spends `pages`. Only a `GET`'s `200` spends the cursor it carries and hands out the next. A false precondition, a refusal or a `HEAD` leaves the mailbox with the cursor it was handed. The server answers any other cursor it can read all the same, and counts that list as a poll; with nothing after that cursor, the page is empty.
+  A continuation spends `pages`. Only a `GET` answered `200` uses up its cursor and gets the next one. After a false precondition, a refusal or a `HEAD`, the mailbox still holds the cursor it had. The server answers any other cursor it can read all the same, and counts that list as a poll; with nothing after that cursor, the page is empty.
 - **The server checks:**
 
   | Check | Otherwise |
@@ -1324,14 +1327,12 @@ A client drains every page of its list (Section 11.11), and fetches the message 
 - **A client keeps a message decrypted, adds it to the replay set, and delivers it only when it accepts the message.** A client acks each message once it has kept its verdict: accepted (delivered or held) or refused. Until then the message stays on the server, and a later drain may serve it again: delivery is at least once.
 - **A refused message is never delivered, and is acked,** so it leaves the server; its client keeps it as evidence. A refusal MUST NOT block its sender: a forgery may be the operator framing one. A refusal for a time is a verdict too: no message waits for a clock to catch up.
 - **A refusal is a code from a closed set** (`undecryptable`, `bad_message`, `bad_envelope`, `bad_identity`, `unsupported_key_type`, `bad_signature`, `reattributed`, `revoked`, `certificate_revoked`, `stale`, `future`, `replay`, `bad_id`) with the client's own words. A client MUST NOT show, in a refusal, a value, member or key from the envelope or from the identity document it carries, nor any of a server's words (Section 11.3).
-- **A refused message is kept with what the checks established when they judged it:**
+- **A refused message is kept with what the checks established when they judged it,** each a value whose form the client checked, never text the sender wrote and never the body:
   - the reader's clock;
-  - the address of the identity document the envelope carries: as who signed the message only when both of the following are true, and otherwise as the identity it claims:
-    - the signature verified, by that identity, or by a working key it certified at its certificate's own start under a certificate the reader keeps no revocation of;
-    - the reader keeps no revocation of that address;
-  - only with who signed it: the envelope's `sent_at` and `msg_id`, and, for a certificate, its certificate serial, start and end.
-
-  Each is a value whose form the client checked: never text the sender wrote, and never the body.
+  - the address of the identity document the envelope carries, recorded as one of:
+    - **who signed the message,** only if the signature verified, by that identity or by a working key it certified, at its certificate's own start, under a certificate the reader keeps no revocation of; and the reader keeps no revocation of that address;
+    - **the identity it claims,** otherwise;
+  - only where it is recorded as who signed the message: the envelope's `sent_at` and `msg_id`, and, for a certificate, its certificate serial, start and end.
 - **A transient failure** (a fetch that errors) and **a fault of the mailbox** (an unreadable key or replay set) are errors, never verdicts: nothing is acked, and the message waits for the next drain.
 - **A client shows or passes on one line built from the checked fields, never the bytes that arrived.** Its strings escape, as JSON does, every line break other than LF (U+0085, U+2028, U+2029) and every character of Unicode's `Default_Ignorable_Code_Point`.
 
@@ -1394,7 +1395,7 @@ A client drains every page of its list (Section 11.11), and fetches the message 
   | The prekey statement is | What is stolen | The mailbox |
   |---|---|---|
   | signed by its identity, or under a certificate of a working key the mailbox did not make | its identity | SHOULD recommend that its owner revoke the address (Section 10.1); a revocation of certificates cannot end it, since whoever has the identity makes a higher certificate as easily (Section 15.5) |
-  | under a certificate of the mailbox's own working key, where the identity is kept beside the mailbox's other keys | that working key, and with a copy of those keys the identity | SHOULD recommend revoking the address |
+  | under a certificate of the mailbox's own working key, where the identity is kept beside the mailbox's other keys | that working key, and the identity kept beside it | SHOULD recommend revoking the address |
   | under a certificate of the mailbox's own working key, where the identity is kept elsewhere | that working key | SHOULD recommend the remedy (Section 12.6) |
 
 - **When its server serves a prekey statement the mailbox did not make:**
