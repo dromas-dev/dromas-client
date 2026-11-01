@@ -261,17 +261,25 @@ The key MUST be of a type this section defines, in its one encoding, and MUST me
 - **Every client MUST verify `ssh-ed25519`.** A client MUST NOT make an identity of any other type unless its owner asks for one.
 - **Every other type is OPTIONAL:** a client verifies it or not, and a server registers it or not (Section 11.7). A mailbox of an optional type can be written to, and heard from, only by mailboxes whose clients verify that type (Section 7).
 - **The working key column** is the type of every working key an identity of that type certifies (Section 5). A type defined later states its own, as it states its own signature bound (Section 3.2).
-- **The form is the same for every key type, defined here or not.** In this order:
-  1. the tag line;
-  2. a key type's name (RFC 4251 §6: printable ASCII with no comma, at most 64 characters);
-  3. one space;
-  4. the base64 of an SSH wire key that begins with that same name;
-  5. LF.
+- **The form is the same for every key type, defined here or not:** `identity-document`, where `key-type` is a key type's name (RFC 4251 §6) and the base64 is of an SSH wire key that begins with that same name.
+
+  ```abnf
+  identity-document = %s"dromas-v1" LF key-type SP base64 LF
+  key-type          = 1*64( %x21-2B / %x2D-7E )   ; printable ASCII, no comma
+  ```
 - **A reader MUST refuse a well-formed document of a type it does not verify as `unsupported_key_type`, never as malformed.** A document that breaks the form, or does not hash to its address, is evidence of tampering; one of a type the reader lacks is not.
 
 ### 4.2. The address
 
-The address is the SHA-384 of `D`, its 48 bytes in lowercase base32 (RFC 4648 §6) without padding, as Tor writes an onion address: 77 characters of `a`–`z` and `2`–`7`, `openssl dgst -sha384 -binary < identity.doc | base32 | tr -d '=' | tr A-Z a-z`. The last character's one unused bit is zero, so each address has one text form.
+The address is the SHA-384 of `D`, its 48 bytes in lowercase base32 (RFC 4648 §6) without padding, as Tor writes an onion address: `openssl dgst -sha384 -binary < identity.doc | base32 | tr -d '=' | tr A-Z a-z`. The last character's one unused bit is zero, so each address has one text form:
+
+```abnf
+address          = 76base32-char base32-char-by-2
+base32-char      = %x61-7A / %x32-37   ; a-z, 2-7
+base32-char-by-2 = %s"a" / %s"c" / %s"e" / %s"g" / %s"i" / %s"k" / %s"m"
+                 / %s"o" / %s"q" / %s"s" / %s"u" / %s"w" / %s"y"
+                 / "2" / "4" / "6"   ; its value even
+```
 
 - **SHA-384 is NIST's category 4 for collisions** (SHA-256 is category 2), and the address is the one part of a mailbox that never changes: whatever else is renewed, a second preimage of it names the mailbox for good.
 - **It has one case and never begins with `-`:** no two addresses differ only in case, so a file named by one is that address's alone on any file system, and a command line never reads one as an option.
