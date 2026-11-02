@@ -80,3 +80,88 @@ func TestASilentDropHalvesTheKeepAlive(t *testing.T) {
 		}
 	}
 }
+
+type closeCounter struct {
+	http.RoundTripper
+	closed int
+}
+
+func (c *closeCounter) CloseIdleConnections() { c.closed++ }
+
+// A mailbox's client closes its idle connections through the transport every
+// mailbox's calls go through: http.Client reaches only one that has the method.
+func TestClosingIdleConnectionsReachesTheTransport(t *testing.T) {
+	next := &closeCounter{}
+	c := &http.Client{Transport: newRoundTripper(next)}
+	c.CloseIdleConnections()
+	if next.closed != 1 {
+		t.Errorf("reached it %d times", next.closed)
+	}
+	(&http.Client{Transport: newRoundTripper(roundTripperOnly{})}).CloseIdleConnections() // has no method: nothing to reach
+}
+
+type roundTripperOnly struct{ http.RoundTripper }
+
+// The next call after renew has a new connection and resumes TLS: its clone keeps
+// the session cache, and the settings, of the transport it was cloned from.
+func TestARenewedTransportResumesAndKeepsItsHealthCheck(t *testing.T) {
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	srv.EnableHTTP2 = true
+	srv.StartTLS()
+	defer srv.Close()
+	tr := defaultTransport(&holding{})
+	pool := x509.NewCertPool()
+	pool.AddCert(srv.Certificate())
+	tr.TLSClientConfig.RootCAs = pool
+	wrapped := newRoundTripper(tr)
+	c := &http.Client{Transport: wrapped}
+	var resumed []bool
+	for range 2 {
+		resp, err := c.Get(srv.URL)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+		if resp.ProtoMajor != 2 {
+			t.Fatalf("HTTP/%d", resp.ProtoMajor)
+		}
+		resumed = append(resumed, resp.TLS.DidResume)
+		wrapped.renew(wrapped.current())
+	}
+	if resumed[0] || !resumed[1] {
+		t.Errorf("resumed %v, want a full handshake then a resumed one", resumed)
+	}
+	now := (*wrapped.next.Load()).(*http.Transport)
+	if now == tr || now.HTTP2 == nil || now.HTTP2.SendPingTimeout != healthCheckAfter {
+		t.Errorf("after renew: %+v", now.HTTP2)
+	}
+	wrapped.CloseIdleConnections()
+}
+
+// No live connection is pinged: one idle closes at connectionIdle, and the hold that
+// might follow that ends by its wait and margin.
+func TestTheHealthCheckIsAboveAnythingALiveConnectionDoes(t *testing.T) {
+	tr := defaultTransport(&holding{})
+	if most := tr.IdleConnTimeout + DefaultHold + holdMargin; tr.HTTP2.SendPingTimeout < most {
+		t.Errorf("a ping is due after %v, and a live connection may read nothing for %v", tr.HTTP2.SendPingTimeout, most)
+	}
+	if connectionIdle != http.DefaultTransport.(*http.Transport).IdleConnTimeout {
+		t.Logf("connectionIdle %v differs from net/http's default", connectionIdle)
+	}
+}
+
+// A renew by a call on what has since been renewed leaves the new connection be.
+func TestARenewAfterAnotherLeavesItsTransport(t *testing.T) {
+	tr := newRoundTripper(defaultTransport(&holding{}))
+	was := tr.current()
+	tr.renew(was)
+	now := tr.current()
+	if now == was {
+		t.Fatal("no new transport")
+	}
+	tr.renew(was)
+	if tr.current() != now {
+		t.Error("a second renew by the old one replaced the new one")
+	}
+}

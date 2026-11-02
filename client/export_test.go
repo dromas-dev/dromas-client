@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"path/filepath"
 	"slices"
@@ -15,6 +16,22 @@ import (
 	"github.com/dromas-dev/dromas-client/protocol"
 	bolt "go.etcd.io/bbolt"
 )
+
+// UseDefaultClient gives b the default client's transport (defaultTransport), over
+// dial in place of its dialer.
+func UseDefaultClient(b *Mailbox, dial func(ctx context.Context, network, addr string) (net.Conn, error)) {
+	t := defaultTransport(&b.holding)
+	t.DialTLSContext = dial
+	b.http = &http.Client{Transport: newTransport(t), CheckRedirect: followNone}
+	b.stall = true
+}
+
+// HTTPOf is b's HTTP client.
+func HTTPOf(b *Mailbox) *http.Client { return b.http }
+
+// HealthCheck is how long the default client's HTTP/2 connection goes unread
+// before it is pinged, and how long the ping may go unanswered.
+func HealthCheck() (after, wait time.Duration) { return healthCheckAfter, healthCheckWait }
 
 // CheckKeyFile is checkKeyFile, for a test of what it refuses.
 func CheckKeyFile(path string) error { return checkKeyFile(path) }

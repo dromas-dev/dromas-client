@@ -18,7 +18,7 @@ func TestNoProxyForThisMachine(t *testing.T) {
 	t.Parallel()
 	proxy, _ := url.Parse("http://proxy.example:3128")
 	given := &http.Transport{Proxy: func(*http.Request) (*url.URL, error) { return proxy, nil }}
-	tr := newTransport(given).(transport).next.(*http.Transport)
+	tr := (*newTransport(given).(*transport).next.Load()).(*http.Transport)
 	for host, direct := range map[string]bool{
 		"localhost": true, "LOCALHOST": true, "LocalHost": true, "127.0.0.1": true, "127.1.2.3": true, "[::1]": true,
 		"dromas.dev": false, "localhost.example": false, "128.0.0.1": false,

@@ -99,6 +99,7 @@ func (b *Mailbox) exchange(ctx context.Context, method, path string, in any, hdr
 	}
 	_, rawIn := in.(*ciphertext)
 	ct, raw := out.(*ciphertext)
+	outer, was := ctx, b.http.Transport.(*transport).current()
 	// The default client bounds a call by requestTimeout: a ciphertext's
 	// bytes, sent or fetched, by their stalls alone, so one of any size moves
 	// on a slow link that keeps moving, and the rest of that call, and any
@@ -139,12 +140,9 @@ func (b *Mailbox) exchange(ctx context.Context, method, path string, in any, hdr
 	name = method + " " + name
 	resp, err := b.http.Do(req)
 	if err != nil {
-		if errors.Is(context.Cause(ctx), errHeldOut) {
-			// net/http reports it as the context canceled.
-			err = errHeldOut
-		}
-		return nil, noAnswer(name, "no answer that is HTTP", cut.why(err))
+		return nil, noAnswer(name, "no answer that is HTTP", b.cutOff(outer, was, cut.why(heldOut(ctx, err))))
 	}
+	b.holding.http2.Store(resp.ProtoMajor == 2)
 	// What every answer says of this client's version, 2xx or not, is kept
 	// for its command to say (Versions): a Deprecation and a Sunset of their
 	// forms, and nothing else of the header.
@@ -168,7 +166,7 @@ func (b *Mailbox) exchange(ctx context.Context, method, path string, in any, hdr
 	if raw && answered {
 		readErr, err := ct.read(name, resp)
 		if readErr != nil {
-			return nil, noAnswer(name, "an answer whose body could not be read", cut.why(readErr))
+			return nil, noAnswer(name, "an answer whose body could not be read", b.cutOff(outer, was, cut.why(readErr)))
 		}
 		return resp, err
 	}
@@ -178,7 +176,7 @@ func (b *Mailbox) exchange(ctx context.Context, method, path string, in any, hdr
 	}
 	data, err := io.ReadAll(io.LimitReader(resp.Body, limit))
 	if err != nil {
-		return nil, noAnswer(name, "an answer whose body could not be read", cut.why(err))
+		return nil, noAnswer(name, "an answer whose body could not be read", b.cutOff(outer, was, cut.why(heldOut(ctx, err))))
 	}
 	if !answered {
 		e := &APIError{Status: resp.StatusCode, Version: b.version}
@@ -381,6 +379,26 @@ type transportError struct {
 
 func (e *transportError) Error() string { return e.call + ": " + e.kind }
 func (e *transportError) Unwrap() error { return e.cause }
+
+// heldOut is err, or errHeldOut where a held list's bound made it: net/http and an
+// answer's body report the cut as the context canceled.
+func heldOut(ctx context.Context, err error) error {
+	if errors.Is(context.Cause(ctx), errHeldOut) {
+		return errHeldOut
+	}
+	return err
+}
+
+// cutOff is err, and where the mailbox's own bound on the call's time made it, the
+// mailbox's next call makes a new connection: nothing came back on this one for that
+// long, and over HTTP/2 the next would be sent down it (transport.renew). A deadline
+// of its caller's (outer) says nothing of the connection.
+func (b *Mailbox) cutOff(outer context.Context, was *http.RoundTripper, err error) error {
+	if timedOut(err) && outer.Err() == nil {
+		b.http.Transport.(*transport).renew(was)
+	}
+	return err
+}
 
 // noAnswer is err, net/http's, as a transportError: the kind its cause
 // shows, or otherwise the kind given.
