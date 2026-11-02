@@ -524,6 +524,11 @@ func TestAPrekeyPastItsDeletionTimeWithNoServerConfirmingItIsSaid(t *testing.T) 
 		t.Fatal("said of a mailbox whose prekeys are all within their time")
 	}
 
+	off = protocol.PrekeyLifetime + protocol.TTL - time.Minute
+	if said() {
+		t.Fatal("said a minute before any prekey's deletion time")
+	}
+
 	// The mailbox's clock alone runs ahead: the server refuses its pass.
 	off = past
 	if !said() {
