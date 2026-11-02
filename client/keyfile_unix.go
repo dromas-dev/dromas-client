@@ -43,6 +43,14 @@ func checkConfigFile(path string, me int) error {
 	return nil
 }
 
-// newKeyTemp is an empty file in dir for a private key: mode 0600, which
-// os.CreateTemp gives every file.
-func newKeyTemp(dir string) (*os.File, error) { return os.CreateTemp(dir, ".tmp-*") }
+// NewPrivateTemp is a new empty file in dir, to rename into place, its owner's
+// alone from its making: mode 0600, which os.CreateTemp gives every file.
+func NewPrivateTemp(dir string) (*os.File, error) { return os.CreateTemp(dir, ".tmp-*") }
+
+// newKeyTemp is NewPrivateTemp for a private key.
+func newKeyTemp(dir string) (*os.File, error) { return NewPrivateTemp(dir) }
+
+// openPrivate opens name, made its owner's alone where it is not there.
+func openPrivate(name string, flag int) (*os.File, error) {
+	return os.OpenFile(name, flag|os.O_CREATE, 0o600) //nolint:gosec // a file of the mailbox's own
+}

@@ -7,16 +7,14 @@ import (
 	"path/filepath"
 )
 
-// writeFile writes a file with mode 0600 through a temporary file and a
-// rename, so a reader never sees half of it, and syncs the file and its
+// writeFile writes a file its owner's alone (NewPrivateTemp) through a temporary
+// file and a rename, so a reader never sees half of it, and syncs the file and its
 // directory, so it survives a power loss once writeFile returns: a message is
 // acked off the server only after it is on disk.
-func writeFile(name string, data []byte) error {
-	return writeWith(name, data, func(dir string) (*os.File, error) { return os.CreateTemp(dir, ".tmp-*") })
-}
+func writeFile(name string, data []byte) error { return writeWith(name, data, NewPrivateTemp) }
 
-// writeKey is writeFile for a private key, whose temporary file is its owner's
-// alone before it holds a byte (newKeyTemp).
+// writeKey is writeFile for a private key, which goes nowhere that cannot keep it
+// its owner's alone (newKeyTemp).
 func writeKey(name string, data []byte) error { return writeWith(name, data, newKeyTemp) }
 
 func writeWith(name string, data []byte, create func(dir string) (*os.File, error)) error {

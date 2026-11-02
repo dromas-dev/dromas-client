@@ -79,6 +79,35 @@ func TestADirectoryTheClientDidNotMakeIsLeftAsItIs(t *testing.T) {
 	if err := ownerOnly(filepath.Join(made, "keys", "prekeys")); err != nil {
 		t.Errorf("prekeys/, which it made: %v", err)
 	}
+	// The directory's list reaches none of the files it writes there: the state
+	// file holds a pass, and the inbox a message in the clear.
+	b := e.mailbox()
+	landAll(t, a)
+	if _, err := b.Send(t.Context(), a.Address(), "kept where only its owner reads it"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.Allow(t.Context(), b.Address()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.Receive(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	files := 0
+	if err := filepath.WalkDir(made, func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		files++
+		if err := ownerOnly(p); err != nil {
+			t.Errorf("%s: %v", p, err)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if es, _ := os.ReadDir(filepath.Join(made, "mail", "inbox")); files == 0 || len(es) == 0 {
+		t.Errorf("%d files, %d in the inbox: this tried nothing", files, len(es))
+	}
 }
 
 // openToOthers makes dir as someone else might before a mailbox is made in it,

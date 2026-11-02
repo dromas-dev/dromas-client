@@ -34,17 +34,30 @@ const (
 // the client, SYSTEM and the local Administrators, as OpenSSH for Windows reads a
 // key file's (contrib/win32/win32compat/w32-sshfileperm.c), entry by entry.
 type fileAccess struct {
-	// owner names an owner who is none of the three, and can change the list
-	// whatever it says.
-	owner string
+	// foreignOwner is an owner who is none of the three, and can change the list
+	// whatever it says, named by owner.
+	foreignOwner bool
+	owner        *windows.SID
 	// others is each allowing entry for anyone else: a volume that keeps no
 	// access list has one, for everyone, with every right.
 	others []accessEntry
 }
 
+// accessEntry is one allowing entry: its trustee, by SID, or in words where it has
+// none to read.
 type accessEntry struct {
-	trustee string
-	rights  windows.ACCESS_MASK
+	sid    *windows.SID
+	words  string
+	rights windows.ACCESS_MASK
+}
+
+// trustee is who the entry names. An account's name is looked up only for a
+// refusal: a lookup may go over the network.
+func (e accessEntry) trustee() string {
+	if e.sid == nil {
+		return e.words
+	}
+	return accountName(e.sid)
 }
 
 func trusted(sid *windows.SID) (bool, error) {
@@ -57,6 +70,9 @@ func trusted(sid *windows.SID) (bool, error) {
 
 // accountName is a trustee for a person to read.
 func accountName(sid *windows.SID) string {
+	if sid == nil {
+		return "no one"
+	}
 	account, domain, _, err := sid.LookupAccount("")
 	switch {
 	case err != nil:
@@ -75,7 +91,7 @@ func readAccess(path string) (fileAccess, error) {
 	}
 	dacl, _, err := sd.DACL()
 	if errors.Is(err, windows.ERROR_OBJECT_NOT_FOUND) || err == nil && dacl == nil {
-		a.others = []accessEntry{{"everyone", ^windows.ACCESS_MASK(0)}}
+		a.others = []accessEntry{{words: "everyone", rights: ^windows.ACCESS_MASK(0)}}
 		return a, nil
 	}
 	if err != nil {
@@ -85,14 +101,11 @@ func readAccess(path string) (fileAccess, error) {
 	if err != nil {
 		return a, err
 	}
-	switch ok, err := trustedOwner(owner); {
-	case err != nil:
+	ok, err := trustedOwner(owner)
+	if err != nil {
 		return a, err
-	case !ok && owner == nil:
-		a.owner = "no one"
-	case !ok:
-		a.owner = accountName(owner)
 	}
+	a.foreignOwner, a.owner = !ok, owner
 	for i := range uint32(dacl.AceCount) {
 		var ace *windows.ACCESS_ALLOWED_ACE
 		if err := windows.GetAce(dacl, i, &ace); err != nil {
@@ -107,12 +120,12 @@ func readAccess(path string) (fileAccess, error) {
 				return a, err
 			}
 			if !ok {
-				a.others = append(a.others, accessEntry{accountName(sid), ace.Mask})
+				a.others = append(a.others, accessEntry{sid: sid, rights: ace.Mask})
 			}
 		default:
 			// A kind whose trustee this client cannot read, or that it does not
 			// know: it may allow anyone anything.
-			a.others = append(a.others, accessEntry{fmt.Sprintf("an entry of type %#x", ace.Header.AceType), ^windows.ACCESS_MASK(0)})
+			a.others = append(a.others, accessEntry{words: fmt.Sprintf("an entry of type %#x", ace.Header.AceType), rights: ^windows.ACCESS_MASK(0)})
 		}
 	}
 	return a, nil
@@ -133,10 +146,10 @@ func checkKeyFile(path string) error {
 		return err
 	}
 	if len(a.others) > 0 {
-		return keyRefusal(path, "is accessible by "+a.others[0].trustee)
+		return keyRefusal(path, "is accessible by "+a.others[0].trustee())
 	}
-	if a.owner != "" {
-		return keyRefusal(path, "is owned by "+a.owner)
+	if a.foreignOwner {
+		return fmt.Errorf("the private key %s is owned by %s: ssh would refuse it too. Take its ownership (icacls /setowner), and check who else holds a copy", path, accountName(a.owner))
 	}
 	return nil
 }
@@ -150,54 +163,88 @@ func CheckConfigFile(path string) error {
 	}
 	for _, e := range a.others {
 		if e.rights&^readOnlyRights != 0 {
-			return fmt.Errorf("%s is writable by %s: give it an access list others cannot write", path, e.trustee)
+			return fmt.Errorf("%s is writable by %s: give it an access list others cannot write", path, e.trustee())
 		}
 	}
-	if a.owner != "" {
-		return fmt.Errorf("%s is owned by %s: take its ownership (icacls /setowner)", path, a.owner)
+	if a.foreignOwner {
+		return fmt.Errorf("%s is owned by %s: take its ownership (icacls /setowner)", path, accountName(a.owner))
 	}
 	return nil
 }
 
-// newKeyTemp is an empty file in dir for a private key, whose protected access
-// list (ownersAlone) it has from its making: a file inherits its directory's
-// otherwise, and a list set once it exists leaves whoever opened it before then
-// their handle. The list is read back, as private reads a directory's: a volume
-// that keeps none takes the call and keeps nothing, and no key goes there.
-func newKeyTemp(dir string) (*os.File, error) {
+// createPrivate makes a new file with a protected access list (ownersAlone) from
+// its making: a file inherits its directory's otherwise, and a list set once it
+// exists leaves whoever opened it before then their handle.
+func createPrivate(name string, want *windows.SECURITY_DESCRIPTOR) (windows.Handle, error) {
+	sa := windows.SecurityAttributes{SecurityDescriptor: want}
+	sa.Length = uint32(unsafe.Sizeof(sa))
+	path, err := windows.UTF16PtrFromString(name)
+	if err != nil {
+		return 0, err
+	}
+	return windows.CreateFile(path, windows.GENERIC_READ|windows.GENERIC_WRITE,
+		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE, &sa, windows.CREATE_NEW, windows.FILE_ATTRIBUTE_NORMAL, 0)
+}
+
+// NewPrivateTemp is a new empty file in dir, to rename into place, its owner's
+// alone from its making (createPrivate).
+func NewPrivateTemp(dir string) (*os.File, error) {
 	want, err := ownersAlone("")
 	if err != nil {
 		return nil, err
 	}
-	sa := windows.SecurityAttributes{SecurityDescriptor: want}
-	sa.Length = uint32(unsafe.Sizeof(sa))
 	for range 10000 {
 		var random [8]byte
 		_, _ = rand.Read(random[:]) // never fails (crypto/rand)
 		name := filepath.Join(dir, ".tmp-"+hex.EncodeToString(random[:]))
-		path, err := windows.UTF16PtrFromString(name)
-		if err != nil {
-			return nil, err
-		}
-		h, err := windows.CreateFile(path, windows.GENERIC_READ|windows.GENERIC_WRITE,
-			windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE, &sa, windows.CREATE_NEW, windows.FILE_ATTRIBUTE_NORMAL, 0)
+		h, err := createPrivate(name, want)
 		if errors.Is(err, windows.ERROR_FILE_EXISTS) {
 			continue
 		}
 		if err != nil {
 			return nil, &os.PathError{Op: "create", Path: name, Err: err}
 		}
-		f := os.NewFile(uintptr(h), name)
-		ok, err := hasDACL(name, want)
-		if err == nil && !ok {
+		return os.NewFile(uintptr(h), name), nil
+	}
+	return nil, fmt.Errorf("%s: no free name for a new file", dir)
+}
+
+// newKeyTemp is NewPrivateTemp for a private key, whose list is read back, as
+// private reads a directory's: a volume that keeps none takes the call and keeps
+// nothing, and no key goes there.
+func newKeyTemp(dir string) (*os.File, error) {
+	f, err := NewPrivateTemp(dir)
+	if err != nil {
+		return nil, err
+	}
+	want, err := ownersAlone("")
+	if err == nil {
+		var ok bool
+		if ok, err = hasDACL(f.Name(), want); err == nil && !ok {
 			err = errNoAccessList
 		}
-		if err != nil {
-			f.Close()       //nolint:errcheck,gosec // the check's error wins
-			os.Remove(name) //nolint:errcheck,gosec // as above
-			return nil, fmt.Errorf("%s: %w", dir, err)
-		}
-		return f, nil
 	}
-	return nil, fmt.Errorf("%s: no free name for a new key file", dir)
+	if err != nil {
+		f.Close()           //nolint:errcheck,gosec // the check's error wins
+		os.Remove(f.Name()) //nolint:errcheck,gosec // as above
+		return nil, fmt.Errorf("%s: %w", dir, err)
+	}
+	return f, nil
+}
+
+// openPrivate opens name, made its owner's alone where it is not there
+// (createPrivate).
+func openPrivate(name string, flag int) (*os.File, error) {
+	want, err := ownersAlone("")
+	if err != nil {
+		return nil, err
+	}
+	h, err := createPrivate(name, want)
+	switch {
+	case err == nil:
+		_ = windows.CloseHandle(h) // opened below, as any other file
+	case !errors.Is(err, windows.ERROR_FILE_EXISTS):
+		return nil, &os.PathError{Op: "create", Path: name, Err: err}
+	}
+	return os.OpenFile(name, flag, 0) //nolint:gosec // a file of the mailbox's own
 }

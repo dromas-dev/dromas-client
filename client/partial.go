@@ -121,7 +121,7 @@ func (p *partial) begin(from int64) error {
 			return err
 		}
 	}
-	f, err := os.OpenFile(p.b.path("partial"), os.O_WRONLY|os.O_CREATE, 0o600)
+	f, err := openPrivate(p.b.path("partial"), os.O_WRONLY)
 	if err != nil {
 		return &partialError{err}
 	}

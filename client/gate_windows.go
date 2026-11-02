@@ -17,7 +17,7 @@ import (
 // at once). It reports false, with no error, when another holds it
 // ([Mailbox.openState]); closing the file lets go of it.
 func tryGate(dir string) (*os.File, bool, error) {
-	f, err := os.OpenFile(filepath.Join(dir, "gate"), os.O_RDWR|os.O_CREATE, 0o600) //nolint:gosec // the mailbox's own gate
+	f, err := openPrivate(filepath.Join(dir, "gate"), os.O_RDWR)
 	if err != nil {
 		return nil, false, err
 	}
