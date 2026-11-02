@@ -229,7 +229,11 @@ func TestEchoAnswers(t *testing.T) {
 		t.Fatal("answered twice")
 	}
 	for _, sub := range []string{"inbox", "refused", "outbox", "sent"} {
-		if l := left(t, x.b.Dir(), sub); len(l) != 0 {
+		dir := x.b.Path(sub)
+		if _, err := os.Stat(dir); err != nil {
+			t.Errorf("%s: %v", sub, err) // nothing left in a directory that is not there says nothing
+		}
+		if l := left(t, filepath.Dir(dir), sub); len(l) != 0 {
 			t.Errorf("%s keeps %v", sub, l)
 		}
 	}

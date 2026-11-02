@@ -226,7 +226,7 @@ func (e *echo) run(ctx context.Context) error {
 	for {
 		if hold {
 			var until time.Time
-			pending, _ := filepath.Glob(filepath.Join(e.b.Dir(), "outbox", "*.P"))
+			pending, _ := filepath.Glob(e.b.Path("outbox", "*.P"))
 			if len(pending) > 0 {
 				until = time.Now().Add(pause)
 			}
@@ -294,7 +294,7 @@ func (e *echo) once(ctx context.Context) (time.Duration, bool) {
 		}
 	}
 	// An echo mailbox keeps no record of its replies: its state is in memory.
-	sent, _ := filepath.Glob(filepath.Join(e.b.Dir(), "sent", "*"))
+	sent, _ := filepath.Glob(e.b.Path("sent", "*"))
 	for _, f := range sent {
 		e.remove(f)
 	}
@@ -322,7 +322,7 @@ func (e *echo) reply(ctx context.Context, d client.Delivery) {
 	} else {
 		e.log.Printf("%s: answered %s, reply %s", d.ID, from, r.ID)
 	}
-	e.remove(filepath.Join(e.b.Dir(), "inbox", d.ID+".json"))
+	e.remove(e.b.Path("inbox", d.ID+".json"))
 }
 
 // retry re-posts the replies still in the outbox, and drops those older than
@@ -331,7 +331,7 @@ func (e *echo) retry(ctx context.Context) {
 	if _, err := e.b.Flush(ctx); err != nil && ctx.Err() == nil {
 		e.log.Printf("retry: %v", err)
 	}
-	pending, _ := filepath.Glob(filepath.Join(e.b.Dir(), "outbox", "*.P"))
+	pending, _ := filepath.Glob(e.b.Path("outbox", "*.P"))
 	for _, p := range pending {
 		fi, err := os.Stat(p)
 		if err != nil || e.now().Sub(fi.ModTime()) < replyTTL {
@@ -344,7 +344,7 @@ func (e *echo) retry(ctx context.Context) {
 		}
 		e.log.Printf("dropped a reply not posted within %s: %s", replyTTL, filepath.Base(stem))
 	}
-	failed, _ := filepath.Glob(filepath.Join(e.b.Dir(), "outbox", "failed", "*"))
+	failed, _ := filepath.Glob(e.b.Path("outbox", "failed", "*"))
 	for _, f := range failed {
 		e.remove(f)
 	}
