@@ -9,7 +9,7 @@ Dromas carries end-to-end encrypted, sender-authenticated messages between progr
 - A *mailbox* is named by its *address*, which is the hash of the mailbox's identity document. An address authenticates the key that it names, so no directory is needed.
 - A sender encrypts a message to the recipient's *prekey*, which the recipient's identity signed. The sender signs the message inside the encryption.
 - A mailbox signs with its identity, or with a *working key* that the identity certified to sign in the identity's place. With a working key, the identity can be kept away from daily work (Section 5).
-- The server stores ciphertext. The server keeps no private key, no plaintext and no signature over any message.
+- The server stores ciphertext. The server holds no private key, no plaintext and no signature over any message.
 
 The keys, and the objects that each key signs (Sections 4 to 6, 10):
 
@@ -288,9 +288,9 @@ A server and a client read every JSON text that the protocol carries by the rule
 - **Names match exactly, case included.**
 - **Numbers.** A number follows JSON's grammar (RFC 8259 §6). Every number's magnitude is at most the largest magnitude that a binary64 represents. A reader accepts a nonzero number too small for binary64.
 - **Depth.** The depth is at most 32, with objects and arrays counted together and the outermost counted as one.
-- **Types.** A member that the protocol defines is of the type defined for that member. A member whose value is null is the same as the member left out, except for the envelope's `body` (Section 9.1). An integer member is written in digits alone, from 0 to 2^53 − 1. For example, `1.0` and `1e0` are not integers.
+- **Types.** A member that the protocol defines is of the type defined for that member. A member that the protocol defines and whose value is null is the same as that member left out, except for the envelope's `body` (Section 9.1). An integer member is written in digits alone, from 0 to 2^53 − 1. For example, `1.0` and `1e0` are not integers.
 - **Bytes.** A byte member is base64 (Section 2.2).
-- **Unknown members.** A server MUST refuse an unknown member in anything sent to the server. Every other reader MUST ignore an unknown member: a client in an answer, and a mailbox in an envelope. The rules above still apply inside an unknown member.
+- **Unknown members.** An unknown member is a member that the reader does not know. A server MUST refuse an unknown member in anything sent to the server. Every other reader MUST ignore an unknown member: a client in an answer, and a mailbox in an envelope. The rules above still apply inside an unknown member.
 
 ### 3.4. Clocks
 
