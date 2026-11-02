@@ -540,7 +540,7 @@ server-port    = %x31-39 *4DIGIT   ; no leading zero, at most 65535
 
   A server accepts a pass only where the pass's server name is the server's own. A server reads a pass by the form of the pass's signer (Section 5).
 - **A client whose pass a server refuses signs another pass and tries once more.** The client MUST NOT retry more than once. The client MUST NOT retry at all after a `certificate_revoked` that the client finds final when the mailbox looks itself up (Section 12.5). When a server refuses both passes for their time, the cause is the mailbox's clock (Section 15.7).
-- **A lookup (Section 11.8), the link page (Section 4.3), publishing a revocation and looking up revocations (Section 11.15) use no pass.** A server reads no pass on these calls, whatever `Authorization` they carry.
+- **A lookup (Section 11.8), the link page (Section 4.3), publishing a revocation and looking up revocations (Section 11.15) accept no pass.** A server reads no pass on these calls, whatever `Authorization` they carry.
 
 **Refusals.** Each refusal below is a `401`. `certificate_revoked` comes first, and otherwise this table gives the code:
 
@@ -739,8 +739,8 @@ A revocation record carries an identity's revocations, and the record proves its
 - **A client MUST call its server over `https`, with one exception.** The exception is a server on the client's own machine, named by an address in `127.0.0.0/8` or by `[::1]`. A client MAY call such a server over `http`. The name `localhost` is not such an address.
 - **A client MUST refuse a URL of any other form before the client sends anything.**
 - **A client MUST send a call to a loopback address, or to `localhost`, without a proxy.**
-- **A server SHOULD terminate its own TLS, on hosts its operator runs, with no third party between a client and the server.** The party that terminates TLS for a server is part of the server (Section 15.8).
-- **A client MUST NOT follow a redirect.** The API never redirects. So a client treats a `3xx` other than `304` as no answer. A pass and a lookup each name an address, and a client sends neither to a location that a server points to.
+- **A server SHOULD terminate its own TLS, on hosts its operator runs, with no third party between a client and the server.** Anything that terminates TLS for a server is part of the server (Section 15.8).
+- **A client MUST NOT follow a redirect.** The API never redirects. So a client treats a `3xx` other than `304` as no answer. A pass and a lookup each name an address, and a client never sends a pass or a lookup anywhere that a server points.
 - **Every API path is under `/v1/`.**
 
 ### 11.2. Requests and answers
@@ -760,7 +760,7 @@ A revocation record carries an identity's revocations, and the record proves its
   - A `HEAD` changes nothing. A `HEAD` spends no cursor, hands out no cursor, marks no message as fetched, and spends none of the first-fetch budget.
   - A server counts a list's `HEAD` as a poll (Section 11.11). A server counts a fetch's `HEAD` as one of the mailbox's calls.
 - **Preconditions.** Preconditions are those of RFC 9110 §13. A server evaluates `If-Match` and `If-None-Match` on every call (§13.1.1, §13.1.2), at the point §13.2.1 gives, in the order §13.2.2 gives. Dromas narrows the preconditions in these ways:
-  - **Normal request checks.** A call's normal request checks (§13.2.1) are the match of the call's route and method, the call's pass where the call requires one, and the read of the call's target. A registration's pass and a renewal's pass are by the signer of the prekey statement that the call brings. Therefore the check of that prekey statement is one of the call's normal request checks.
+  - **Normal request checks.** A call's normal request checks (§13.2.1) are the match of the call's route and method, the call's pass where the call accepts one, and the read of the call's target. A registration's pass and a renewal's pass are by the signer of the prekey statement that the call brings. Therefore the check of that prekey statement is one of the call's normal request checks.
   - **Only a list's first page (Section 11.11) and an ACL (Section 11.14) carry an `ETag`.**
   - **A server answers a false `If-Match` with `412 precondition_failed`, and never with a `2xx` as for a change that appears already applied (§13.1.1).**
   - **A value of `If-Match` or `If-None-Match` matches nothing if the value has any form other than `*` alone or a list of entity-tags.** A list with `*` among its tags is such a form.
@@ -773,10 +773,10 @@ A revocation record carries an identity's revocations, and the record proves its
 
 ### 11.3. Errors
 
-- **Every error body is RFC 9457 Problem Details (`application/problem+json`), in AEP-193's form.** The members are `type`, `title`, `status`, `detail`, `code` and `hint`, and one more member for each value the error carries. Every value that `detail` names is also in one of those members.
+- **Every error body is RFC 9457 Problem Details (`application/problem+json`), in AEP-193's form.** The members are `type`, `title`, `status`, `detail`, `code` and `hint`, and one more member for each value the error carries. Every value that `detail` names also has a member of its own.
 - **`type`.** The value is `tag:dromas.dev,2026-10-26:errors/<code>` (RFC 4151), the same at every server. The tag resolves to nothing.
 - **Every `code` is on the closed list that `api/openapi.yaml` gives, under the status that the list gives the code, with the code's own `type`.**
-  - A client ignores an unknown code, a code under another status, and a code with another `type`.
+  - A client ignores a code that the client does not know, a code under another status, and a code with another `type`.
   - The client does not act on such a code, and shows none of the code. The client shows only the status.
   - A client treats a body as no answer when a member of the body is not of the member's type (Section 3.3).
 - **A client MUST NOT show `detail`, `hint`, `title`, or any other text a server sent (a status line, a header or trailer line, a `Location`, a list's cursor in a path).** These texts are the server's words, meant for a person who reads the body.
@@ -793,7 +793,7 @@ This table gives each code's meaning, and how a client acts on the code:
 
 | Status | Code | Meaning |
 |---|---|---|
-| 400 | `bad_request` | a request body that is not a JSON text Section 3.3 accepts; a member or query parameter, named in `member`, that is missing, unknown, repeated, or has a value the call does not accept, including a byte member that is not in base64's one encoding; a send's body that is not an age file (Section 11.10, step 4) |
+| 400 | `bad_request` | a request body that is not a JSON text Section 3.3 accepts; a member or query parameter, named in `member`, that is missing, unknown, repeated, or has a value the call does not accept, including a byte member that is not base64 in base64's one encoding (Section 2.2); a send's body that is not an age file (Section 11.10, step 4) |
 | 400 | `bad_address` | a path address that is not an `address` (Section 4.2) |
 | 400 | `identity_mismatch` | an identity document that does not hash to the address, or that does not have the form Section 4.1 gives |
 | 400 | `unsupported_key_type` | an identity key type that this protocol does not define, or that this server does not register; `key_types` lists the types the server registers |
@@ -823,7 +823,7 @@ This table gives each code's meaning, and how a client acts on the code:
 | 413 | `too_large` | a body or ciphertext over its cap, or an ACL with more entries than the server accepts; `limit` gives the cap |
 | 429 | `rate_limited` | the call is past a limit (Section 11.5); the answer carries `subject` and `quota_id`, and `limit` for a number a day |
 | 429 | `fetch_paced` | the server paces the mailbox's fetches, of new messages or of messages fetched before (Section 11.12) |
-| 429 | `mailbox_full` | the mailbox stores as many messages as it may; `count` is that number, as the mailbox's list counts them |
+| 429 | `mailbox_full` | the mailbox stores as many messages as it may; `count` is the number of messages that the mailbox stores, as the mailbox's list counts them |
 | 429 | `mailbox_busy` | the mailbox has spent its intake budget for now |
 | 503 | `unavailable` | the server is not ready to answer |
 
@@ -855,7 +855,7 @@ A server chooses what it limits and by how much. No limit's value is part of the
 - **Only three things spend a mailbox's counts:** a call that carries the mailbox's pass, a message sent to the mailbox, and a revocation of certificates that the mailbox's identity publishes through a higher revocation serial. Only calls from an IP address spend that IP address's counts.
 - **A server counts the identity's acts apart from the counts that a working key can spend** (Section 15.5):
   - The server counts a renewal by a signer of higher rank than the current signer apart from a renewal by the current signer (Section 11.9).
-  - The server counts no renewal made while the current signer is revoked (Section 11.9).
+  - A renewal made while the current signer is revoked spends no count at all (Section 11.9).
   - The server counts a revocation of certificates through a higher revocation serial on a separate quota.
   - The server counts a revocation of the address against no mailbox (Section 11.15).
 - **A request that would change nothing is never refused by a count of what the request would make new:**
@@ -970,7 +970,7 @@ The server checks:
 
 ### 11.8. Look up a mailbox
 
-A lookup, `GET /v1/<A>`, uses no pass (Section 8). The lookup answers with the information a sender needs before posting, and with the information a mailbox checks about itself (Sections 12.4, 12.5).
+A lookup, `GET /v1/<A>`, accepts no pass (Section 8). The lookup answers with the information a sender needs before posting, and with the information a mailbox checks about itself (Sections 12.4, 12.5).
 
 - **An active mailbox.** The server answers `200` with `identity`, `prekey` and `prekey_signature`. The answer also carries `sender_key_types` if the mailbox declared any. If the server keeps a revocation of the mailbox's certificates, the answer also carries `revoked_certificates` with `revoked_certificates_signature`.
 - **An unknown address.** The server answers `404 no_such_mailbox`, whatever certificates the address's identity has revoked. Looking up revocations serves those revocations (Section 11.15).
@@ -992,7 +992,7 @@ The server accepts a renewal because the renewal's prekey statement is later tha
   | by a signer of lower rank, or by another certificate with the current certificate's serial | `401 certificate_not_current`; where the new prekey statement must be above a certificate, `certificate_serial` names that certificate's certificate serial |
   | under a certificate the identity revoked | `401 certificate_revoked` |
 
-- **A prekey that is not new.** The server answers `400 prekey_not_new` to a renewal whose prekey equals the current prekey or a retired prekey that the server keeps. For this check alone, a server keeps the newest of a mailbox's retired prekeys, and the server chooses how many. Each retired prekey is kept until its prekey statement's `not_after`.
+- **A prekey that is not new.** The server answers `400 prekey_not_new` to a renewal whose prekey equals the current prekey or a retired prekey that the server keeps. For this check alone, a server keeps the newest of a mailbox's retired prekeys, and the server chooses how many. The server keeps each of those retired prekeys until the `not_after` of the retired prekey's statement.
 - **On success:**
   - The new prekey becomes the current prekey, and the new prekey statement's signer becomes the current signer. So the server no longer accepts a pass by a certificate that the renewal replaced (Section 8).
   - The renewal's declaration (Section 7) is the mailbox's declaration from then on.
@@ -1149,7 +1149,7 @@ A mailbox's ACL says from which senders the mailbox's server accepts messages to
 
 ### 11.15. Revocations
 
-The two calls in this section use no pass (Section 8).
+The two calls in this section accept no pass (Section 8).
 
 - **Publish a revocation: `PUT /v1/<A>/revocations`.** The call's body is a revocation record (Section 10.3). The server verifies the revocation record as a client does. The server keeps permanently each revocation that verifies, whether or not a mailbox is at the address.
   - **The server answers a revocation it already keeps from its stored revocations.** That answer comes ahead of every other refusal of this call, and ahead of every count except the budgets that bound any call (Section 11.5). Two kinds of body count as a revocation the server already keeps:
@@ -1245,7 +1245,7 @@ A mailbox may belong to one account at its server. The protocol fixes how a mail
 
 ### 11.18. The server's document
 
-`GET /v1/` uses no pass. The server answers with its version policy and the capabilities it serves, the same to every caller:
+`GET /v1/` accepts no pass. The server answers with its version policy and the capabilities it serves, the same to every caller:
 
 - **`min_version`:** the version floor, when the server sets one.
 - **`latest_version`:** the latest version the server names, when the server names one.
@@ -1732,7 +1732,7 @@ Dromas protects a message's content from everyone but the message's recipient. D
 - **The lookup before a post tells the server that the mailbox is about to be written to.** The post tells the server the same thing a moment later.
 - **A lookup answered with gzip has a length that depends on the mailbox's own bytes.** So the length can help a network observer narrow down whom a sender is about to write to.
 - **Only a lookup's answer is compressed (Section 11.2).** A list, for example, sets values that senders chose beside the mailbox's own values (BREACH, RFC 7457 §2.6).
-- **The party that terminates TLS for a server is part of the server.** That party sees everything the server sees, and each pass in transit. For the minutes a pass has left, the pass does at that server everything that Section 15.5 lists for a stolen pass. A third party in that position would replace the server for every mailbox whose pass the third party sees. That is why Section 11.1 keeps TLS inside the server.
+- **Anything that terminates TLS for a server is part of the server.** A TLS terminator sees everything the server sees, and each pass in transit. For the minutes a pass has left, the pass does at that server everything that Section 15.5 lists for a stolen pass. A third party in that position would replace the server for every mailbox whose pass the third party sees. That is why Section 11.1 keeps TLS inside the server.
 - **An address in a URL is seen wherever URLs are logged.** Such an address is seen, for example, by the party that terminates TLS, in a chat that unfurls links, and in a transcript. A leaked address is answered by a new mailbox and by revoking the old address.
 
 ### 15.9. Addresses, messages and availability
