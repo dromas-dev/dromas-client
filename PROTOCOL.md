@@ -1087,7 +1087,7 @@ The server checks the steps below. Only step 9 stores anything. The server spend
   | the only parameters are `cursor` and `wait`, each at most once | `400 bad_request`, naming the parameter |
   | `cursor` has the form above, and the server can read it as a cursor it makes | `400 bad_request`, naming `cursor` |
   | `wait` is delay-seconds, digits alone | `400 bad_request`, naming `wait` |
-  | a list does not carry both `cursor` and `wait` | `400 bad_request`, naming it |
+  | a list does not carry both `cursor` and `wait` | `400 bad_request`, naming either one |
 
 - **A first page MAY be a long poll:**
   - A list without a cursor MAY carry `wait`, a number of seconds.
@@ -1141,7 +1141,7 @@ A mailbox's ACL says from which senders the mailbox's server accepts messages to
 
   - `allow` is REQUIRED. In `allow`, `["*"]` matches everyone and `[]` matches nobody. A document without `allow` → `400 bad_request`.
   - `deny` may be left out, which is the same as an empty `deny`.
-  - An ACL with more entries than the server accepts, in both lists together → `413 too_large`. A server MUST NOT accept more than 10,000 entries, and MAY accept fewer.
+  - An ACL with more entries than the server accepts, in both lists together → `413 too_large`. The server counts entries as sent, before a repeated entry is read as one entry. A server MUST NOT accept more than 10,000 entries, and MAY accept fewer.
   - The answer is `200` with the ACL as stored, and no `ETag`. The answer lists `*` first, then each address once, in ascending order of the addresses' 48 bytes (not of their text: base64url's alphabet is not in ASCII order, so the two orders differ).
 - **Get the ACL: `GET /v1/<B>/acl`.** The call carries the mailbox's pass. The server answers the ACL as stored, in that order, with the ACL's `ETag`. That `ETag` is a strong validator that changes whenever the lists change. For a mailbox with no ACL, the server answers `{"allow":["*"],"deny":[]}`, also with a tag. There is no `DELETE` of the ACL.
 - **A client MUST treat as malformed an ACL answer with more than 10,000 entries in both lists together.**
