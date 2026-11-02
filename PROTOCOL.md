@@ -15,7 +15,7 @@ The keys, and what each signs (Sections 4 to 6, 10):
 
 ```mermaid
 flowchart LR
-    ID["identity key<br/>its hash is the address"]
+    ID["identity key<br/>the address is the SHA-384<br/>of its identity document"]
     WK["working key"]
     SPM["prekey statements,<br/>passes, messages"]
     REV["revocations"]
@@ -40,8 +40,8 @@ sequenceDiagram
     V-->>S: identity, prekey statement, revocations
     Note over S: check them, then date, sign and seal the envelope
     S->>V: send the sealed file
-    V-->>S: receipt
     Note over V: stores the ciphertext
+    V-->>S: receipt
     R->>V: list
     V-->>R: ids and sizes
     R->>V: fetch each message
@@ -527,7 +527,7 @@ server-port    = %x31-39 *4DIGIT   ; no leading zero, at most 65535
   The exception: a registration (Section 11.7) and a renewal (Section 11.9) take a pass by the certificate of the prekey statement they bring.
 
   A server takes a pass only for a name that is its own. It reads a pass by its signer's form (Section 5).
-- **A client that is refused a pass signs another and tries once more.** It MUST NOT try more than once. It MUST NOT try at all after a `certificate_revoked` that it finds final when it looks itself up (Section 12.5). A pass refused twice for its time is the clock (Section 12.1).
+- **A client that is refused a pass signs another and tries once more.** It MUST NOT try more than once. It MUST NOT try at all after a `certificate_revoked` that it finds final when it looks itself up (Section 12.5). A pass refused twice for its time is the clock (Section 15.7).
 - **A lookup (Section 11.8), the link page (Section 4.3), publishing a revocation and looking up revocations (Section 11.15) take no pass.** A server reads none on them, whatever `Authorization` they carry.
 
 **Refusals.** Each is a `401`. `certificate_revoked` comes first; otherwise:
@@ -733,6 +733,8 @@ A revocation record carries what an identity revoked, and proves itself: anyone 
 - **Preconditions** are RFC 9110 §13: a server evaluates `If-Match` and `If-None-Match` on every call (§13.1.1, §13.1.2), at the point §13.2.1 gives, in the order §13.2.2 gives. Where Dromas narrows them:
   - **A call's normal request checks** (§13.2.1) are the match of its route and method, its pass where it takes one, and the read of its target. A registration's and a renewal's pass is by the signer of the prekey statement they bring, so that statement is checked among them.
   - **Which targets carry an `ETag`:** only a list's first page (Section 11.11) and an ACL (Section 11.14).
+  - **A false `If-Match` is answered `412 precondition_failed`,** never `2xx` as a change that appears already applied (§13.1.1).
+  - **A value of `If-Match` or `If-None-Match` of any form but `*` alone or a list of entity-tags,** `*` among tags included, matches nothing.
   - **No target has a modification date.** No answer carries `Last-Modified`, so a condition on a date is ignored (§13.1.3, §13.1.4).
   - **A call refused by a false precondition does nothing but count.** A list counts as a poll, and a fetch or an ack as one of the mailbox's calls.
   - **A write whose conditions held when they were evaluated, and no longer hold when it writes,** is answered `409 mailbox_changed`, and nothing changes. Two operations answer that case their own way: a registration (Section 11.7, step 8) and an ack (Section 11.13).
@@ -898,7 +900,7 @@ The server checks:
    | the key meets its type's key checks | `bad_key` |
 
    A server registers `ssh-ed25519` and whichever other defined types its operator chooses, and answers the rest `unsupported_key_type`, naming its list.
-5. **A registration never changes a registered mailbox.** A registration of a mailbox the server keeps is answered from what the server holds of the mailbox, whatever step 6 would answer:
+5. **A registration never changes a registered mailbox.** A registration of a mailbox the server keeps is answered from what the server holds of the mailbox, once steps 1 to 4 hold, ahead of every other refusal of this call and of every count but the budgets that bound any call (Section 11.5):
 
    | The server holds | The request | Answer |
    |---|---|---|
@@ -937,7 +939,7 @@ The server checks:
 
 The server takes a renewal because its prekey statement is later than the current statement and is signed by the identity or by a working key the identity certified. No pass by the current signer is needed. So a mailbox that lost its working key comes back by renewing under a new certificate, and a mailbox moves to a new certificate, its first included, by renewing.
 
-- **An identical retry** is answered from what the server holds of the mailbox, whatever the checks below would answer: `200 {}` once its pass is verified, or `401 certificate_revoked` while the current signer is revoked.
+- **An identical retry** is answered from what the server holds of the mailbox, ahead of every check below and of every count but the budgets that bound any call (Section 11.5): `200 {}` once its pass is verified, or `401 certificate_revoked` while the current signer is revoked.
 - **Any other prekey statement** is verified as at registration (Section 11.7, steps 6 and 7), and MUST be later than the current statement by `(c, p)` (Section 5.3): signed by a signer of higher rank, at any prekey serial, or by the current signer at a higher prekey serial. Otherwise:
 
   | The new prekey statement is signed | Answer |
@@ -984,7 +986,7 @@ The server checks the steps below; only step 9 stores anything. The server takes
 3. **The body's size** is at most the sender's cap → otherwise `413 too_large`, with the cap in `limit`. The server refuses by the `Content-Length` before it reads anything, or while it reads.
 4. **It is an age file** → otherwise `bad_request`, an empty body included, with no `member`.
 5. **`B` is active:** unknown → `404 no_such_mailbox`; revoked → `410 revoked`.
-6. **Dedupe, while the message is live.** The send's preconditions are evaluated before this step (Section 11.2). The message id is the ciphertext's SHA-256. If `B` stores a message with that message id unacked, from any sender → `200` with the receipt the server kept, whatever has changed at `B` since. Nothing of a message is kept once it is gone: the same bytes sent after that are a new message, stored and counted as any send is. A reader that accepted them once skips or refuses them (Section 12.3, check 8).
+6. **Dedupe, while the message is live.** The send's preconditions are evaluated before this step (Section 11.2). The message id is the ciphertext's SHA-256. If `B` stores a message with that message id unacked, from any sender → `200` with the receipt the server kept, whatever has changed at `B` since, ahead of steps 7 to 9 and of every count but the budgets that bound any call (Section 11.5). Nothing of a message is kept once it is gone: the same bytes sent after that are a new message, stored and counted as any send is. A reader that accepted them once skips or refuses them (Section 12.3, check 8).
 7. **`B` accepts messages on this prekey, from this sender:**
 
    | Failure | Answer |
@@ -1103,6 +1105,7 @@ A mailbox's ACL says which senders its server accepts the mailbox's messages fro
 Neither call takes a pass (Section 8).
 
 - **Publish a revocation: `PUT /v1/<A>/revocations`** with a revocation record (Section 10.3). The server verifies it as a client does, and keeps for good what verifies, whether or not a mailbox is at the address.
+  - **A revocation the server already keeps is answered from what it keeps,** ahead of every other refusal of this call and of every count but the budgets that bound any call (Section 11.5): any body for an address the server keeps revoked, and a body that carries only a revocation of certificates through a revocation serial no higher than the one it keeps.
 
   | The body carries | Answer |
   |---|---|
@@ -1189,7 +1192,7 @@ A mailbox may belong to one account at its server. The protocol fixes how a mail
 - **A retired version.** A request whose version is below the version floor, or covered by a sunset whose date has passed at the server's clock, is answered `410 version_retired`, with `min_version` where the server sets a version floor. Section 11.4, rule 0, places it first. The server's document accepts every version.
 - **A client reads `Deprecation` and `Sunset` on every answer, and nothing more of them.** A value of another form than RFC 9745 §2.1's or RFC 8594 §3's counts as absent, and a client shows neither as the server's words (Section 11.3).
 - **A client SHOULD get the server's document** (Section 11.18) at most once a day.
-- **A client SHOULD tell its owner** of a deprecation or a sunset of its own version, and of a `latest_version` higher than its own version by SemVer precedence ([SemVer] §11) in the parts `latest_version` writes.
+- **A client SHOULD tell its owner** of a deprecation or a sunset of its own version, and of a `latest_version` higher than its own version: the two compared in the parts `latest_version` writes, from the major on.
 
 ### 11.18. The server's document
 
@@ -1210,7 +1213,7 @@ A server lists at most 64 deprecations, 64 sunsets and 64 capabilities, and a cl
 
 ## 12. Clients
 
-### 12.1. Keys and what a client keeps
+### 12.1. Keys, the clock and one place
 
 - **A mailbox's keys and state MUST be readable by its owner alone.**
 - **A prekey MUST NOT be backed up, synced, derived from a seed, or kept where old versions survive** (a secrets manager, a version-control system, a snapshot; Section 15.3).
@@ -1300,7 +1303,12 @@ A client drains every page of its list (Section 11.11), and fetches the message 
 - **A client keeps a message decrypted, adds it to the replay set, and delivers it only when it accepts the message.** A client acks each message once it has kept its verdict: accepted (delivered or held) or refused. Until then the message stays on the server, and a later drain may serve it again: delivery is at least once.
 - **A refused message is never delivered, and is acked,** so it leaves the server. A refusal MUST NOT block its sender (Section 15.4). A refusal for a time is a verdict too: no message waits for a clock to catch up.
 - **A refusal is a code from a closed set** (`undecryptable`, `bad_message`, `bad_envelope`, `bad_identity`, `unsupported_key_type`, `bad_signature`, `reattributed`, `revoked`, `certificate_revoked`, `stale`, `future`, `replay`, `bad_id`) with the client's own words. A client MUST NOT show, in a refusal, a value, member or key from the envelope or from the identity document it carries, nor any of a server's words (Section 11.3).
-- **A client that keeps a record of a refused message MUST NOT record as its signer an identity whose signature did not verify,** or one it keeps a revocation of, and records no text the sender wrote (Section 15.4).
+- **A client MUST keep a refused message, with what its checks established when they judged it** (Section 15.4). Each is a value whose form the client checked, never text the sender wrote and never the body:
+  - the reader's clock;
+  - the address of the identity document the envelope carries, recorded as one of:
+    - **who signed the message,** only if both hold: the signature verified, by that identity or by a working key it certified, at its certificate's own start, under a certificate the reader keeps no revocation of; and the reader keeps no revocation of that address;
+    - **the identity it claims,** otherwise;
+  - only where it is recorded as who signed the message: the envelope's `sent_at` and `msg_id`, and, for a certificate, its certificate serial, start and end.
 - **A transient failure** (a fetch that errors) and **a fault of the mailbox** (an unreadable key or replay set) are errors, never verdicts: nothing is acked, and the message waits for the next drain.
 - **A client shows or passes on one line built from the checked fields, never the bytes that arrived.** Its strings escape, as JSON does, every line break other than LF (U+0085, U+2028, U+2029) and every character of Unicode's `Default_Ignorable_Code_Point`.
 
@@ -1402,7 +1410,7 @@ A mailbox whose revocation of its certificates covers the certificate it uses re
 
 ### 12.7. A mailbox whose identity is kept elsewhere
 
-A mailbox whose identity is kept elsewhere signs under certificates. The identity holder makes the mailbox's certificates and revocations; the mailbox keeps everything else (Section 12.1).
+A mailbox whose identity is kept elsewhere signs under certificates. The identity holder makes the mailbox's certificates and revocations; the mailbox keeps its working keys, prekeys and state (Section 12.1).
 
 - **The mailbox makes each working key and keeps it; the identity holder certifies only its public half.** In this order:
   1. The mailbox gives the identity holder the public key and the lowest certificate serial the certificate may have: one above the highest the mailbox knows of for itself (Section 5.2).
@@ -1543,7 +1551,7 @@ Dromas protects a message's content from everyone but its recipient, and its sen
 - **A reader decrypts before it verifies.** Until the signature is checked, it handles bytes nobody vouched for: age's, then the envelope's. age is made to take files from anyone, and a refusal is acked whatever its reason, so neither the server nor the sender learns which check failed. Each part of the plaintext has one place, and nothing is searched for (Section 9.2).
 - **age to a public key authenticates nobody:** only the signature inside makes a message its sender's. The padding after it is unsigned, and never read.
 - **A malformed identity document, or one that does not hash to its address, is evidence of tampering; a well-formed one of a key type a reader lacks is not** (Section 4.1).
-- **A forgery may be the operator framing a sender.** So a refusal blocks no sender, and a record of a refused message names as its signer only an identity whose signature verified (Section 12.3).
+- **A forgery may be the operator framing a sender, and a message under a revoked certificate may be a thief's, whose signature verifies.** So a refusal blocks no sender, and a refused message's record names its signer only where the signature verified under a certificate the reader keeps no revocation of, at an address it keeps no revocation of (Section 12.3).
 
 ### 15.5. Stolen keys
 
@@ -1617,7 +1625,7 @@ Dromas protects a message's content from everyone but its recipient, and its sen
 - **Silent drops are undetectable;** the protocol has no receipt from the recipient.
 - **A message is sent again as the same envelope** (Section 12.2): a new message would carry a new `msg_id`, and a reader that acts on messages would act twice. A post whose answer is lost costs a send: the server stored the message, the next post is a new ciphertext that it stores and counts again, and the recipient delivers the message once (Section 12.3, check 9).
 - **A mailbox runs in one place at a time** (Section 12.1). Two copies keep two replay sets and two sets of prekeys, each renewing and deleting without the other: a message one delivered the other delivers again, and a prekey one retired the other still holds. A mailbox restored from its identity alone takes the mailbox's place (Section 12.4).
-- **Losing the identity loses the address;** the identity is the one key a mailbox backs up (Section 15.5).
+- **Losing the identity loses the address,** so the identity is the one key whose loss a backup answers: a restored mailbox makes new working keys and prekeys, and a prekey is never backed up (Section 12.1).
 - **A mailbox that does not renew** is sent nothing once its prekey's `not_after` passes (`409 prekey_expired` to its senders). Under a certificate it can poll while the certificate lasts, and by its identity's pass where it has its identity. Once the certificate has ended, its server takes no pass under it, and a renewal brings the mailbox back while the server keeps it.
 
 ### 15.10. Post-quantum
