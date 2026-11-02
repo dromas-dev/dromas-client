@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dromas-dev/dromas-client/protocol"
+
 	"filippo.io/age"
 )
 
@@ -29,18 +31,18 @@ func TestOnlyTheDefaultClientIsBoundedByTheMailbox(t *testing.T) {
 	}
 }
 
-// A pass names the server as an origin is written: its host, lowercase, with
-// no user before it, and its port as a number only when that is not the
-// scheme's default, so https://dromas.dev:443 and https://dromas.dev name
-// one server, as the server reads its Host (PROTOCOL.md §8).
-func TestAPassNamesTheServerAsAnOrigin(t *testing.T) {
+// A pass names the server by its host, lowercase, with no user before it, and
+// its port as a number, with none when it is 80 or 443, so
+// https://dromas.dev:443 and https://dromas.dev name one server, as the server
+// reads its Host (PROTOCOL.md §8).
+func TestAPassNamesTheServer(t *testing.T) {
 	t.Parallel()
 	for base, want := range map[string]string{
 		"https://dromas.dev":              "dromas.dev",
 		"https://dromas.dev:443":          "dromas.dev",
 		"https://Dromas.dev:0443/":        "dromas.dev",
 		"https://someone@dromas.dev:8443": "dromas.dev:8443",
-		"https://dromas.dev:80":           "dromas.dev:80",
+		"http://dromas:443":               "dromas",
 		"http://dromas:8080":              "dromas:8080",
 		"http://dromas:80":                "dromas",
 		"http://dromas:":                  "dromas",
@@ -59,6 +61,68 @@ func TestAPassNamesTheServerAsAnOrigin(t *testing.T) {
 	// (#405).
 	if got, err := (&Mailbox{base: "https://\u212aey.example"}).serverName(); err == nil {
 		t.Errorf("a host that is not ASCII: named %q", got)
+	}
+}
+
+// https on port 80 is no server this client calls, whatever else names it, and
+// http on 80 or 443 to this machine is, with those ports dropped from its name
+// (PROTOCOL.md §8, §11.1).
+func TestHTTPSOnPort80IsRefused(t *testing.T) {
+	t.Parallel()
+	for _, base := range []string{"https://dromas.dev:80", "https://dromas.dev:0080/", "HTTPS://Dromas.dev:80", "https://someone@dromas.dev:80", "https://[::1]:80"} {
+		if _, err := newMailbox(t.TempDir(), Options{Base: base}); err == nil || !strings.Contains(err.Error(), "never on port 80") {
+			t.Errorf("%s: %v", base, err)
+		}
+	}
+	for _, base := range []string{"https://dromas.dev", "https://dromas.dev:443", "https://dromas.dev:8080", "https://[2001:db8::80]", "http://127.0.0.1:80", "http://127.0.0.1:443"} {
+		if err := checkServerURL(base); err != nil {
+			t.Errorf("%s: %v", base, err)
+		}
+	}
+}
+
+// A link is its server's by its server name, however the two are written, and
+// any other is refused (PROTOCOL.md §4.3).
+func TestALinkIsComparedByServerName(t *testing.T) {
+	t.Parallel()
+	addr := protocol.Address{}
+	own, another, notOne := "", "a link to another server", "not an address, a link to one, or an alias"
+	for _, c := range []struct{ base, s, want string }{
+		{"https://dromas.dev", addr.String(), own},
+		{"https://dromas.dev", "https://dromas.dev/to/" + addr.String(), own},
+		{"https://dromas.dev", "https://dromas.dev:443/to/" + addr.String(), own},
+		{"https://dromas.dev", "https://dromas.dev:0443/to/" + addr.String(), own},
+		{"https://dromas.dev", "https://Dromas.DEV/to/" + addr.String(), own},
+		{"https://dromas.dev", "https://someone@dromas.dev/to/" + addr.String(), own},
+		{"https://dromas.dev:443", "https://dromas.dev/to/" + addr.String(), own},
+		{"https://dromas.dev:8443", "https://dromas.dev:8443/to/" + addr.String(), own},
+		{"http://127.0.0.1", "http://127.0.0.1:80/to/" + addr.String(), own},
+		{"http://127.0.0.1:80", "http://127.0.0.1/to/" + addr.String(), own},
+		{"https://[::1]:443", "https://[::1]/to/" + addr.String(), own},
+		{"https://dromas.dev/base", "https://dromas.dev:443/base/to/" + addr.String(), own},
+
+		{"https://dromas.dev", "https://other.example/to/" + addr.String(), another},
+		{"https://dromas.dev", "https://dromas.dev:8443/to/" + addr.String(), another},
+		{"https://dromas.dev", "https://dromas.dev@other.example/to/" + addr.String(), another},
+		{"https://dromas.dev", "https://dromas.dev.other.example/to/" + addr.String(), another},
+		{"https://dromas.dev", "ftp://dromas.dev/to/" + addr.String(), another},
+		{"https://dromas.dev", "https://dromas.dev:65536/to/" + addr.String(), another},
+		{"http://127.0.0.1:8080", "http://127.0.0.1/to/" + addr.String(), another},
+
+		{"https://dromas.dev", "https://dromas.dev/to/" + addr.String() + "?x=1", notOne},
+		{"https://dromas.dev", "https://dromas.dev/to/" + addr.String() + "#x", notOne},
+		{"https://dromas.dev", "https://dromas.dev/to/" + addr.String() + "/", notOne},
+		{"https://dromas.dev", "https://dromas.dev/" + addr.String(), notOne},
+		{"https://dromas.dev", "https://dromas.dev/to/", notOne},
+		{"https://dromas.dev", "not an address", notOne},
+	} {
+		got, err := (&Mailbox{base: c.base}).Destination(c.s)
+		switch {
+		case c.want == own && (err != nil || got != addr):
+			t.Errorf("%s at %s: %v, %v", c.s, c.base, got, err)
+		case c.want != own && (err == nil || !strings.Contains(err.Error(), c.want)):
+			t.Errorf("%s at %s: %v, want %q", c.s, c.base, err, c.want)
+		}
 	}
 }
 

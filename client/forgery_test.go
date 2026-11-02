@@ -557,3 +557,42 @@ func TestForgeries(t *testing.T) {
 		}
 	})
 }
+
+// The fake reads a pass against its request's Host as a server name, as a real
+// server does (PROTOCOL.md §8): a Host that carries port 443 or 80 is the name
+// without it, and any other port is part of the name.
+func TestTheFakeReadsAHostAsAServerName(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	a := e.mailbox()
+	for _, c := range []struct {
+		host, named string
+		taken       bool
+	}{
+		{"dromas.example", "dromas.example", true},
+		{"dromas.example:443", "dromas.example", true},
+		{"dromas.example:80", "dromas.example", true},
+		{"dromas.example:8443", "dromas.example:8443", true},
+		{"dromas.example:8443", "dromas.example", false},
+		{"other.example:443", "dromas.example", false},
+	} {
+		h, _, err := protocol.NewPass(identityKey(t, a), a.Address(), c.named, e.clock.Now())
+		if err != nil {
+			t.Fatal(err)
+		}
+		req, err := http.NewRequest(http.MethodGet, e.srv.URL+"/v1/"+a.Address().String()+"/messages", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Host = c.host
+		req.Header.Set("Authorization", h)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		if taken := resp.StatusCode != http.StatusUnauthorized; taken != c.taken {
+			t.Errorf("Host %s, a pass that names %s: %d, want taken %v", c.host, c.named, resp.StatusCode, c.taken)
+		}
+	}
+}

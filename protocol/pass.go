@@ -71,9 +71,33 @@ const (
 	maxDNSName = 253
 )
 
+// ServerName writes the host and port of a URL, or of a request's Host, as a
+// server name (PROTOCOL.md §8): lowercase in ASCII, the port as a number, and
+// no port when it is 80 or 443 or is empty. Which of the two a request came by
+// is no part of a name, so a pass never rests on its scheme. A port that is no
+// number stays as it is written, for CheckServerName to refuse.
+func ServerName(hostport string) string {
+	name := LowerASCII(hostport)
+	i := strings.LastIndexByte(name, ':')
+	if i <= strings.LastIndexByte(name, ']') { // an IPv6 address ends in ], so a colon there begins no port
+		return name
+	}
+	if i == len(name)-1 {
+		return name[:i]
+	}
+	port, err := strconv.ParseUint(name[i+1:], 10, 16)
+	switch {
+	case err != nil:
+		return name
+	case port == 80 || port == 443:
+		return name[:i]
+	}
+	return name[:i+1] + strconv.FormatUint(port, 10)
+}
+
 // CheckServerName checks that s can stand in a pass as the server's name: the
-// host of the server's URL, lowercase, with its port only when that is not the
-// scheme's default (PROTOCOL.md §8).
+// host of the server's URL, lowercase, with a port that is neither 80 nor 443,
+// where it has one (PROTOCOL.md §8). ServerName writes one from a URL or a Host.
 func CheckServerName(s string) error {
 	m := serverNameGrammar.FindStringSubmatch(s)
 	ok := m != nil && len(m[1]) <= maxDNSName
@@ -83,10 +107,10 @@ func CheckServerName(s string) error {
 	}
 	if ok && m[3] != "" {
 		port, err := strconv.Atoi(m[3])
-		ok = err == nil && port <= 65535
+		ok = err == nil && port <= 65535 && port != 80 && port != 443
 	}
 	if !ok {
-		return fmt.Errorf("%w: the server's name is its host, lowercase, with its port only when that is not the scheme's default", ErrPass)
+		return fmt.Errorf("%w: the server's name is its host, lowercase, with a port only when that is neither 80 nor 443", ErrPass)
 	}
 	return nil
 }

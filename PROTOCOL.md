@@ -359,7 +359,7 @@ address-form = %s"d"   ; the one form this version defines
 An address is shared as the link `https://<server>/to/<address>`.
 
 - A server MUST serve a page at that link for exactly an `address` (Section 4.2), and `404` for any other path. The page consists of fixed text, the address, and the server's own link to the address. The page never contains text that a mailbox supplied. The server sends the page with `Referrer-Policy: no-referrer` and `X-Robots-Tag: noindex`. The server ignores a query on the link.
-- A client given a link MUST read the address from the link's path, MUST NOT request the page, and MUST refuse a link to any server but the client's own.
+- A client given a link MUST read the address from the link's path, MUST NOT request the page, and MUST refuse a link whose server name (Section 8) is not the name of the client's server.
 
 ## 5. Signers
 
@@ -496,13 +496,15 @@ server-host    = dns-name / "[" IPv6address "]"   ; in lowercase
 dns-name       = dns-label *( "." dns-label )   ; at most 253 characters
 dns-label      = dns-char [ *61( dns-char / "-" ) dns-char ]
 dns-char       = %x61-7A / DIGIT
-server-port    = %x31-39 *4DIGIT   ; no leading zero, at most 65535
+server-port    = %x31-39 *4DIGIT   ; no leading zero, at most 65535,
+                                   ; and neither 80 nor 443
 ```
 
-- **The server name.** The server name is the host of the mailbox's URL for its server, written as an origin is written (RFC 6454 §6.2). The server name is in lowercase, has no user information, and has the port only when the port is not the scheme's default.
+- **The server name.** The server name is the host of the mailbox's URL for its server, in lowercase, with no user information, followed by the URL's port as a number. A server name never carries port 80 or port 443.
+  - A client drops a port of 443 whatever the scheme. A client drops a port of 80 from an `http` URL, and refuses an `https` URL with a port of 80 (Section 11.1).
   - The server name's host is either a name of DNS labels (RFC 1123 §2.1), including an IPv4 address, or an IPv6 address in brackets.
   - Anything else that RFC 3986's `host` allows is not a server name: IPvFuture, a zone, percent-encoding, or any other character.
-  - For example, `https://dromas.dev:443` and `https://dromas.dev` both have the server name `dromas.dev`. `http://127.0.0.1:8080` has the server name `127.0.0.1:8080`.
+  - For example, `https://dromas.dev:443` and `https://dromas.dev` both have the server name `dromas.dev`. `http://127.0.0.1:80` and `http://127.0.0.1` both have the server name `127.0.0.1`. `http://127.0.0.1:8080` has the server name `127.0.0.1:8080`.
 - **A server MUST write the `Host` of a request the same way, and drop a port of 443 and a port of 80 alike, so that checking a pass never depends on the scheme of the request.**
 - **A client writes the pass as the value of one `Authorization` line, in the form `pass-authorization`.** In that value, the signature is the base64 of the armoured signature. A request with two `Authorization` lines carries no pass.
 
@@ -542,7 +544,7 @@ server-port    = %x31-39 *4DIGIT   ; no leading zero, at most 65535
 
   The exception: on a registration (Section 11.7) and on a renewal (Section 11.9), the server accepts a pass by the certificate of the prekey statement that the call brings, in place of the current certificate.
 
-  A server accepts a pass only where the pass's server name is the server's own. A server reads a pass by the form of the pass's signer (Section 5).
+  A server accepts a pass only where the pass's server name is one of the server's names (Section 11.1). A server reads a pass by the form of the pass's signer (Section 5).
 - **A client whose pass a server refuses signs another pass and tries once more.** The client MUST NOT retry more than once. The client MUST NOT retry at all after a `certificate_revoked` that the client finds final when the mailbox looks itself up (Section 12.5). When a server refuses both passes for their time, the cause is the mailbox's clock (Section 15.7).
 - **A lookup (Section 11.8), the link page (Section 4.3), publishing a revocation and looking up revocations (Section 11.15) accept no pass.** A server reads no pass on these calls, whatever `Authorization` they carry.
 
@@ -741,8 +743,9 @@ A revocation record carries an identity's revocations, and the record proves its
 ### 11.1. Transport
 
 - **A client MUST call its server over `https`, with one exception.** The exception is a server on the client's own machine, named by an address in `127.0.0.0/8` or by `[::1]`. A client MAY call such a server over `http`. The name `localhost` is not such an address.
-- **A client MUST refuse a URL of any other form before the client sends anything.**
+- **A client MUST refuse a URL of any other form before the client sends anything.** A client MUST also refuse an `https` URL with a port of 80.
 - **A client MUST send a call to a loopback address, or to `localhost`, without a proxy.**
+- **A server's names are the names that the server's operator gives the server.** Each name is written as Section 8 writes a server name.
 - **A server SHOULD terminate its own TLS, on hosts its operator runs, with no third party between a client and the server.** Anything that terminates TLS for a server is part of the server (Section 15.8).
 - **A client MUST NOT follow a redirect.** The API never redirects. So a client treats a `3xx` other than `304` as no answer. A pass and a lookup each name an address, and a client never sends a pass or a lookup anywhere that a server points.
 - **Every API path is under `/v1/`.**
@@ -1780,7 +1783,7 @@ Dromas protects a message's content from everyone but the message's recipient. D
 - **[BIP 173]** Bech32
 - **[FIPS 180-4]**, **[FIPS 186-5]**
 - **[RFC 2119]**, **[RFC 8174]** BCP 14
-- **[RFC 3339]** timestamps · **[RFC 3986]** URIs · **[RFC 4151]** the `tag` URI scheme · **[RFC 4251]**, **[RFC 4253]** SSH · **[RFC 4648]** base64 and base64url · **[RFC 5234]** ABNF · **[RFC 5656]** ECDSA in SSH · **[RFC 6454]** origins · **[RFC 6648]** deprecating the `X-` prefix · **[RFC 7405]** case-sensitive strings in ABNF · **[RFC 7457]** TLS attacks · **[RFC 7493]** I-JSON · **[RFC 7519]** JSON Web Token · **[RFC 8032]** EdDSA · **[RFC 8259]** JSON · **[RFC 8555]** ACME · **[RFC 8594]** the `Sunset` header field · **[RFC 8709]** Ed25519 in SSH · **[RFC 9110]** HTTP semantics · **[RFC 9457]** problem details · **[RFC 9562]** UUIDs · **[RFC 9651]** Structured Field Values · **[RFC 9745]** the `Deprecation` header field
+- **[RFC 3339]** timestamps · **[RFC 3986]** URIs · **[RFC 4151]** the `tag` URI scheme · **[RFC 4251]**, **[RFC 4253]** SSH · **[RFC 4648]** base64 and base64url · **[RFC 5234]** ABNF · **[RFC 5656]** ECDSA in SSH · **[RFC 6648]** deprecating the `X-` prefix · **[RFC 7405]** case-sensitive strings in ABNF · **[RFC 7457]** TLS attacks · **[RFC 7493]** I-JSON · **[RFC 7519]** JSON Web Token · **[RFC 8032]** EdDSA · **[RFC 8259]** JSON · **[RFC 8555]** ACME · **[RFC 8594]** the `Sunset` header field · **[RFC 8709]** Ed25519 in SSH · **[RFC 9110]** HTTP semantics · **[RFC 9457]** problem details · **[RFC 9562]** UUIDs · **[RFC 9651]** Structured Field Values · **[RFC 9745]** the `Deprecation` header field
 - **[SemVer]** Semantic Versioning 2.0.0, https://semver.org/spec/v2.0.0.html
 
 ## Appendix A. Where `ssh-keygen` differs (informative)
@@ -1892,7 +1895,8 @@ revoke-namespace           = %s"dromas-revoke-v1:" address
 serial                     = %x31-39 *15DIGIT   ; no leading zero
 server-host                = dns-name / "[" IPv6address "]"   ; in lowercase
 server-name                = server-host [ ":" server-port ]
-server-port                = %x31-39 *4DIGIT   ; no leading zero, at most 65535
+server-port                = %x31-39 *4DIGIT   ; no leading zero, at most 65535,
+                                                 ; and neither 80 nor 443
 signature-even             = signature-groups LF
 signature-groups           = *16( 4base64-char ) ( 4base64-char / base64-final )
 signature-line             = 70base64-char LF

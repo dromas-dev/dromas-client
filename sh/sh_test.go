@@ -2081,11 +2081,11 @@ dr_recv`
 	}
 }
 
-// The script's pass names the server as the Go client's does, as an origin is
-// written: its host, lowercase, with no user before it, and its port as a
-// number only when that is not the scheme's default (PROTOCOL.md §8;
-// client's TestAPassNamesTheServerAsAnOrigin holds the Go client to the same).
-func TestTheScriptsPassNamesTheServerAsAnOrigin(t *testing.T) {
+// The script's pass names the server as the Go client's does: its host,
+// lowercase, with no user before it, and its port as a number, with none when
+// it is 80 or 443 (PROTOCOL.md §8; client's TestAPassNamesTheServer holds the Go
+// client to the same).
+func TestTheScriptsPassNamesTheServer(t *testing.T) {
 	t.Parallel()
 	need(t, "bash")
 	for base, want := range map[string]string{
@@ -2093,7 +2093,7 @@ func TestTheScriptsPassNamesTheServerAsAnOrigin(t *testing.T) {
 		"https://dromas.dev:443":          "dromas.dev",
 		"https://Dromas.dev:0443/":        "dromas.dev",
 		"https://someone@dromas.dev:8443": "dromas.dev:8443",
-		"https://dromas.dev:80":           "dromas.dev:80",
+		"http://dromas:443":               "dromas",
 		"http://dromas:8080":              "dromas:8080",
 		"http://dromas:80":                "dromas",
 		"http://dromas:":                  "dromas",
@@ -2114,7 +2114,8 @@ func TestBothClientsCallTheSameServers(t *testing.T) {
 	need(t, "bash", "jq")
 	const refusal = "is not a server this client calls"
 	for _, u := range []string{
-		"https://dromas.dev", "HTTPS://dromas.dev", "https://10.0.0.1:8443", "https://someone@dromas.dev",
+		"https://dromas.dev", "HTTPS://dromas.dev", "https://10.0.0.1:8443", "https://someone@dromas.dev", "https://dromas.dev:443", "https://dromas.dev:8080", "https://[2001:db8::80]", "http://127.0.0.1:80", "http://127.0.0.1:443",
+		"https://dromas.dev:80", "https://dromas.dev:0080", "https://dromas.dev:80/", "HTTPS://Dromas.dev:80", "https://someone@dromas.dev:80", "https://[::1]:80",
 		"http://127.0.0.1:8080", "http://127.255.0.9", "http://[::1]:8080", "http://[::1]", "http://someone@127.0.0.1:1",
 		"http://example.com", "http://dromas:8080", "http://10.0.0.1:8080", "http://127.0.0.256", "http://127.01.0.1",
 		"http://127.0.0.1.example", "http://localhost.example", "http://localhost:1", "http://LOCALHOST", "http://[::2]:8080", "http://[::ffff:127.0.0.1]:8080",

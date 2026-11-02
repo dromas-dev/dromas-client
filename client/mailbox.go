@@ -338,9 +338,16 @@ func CheckServerURL(s string) error { return checkServerURL(s) }
 // checkServerURL holds the URL of the server a mailbox calls to https, or to http only for a server on this
 // machine (onThisMachine). A pass is a bearer credential for the minutes it
 // has left, and a lookup names the address it asks about, so neither
-// crosses a network in the clear (RFC 6750 §5.3). Nothing allows more.
+// crosses a network in the clear (RFC 6750 §5.3). Nothing allows more. https on
+// port 80 is refused too: its server name would drop the port (PROTOCOL.md §8,
+// §11.1), and no server is there.
 func checkServerURL(s string) error {
 	u, err := url.Parse(s)
+	if err == nil && u.Scheme == "https" {
+		if port, err := strconv.ParseUint(u.Port(), 10, 16); err == nil && port == 80 {
+			return fmt.Errorf("%.80q is not a server this client calls: https is never on port 80", s)
+		}
+	}
 	if err == nil && u.Host != "" && (u.Scheme == "https" || u.Scheme == "http" && onThisMachine(u.Hostname())) {
 		return nil
 	}
@@ -367,19 +374,46 @@ func (b *Mailbox) Link() string { return b.base + protocol.LinkPath + b.Address(
 
 // Destination parses where to send: an address, a link to one on this mailbox's
 // server, or one of this mailbox's aliases (see [Mailbox.SetAlias]). A link to
-// another server is refused, since a mailbox sends only through its own.
+// another server is refused, since a mailbox sends only through its own: the
+// two are compared by server name (PROTOCOL.md §4.3), so one written with its
+// default port is the same server's.
 func (b *Mailbox) Destination(s string) (protocol.Address, error) {
 	if aliasGrammar.MatchString(s) {
 		return b.alias(s)
 	}
-	a, err := protocol.ParseAddress(strings.TrimPrefix(s, b.base+protocol.LinkPath))
-	switch {
-	case err == nil:
+	if !strings.Contains(s, "://") {
+		a, err := protocol.ParseAddress(s)
+		if err != nil {
+			return a, refuse("not an address, a link to one, or an alias: %s", s)
+		}
 		return a, nil
-	case strings.Contains(s, "://") && !strings.HasPrefix(s, b.base+"/"):
-		return a, refuse("a link to another server: this mailbox's server is %s", b.base)
 	}
-	return a, refuse("not an address, a link to one, or an alias: %s", s)
+	if !b.ownLink(s) {
+		return protocol.Address{}, refuse("a link to another server: this mailbox's server is %s", b.base)
+	}
+	u, err := url.Parse(s)
+	base, berr := url.Parse(b.base)
+	if err == nil && berr == nil && !strings.ContainsAny(s, "?#") {
+		if a, err := protocol.ParseAddress(strings.TrimPrefix(u.EscapedPath(), base.EscapedPath()+protocol.LinkPath)); err == nil {
+			return a, nil
+		}
+	}
+	return protocol.Address{}, refuse("not an address, a link to one, or an alias: %s", s)
+}
+
+// ownLink reports whether a link is an http or https URL whose server name is
+// this mailbox's server's.
+func (b *Mailbox) ownLink(link string) bool {
+	own, err := b.serverName()
+	if err != nil {
+		return false
+	}
+	name, err := serverNameOf(link)
+	if err != nil || name != own {
+		return false
+	}
+	u, err := url.Parse(link)
+	return err == nil && (u.Scheme == "https" || u.Scheme == "http")
 }
 
 // Identity returns the mailbox's identity.
