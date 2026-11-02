@@ -194,8 +194,11 @@ func Open(dir string, opt Options) (*Mailbox, error) {
 // HTTP client takes every request through one transport (newTransport) and
 // follows no redirect (followNone).
 func newMailbox(dir string, opt Options) (*Mailbox, error) {
-	if err := CheckLayout(dir, opt.Layout); err != nil {
-		return nil, err
+	// No directory is a mailbox that keeps nothing ([Publish], [Revoke]).
+	if dir != "" {
+		if err := CheckLayout(dir, opt.Layout); err != nil {
+			return nil, err
+		}
 	}
 	if err := opt.Policy.checkSet(); err != nil {
 		return nil, err

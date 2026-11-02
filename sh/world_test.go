@@ -72,9 +72,12 @@ func newWorld(t *testing.T) *world {
 
 // shMailbox is one of the script's mailboxes, a directory of its own.
 type shMailbox struct {
-	w    *world
-	dir  string
-	addr protocol.Address
+	// goLayout is whether the Go client made this mailbox, whose parts are in its
+	// default layout (client.Layout) and not in one directory.
+	goLayout bool
+	w        *world
+	dir      string
+	addr     protocol.Address
 }
 
 // empty is a mailbox nothing has been made in yet.
@@ -110,7 +113,7 @@ func (w *world) goMailbox(workingKey bool) (*client.Mailbox, *shMailbox) {
 		w.t.Fatal(err)
 	}
 	landAll(w.t, g)
-	return g, &shMailbox{w: w, dir: g.Dir(), addr: g.Address()}
+	return g, &shMailbox{w: w, dir: g.Dir(), addr: g.Address(), goLayout: true}
 }
 
 // publish puts a record at the server for the address it names, with no pass,
@@ -162,7 +165,17 @@ func (b *shMailbox) must(commands string) string {
 }
 
 // file is the mailbox's file name, relative to its directory.
-func (b *shMailbox) file(name string) string { return filepath.Join(b.dir, name) }
+func (b *shMailbox) file(name string) string {
+	if b.goLayout {
+		switch first, _, _ := strings.Cut(name, "/"); first {
+		case "work", "prekeys":
+			return filepath.Join(b.dir, "keys", name)
+		case "inbox", "held", "refused", "sent":
+			return filepath.Join(b.dir, "mail", name)
+		}
+	}
+	return filepath.Join(b.dir, name)
+}
 
 // read is the contents of the mailbox's file, "" when there is none.
 func (b *shMailbox) read(name string) string {

@@ -299,8 +299,11 @@ func TestInitWritesAProfilesFileAndRunsFromIt(t *testing.T) {
 	if err := do(t.Context(), "status", []string{"--profile", "bot", "--server", srv.URL}, nil, &st, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(st.String(), `"config":"`+file) {
-		t.Errorf("status names no config: %s", st.String())
+	var named struct {
+		Paths map[string]string `json:"paths"`
+	}
+	if err := json.Unmarshal(st.Bytes(), &named); err != nil || named.Paths["config"] != file {
+		t.Errorf("status names no config: %s, %v", st.String(), err)
 	}
 	if err := os.WriteFile(file, append(raw, []byte("\n# mine\n")...), 0o600); err != nil {
 		t.Fatal(err)
@@ -397,5 +400,49 @@ func TestAConfigFileOthersCanWriteStopsTheCommand(t *testing.T) {
 	var bad *configError
 	if err := do(t.Context(), "config", []string{"--config", file}, nil, io.Discard, io.Discard); !errors.As(err, &bad) || !strings.Contains(err.Error(), "writable by others") {
 		t.Errorf("%v", err)
+	}
+}
+
+// A revocation record is published from anywhere, as it promises: with no config
+// file, with no mailbox, and with no regard to a file named identity where it runs.
+// A profile someone named, and a config that is wrong, stop it as they stop anything.
+func TestARecordIsPublishedWithNoConfig(t *testing.T) {
+	cleanEnv(t)
+	ctx := t.Context()
+	srv := fakeserver.New(t, time.Now)
+	a, err := client.Init(ctx, t.TempDir(), client.Options{Base: srv.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("DROMAS_SERVER_URL", srv.URL)
+	useMailbox(t, a.Dir())
+	var record bytes.Buffer
+	if err := do(ctx, "revocation make", nil, nil, &record, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("DROMAS_CONFIG", "")
+	file := filepath.Join(t.TempDir(), "record.json")
+	if err := os.WriteFile(file, record.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cwd := t.TempDir()
+	t.Chdir(cwd)
+	key, err := os.ReadFile(filepath.Join(a.Dir(), "identity"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cwd, "identity"), key, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	args := []string{"--record", file, a.Address().String()}
+	var bad *configError
+	if err := do(ctx, "revocation publish", append([]string{"--profile", "none"}, args...), nil, io.Discard, io.Discard); !errors.As(err, &bad) {
+		t.Errorf("a profile with no file: %v", err)
+	}
+	if err := do(ctx, "revocation publish", args, nil, io.Discard, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if es, _ := os.ReadDir(cwd); len(es) != 1 {
+		t.Errorf("the working directory holds %v", es)
 	}
 }

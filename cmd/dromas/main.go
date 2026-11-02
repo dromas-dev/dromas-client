@@ -16,6 +16,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -129,12 +130,19 @@ type cli struct {
 	stdout, stderr io.Writer
 }
 
-func (e *cli) mailbox() (*client.Mailbox, error) { return client.Open(e.dir, e.opt) }
+func (e *cli) mailbox() (*client.Mailbox, error) {
+	if e.dir == "" { // a command that needs no mailbox ran with no config: never the working directory
+		return nil, errors.New("no mailbox: no config file names one")
+	}
+	return client.Open(e.dir, e.opt)
+}
 
 // environment reads where the mailbox is and how to reach its server, once the
 // command line is known to be one that runs.
 func (e *cli) environment(c *cobra.Command) error {
-	cfg, err := loadConfig(c, &e.flags, c.Name() == "init" && c.Parent() == c.Root())
+	// A record is published from anywhere: it needs a server, and no mailbox.
+	none := c.Name() == "publish" && c.Flags().Changed("record")
+	cfg, err := loadConfig(c, &e.flags, c.Name() == "init" && c.Parent() == c.Root(), none)
 	if err != nil {
 		return err
 	}

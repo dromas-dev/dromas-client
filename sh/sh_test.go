@@ -1391,7 +1391,7 @@ func TestWithGoClient(t *testing.T) {
 	if err != nil || json.Unmarshal([]byte(out), &line) != nil || line.Envelope.Subject != f.Subject || line.Envelope.InReplyTo != f.InReplyTo || line.Envelope.Supersedes != f.Supersedes {
 		t.Fatalf("dr_recv printed %q, %v", out, err)
 	}
-	sameButReceipt(t, filepath.Join(goDir, "sent", shAddr.String()+"."+line.Envelope.MsgID+".json"), []byte(out), r.ID)
+	sameButReceipt(t, filepath.Join(goDir, "mail", "sent", shAddr.String()+"."+line.Envelope.MsgID+".json"), []byte(out), r.ID)
 }
 
 // sameButReceipt checks a sent/ record: the line its recipient delivered, as

@@ -137,8 +137,9 @@ func expand(path, rel string) (string, error) {
 
 // loadConfig reads the settings, and refuses what is wrong before a command
 // touches the mailbox. isInit is whether init runs, which writes a profile's file
-// where it finds none.
-func loadConfig(c *cobra.Command, g *globals, isInit bool) (*config, error) {
+// where it finds none. noMailbox is whether the command can run without one: then
+// the default profile may have no file, and a file need name no paths.
+func loadConfig(c *cobra.Command, g *globals, isInit, noMailbox bool) (*config, error) {
 	envConfig, envProfile := os.Getenv("DROMAS_CONFIG"), os.Getenv("DROMAS_PROFILE")
 	switch {
 	case g.config != "" && g.profile != "":
@@ -189,6 +190,7 @@ func loadConfig(c *cobra.Command, g *globals, isInit bool) (*config, error) {
 				return nil, &configError{file: file, msg: err.Error()}
 			}
 			found = true
+		case noMailbox && g.profile == "" && envProfile == "":
 		case g.baseDir == "" || g.mailDir == "":
 			return nil, &configError{file: file, msg: fmt.Sprintf("no config file at %s: dromas init makes one", file)}
 		}
@@ -201,7 +203,7 @@ func loadConfig(c *cobra.Command, g *globals, isInit bool) (*config, error) {
 		cfg.file = file
 		rel = filepath.Dir(file)
 	}
-	if err := cfg.resolve(g, &fc, rel); err != nil {
+	if err := cfg.resolve(g, &fc, rel, noMailbox); err != nil {
 		return nil, err
 	}
 	return cfg, nil
@@ -229,7 +231,7 @@ func readConfig(file string, fc *fileConfig) error {
 
 // resolve takes each setting from the first place that says it, and refuses
 // what no mailbox can run with.
-func (cfg *config) resolve(g *globals, fc *fileConfig, rel string) error {
+func (cfg *config) resolve(g *globals, fc *fileConfig, rel string, noMailbox bool) error {
 	bad := func(key, format string, a ...any) error {
 		return &configError{file: cfg.file, key: key, msg: fmt.Sprintf(format, a...)}
 	}
@@ -260,24 +262,26 @@ func (cfg *config) resolve(g *globals, fc *fileConfig, rel string) error {
 		cfg.values[key] = setting{p, from}
 		return p, nil
 	}
-	var err error
-	if cfg.dir, err = path("base-dir", g.baseDir, fc.BaseDir, ""); err != nil {
-		return err
-	}
-	if cfg.layout.Mail, err = path("mail-dir", g.mailDir, fc.MailDir, ""); err != nil {
-		return err
-	}
-	if cfg.layout.IdentityFile, err = path("identity-file", g.identityFile, fc.IdentityFile, filepath.Join(cfg.dir, "identity")); err != nil {
-		return err
-	}
-	if cfg.layout.RotatingKeys, err = path("rotating-keys-dir", g.rotatingKeysDir, fc.RotatingKeysDir, filepath.Join(cfg.dir, "keys")); err != nil {
-		return err
-	}
-	if cfg.layout.Inbox, err = path("inbox-dir", g.inbox, fc.InboxDir, filepath.Join(cfg.layout.Mail, "inbox")); err != nil {
-		return err
-	}
-	if err := client.CheckLayout(cfg.dir, cfg.layout); err != nil {
-		return bad("", "%v", err)
+	if !noMailbox || g.baseDir != "" || fc.BaseDir != "" {
+		var err error
+		if cfg.dir, err = path("base-dir", g.baseDir, fc.BaseDir, ""); err != nil {
+			return err
+		}
+		if cfg.layout.Mail, err = path("mail-dir", g.mailDir, fc.MailDir, ""); err != nil {
+			return err
+		}
+		if cfg.layout.IdentityFile, err = path("identity-file", g.identityFile, fc.IdentityFile, filepath.Join(cfg.dir, "identity")); err != nil {
+			return err
+		}
+		if cfg.layout.RotatingKeys, err = path("rotating-keys-dir", g.rotatingKeysDir, fc.RotatingKeysDir, filepath.Join(cfg.dir, "keys")); err != nil {
+			return err
+		}
+		if cfg.layout.Inbox, err = path("inbox-dir", g.inbox, fc.InboxDir, filepath.Join(cfg.layout.Mail, "inbox")); err != nil {
+			return err
+		}
+		if err := client.CheckLayout(cfg.dir, cfg.layout); err != nil {
+			return bad("", "%v", err)
+		}
 	}
 
 	server, from := client.DefaultBase, "default"
@@ -394,11 +398,12 @@ func homeBase(env, def string) string {
 // active default would hold its value through an upgrade. What the command line
 // says goes in as it says it.
 func writeTemplate(file, profile string, g *globals) error {
-	join := func(a, b string) string {
+	// Under ~/ a path is written with / on every system, which expand reads.
+	join := func(a string, elem ...string) string {
 		if strings.HasPrefix(a, "~/") {
-			return a + "/" + b
+			return a + "/" + strings.Join(elem, "/")
 		}
-		return filepath.Join(a, b)
+		return filepath.Join(append([]string{a}, elem...)...)
 	}
 	abs := func(p string) string {
 		if p == "" || strings.HasPrefix(p, "~") {
@@ -416,10 +421,10 @@ func writeTemplate(file, profile string, g *globals) error {
 		}
 		return b
 	}
-	base := first(g.baseDir, join(homeBase("XDG_DATA_HOME", ".local/share"), filepath.Join("dromas", profile)))
+	base := first(g.baseDir, join(homeBase("XDG_DATA_HOME", ".local/share"), "dromas", profile))
 	mail := first(g.mailDir, join(base, "mail"))
 	identity := first(g.identityFile, join(base, "identity"))
-	keys := first(g.rotatingKeysDir, join(homeBase("XDG_STATE_HOME", ".local/state"), filepath.Join("dromas", profile, "keys")))
+	keys := first(g.rotatingKeysDir, join(homeBase("XDG_STATE_HOME", ".local/state"), "dromas", profile, "keys"))
 	var b strings.Builder
 	fmt.Fprintf(&b, "# dromas profile %q. Commented lines show the default: uncomment to change.\n", profile)
 	b.WriteString("# `dromas config` prints every value as resolved.\n")
