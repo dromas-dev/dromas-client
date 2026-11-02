@@ -102,6 +102,7 @@ func layoutParts(dir string, l Layout) []layoutPart {
 // filesystem that ignores case hides an overlap.
 func CheckLayout(dir string, l Layout) error {
 	parts := layoutParts(dir, l.resolved(dir))
+	seen := places{}
 	for i := range parts {
 		p := &parts[i]
 		where, err := realPath(p.path)
@@ -109,7 +110,7 @@ func CheckLayout(dir string, l Layout) error {
 			return fmt.Errorf("%s, %s: %w", p.name, p.path, err)
 		}
 		p.path = where
-		if fi, err := os.Stat(where); err == nil && fi.IsDir() == p.file {
+		if fi := seen.stat(where); fi != nil && fi.IsDir() == p.file {
 			kind := "a directory"
 			if p.file {
 				kind = "a file"
@@ -120,19 +121,58 @@ func CheckLayout(dir string, l Layout) error {
 	for i, a := range parts {
 		for _, b := range parts[i+1:] {
 			switch {
-			case samePlace(a.path, b.path):
+			case seen.same(a.path, b.path):
 				return fmt.Errorf("%s and %s are one place, %s: each part of a mailbox has its own", a.name, b.name, a.path)
-			case insidePlace(a.path, b.path) && !slices.Contains(a.inside, b.name):
+			case seen.inside(a.path, b.path) && !slices.Contains(a.inside, b.name):
 				return fmt.Errorf("%s, %s, is inside %s, %s, and it may not be", a.name, a.path, b.name, b.path)
-			case insidePlace(b.path, a.path) && !slices.Contains(b.inside, a.name):
+			case seen.inside(b.path, a.path) && !slices.Contains(b.inside, a.name):
 				return fmt.Errorf("%s, %s, is inside %s, %s, and it may not be", b.name, b.path, a.name, a.path)
 			}
 		}
 	}
-	if fs := networkFilesystem(parts[0].path); fs != "" {
-		return fmt.Errorf("base-dir, %s, is on a network filesystem (%s): the mailbox's lock is a flock there, which is not one to rely on, and mail-dir may be on one where base-dir is not", parts[0].path, fs)
+	return checkBaseLocal(parts[0].path)
+}
+
+// checkBaseLocal refuses a base directory on a network filesystem.
+func checkBaseLocal(dir string) error {
+	if fs := networkFilesystem(dir); fs != "" {
+		return fmt.Errorf("base-dir, %s, is on a network filesystem (%s): the mailbox's lock is a flock there, which is not one to rely on, and mail-dir may be on one where base-dir is not", dir, fs)
 	}
 	return nil
+}
+
+// places is what one check has read of each path, so that comparing every pair of
+// parts and each one's parents reads each path once.
+type places map[string]os.FileInfo
+
+// stat is what path is, or nil where nothing is there.
+func (c places) stat(path string) os.FileInfo {
+	fi, ok := c[path]
+	if !ok {
+		fi, _ = os.Stat(path) //nolint:errcheck // nil: nothing to compare
+		c[path] = fi
+	}
+	return fi
+}
+
+func (c places) same(a, b string) bool {
+	if a == b {
+		return true
+	}
+	fa, fb := c.stat(a), c.stat(b)
+	return fa != nil && fb != nil && os.SameFile(fa, fb)
+}
+
+// inside is whether a is somewhere under b.
+func (c places) inside(a, b string) bool {
+	for p := filepath.Dir(a); ; p = filepath.Dir(p) {
+		if c.same(p, b) {
+			return true
+		}
+		if p == filepath.Dir(p) {
+			return false
+		}
+	}
 }
 
 // realPath is path made absolute, with the symlinks of as much of it as
@@ -155,27 +195,6 @@ func realPath(path string) (string, error) {
 			return abs, nil
 		}
 		rest = filepath.Join(filepath.Base(p), rest)
-	}
-}
-
-func samePlace(a, b string) bool {
-	if a == b {
-		return true
-	}
-	fa, erra := os.Stat(a)
-	fb, errb := os.Stat(b)
-	return erra == nil && errb == nil && os.SameFile(fa, fb)
-}
-
-// insidePlace is whether a is somewhere under b.
-func insidePlace(a, b string) bool {
-	for p := filepath.Dir(a); ; p = filepath.Dir(p) {
-		if samePlace(p, b) {
-			return true
-		}
-		if p == filepath.Dir(p) {
-			return false
-		}
 	}
 }
 

@@ -5,6 +5,7 @@ package client
 import (
 	"fmt"
 	"strings"
+	"sync"
 
 	"golang.org/x/sys/windows"
 )
@@ -15,27 +16,35 @@ const keyFix = "Give it a protected access list of its user, SYSTEM and the Admi
 // write nothing.
 var readOnlyRights = map[string]bool{"FR": true, "GR": true, "FRFX": true, "GRGX": true, "FX": true, "GX": true, "0x1200a9": true, "0x120089": true, "0x1200a0": true}
 
+// selfTrustee is the user running the client as an access list's text form writes
+// it, which is by an alias for some accounts. It is read once: every key read asks.
+var selfTrustee = sync.OnceValues(func() (string, error) {
+	user, err := windows.GetCurrentProcessToken().GetTokenUser()
+	if err != nil {
+		return "", fmt.Errorf("the user running the client: %w", err)
+	}
+	self, err := windows.SecurityDescriptorFromString("D:(A;;FA;;;" + user.User.Sid.String() + ")")
+	if err != nil {
+		return "", err
+	}
+	f := strings.Split(strings.TrimSuffix(aces(self.String()), ")"), ";")
+	return f[len(f)-1], nil
+})
+
 // foreign is each allowing entry of path's access list for anyone but the user
 // running the client, SYSTEM and the local Administrators, as OpenSSH for
 // Windows reads a key file's (contrib/win32/win32compat/w32-sshfileperm.c):
 // its rights by its trustee. A volume that keeps no access list has one entry,
 // for everyone: "D:NO_ACCESS_CONTROL".
 func foreign(path string) (map[string]string, error) {
-	user, err := windows.GetCurrentProcessToken().GetTokenUser()
+	self, err := selfTrustee()
 	if err != nil {
-		return nil, fmt.Errorf("the user running the client: %w", err)
+		return nil, err
 	}
 	sd, err := windows.GetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
 	if err != nil {
 		return nil, err
 	}
-	// The text form writes some accounts by an alias: the user running the
-	// client is read back through it as its own entries are.
-	self, err := windows.SecurityDescriptorFromString("D:(A;;FA;;;" + user.User.Sid.String() + ")")
-	if err != nil {
-		return nil, err
-	}
-	selfAce := strings.Split(strings.TrimSuffix(aces(self.String()), ")"), ";")
 	sddl := sd.String()
 	out := map[string]string{}
 	if strings.Contains(sddl, "NO_ACCESS_CONTROL") {
@@ -48,7 +57,7 @@ func foreign(path string) (map[string]string, error) {
 			continue
 		}
 		switch t := f[5]; t {
-		case selfAce[len(selfAce)-1], "SY", "BA":
+		case self, "SY", "BA":
 		default:
 			out[t] = f[2]
 		}
