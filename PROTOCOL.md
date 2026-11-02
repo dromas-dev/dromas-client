@@ -1703,7 +1703,7 @@ Dromas protects a message's content from everyone but the message's recipient. D
 
 ### 15.6. Revocation's limits
 
-- **A server can withhold a revocation from a peer that has never seen the revocation.** The server answers that it keeps no revocation, and nothing tells the peer otherwise. The lookup before every post narrows this risk in time, and no further. A client keeps every revocation that it was shown while its server answered truly. The client still keeps those revocations after that server stops answering truly. Only a revocation record from the mailbox's owner, handed over out of band, answers a server that hides a revocation record from the server's first answer.
+- **A server can withhold a revocation from a peer that has never seen the revocation.** The server answers that it keeps no revocation, and nothing tells the peer otherwise. The lookup before every post narrows this risk in time, and no further, because a client keeps every revocation that the client was shown while the client's server answered truly. The client still keeps those revocations after that server stops answering truly. Only a revocation record from the mailbox's owner, handed over out of band, answers a server that hides a revocation record from the server's first answer.
 - **A mailbox checks revocations at its own server alone (Section 12.5).** Asking another server too, such as one running another implementation, would help against a server that withholds a revocation, but only if the revoked mailbox's owner and the reader both use that other server. This version defines no second server.
 - **This protocol sets no bound on how long a revocation can go unseen by a peer whose server hides the revocation.** The usual answer is key transparency: a log of everything a server serves, which clients check. This protocol lacks key transparency.
 
@@ -1732,7 +1732,7 @@ Dromas protects a message's content from everyone but the message's recipient. D
 - **The lookup before a post tells the server that the mailbox is about to be written to.** The post tells the server the same thing a moment later.
 - **A lookup answered with gzip has a length that depends on the mailbox's own bytes.** So the length can help a network observer narrow down whom a sender is about to write to.
 - **Only a lookup's answer is compressed (Section 11.2).** A list, for example, sets values that senders chose beside the mailbox's own values (BREACH, RFC 7457 §2.6).
-- **Anything that terminates TLS for a server is part of the server.** A TLS terminator sees everything the server sees, and each pass in transit. For the minutes a pass has left, the pass does at that server everything that Section 15.5 lists for a stolen pass. A third party in that position would replace the server for every mailbox whose pass the third party sees. That is why Section 11.1 keeps TLS inside the server.
+- **Anything that terminates TLS for a server is part of the server.** A TLS terminator sees everything the server sees, and each pass in transit. For the minutes a pass has left, the pass does at that server everything that Section 15.5 lists. A third party in that position would replace the server for every mailbox whose pass the third party sees. That is why Section 11.1 keeps TLS inside the server.
 - **An address in a URL is seen wherever URLs are logged.** Such an address is seen, for example, by the party that terminates TLS, in a chat that unfurls links, and in a transcript. A leaked address is answered by a new mailbox and by revoking the old address.
 
 ### 15.9. Addresses, messages and availability
@@ -1757,7 +1757,7 @@ Dromas protects a message's content from everyone but the message's recipient. D
 
 ## 16. Test vectors
 
-`testdata/vectors/` has the conformance vectors. Each file is one scenario, with the scenario's expected outcome, and each file is named for the scenario's verdict. `testdata/vectors/README.md` describes the vectors' format and how each vector is checked. A conforming client meets every vector of the parts it implements. The crypto and container vectors are checked by `age`, `ssh-keygen` and `sha256sum`, which are tools written outside this project. The vectors' keys are published test keys.
+`testdata/vectors/` has the conformance vectors. Each file is one scenario, with the scenario's expected outcome, and each file is named for the scenario's verdict. `testdata/vectors/README.md` describes the vectors' format and how each vector is checked. A conforming client meets every vector of the parts it implements. The crypto and container vectors are checked by `age`, `ssh-keygen` and `sha256sum`, which are tools written outside this project. The keys of the crypto and container vectors are published test keys.
 
 ## 17. References
 
