@@ -42,7 +42,7 @@ func (b *shMailbox) newest() uint64 {
 func (b *shMailbox) dated(n uint64, at time.Time) {
 	b.w.t.Helper()
 	f := b.file(fmt.Sprintf("prekeys/%d.txt", n))
-	if err := os.WriteFile(f, withLine(mustRead(b.w.t, f), 5, at.UTC().Format(protocol.TimeLayout)), 0o600); err != nil {
+	if err := os.WriteFile(f, withLine(mustRead(b.w.t, f), 6, at.UTC().Format(protocol.TimeLayout)), 0o600); err != nil {
 		b.w.t.Fatal(err)
 	}
 }

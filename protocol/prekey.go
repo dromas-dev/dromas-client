@@ -55,15 +55,17 @@ var serialGrammar = regexp.MustCompile(`\A[1-9][0-9]{0,15}\z`)
 // by its identity or by a working key it certified.
 type Prekey struct {
 	Address  Address   // the mailbox the key belongs to
+	Rank     uint64    // its signer's rank (PROTOCOL.md §5): 0 for the identity, the certificate's serial for a working key
 	Serial   uint64    // strictly increasing under one signer: its maker's clock, or one above the highest it knows
 	Key      string    // the age recipient: "age1pq1…"
 	NotAfter time.Time // the last moment the key may be encrypted to
 }
 
-// Statement returns the statement's exact text: five lines, each ending in LF.
+// Statement returns the statement's exact text: six lines, each ending in LF.
 func (p *Prekey) Statement() []byte {
 	return []byte(PrekeyTag + "\n" +
 		p.Address.String() + "\n" +
+		strconv.FormatUint(p.Rank, 10) + "\n" +
 		strconv.FormatUint(p.Serial, 10) + "\n" +
 		p.Key + "\n" +
 		p.NotAfter.UTC().Format(TimeLayout) + "\n")
@@ -100,12 +102,13 @@ func (p *Prekey) CheckLifetime(now time.Time) error {
 // never as a statement that does not verify (PROTOCOL.md §14, §6).
 var ErrPrekeyType = errors.New("the prekey is an age recipient of a type this client cannot encrypt to")
 
-// ParsePrekey parses a prekey statement. It must be exactly five LF-terminated
-// lines with nothing after them, its serial a decimal integer with no leading
-// zero and at most MaxSerial, its key a hybrid age recipient in canonical form
-// that can be encrypted to (so no small-order point in its X25519 half), and
-// its not_after a UTC timestamp to the second. A key that is a well-formed
-// age recipient of another type is ErrPrekeyType.
+// ParsePrekey parses a prekey statement. It must be exactly six LF-terminated
+// lines with nothing after them, its rank 0 or written as a serial is, its
+// serial a decimal integer with no leading zero and at most MaxSerial, its key
+// a hybrid age recipient in canonical form that can be encrypted to (so no
+// small-order point in its X25519 half), and its not_after a UTC timestamp to
+// the second. A key that is a well-formed age recipient of another type is
+// ErrPrekeyType. Holding the rank to the statement's signer is verifyPrekey's.
 func ParsePrekey(statement []byte) (*Prekey, error) {
 	p, err := parsePrekey(statement)
 	if err != nil {
@@ -121,11 +124,11 @@ func ParsePrekey(statement []byte) (*Prekey, error) {
 // last thing a verifier asks, once the statement is otherwise good.
 func parsePrekey(statement []byte) (*Prekey, error) {
 	if !bytes.HasSuffix(statement, []byte("\n")) {
-		return nil, errors.New("a prekey statement is five lines, each ending in LF")
+		return nil, errors.New("a prekey statement is six lines, each ending in LF")
 	}
 	lines := strings.Split(string(statement[:len(statement)-1]), "\n")
-	if len(lines) != 5 {
-		return nil, errors.New("a prekey statement is five lines, each ending in LF")
+	if len(lines) != 6 {
+		return nil, errors.New("a prekey statement is six lines, each ending in LF")
 	}
 	if lines[0] != PrekeyTag {
 		return nil, fmt.Errorf("a prekey statement starts with %q", PrekeyTag)
@@ -134,15 +137,22 @@ func parsePrekey(statement []byte) (*Prekey, error) {
 	if err != nil {
 		return nil, fmt.Errorf("line 2 of a prekey statement: %v", err)
 	}
-	serial, ok := parseSerial([]byte(lines[2]))
+	var rank uint64
+	if lines[2] != "0" {
+		var ok bool
+		if rank, ok = parseSerial([]byte(lines[2])); !ok {
+			return nil, errors.New("a prekey statement's rank is 0, or a decimal integer with no leading zero, from 1 to 2^53 − 1")
+		}
+	}
+	serial, ok := parseSerial([]byte(lines[3]))
 	if !ok {
 		return nil, errors.New("a prekey serial is a decimal integer with no leading zero, from 1 to 2^53 − 1")
 	}
-	notAfter, err := ParseTime(lines[4])
+	notAfter, err := ParseTime(lines[5])
 	if err != nil {
 		return nil, fmt.Errorf("not_after: %v", err)
 	}
-	return &Prekey{Address: addr, Serial: serial, Key: lines[3], NotAfter: notAfter}, nil
+	return &Prekey{Address: addr, Rank: rank, Serial: serial, Key: lines[4], NotAfter: notAfter}, nil
 }
 
 // checkRecipient checks the key is an age recipient that age can encrypt to.
@@ -234,7 +244,9 @@ func bech32HRP(s string) (string, bool) {
 // VerifyPrekey verifies a prekey statement of the mailbox whose identity is id,
 // at now, and parses it. The signature must be by that identity or a working
 // key it certified, under a certificate valid at now, in id's prekey
-// namespace, and the statement must name id's own address. It returns the
+// namespace, and the statement must name id's own address and the rank of the
+// signer that signed it (PROTOCOL.md §6): SSHSIG signs no signing key, so that
+// line is what ties the signature to its signer's rank. It returns the
 // signer too: holding it to the highest it has seen, and to any revocation of certificates,
 // is the caller's. The key's type is checked last, so ErrPrekeyType is a
 // statement good in every other way, and comes with the statement and its
@@ -263,6 +275,9 @@ func verifyPrekey(id *Identity, statement, signature []byte, check func(ssh.Publ
 	}
 	if p.Address != id.Address() {
 		return nil, nil, errors.New("the prekey statement names another mailbox")
+	}
+	if p.Rank != signer.Rank() {
+		return nil, nil, errors.New("the prekey statement names a rank that is not its signer's")
 	}
 	if err := checkRecipient(p); errors.Is(err, ErrPrekeyType) {
 		return p, signer, err
@@ -300,18 +315,19 @@ func (o Order) Less(p Order) bool {
 }
 
 // PrekeyOrder reads a statement's Order and verifies nothing: not the
-// signature, not the certificate, not the key. A server reads it to refuse,
-// before any signature check, a statement it could not take even if it
+// signature, not the certificate, not the key, and not the statement's rank
+// line, since the rank it reads is the signing key's. A server reads it to
+// refuse, before any signature check, a statement it could not take even if it
 // verified, and trusts it for nothing more: a statement that passes is
 // verified in full after. A signing key that is no certificate reads as rank
 // 0: verifying it as the identity's is VerifyPrekey's.
 func PrekeyOrder(statement, signature []byte) (Order, error) {
 	notOrdered := errors.New("the prekey statement or its signature does not parse")
-	lines := strings.SplitN(string(statement), "\n", 4)
-	if len(lines) < 4 || lines[0] != PrekeyTag {
+	lines := strings.SplitN(string(statement), "\n", 5)
+	if len(lines) < 5 || lines[0] != PrekeyTag {
 		return Order{}, notOrdered
 	}
-	serial, ok := parseSerial([]byte(lines[2]))
+	serial, ok := parseSerial([]byte(lines[3]))
 	if !ok {
 		return Order{}, notOrdered
 	}

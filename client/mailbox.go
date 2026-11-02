@@ -844,10 +844,14 @@ func (b *Mailbox) makePrekey(ctx context.Context, serial uint64, certify bool) (
 	}
 	made := b.now().UTC().Truncate(time.Second)
 	notAfter := made.Add(lifetime)
-	if cert != nil && cert.NotAfter().Before(notAfter) {
-		notAfter = cert.NotAfter()
+	var rank uint64
+	if cert != nil {
+		rank = cert.Serial()
+		if cert.NotAfter().Before(notAfter) {
+			notAfter = cert.NotAfter()
+		}
 	}
-	p := &protocol.Prekey{Address: b.id.Address(), Serial: serial, Key: recipient, NotAfter: notAfter}
+	p := &protocol.Prekey{Address: b.id.Address(), Rank: rank, Serial: serial, Key: recipient, NotAfter: notAfter}
 	sig, err := by.Statement(p)
 	if err != nil {
 		return nil, err

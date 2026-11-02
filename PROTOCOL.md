@@ -431,7 +431,7 @@ A certificate is an OpenSSH user certificate. A verifier MUST check every row of
   | different certificates of the same certificate serial | neither |
 
   Once a prekey statement under a certificate is accepted, a prekey statement that the identity signs is earlier than the accepted one. From then on, a server and a sender refuse a prekey statement that the identity signs.
-- **Who orders them.** A server orders a mailbox's prekey statements by `(c, p)` (Section 11.9). A sender does the same, by the prekey statements the sender has seen (Sections 6, 12.2).
+- **Who orders them.** A server orders a mailbox's prekey statements by this table (Section 11.9). A sender orders the prekey statements the sender has seen by `(c, p)` as two numbers, whatever the certificate (Sections 6, 12.2). So the table's row for different certificates of the same certificate serial binds only the server.
 - **A signer of a higher rank retires different things at each party:**
   - at the server, every prekey statement by a signer of a lower rank (Section 11.9), and the pass by every certificate other than the current certificate (Section 8). The server still accepts the identity's pass.
   - at a sender, every prekey statement by a signer of a lower rank.
@@ -442,15 +442,19 @@ A certificate is an OpenSSH user certificate. A verifier MUST check every row of
 A prekey statement has the form `prekey-statement`. The mailbox's signer (Section 5) signs the prekey statement in the namespace `dromas-prekey-v1:<A>`, `prekey-namespace`:
 
 ```abnf
-prekey-statement = %s"dromas-prekey-v1" LF address LF serial LF
+prekey-statement = %s"dromas-prekey-v1" LF address LF rank LF serial LF
                    age-recipient LF time LF
 prekey-namespace = %s"dromas-prekey-v1:" address
+rank             = "0" / serial
 age-recipient    = %s"age" *bech32-hrp-char "1" 6*bech32-char
 bech32-hrp-char  = %x21-40 / %x5B-7E   ; printable ASCII but A-Z
 bech32-char      = "0" / %x32-39 / %x61 / %x63-68 / %x6A-6E / %x70-7A
                    ; BIP 173's alphabet: no 1, b, i or o
 ```
 
+- **Rank:** the rank of the prekey statement's signer (Section 5). The rank is `0` when the identity signs. The rank is the certificate serial when a working key signs under a certificate.
+  - A verifier reads the rank of the signer from the signature (Section 5).
+  - A verifier MUST refuse a prekey statement whose rank differs from the rank of that signer. Such a prekey statement is invalid.
 - **Serial:** the prekey serial, a serial (Section 2.2). Under one signer, each prekey statement's prekey serial is higher than the previous one's.
 - **Key:** an age recipient. The recipient's Bech32 human-readable part, before the last `1`, names the key's type (BIP 173). The key is written as age writes a recipient: of any length, with a valid checksum, and with the data in whole bytes.
   - The one prekey type is `mlkem768x25519`, named `age1pq`.
@@ -460,7 +464,7 @@ bech32-char      = "0" / %x32-39 / %x61 / %x63-68 / %x6A-6E / %x70-7A
   - A client signs a prekey statement to end one prekey lifetime after the client makes the prekey statement (Section 12.4).
   - A server accepts a prekey statement that ends at most 8 days and the skew allowance after the time on the server's own clock. The longest prekey lifetime is 8 days (Section 12.4).
 - **A sender MUST NOT encrypt to a prekey past the prekey's `not_after`.** There is no grace period.
-- **A sender MUST keep, for each mailbox, the latest `(c, p)` it has seen on the mailbox's prekey statements.** The sender MUST refuse an earlier prekey statement (Section 5.3).
+- **A sender MUST keep, for each mailbox, the latest `(c, p)` it has seen on the mailbox's prekey statements.** The sender MUST refuse an earlier prekey statement. The sender compares `(c, p)` as two numbers, whatever the certificate (Section 5.3).
 - **A sender MUST check a prekey statement against every other rule before it checks the key's type.** The sender refuses a prekey statement as `unsupported_prekey_type`, never as one that does not verify, when both of these are true:
   - the prekey statement meets every other rule;
   - the key is a well-formed Bech32 string whose human-readable part begins `age` and is not `age1pq` (for example, X25519's `age`).
@@ -959,7 +963,8 @@ The server checks:
 6. **The prekey statement and its signer.** Each of these is true:
    - the prekey statement has the form of Section 6;
    - line 2 is the address;
-   - line 4 is a valid age recipient of the prekey type, whose X25519 half is not of small order;
+   - line 3 is the rank of the signer;
+   - line 5 is a valid age recipient of the prekey type, whose X25519 half is not of small order;
    - the signer is that identity, or a certificate of that identity that meets every rule of Section 5.2;
    - the namespace is `dromas-prekey-v1:<A>`;
    - the prekey statement's `not_after` is after now and at most 8 days and an hour after now.
@@ -1287,6 +1292,7 @@ A server lists at most 64 deprecations, 64 sunsets and 64 capabilities. A client
   - the prekey statement meets every rule of Section 6:
     - the form and namespace;
     - line 2 the recipient's address;
+    - line 3 the rank of the signer;
     - the key;
     - the `not_after` not passed;
     - the prekey statement not earlier than any prekey statement the sender has seen (Section 5.3).
@@ -1683,9 +1689,11 @@ Dromas protects a message's content from everyone but the message's recipient. D
 - **A registration needs the identity to choose the key, and needs the party that has the identity key to be present.** The signer shows that the identity chose the key. A pass minutes old shows that this party is present. Only a party that has an identity key can register that identity, and a party that finds a leaked prekey statement cannot register the statement (Section 11.7, step 7).
 - **A revocation of certificates does not cover the identity's own signature (Section 10.2).** Refusing the identity's signature would stop no thief, because the party that has the identity key makes a certificate above any revocation just as easily. A revocation of certificates answers a stolen working key, and for that purpose needs nothing of the identity's signatures.
 - **If the identity key is lost, only a revocation record made in advance can revoke the address (Section 12.5).** Without such a record, the address stops accepting messages once its prekey ends, and the address's correspondents are told the new address out of band. Anyone who has such a record can revoke the address, so the record is kept apart from the identity. A revocation of an address is permanent, so a client makes and publishes one only when the owner asks.
-- **A certified key is never the identity key, and every certificate certifies a new working key (Section 5.2).** SSHSIG does not sign its signing-key field. So a signature can be carried under any certificate of the key that made the signature. Without these rules:
-  - The identity's own signature on a prekey statement, of rank 0, could be wrapped in a certificate of the identity key above the revocation serial. The signature would then rank at that certificate's serial, above the later prekey statements under certificates (Section 5.3).
-  - A working key's signature under a certificate of certificate serial s1 could be wrapped in a certificate of the same key at a higher certificate serial, s2. A verifier would then accept that signature past a revocation of certificates through s1.
+- **SSHSIG does not sign the signing-key field.** So a signature can be carried under any certificate of the key that made the signature.
+- **A prekey statement signs the rank of the prekey statement's signer (Section 6).** So a verifier refuses a prekey statement carried under a certificate of another rank. So an older prekey statement cannot stand above a sender's latest `(c, p)` under a later certificate of the same key. The same prekey statement cannot pass a revocation of certificates that covers the certificate that the working key signed under.
+- **A pass and a message sign no rank, so a certified key is never the identity key, and every certificate certifies a new working key (Section 5.2).** Without these rules:
+  - The identity's own signature on a pass or a message could be carried under a certificate of the identity key. That signature would then read as a working key's signature.
+  - A working key's signature on a pass or a message under a certificate of certificate serial s1 could be carried under a certificate of the same key at a higher certificate serial, s2. A verifier would then accept that signature past a revocation of certificates through s1.
 - **A server counts the identity's acts apart from a working key's acts (Section 11.5).** So the holder of a stolen working key cannot stop the identity from revoking that key's certificate.
 - **A stolen working key signs as the mailbox until the key's certificate ends, if a server delivers the messages, or until the certificate is revoked.**
   - A server accepts a prekey statement under a certificate that runs at most the server's maximum (Section 11.18).
@@ -1872,10 +1880,11 @@ pre-release                = pre-release-id *( "." pre-release-id )
 pre-release-id             = version-number
                              / *DIGIT ( ALPHA / "-" ) *( ALPHA / DIGIT / "-" )
 prekey-namespace           = %s"dromas-prekey-v1:" address
-prekey-statement           = %s"dromas-prekey-v1" LF address LF serial LF
+prekey-statement           = %s"dromas-prekey-v1" LF address LF rank LF serial LF
                              age-recipient LF time LF
 range-asked                = "bytes=" 1*DIGIT "-"
 range-number               = "0" / %x31-39 *DIGIT   ; no leading zero
+rank                       = "0" / serial
 revocation-of-address      = %s"dromas-revoke-v1" LF address LF
 revocation-of-certificates = %s"dromas-revoke-certs-v1" LF address LF serial LF
 revoke-certs-namespace     = %s"dromas-revoke-certs-v1:" address

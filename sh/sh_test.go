@@ -351,9 +351,16 @@ func TestVectorsCertificate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	stmt := abs(t, filepath.Join(vectors, "a/prekey-1.txt"))
+	// The statement a signature of cert/ is over is the one beside it, which
+	// names that certificate's serial as its signer's rank.
+	stmtOf := func(sig string) string {
+		if filepath.Base(filepath.Dir(sig)) == "cert" {
+			return abs(t, strings.TrimSuffix(sig, ".sig")+".txt")
+		}
+		return abs(t, filepath.Join(vectors, "a/prekey-1.txt"))
+	}
 	signed := func(addr, doc, sig string) (string, error) {
-		return bash(t, scratch(t), setNow+held(t, "a")+fmt.Sprintf("A=%s; c=$(dr_signed %s %s dromas-prekey-v1:%s %s %s) || exit\n", addr, addr, doc, a, abs(t, sig), stmt)+unrevoked)
+		return bash(t, scratch(t), setNow+held(t, "a")+fmt.Sprintf("A=%s; c=$(dr_signed %s %s dromas-prekey-v1:%s %s %s) || exit\n", addr, addr, doc, a, abs(t, sig), stmtOf(sig))+unrevoked)
 	}
 	// The script's status says which way it failed, as the Go client's error
 	// does: 2 for a certificate that has ended, 3 for one that has not begun,
@@ -361,7 +368,7 @@ func TestVectorsCertificate(t *testing.T) {
 	status := map[string]int{"bad-ended.sig": 2, "bad-not-begun.sig": 3}
 	verdict := func(sig string) (string, int) {
 		t.Helper()
-		signer, err := protocol.VerifySigned(id, mustRead(t, stmt), mustRead(t, sig), protocol.PrekeyNamespace(A), now)
+		signer, err := protocol.VerifySigned(id, mustRead(t, stmtOf(sig)), mustRead(t, sig), protocol.PrekeyNamespace(A), now)
 		if err != nil {
 			if s, ok := status[filepath.Base(sig)]; ok {
 				return "", s
@@ -408,7 +415,7 @@ func TestVectorsCertificate(t *testing.T) {
 	// them.
 	for _, name := range []string{"bad-extensions", "bad-reserved-field", "bad-nonce-of-16-bytes", "bad-key-id", "bad-serial-zero", "bad-certifies-the-identity"} {
 		verify := fmt.Sprintf(`printf '%%s cert-authority %%s\n' %s "$(sed -n 2p %s)" > "$DR/s" && ssh-keygen -Y verify -f "$DR/s" -I %s -n dromas-prekey-v1:%s -s %s -O verify-time=20261010000000Z < %s`,
-			a, aDoc, a, a, abs(t, filepath.Join(vectors, "cert", name+".sig")), stmt)
+			a, aDoc, a, a, abs(t, filepath.Join(vectors, "cert", name+".sig")), abs(t, filepath.Join(vectors, "cert", name+".txt")))
 		if _, err := bash(t, scratch(t), "mkdir -p \"$DR\"; "+verify); err != nil {
 			t.Errorf("control: ssh-keygen -Y verify refuses %s by itself: %v", name, err)
 		}

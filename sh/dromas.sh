@@ -199,7 +199,7 @@ dr_prekey(){ # <serial> → prekeys/<serial>.agekey and its statement, signed by
   [ -s "$p.agekey" ] || { rm -f "$p.agekey"; age-keygen -pq -o "$p.agekey" 2> /dev/null; } || dr_refuse "age-keygen failed: a post-quantum key needs age >= 1.3" || return 1      # an empty key file, as a crash before the sync below leaves one, is no key, and no statement names it, so it is made again, as the Go client does
   k=$(age-keygen -y "$p.agekey" 2> /dev/null) || dr_refuse "age-keygen cannot read $p.agekey, the key this mailbox began prekey $1 with (a post-quantum one needs age >= 1.3)" || return 1      # never a statement with no key in it, which a server refuses at every try
   t=$(dr_now)
-  printf 'dromas-prekey-v1\n%s\n%s\n%s\n%s\n' "$A" "$1" "$k" "$(jq -nr --argjson t "$t" --argjson l "$l" '$t + $l | todate')" > "$p.txt" &&
+  printf 'dromas-prekey-v1\n%s\n0\n%s\n%s\n%s\n' "$A" "$1" "$k" "$(jq -nr --argjson t "$t" --argjson l "$l" '$t + $l | todate')" > "$p.txt" &&
   jq -nr --argjson t "$t" '$t | todate' > "$p.made" &&      # before the signature: a statement is signed once its record is there
   ssh-keygen -q -Y sign -n "dromas-prekey-v1:$A" -f "$DR/identity" < "$p.txt" > "$p.txt.sig" &&      # stdin to stdout: never a stale .sig
   sync "$p.agekey" "$p.txt" "$p.made" "$p.txt.sig" "$DR/prekeys"      # on disk before any upload publishes the statement: a key lost to a crash after that is a message nobody can read
@@ -340,7 +340,7 @@ dr_bech32(){ # <string> → its human-readable part, only for a Bech32 string (B
   ((chk == 1 && c < 5 && (k & m) == 0)) || return 1
   printf '%s\n' "$h"
 }
-dr_prekeycheck(){ # <statement> <signature> <address> <identity document> → "<serial> <age recipient> <not_after as Unix time> <its signer's rank>" only for five LF-ended lines naming that address, signed by its identity or by a working key its identity certified (dr_signed), holding a key age will encrypt to; otherwise the reason, and 1. Whether the address's identity has revoked that signer is the caller's (dr_certrevoked). 2, with the reason, for one good in every other way whose key is a well-formed age recipient of a type this script cannot encrypt to: its Bech32 human-readable part begins age and is not the hybrid's age1pq, X25519's age among them. Nothing is wrong with such a statement (PROTOCOL.md §6), so its key's type is the last thing checked
+dr_prekeycheck(){ # <statement> <signature> <address> <identity document> → "<serial> <age recipient> <not_after as Unix time> <its signer's rank>" only for six LF-ended lines naming that address and its signer's rank, signed by its identity or by a working key its identity certified (dr_signed), holding a key age will encrypt to; otherwise the reason, and 1. Whether the address's identity has revoked that signer is the caller's (dr_certrevoked). 2, with the reason, for one good in every other way whose key is a well-formed age recipient of a type this script cannot encrypt to: its Bech32 human-readable part begins age and is not the hybrid's age1pq, X25519's age among them. Nothing is wrong with such a statement (PROTOCOL.md §6), so its key's type is the last thing checked
   local p=$1 B=$3 s k na c L
   c=$(dr_signed "$B" "$4" "dromas-prekey-v1:$B" "$2" "$p"); case $? in 0) ;;
     2) echo "$B's prekey: the certificate the prekey is signed under has ended"; return 1 ;;
@@ -348,11 +348,12 @@ dr_prekeycheck(){ # <statement> <signature> <address> <identity document> → "<
     *) echo "$B's prekey is not signed by its identity, or by a working key its identity certified under a certificate that holds now"; return 1 ;;
   esac
   mapfile -t L < "$p"
-  [ "$(printf '%s\n' "${L[@]}" | sha256sum)" = "$(sha256sum < "$p")" ] && [ ${#L[@]} -eq 5 ] && [ "${L[0]}" = dromas-prekey-v1 ] && [ "${L[1]}" = "$B" ] ||      # the file against itself rebuilt from its lines: every line ends in LF, and nothing is in it that a shell variable drops (a NUL)
-    { echo "the prekey statement is not $B's: five lines, each ending in LF"; return 1; }
-  s=${L[2]}; [[ $s =~ ^[1-9][0-9]{0,15}$ ]] && [ "$s" -le 9007199254740991 ] || { echo "$B's prekey serial is malformed"; return 1; }      # from 1 to 2^53 - 1, as every serial is written
-  na=$(dr_time "${L[4]}") || { echo "$B's prekey has no valid not_after"; return 1; }
-  k=${L[3]}
+  [ "$(printf '%s\n' "${L[@]}" | sha256sum)" = "$(sha256sum < "$p")" ] && [ ${#L[@]} -eq 6 ] && [ "${L[0]}" = dromas-prekey-v1 ] && [ "${L[1]}" = "$B" ] ||      # the file against itself rebuilt from its lines: every line ends in LF, and nothing is in it that a shell variable drops (a NUL)
+    { echo "the prekey statement is not $B's: six lines, each ending in LF"; return 1; }
+  [ "${L[2]}" = "$c" ] || { echo "$B's prekey statement names a rank that is not its signer's"; return 1; }      # compared as text: its signer's rank as dr_signed writes it, so no other form of that number passes (PROTOCOL.md §6)
+  s=${L[3]}; [[ $s =~ ^[1-9][0-9]{0,15}$ ]] && [ "$s" -le 9007199254740991 ] || { echo "$B's prekey serial is malformed"; return 1; }      # from 1 to 2^53 - 1, as every serial is written
+  na=$(dr_time "${L[5]}") || { echo "$B's prekey has no valid not_after"; return 1; }
+  k=${L[4]}
   case $(dr_bech32 "$k") in      # the key's type is its human-readable part, read before age is: age 1.3 encrypts to more types than the protocol defines, and to an SSH key
     age1pq) if ! age -r "$k" < /dev/null > /dev/null 2>&1; then
         echo "$B's prekey is post-quantum, and this age ($(age --version 2> /dev/null)) cannot encrypt to one: that takes age >= 1.3"; return 1
@@ -769,7 +770,7 @@ dr_renew(){ # → what dr_rekey does, the lock held. A serial is signed ONCE
     [ "$s" -ge "$p" ] || dr_refuse "rollback: the server serves this mailbox's prekey serial $s, before serial $p, which this mailbox published" || return 1
   fi
   t=$(ls "$DR/prekeys" | sed -n 's/\.agekey$//p; s/\.txt\.sig$//p' | sort -n | tail -n 1); new=1      # s is the highest number this mailbox knows of, its own and the server's, and the new statement goes above it under the same signer (PROTOCOL.md §5.3). t is the highest number this mailbox began a prekey at
-  if [ "${t:-0}" -gt "$s" ]; then s=$t; new=; [ ! -s "$DR/prekeys/$s.txt.sig" ] || { na=$(dr_time "$(sed -n 5p "$DR/prekeys/$s.txt")") && [ "$na" -gt "$(dr_now)" ] && u=$(dr_time "$(cat "$DR/prekeys/$s.made" 2> /dev/null)") && [ "$u" -le "$(dr_now)" ] && w=$(dr_lifetime 2> /dev/null) && [ $((na - u)) -le "$w" ]; } || new=1; fi      # a number an earlier run took, and that nothing has passed since, is kept. Signed and never seen published: sent again AS IT IS until it expires, then a new number, and so is one made while the clock read ahead of where it reads now, which a server may not take until the clock catches up. Signed again, the same key would get 8 more days from a server that keeps what it refuses. Never signed: its key is used
+  if [ "${t:-0}" -gt "$s" ]; then s=$t; new=; [ ! -s "$DR/prekeys/$s.txt.sig" ] || { na=$(dr_time "$(sed -n 6p "$DR/prekeys/$s.txt")") && [ "$na" -gt "$(dr_now)" ] && u=$(dr_time "$(cat "$DR/prekeys/$s.made" 2> /dev/null)") && [ "$u" -le "$(dr_now)" ] && w=$(dr_lifetime 2> /dev/null) && [ $((na - u)) -le "$w" ]; } || new=1; fi      # a number an earlier run took, and that nothing has passed since, is kept. Signed and never seen published: sent again AS IT IS until it expires, then a new number, and so is one made while the clock read ahead of where it reads now, which a server may not take until the clock catches up. Signed again, the same key would get 8 more days from a server that keeps what it refuses. Never signed: its key is used
   if [ -n "$new" ]; then [ "$s" -lt 9007199254740991 ] || dr_refuse "this mailbox's prekey serial is the highest there is, so no later statement can be made: the address cannot renew" || return 1; t=$(dr_now); s=$((t > s ? t : s + 1)); fi      # a new number: this machine's clock, in seconds, or one above the highest this mailbox knows of when the clock gives nothing higher. A mailbox restored from its identity knows only what the server shows: by the clock, its statement is above every one made before, on whatever machine
   [ -s "$DR/prekeys/$s.txt.sig" ] || rm -f "$DR/prekeys/$s.txt" "$DR/prekeys/$s.made"; dr_prekey "$s" || return 1
   if [ -n "$gone" ]; then u="/v1/$A"; w='{identity:$i}'; else u="/v1/$A/prekey"; w='{}'; fi      # a registration is the identity document, then what a new prekey carries
@@ -777,14 +778,14 @@ dr_renew(){ # → what dr_rekey does, the lock held. A serial is signed ONCE
   h=$(dr_pass new) && dr_authed "$h" PUT "$u" "$DR/rekey.json" > /dev/null || { dr_clock; dr_own; return 1; }      # a new pass, dated as the renewal is sent
   [ "$s" -le "$(cat "$DR/serial" 2> /dev/null || echo 0)" ] || dr_putline "$DR/serial" "$s" || return 1
   mv "$DR/pass.new" "$DR/pass" || return 1
-  at=$(dr_taken) && dr_prune "$at" && dr_out prekey --argjson serial "$s" --arg not_after "$(sed -n 5p "$DR/prekeys/$s.txt")"      # by the reading the server took the renewal at: the date of its pass, now $DR/pass
+  at=$(dr_taken) && dr_prune "$at" && dr_out prekey --argjson serial "$s" --arg not_after "$(sed -n 6p "$DR/prekeys/$s.txt")"      # by the reading the server took the renewal at: the date of its pass, now $DR/pass
 }
 dr_prune(){ # <Unix time, one a server took (dr_taken)> → deletes every retired prekey past its deletion time by that reading of this machine's clock: its not_after + the 7 days a message is kept. dr_recv gives the date of the pass its list carried, dr_renew that of the renewal's: a clock a server took, never a later reading. After that, a message encrypted to it is unrecoverable. (The Go client also deletes them sooner.)
   local f n top na; top=$(ls "$DR/prekeys" | sed -n 's/\.agekey$//p' | sort -n | tail -n 1); [ -n "$top" ] || return 0
   for f in "$DR"/prekeys/*.txt; do
     [ -e "$f" ] || continue
     n=$(basename "$f" .txt); [ "$n" -lt "$top" ] || continue      # never the newest
-    na=$(dr_time "$(sed -n 5p "$f")") || continue
+    na=$(dr_time "$(sed -n 6p "$f")") || continue
     [ "$1" -lt $((na + 7*86400)) ] || rm -f "$DR/prekeys/$n.agekey"
   done
 }

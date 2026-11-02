@@ -231,7 +231,7 @@ func TestVectorsByToolsNotOurs(t *testing.T) {
 			if _, err := run(t, nil, "ssh-keygen", "-L", "-f", c); err != nil {
 				t.Errorf("ssh-keygen -L %s: %v", c, err)
 			}
-			verify(t, underA, "a", ns("dromas-prekey-v1", "a"), "a/prekey-1.txt", strings.TrimSuffix(c, ".pub")+".sig")
+			verify(t, underA, "a", ns("dromas-prekey-v1", "a"), strings.TrimSuffix(c, ".pub")+".txt", strings.TrimSuffix(c, ".pub")+".sig")
 		}
 		// What an identity signs itself is verified under its bare key: B's and
 		// C's statements, passes and B's message, and every revocation.

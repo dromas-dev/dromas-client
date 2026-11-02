@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -169,10 +170,11 @@ func TestSendToAPrekeyOfATypeThisClientLacks(t *testing.T) {
 			}
 			st, _ := e.srv.Prekey(b.Address())
 			lines := strings.Split(string(st), "\n")
-			key := strings.Split(string(vector), "\n")[3]
-			lines[3] = key
+			key := strings.Split(string(vector), "\n")[4]
+			by := worker(t, b)
+			lines[2], lines[4] = strconv.FormatUint(rankOf(by), 10), key
 			statement := []byte(strings.Join(lines, "\n"))
-			sig, err := protocol.Sign(worker(t, b), statement, protocol.PrekeyNamespace(b.Address()))
+			sig, err := protocol.Sign(by, statement, protocol.PrekeyNamespace(b.Address()))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -197,7 +199,7 @@ func TestSendToAPrekeyOfATypeThisClientLacks(t *testing.T) {
 			}
 			// The type is the last thing a statement is held to (#167): one that has
 			// expired is refused for that, whatever its key's type.
-			lines[4] = e.clock.Now().Add(-time.Hour).UTC().Format(protocol.TimeLayout)
+			lines[5] = e.clock.Now().Add(-time.Hour).UTC().Format(protocol.TimeLayout)
 			expired := []byte(strings.Join(lines, "\n"))
 			statement, sig = expired, nil
 			if sig, err = protocol.Sign(worker(t, b), expired, protocol.PrekeyNamespace(b.Address())); err != nil {

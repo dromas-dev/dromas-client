@@ -120,7 +120,16 @@ Noise: 1b. **What the survey found:** nothing else offers an end-to-end encrypte
 | **Let's Encrypt** | Halves its certificates' lifetime: 90 days "will be cut in half to 45 days by 2028", with a 64-day default from 2027-02-10, following the CA/Browser Forum's Baseline Requirements; it recommends renewing "at approximately two thirds of the way through the current certificate’s lifetime" | read 2026-10-31, [Decreasing Certificate Lifetimes to 45 Days](https://letsencrypt.org/2025/12/02/from-90-to-45) and [64-Day Certificate Lifetimes Coming Feb 2027](https://letsencrypt.org/2026/10/07/64-day-certs) |
 | **Short-lived certificates in place of revocation** | The web waives revocation at 10 days or less, 7 from 2026-03-15 (§ 3b) | read 2026-10-13 |
 
+**What a signature says of its signer:**
+
+| Who | What they do | How it is known |
+|---|---|---|
+| **SSH public key authentication** | The signature covers the "public key algorithm name" and the "public key to be used for authentication" | read 2026-11-02, [RFC 4252](https://www.rfc-editor.org/rfc/rfc4252) §7 |
+| **TLS 1.3** | CertificateVerify signs `Transcript-Hash(Handshake Context, Certificate)`, so the signature covers the certificate sent before it | read 2026-11-02, [RFC 8446](https://www.rfc-editor.org/rfc/rfc8446) §4.4.3 |
+| **S/MIME's ESS** | The signing certificate attribute answers a "substituted certificate", for example a new certificate of the same public key; it goes in "locations that are protected by the signature" | read 2026-11-02, [RFC 5035](https://www.rfc-editor.org/rfc/rfc5035) §7 |
+
 **Where ours differs, and why:**
+- **A prekey statement signs its signer's rank (§6), as one line a verifier holds equal to the signer's, and nothing else of its signer:** SSHSIG signs no signing key, so the line is in the bytes signed. Each system above signs the whole key or certificate; the order of statements reads the rank alone, and two certificates of one serial stand alike (§5.3). Passes and messages sign no rank, since neither is ordered, and a maker's rule covers them (§5.2).
 - **Both forms taken, as OpenPGP takes the primary key's signatures and its signing subkeys':** each other system above fixes one. A mailbox that never keeps its identity away from daily work has nothing to certify, as Signal's identity signs its prekey; one that does signs under a working key, and a revocation of certificates ends working keys alone, as OpenPGP's of a subkey leaves the primary key. Refusing the identity's own signature would stop no thief: whoever holds the identity certifies a key of its own as easily (§15.5).
 - **Statements go one way by their order:** the identity ranks below every certificate (§5.3), so a statement under a certificate retires the identity's statements at a server and at a sender, as a later certificate retires an earlier one's. Messages and passes are not ordered.
 - **Not NIP-26's delegation,** where a Nostr key names a delegate in a tag any event can carry and nothing revokes the delegation (from memory): here a certificate is revoked through its serial (§10.2).

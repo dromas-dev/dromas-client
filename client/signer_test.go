@@ -90,7 +90,7 @@ func upload(t *testing.T, e *env, a *client.Mailbox, by ssh.Signer, n uint64, pa
 	if err != nil {
 		t.Fatal(err)
 	}
-	p := &protocol.Prekey{Address: a.Address(), Serial: n, Key: k.Recipient().String(), NotAfter: e.clock.Now().Add(24 * time.Hour).Truncate(time.Second)}
+	p := &protocol.Prekey{Address: a.Address(), Rank: rankOf(by), Serial: n, Key: k.Recipient().String(), NotAfter: e.clock.Now().Add(24 * time.Hour).Truncate(time.Second)}
 	sig, err := protocol.Sign(by, p.Statement(), protocol.PrekeyNamespace(a.Address()))
 	if err != nil {
 		t.Fatal(err)
@@ -229,7 +229,7 @@ func TestAnIdentityStatementItDidNotMake(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p.Serial, p.Key = p.Serial+5, k.Recipient().String()
+	p.Rank, p.Serial, p.Key = 0, p.Serial+5, k.Recipient().String()
 	sig, err := protocol.Sign(identityKey(t, a), p.Statement(), protocol.PrekeyNamespace(a.Address()))
 	if err != nil {
 		t.Fatal(err)
@@ -363,7 +363,7 @@ func TestAnIdentityStatementAfterACertificatesIsRefused(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p.Serial += 10
+	p.Rank, p.Serial = 0, p.Serial+10
 	sig, err := protocol.Sign(identityKey(t, a), p.Statement(), protocol.PrekeyNamespace(a.Address()))
 	if err != nil {
 		t.Fatal(err)
