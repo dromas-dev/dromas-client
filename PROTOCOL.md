@@ -135,7 +135,7 @@ Where this document uses a term below as a defined term, the term has the sense 
 - **Prekey statement:** the statement that contains a prekey (Section 6). A prekey statement's **prekey serial** is the statement's serial, `p`.
 - **Later, earlier:** of two prekey statements of one mailbox, their place in `(c, p)` order (Section 5.3).
 - **Current statement:** the prekey statement that a server serves for a mailbox now (Section 11.8). The current statement has the **current prekey** as its key and the **current signer** as its signer, and a current signer that is a certificate is the **current certificate**.
-- **Retired prekey:** a prekey from the time the server accepts a later prekey statement (Section 11.9).
+- **Retired prekey:** a prekey once the server has accepted a later prekey statement (Section 11.9).
 - **Prekey lifetime:** the time from when a client makes a prekey statement to when the statement ends (Sections 6, 12.4).
 - **Pass:** a statement that a mailbox signs to prove itself to the mailbox's server on a call (Section 8).
 
@@ -192,7 +192,7 @@ Where this document uses a term below as a defined term, the term has the sense 
 - **Replay set:** the record that a client keeps of each message that the client accepted (Section 12.3, check 8).
 - **Replay floor:** the cutoff to which a mailbox's replay set has been pruned (Section 12.3, check 8).
 - **Deletion time:** the time by which a client deletes a retired prekey (Section 12.4).
-- **Confirmed time:** of a renewal, the time at which the client signed the pass that the client sent with the renewal that the server accepted (Section 12.4).
+- **Confirmed time:** of a renewal, the date of the pass that the client sent with the upload that the server accepted for the renewal (Section 12.4).
 - **The remedy:** the steps of Section 12.6, for a stolen working key.
 
 **Time**
@@ -358,7 +358,7 @@ address-form = %s"d"   ; the one form this version defines
 
 An address is shared as the link `https://<server>/to/<address>`.
 
-- A server MUST serve a page at that link for exactly an `address` (Section 4.2), and `404` for any other path. The page is fixed text: the address, and the server's own link to the address. The page never contains text that a mailbox supplied. The server sends the page with `Referrer-Policy: no-referrer` and `X-Robots-Tag: noindex`. The server ignores a query on the link.
+- A server MUST serve a page at that link for exactly an `address` (Section 4.2), and `404` for any other path. The page consists of fixed text, the address, and the server's own link to the address. The page never contains text that a mailbox supplied. The server sends the page with `Referrer-Policy: no-referrer` and `X-Robots-Tag: noindex`. The server ignores a query on the link.
 - A client given a link MUST read the address from the link's path, MUST NOT request the page, and MUST refuse a link to any server but the client's own.
 
 ## 5. Signers
