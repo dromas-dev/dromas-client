@@ -139,7 +139,7 @@ func (b *Mailbox) exchange(ctx context.Context, method, path string, in any, hdr
 	name = method + " " + name
 	resp, err := b.http.Do(req)
 	if err != nil {
-		return nil, noAnswer(name, "no answer that is HTTP", cut.why(heldOut(ctx, err)))
+		return nil, noAnswer(name, "no answer that is HTTP", b.cutOff(cut.why(heldOut(ctx, err))))
 	}
 	b.holding.http2.Store(resp.ProtoMajor == 2)
 	// What every answer says of this client's version, 2xx or not, is kept
@@ -165,7 +165,7 @@ func (b *Mailbox) exchange(ctx context.Context, method, path string, in any, hdr
 	if raw && answered {
 		readErr, err := ct.read(name, resp)
 		if readErr != nil {
-			return nil, noAnswer(name, "an answer whose body could not be read", cut.why(readErr))
+			return nil, noAnswer(name, "an answer whose body could not be read", b.cutOff(cut.why(readErr)))
 		}
 		return resp, err
 	}
@@ -175,7 +175,7 @@ func (b *Mailbox) exchange(ctx context.Context, method, path string, in any, hdr
 	}
 	data, err := io.ReadAll(io.LimitReader(resp.Body, limit))
 	if err != nil {
-		return nil, noAnswer(name, "an answer whose body could not be read", cut.why(heldOut(ctx, err)))
+		return nil, noAnswer(name, "an answer whose body could not be read", b.cutOff(cut.why(heldOut(ctx, err))))
 	}
 	if !answered {
 		e := &APIError{Status: resp.StatusCode, Version: b.version}
@@ -379,8 +379,6 @@ type transportError struct {
 func (e *transportError) Error() string { return e.call + ": " + e.kind }
 func (e *transportError) Unwrap() error { return e.cause }
 
-// noAnswer is err, net/http's, as a transportError: the kind its cause
-// shows, or otherwise the kind given.
 // heldOut is err, or errHeldOut where a held list's bound made it: net/http and an
 // answer's body report the cut as the context canceled.
 func heldOut(ctx context.Context, err error) error {
@@ -390,6 +388,20 @@ func heldOut(ctx context.Context, err error) error {
 	return err
 }
 
+// cutOff is err, and where a bound on the call's time made it, the mailbox's next
+// call makes a new connection: nothing came back on this one for that long, and
+// over HTTP/2 the next would be sent down it (transport.renew).
+func (b *Mailbox) cutOff(err error) error {
+	if timedOut(err) {
+		if t, ok := b.http.Transport.(*transport); ok {
+			t.renew()
+		}
+	}
+	return err
+}
+
+// noAnswer is err, net/http's, as a transportError: the kind its cause
+// shows, or otherwise the kind given.
 func noAnswer(call, otherwise string, err error) error {
 	var timeout net.Error
 	var certificate *tls.CertificateVerificationError

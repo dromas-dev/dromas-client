@@ -21,6 +21,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"filippo.io/age"
@@ -255,20 +256,40 @@ func newMailbox(dir string, opt Options) (*Mailbox, error) {
 
 // transport is every mailbox's: it holds each request's URL to checkServerURL,
 // whatever made the request, before anything is sent.
-type transport struct{ next http.RoundTripper }
+type transport struct {
+	next atomic.Pointer[http.RoundTripper]
+}
 
-func (t transport) RoundTrip(r *http.Request) (*http.Response, error) {
+func newRoundTripper(rt http.RoundTripper) *transport {
+	t := &transport{}
+	t.next.Store(&rt)
+	return t
+}
+
+func (t *transport) RoundTrip(r *http.Request) (*http.Response, error) {
 	if err := checkServerURL(r.URL.Scheme + "://" + r.URL.Host); err != nil {
 		return nil, err
 	}
-	return t.next.RoundTrip(r)
+	return (*t.next.Load()).RoundTrip(r)
 }
 
 // CloseIdleConnections is what http.Client.CloseIdleConnections calls, which
 // reaches only a transport that has it.
-func (t transport) CloseIdleConnections() {
-	if c, ok := t.next.(interface{ CloseIdleConnections() }); ok {
+func (t *transport) CloseIdleConnections() {
+	if c, ok := (*t.next.Load()).(interface{ CloseIdleConnections() }); ok {
 		c.CloseIdleConnections()
+	}
+}
+
+// renew has the next call make a new connection, leaving what the current ones
+// carry to end as it will: a clone of a transport of net/http's own shares no
+// pool with it (see hold.go, of an HTTP/2 connection). Another transport can only
+// be asked to close what is idle.
+func (t *transport) renew() {
+	t.CloseIdleConnections()
+	if c, ok := (*t.next.Load()).(*http.Transport); ok {
+		var fresh http.RoundTripper = c.Clone()
+		t.next.Store(&fresh)
 	}
 }
 
@@ -292,7 +313,7 @@ func newTransport(rt http.RoundTripper) http.RoundTripper {
 		}
 		rt = c
 	}
-	return transport{rt}
+	return newRoundTripper(rt)
 }
 
 // followNone is every mailbox's redirect policy: a 3xx comes back as the answer

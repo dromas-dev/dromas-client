@@ -107,7 +107,10 @@ func newHTTP2Mailbox(t *testing.T) (*env, *http2Mailbox) {
 func TestAHeldConnectionOverHTTP2SendsNothingWhileItIsLive(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		_, m := newHTTP2Mailbox(t)
-		for range 4 { // past the health check's time, more than once
+		for i := range 4 { // past the health check's time, more than once
+			if i > 0 { // a gap, as long as a connection stays with nothing on it
+				time.Sleep(85 * time.Second)
+			}
 			done := make(chan *client.HoldResult, 1)
 			go func() {
 				h, err := m.b.Hold(t.Context(), client.DefaultHold)
@@ -132,63 +135,74 @@ func TestAHeldConnectionOverHTTP2SendsNothingWhileItIsLive(t *testing.T) {
 	})
 }
 
-// The health check is above a hold and its margin, so no live hold reaches it, and
-// a hold that meets a connection its last one found dead ends before it can be
-// taken for a drop of its own.
-func TestTheHealthCheckIsAboveAHoldAndClosesWithinOne(t *testing.T) {
-	after, wait := client.HealthCheck()
-	bound := client.DefaultHold + 15*time.Second
-	if after <= bound {
-		t.Errorf("a ping is due after %v, and a live hold may read nothing for %v", after, bound)
-	}
-	if excess := after - bound + wait; excess >= client.MinHold/2 {
-		t.Errorf("a hold on a dead connection lasts %v past the last's bound, and %v is taught", excess, client.MinHold/2)
-	}
-}
-
-// One silent drop: its hold is cut at its bound, the health check closes the dead
-// connection, and the next is a new one with keep-alive below the drop. It is
-// taught once, so the wait stays and the mailbox is back within one hold's time
-// and the check's, where a kernel might take 15 minutes.
-func TestASilentDropOverHTTP2GetsANewConnection(t *testing.T) {
+// One silent drop: its hold is cut at its bound, and the next is on a new connection
+// with keep-alive below the drop, at once, as over HTTP/1.1, whose cancelled
+// request closes its connection. The wait stays.
+func TestASilentDropOverHTTP2GetsANewConnectionAtItsBound(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		_, m := newHTTP2Mailbox(t)
 		dead := m.last()
+		dead.forgotten.Store(true)
 		start := time.Now()
-		dropped := time.AfterFunc(2*time.Minute, func() { dead.forgotten.Store(true) })
-		defer dropped.Stop()
-		var settled *client.HoldResult
-		for range 8 {
-			h, err := m.b.Hold(t.Context(), client.DefaultHold)
-			if err == nil && !h.Dropped {
-				settled = h
-				break
-			}
+		h, err := m.b.Hold(t.Context(), client.DefaultHold)
+		if err != nil || !h.Dropped || time.Since(start) != client.DefaultHold+15*time.Second {
+			t.Fatalf("%+v, %v, after %v", h, err, time.Since(start))
 		}
-		took := time.Since(start)
-		if settled == nil {
-			t.Fatalf("never settled: %d connections in %v", m.dials(), took)
+		h, err = m.b.Hold(t.Context(), client.DefaultHold)
+		if err != nil || h.Dropped || h.After != client.DefaultHold {
+			t.Fatalf("the next hold: %+v, %v", h, err)
+		}
+		if m.dials() != 2 || m.lives[1] != 2*time.Minute+22*time.Second {
+			t.Errorf("%d connections, the new one with keep-alive %v", m.dials(), m.lives[1])
+		}
+	})
+}
+
+// Holds shorter than the health check find a dead connection at each one's bound,
+// not the check's.
+func TestAShortHoldOverHTTP2FindsADeadConnectionAtItsBound(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		_, m := newHTTP2Mailbox(t)
+		m.last().forgotten.Store(true)
+		h, err := m.b.Hold(t.Context(), time.Minute)
+		if err != nil || !h.Dropped {
+			t.Fatalf("%+v, %v", h, err)
+		}
+		if h, err = m.b.Hold(t.Context(), time.Minute); err != nil || h.Dropped || m.dials() != 2 {
+			t.Fatalf("the next hold: %+v, %v, %d connections", h, err, m.dials())
+		}
+	})
+}
+
+// A call that is no hold, on a connection dead with no hold to find it: it fails at
+// its own bound, and the next is on a new connection and goes through.
+func TestACallOverHTTP2AfterADropGetsANewConnection(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		e, m := newHTTP2Mailbox(t)
+		a := e.mailbox()
+		m.last().forgotten.Store(true)
+		if res, err := m.b.Receive(t.Context()); err == nil {
+			t.Fatalf("a receive on a dead connection: %+v", res)
+		}
+		if _, err := m.b.Send(t.Context(), a.Address(), "after the drop"); err != nil {
+			t.Errorf("the next call: %v", err)
 		}
 		if m.dials() != 2 {
-			t.Errorf("%d connections, want the dead one and one more", m.dials())
+			t.Errorf("%d connections", m.dials())
 		}
-		select {
-		case <-dead.closed:
-		default:
-			t.Error("the dead connection is still open")
-		}
-		// Its hold's bound, the check's excess, a turn, and the next hold whole.
-		if most := 5*time.Minute + 25*time.Second + time.Minute + client.DefaultHold; took > most {
-			t.Errorf("back after %v, want at most %v", took, most)
-		}
-		if ka := client.KeepAliveOf(m.b); ka != 2*time.Minute+22*time.Second {
-			t.Errorf("keep-alive %v: one drop teaches once", ka)
-		}
-		if m.lives[1] != 2*time.Minute+22*time.Second {
-			t.Errorf("the new connection dialled with keep-alive %v", m.lives[1])
-		}
-		if settled.After != client.DefaultHold {
-			t.Errorf("the wait is %v, which one drop does not shorten", settled.After)
+	})
+}
+
+// A live connection a proxy stops streams on, keeping the connection and answering
+// PINGs, teaches at each hold: a proxy's timeout is what shortens the wait (hold.go),
+// and it settles as over HTTP/1.1.
+func TestAProxysTimeoutOverHTTP2SettlesAsItDoesOverHTTP1(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		e, m := newHTTP2Mailbox(t)
+		path{2 * time.Minute, true, false}.on(e, m.b)
+		holds, h, _ := settle(t, m.b)
+		if holds != 7 || h.After != time.Minute+11*time.Second || client.KeepAliveOf(m.b) != client.MinHold/2 {
+			t.Errorf("settled after %d holds, holding %v with keep-alive %v", holds, h.After, client.KeepAliveOf(m.b))
 		}
 	})
 }

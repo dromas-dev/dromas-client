@@ -3,7 +3,6 @@ package client
 import (
 	"crypto/x509"
 	"io"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -82,29 +81,6 @@ func TestASilentDropHalvesTheKeepAlive(t *testing.T) {
 	}
 }
 
-// Holds can meet one dead connection several times before its health check closes
-// it, and one drop is taught once; another connection's teaches again.
-func TestADeadConnectionTeachesOnce(t *testing.T) {
-	var h holding
-	one, two := &net.TCPConn{}, &net.TCPConn{}
-	_, first := h.droppedOn(one, 5*time.Minute, true)
-	if _, ka := h.droppedOn(one, 5*time.Minute, true); ka != first {
-		t.Errorf("keep-alive %v, then %v from one connection", first, ka)
-	}
-	if _, ka := h.droppedOn(one, time.Minute, false); ka != first {
-		t.Errorf("keep-alive %v, then %v when it closed", first, ka)
-	}
-	if _, ka := h.droppedOn(two, 5*time.Minute, true); ka >= first {
-		t.Errorf("keep-alive %v, then %v from another connection", first, ka)
-	}
-	// A hold that never got a connection names none to have taught.
-	var none holding
-	_, a := none.droppedOn(nil, 5*time.Minute, true)
-	if _, b := none.droppedOn(nil, 5*time.Minute, true); b >= a {
-		t.Errorf("keep-alive %v, then %v", a, b)
-	}
-}
-
 type closeCounter struct {
 	http.RoundTripper
 	closed int
@@ -116,12 +92,61 @@ func (c *closeCounter) CloseIdleConnections() { c.closed++ }
 // mailbox's calls go through: http.Client reaches only one that has the method.
 func TestClosingIdleConnectionsReachesTheTransport(t *testing.T) {
 	next := &closeCounter{}
-	c := &http.Client{Transport: transport{next}}
+	c := &http.Client{Transport: newRoundTripper(next)}
 	c.CloseIdleConnections()
 	if next.closed != 1 {
 		t.Errorf("reached it %d times", next.closed)
 	}
-	(&http.Client{Transport: transport{roundTripperOnly{}}}).CloseIdleConnections() // has no method: nothing to reach
+	(&http.Client{Transport: newRoundTripper(roundTripperOnly{})}).CloseIdleConnections() // has no method: nothing to reach
 }
 
 type roundTripperOnly struct{ http.RoundTripper }
+
+// The next call after renew has a new connection and resumes TLS: its clone keeps
+// the session cache, and the settings, of the transport it was cloned from.
+func TestARenewedTransportResumesAndKeepsItsHealthCheck(t *testing.T) {
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	srv.EnableHTTP2 = true
+	srv.StartTLS()
+	defer srv.Close()
+	tr := defaultTransport(&holding{})
+	pool := x509.NewCertPool()
+	pool.AddCert(srv.Certificate())
+	tr.TLSClientConfig.RootCAs = pool
+	wrapped := newRoundTripper(tr)
+	c := &http.Client{Transport: wrapped}
+	var resumed []bool
+	for range 2 {
+		resp, err := c.Get(srv.URL)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+		if resp.ProtoMajor != 2 {
+			t.Fatalf("HTTP/%d", resp.ProtoMajor)
+		}
+		resumed = append(resumed, resp.TLS.DidResume)
+		wrapped.renew()
+	}
+	if resumed[0] || !resumed[1] {
+		t.Errorf("resumed %v, want a full handshake then a resumed one", resumed)
+	}
+	now := (*wrapped.next.Load()).(*http.Transport)
+	if now == tr || now.HTTP2 == nil || now.HTTP2.SendPingTimeout != healthCheckAfter {
+		t.Errorf("after renew: %+v", now.HTTP2)
+	}
+	wrapped.CloseIdleConnections()
+}
+
+// No live connection is pinged: one idle closes at connectionIdle, and the hold that
+// might follow that ends by its wait and margin.
+func TestTheHealthCheckIsAboveAnythingALiveConnectionDoes(t *testing.T) {
+	tr := defaultTransport(&holding{})
+	if most := tr.IdleConnTimeout + DefaultHold + holdMargin; tr.HTTP2.SendPingTimeout < most {
+		t.Errorf("a ping is due after %v, and a live connection may read nothing for %v", tr.HTTP2.SendPingTimeout, most)
+	}
+	if connectionIdle != http.DefaultTransport.(*http.Transport).IdleConnTimeout {
+		t.Logf("connectionIdle %v differs from net/http's default", connectionIdle)
+	}
+}
