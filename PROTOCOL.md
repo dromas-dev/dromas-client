@@ -1766,7 +1766,6 @@ Dromas protects a message's content from everyone but the message's recipient. D
 - **[age]** C2SP, "age", v1.1.0, https://c2sp.org/age@v1.1.0, read 2026-11-02
 - **[draft-ietf-hpke-pq-03]** Barnes, Connolly, "Post-Quantum and Post-Quantum/Traditional Hybrid Algorithms for HPKE", draft-ietf-hpke-pq-03: the MLKEM768-X25519 KEM that [age] names
 - **[draft-ietf-sshm-cert-01]** Miller, "SSH Certificate Format", draft-ietf-sshm-cert-01
-- **[OpenSSH]** OpenSSH 10.6p1, the release that this document's statements about OpenSSH were read against
 - **[PROTOCOL.sshsig]** OpenSSH 10.6p1, `PROTOCOL.sshsig`
 - **[AEP-158]**, **[AEP-193]** API Enhancement Proposals: pagination; errors
 - **[BIP 173]** Bech32
