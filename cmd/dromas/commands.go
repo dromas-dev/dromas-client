@@ -174,8 +174,10 @@ certificate where its server serves a statement under one or --offline asks.`,
 			opt := e.opt
 			opt.WorkingKey = offline
 			var warning any
-			if opt.IdentityType = idType; idType != "" && idType != protocol.IdentityEd25519 {
-				warning = fmt.Sprintf("WARNING: a mailbox whose identity is of the key type %s can neither write to nor hear from a mailbox whose client does not verify that type. Every client verifies ssh-ed25519, which init makes without --identity-type.", idType)
+			// A type of PROTOCOL.md §4.1 reaches every mailbox; an optional one only
+			// those whose clients verify it (§7).
+			if opt.IdentityType = idType; idType != "" && !protocol.AcceptsSender(nil, idType) {
+				warning = fmt.Sprintf("WARNING: a mailbox whose identity is of the optional key type %s can neither write to nor hear from a mailbox whose client does not verify that type. Every client verifies ssh-ed25519, which init makes without --identity-type.", idType)
 			}
 			b, err := client.Init(c.Context(), e.dir, opt)
 			if err != nil {
@@ -184,7 +186,7 @@ certificate where its server serves a statement under one or --offline asks.`,
 			return e.out(line("mailbox", "address", b.Address(), "link", b.Link(), "detail", warning))
 		})
 	c.Flags().BoolVar(&offline, "offline", false, "register the mailbox under a certificate, whose working key signs in place of its identity: for good")
-	c.Flags().StringVar(&idType, "identity-type", "", "make the identity a key of this `type`, not ssh-ed25519: "+protocol.IdentityP256+". Every client verifies ssh-ed25519; a mailbox of another type is reached only by mailboxes whose client verifies it")
+	c.Flags().StringVar(&idType, "identity-type", "", "make the identity a key of this `type`, not ssh-ed25519: "+protocol.IdentityP256+", which every client verifies too")
 	return c
 }
 

@@ -116,7 +116,10 @@ func (b *Mailbox) worker(n uint64) (*sign.Work, *protocol.Certificate, error) {
 	return sign.NewWork(signer, b.finished), cert, nil
 }
 
-// dropWork deletes every working key older than n.
+// dropWork deletes every working key older than n, once the renewal under
+// n's certificate is taken. Until then a mailbox under a certificate holds two
+// working keys: the one under its current certificate, which signs its passes,
+// and the one the waiting prekey statement is signed with.
 func (b *Mailbox) dropWork(n uint64) error {
 	names, err := filepath.Glob(b.path("work", "*-cert.pub"))
 	if err != nil {

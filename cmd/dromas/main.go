@@ -38,9 +38,6 @@ The mailbox's policy file says where a message from a sender it has not allowed
 lands, "unknown held" (the default) or "unknown inbox", and whom its server
 takes messages from, "server all" (the default: everyone it has not blocked) or
 "server allowed" (only those it allowed, which tells the server who they are).
-With each prekey a mailbox declares which identity key types its client verifies,
-and so whose messages it takes: every type this client verifies, unless
-$DROMAS_SENDER_KEY_TYPES says otherwise ("any": do not say).
 
 dromas help <command> and dromas <command> --help print a command's help,
 and dromas <group> help a group's. --help after a command prints its help
@@ -137,9 +134,6 @@ func (e *cli) environment() error {
 	}
 	e.dir = dir
 	e.opt.Base = os.Getenv("DROMAS_SERVER_URL")
-	if v := os.Getenv("DROMAS_SENDER_KEY_TYPES"); v != "" {
-		e.opt.SenderKeyTypes = strings.Split(v, ",")
-	}
 	return nil
 }
 

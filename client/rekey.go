@@ -24,9 +24,10 @@ import (
 // sent (PROTOCOL.md §12.4): it has expired or does not verify by this clock,
 // it is the identity's where the renewal is under a certificate, its certificate began
 // less than an hour before the clock or is at or below a serial the identity
-// revoked, it was made for longer than the mailbox's
-// lifetime now allows or has no record of when it was made, or this mailbox no
-// longer holds its key or its working key. A key is signed once, so no key is
+// revoked or runs longer than the server's maximum, it was made for longer
+// than the mailbox's lifetime now allows or has no record of when it was made,
+// its server serves a statement no earlier than it, or this mailbox no longer holds its key or its working key. The key passed
+// over is kept, and deleted as a retired prekey. A key is signed once, so no key is
 // encrypted to for longer than its lifetime, at most protocol.PrekeyLifetime
 // or the mailbox's shorter one, whatever the server does with what it was sent. It needs only the identity, so it also
 // recovers a mailbox that lost its prekeys or its working key, and such a mailbox
@@ -477,7 +478,9 @@ func (b *Mailbox) makeRenewal(ctx context.Context, st *ownRead, next uint64, p *
 	if rec == nil {
 		return nil, out, fmt.Errorf("the mailbox's state file keeps no statement of prekey %d", next)
 	}
-	req.SenderKeyTypes, req.Prekey, req.PrekeySignature = b.senderKeyTypes, rec.Statement, rec.Signature
+	// The declaration is what this client verifies beyond PROTOCOL.md §4.1's
+	// types, which every mailbox takes (§7).
+	req.SenderKeyTypes, req.Prekey, req.PrekeySignature = protocol.OptionalTypes(), rec.Statement, rec.Signature
 	return p, out, nil
 }
 

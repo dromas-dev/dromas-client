@@ -221,16 +221,15 @@ func TestSendToAPrekeyOfATypeThisClientLacks(t *testing.T) {
 	}
 }
 
-// With each prekey a mailbox declares which sender key types its client verifies:
-// every type this client verifies, unless it is told otherwise. "any" is
-// never what it says by itself.
-func TestAMailboxDeclaresTheSenderKeyTypesItVerifies(t *testing.T) {
+// With each prekey a mailbox declares the optional sender key types its client
+// verifies, and never a type of PROTOCOL.md §4.1, which every mailbox takes.
+func TestAMailboxDeclaresTheOptionalSenderKeyTypesItVerifies(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
 	body := forge.Capture(e.srv, http.MethodPut, "")
 	b := e.mailbox()
 	var reg protocol.RegisterRequest
-	if err := json.Unmarshal(*body, &reg); err != nil || !slices.Equal(reg.SenderKeyTypes, protocol.IdentityTypes()) {
+	if err := json.Unmarshal(*body, &reg); err != nil || !slices.Equal(reg.SenderKeyTypes, protocol.OptionalTypes()) {
 		t.Fatalf("a registration declares %v, %v", reg.SenderKeyTypes, err)
 	}
 	body = forge.Capture(e.srv, http.MethodPut, "/prekey")
@@ -239,48 +238,30 @@ func TestAMailboxDeclaresTheSenderKeyTypesItVerifies(t *testing.T) {
 		t.Fatal(err)
 	}
 	var up protocol.PrekeyRequest
-	if err := json.Unmarshal(*body, &up); err != nil || !slices.Equal(up.SenderKeyTypes, protocol.IdentityTypes()) {
+	if err := json.Unmarshal(*body, &up); err != nil || !slices.Equal(up.SenderKeyTypes, protocol.OptionalTypes()) {
 		t.Fatalf("a new prekey declares %v, %v", up.SenderKeyTypes, err)
 	}
-	if slices.Contains(protocol.IdentityTypes(), protocol.AnySender) || !slices.Contains(protocol.IdentityTypes(), protocol.IdentityEd25519) {
-		t.Fatal("what a client verifies is a list of key types, Ed25519 among them")
-	}
-	// A mailbox told to say "any" says that and nothing else.
-	o := e.opts()
-	o.SenderKeyTypes = []string{protocol.AnySender}
-	body = forge.Capture(e.srv, http.MethodPut, "")
-	if _, err := client.Init(context.Background(), t.TempDir(), o); err != nil {
-		t.Fatal(err)
-	}
-	if err := json.Unmarshal(*body, &reg); err != nil || !slices.Equal(reg.SenderKeyTypes, []string{protocol.AnySender}) {
-		t.Fatalf("a mailbox told to say any declares %v, %v", reg.SenderKeyTypes, err)
+	for _, ty := range append(reg.SenderKeyTypes, up.SenderKeyTypes...) {
+		if protocol.AcceptsSender(nil, ty) {
+			t.Errorf("a mailbox declares %s, a type every mailbox takes", ty)
+		}
 	}
 }
 
-// A mailbox on an identity of the optional type does not send to a mailbox whose
-// client does not verify that type: the recipient would refuse its messages, and
-// the sender would hold a receipt for it. A mailbox on an Ed25519 identity sends
-// to any mailbox, whatever it declared.
-func TestSendToAMailboxThatDoesNotVerifyThisMailboxsKeyType(t *testing.T) {
+// Every mailbox takes a sender of every type PROTOCOL.md §4.1 defines, whatever
+// it declared: a mailbox on a P-256 identity sends to one on Ed25519, and the
+// other way, and its server is posted every message.
+func TestEveryMailboxTakesASenderOfEveryDefinedType(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
 	ctx := context.Background()
-	with := func(mod func(*client.Options)) *client.Mailbox {
-		t.Helper()
-		o := e.opts()
-		mod(&o)
-		b, err := client.Init(ctx, t.TempDir(), o)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return b
+	o := e.opts()
+	o.IdentityType = protocol.IdentityP256
+	p, err := client.Init(ctx, t.TempDir(), o)
+	if err != nil {
+		t.Fatal(err)
 	}
-	p := with(func(o *client.Options) { o.IdentityType = protocol.IdentityP256 })
 	ed := e.mailbox()
-	edOnly := with(func(o *client.Options) { o.SenderKeyTypes = []string{protocol.IdentityEd25519} })
-	silent := with(func(o *client.Options) { o.SenderKeyTypes = []string{} })
-	anyType := with(func(o *client.Options) { o.SenderKeyTypes = []string{protocol.AnySender} })
-
 	posts := 0
 	e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
 		if r.Method == http.MethodPost {
@@ -288,25 +269,12 @@ func TestSendToAMailboxThatDoesNotVerifyThisMailboxsKeyType(t *testing.T) {
 		}
 		next.ServeHTTP(w, r)
 	})
-	for name, to := range map[string]*client.Mailbox{"a mailbox that declared Ed25519 only": edOnly, "a mailbox that declared nothing": silent} {
-		_, err := p.Send(ctx, to.Address(), "hello")
-		var refused *client.RefusedError
-		if !errors.As(err, &refused) || !strings.Contains(refused.Reason, "does not verify identities of this mailbox's key type, ecdsa-sha2-nistp256") {
-			t.Errorf("to %s: %v", name, err)
+	for _, pair := range [][2]*client.Mailbox{{p, ed}, {ed, p}, {p, p}, {ed, ed}} {
+		if _, err := pair[0].Send(ctx, pair[1].Address(), "hello"); err != nil {
+			t.Errorf("%s to %s: %v", pair[0].Address(), pair[1].Address(), err)
 		}
 	}
-	if posts != 0 {
-		t.Fatalf("%d sends were posted to mailboxes that would refuse them", posts)
-	}
-	for name, to := range map[string]*client.Mailbox{"a mailbox that declared P-256": ed, "a mailbox that said any": anyType} {
-		if _, err := p.Send(ctx, to.Address(), "hello"); err != nil {
-			t.Errorf("to %s: %v", name, err)
-		}
-	}
-	// Ed25519 is taken by every mailbox, whatever it declared.
-	for _, to := range []*client.Mailbox{edOnly, silent, anyType, p} {
-		if _, err := ed.Send(ctx, to.Address(), "hello"); err != nil {
-			t.Errorf("from an Ed25519 mailbox: %v", err)
-		}
+	if posts != 4 {
+		t.Fatalf("%d of 4 sends were posted", posts)
 	}
 }

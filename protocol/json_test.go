@@ -101,6 +101,9 @@ func TestUnmarshalRequest(t *testing.T) {
 		if (c.want == nil) != (err == nil) || (c.want != nil && !errors.Is(err, c.want)) {
 			t.Errorf("%s: %v, want %v", c.body, err, c.want)
 		}
+		if c.want == ErrNotBase64 && Member(err) != "prekey" { //nolint:errorlint // a sentinel the case names
+			t.Errorf("%s: names the member %q, want prekey", c.body, Member(err))
+		}
 	}
 }
 

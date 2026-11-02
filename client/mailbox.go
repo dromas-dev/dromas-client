@@ -78,14 +78,6 @@ type Options struct {
 	// server serves a statement under a certificate renews under a new one
 	// whatever this says.
 	WorkingKey bool
-	// SenderKeyTypes is what the mailbox declares with each prekey it
-	// publishes: the identity key types of the senders it takes messages from
-	// (protocol.AcceptsSender). Nil: every type this client verifies, which
-	// is the one to use. The one entry protocol.AnySender is for a mailbox that
-	// would not show which types it verifies: the server then takes messages
-	// for it from a sender of any type, and this client refuses what it
-	// cannot verify.
-	SenderKeyTypes []string
 	// Waiting, if not nil, is told when a command finds the mailbox's lock held
 	// by another command of the mailbox, once, before it waits for it: a mailbox's
 	// commands write its files one at a time.
@@ -128,8 +120,6 @@ type Mailbox struct {
 	lifetime time.Duration
 	// identityType is the type of key Init makes when the mailbox has none.
 	identityType string
-	// senderKeyTypes is what the mailbox declares with each prekey it publishes.
-	senderKeyTypes []string
 	// waiting is told when a command waits for the mailbox's lock ([Mailbox.hold]).
 	waiting func()
 	// drainTime bounds a Receive's drain (Options.DrainTime).
@@ -190,10 +180,7 @@ func Open(dir string, opt Options) (*Mailbox, error) {
 // HTTP client takes every request through one transport (newTransport) and
 // follows no redirect (followNone).
 func newMailbox(dir string, opt Options) (*Mailbox, error) {
-	b := &Mailbox{dir: dir, base: strings.TrimRight(opt.Base, "/"), http: opt.HTTPClient, now: opt.Now, identityType: opt.IdentityType, workingKey: opt.WorkingKey, senderKeyTypes: opt.SenderKeyTypes, waiting: opt.Waiting, slot: make(chan struct{}, 1)}
-	if b.senderKeyTypes == nil {
-		b.senderKeyTypes = protocol.IdentityTypes()
-	}
+	b := &Mailbox{dir: dir, base: strings.TrimRight(opt.Base, "/"), http: opt.HTTPClient, now: opt.Now, identityType: opt.IdentityType, workingKey: opt.WorkingKey, waiting: opt.Waiting, slot: make(chan struct{}, 1)}
 	if b.base == "" {
 		b.base = DefaultBase
 	}

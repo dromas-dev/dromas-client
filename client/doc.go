@@ -12,7 +12,7 @@
 //
 //	identity, identity.pub     the identity key, OpenSSH format: Ed25519 unless the mailbox was made on another type; back it up. It signs certificates and revocations, and what the mailbox says until it has published a statement under a certificate (init --offline, cert switch; client/signer.go)
 //	identity.doc, address      the identity document and its SHA-384, the address
-//	work/<serial>              working keys, each with its certificate (.pub, -cert.pub): they sign what the mailbox says
+//	work/<serial>              working keys, each with its certificate (.pub, -cert.pub): they sign what the mailbox says; never backed up, since a restored mailbox makes new ones
 //	prekeys/<serial>.agekey    age keys, each statement signed for one, when it was signed and when its server took it, kept in state; never backed up
 //	prekey-lifetime            how long each new prekey is valid for: a number of seconds, from 21600 (6 hours) to 691200 (8 days), the default. Yours to write, or dromas prekey lifetime's
 //	outbox/, outbox/failed/    envelopes awaiting a receipt, sealed afresh at every post and never kept sealed; ones that can never be delivered

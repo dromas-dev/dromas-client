@@ -760,6 +760,7 @@ paths:
         '503':
           $ref: '#/components/responses/HeadUnavailable'
   /v1/{addr}/account:
+    description: Optional. A server without accounts does not offer this path, and answers it as a route it does not offer (`PROTOCOL.md` §11.2, §11.16).
     parameters:
       - $ref: '#/components/parameters/DromasVersion'
       - $ref: '#/components/parameters/addr'
@@ -1585,14 +1586,14 @@ components:
       name: If-Match
       in: header
       required: false
-      description: RFC 9110 §13.1.1's `If-Match`, evaluated as `PROTOCOL.md` §11.2 says, at the point §11.4 places it. A false one is `412`.
+      description: RFC 9110 §13.1.1's `If-Match`, evaluated as `PROTOCOL.md` §11.2 says. A false one is `412`.
       schema:
         type: string
     IfNoneMatch:
       name: If-None-Match
       in: header
       required: false
-      description: RFC 9110 §13.1.2's `If-None-Match`, evaluated as `PROTOCOL.md` §11.2 says, at the point §11.4 places it. A false one is `304` to a `GET` or a `HEAD`, and `412` to any other method.
+      description: RFC 9110 §13.1.2's `If-None-Match`, evaluated as `PROTOCOL.md` §11.2 says. A false one is `304` to a `GET` or a `HEAD`, and `412` to any other method.
       schema:
         type: string
 
@@ -1791,10 +1792,10 @@ components:
     BadRequest:
       description: |
         Not a request this call takes: `bad_request` (naming what is wrong in
-        `member`) · `bad_address` · `bad_encoding` · `identity_mismatch` ·
-        `unsupported_key_type` (with the server's `key_types`) · `bad_key` ·
-        `prekey_not_new` · `prekey_time` · `certificate_too_long` (with the
-        server's `max_certificate_lifetime`) · `not_age` ·
+        `member`, where it is a member or a query parameter) · `bad_address` ·
+        `identity_mismatch` · `unsupported_key_type` (with the server's
+        `key_types`) · `bad_key` · `prekey_not_new` · `prekey_time` ·
+        `certificate_too_long` (with the server's `max_certificate_lifetime`) ·
         `wrong_recipient_type` · `bad_revocation`. `PROTOCOL.md` §11.3 has what
         each means.
       headers:
@@ -1825,7 +1826,7 @@ components:
                   status:
                     const: 400
                   code:
-                    enum: [bad_request, bad_address, bad_encoding, identity_mismatch, unsupported_key_type, bad_key, prekey_not_new, prekey_time, certificate_too_long, not_age, wrong_recipient_type, bad_revocation]
+                    enum: [bad_request, bad_address, identity_mismatch, unsupported_key_type, bad_key, prekey_not_new, prekey_time, certificate_too_long, wrong_recipient_type, bad_revocation]
     Unauthorized:
       description: |
         The pass is refused: `unauthorized` · `pass_expired` ·
@@ -2132,7 +2133,7 @@ components:
         Past a limit: `rate_limited` (with `subject`, whom it was counted
         against, and `quota_id`, which limit, from a closed set; a limit
         counted by the day also with its `limit`) · `fetch_paced` ·
-        `refetch_spent` · `mailbox_full` (with `count`) · `mailbox_busy`.
+        `mailbox_full` (with `count`) · `mailbox_busy`.
         `PROTOCOL.md` §11.3 and §11.5 have what each means.
       headers:
         Date:
@@ -2164,7 +2165,7 @@ components:
                   status:
                     const: 429
                   code:
-                    enum: [rate_limited, fetch_paced, refetch_spent, mailbox_full, mailbox_busy]
+                    enum: [rate_limited, fetch_paced, mailbox_full, mailbox_busy]
     Unavailable:
       description: '`unavailable`: the server is not ready to answer (`PROTOCOL.md` §11.2).'
       headers:
@@ -2373,8 +2374,9 @@ components:
       pattern: '^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$'
     KeyTypes:
       description: |
-        The identity key types the mailbox's client verifies (`PROTOCOL.md` §7):
-        key type names, or the one entry `any`.
+        The optional identity key types the mailbox's client verifies
+        (`PROTOCOL.md` §7): key type names, never a type of §4.1, which every
+        mailbox takes.
       type: [array, 'null']
       items:
         type: string
@@ -2688,10 +2690,10 @@ components:
           items:
             type: string
         key_type:
-          description: '`sender_key_type`: the sender''s key type, which the mailbox''s client does not verify.'
+          description: '`sender_key_type`: the sender''s key type, an optional one the mailbox did not declare.'
           type: [string, 'null']
         member:
-          description: '`bad_request`: the request member or query parameter that is missing, unknown or given twice, or holds a value its call does not take.'
+          description: '`bad_request`: the request member or query parameter that is missing, unknown or given twice, or holds a value its call does not take, a byte member not base64 in its one encoding among them. A send''s body that is not an age file names none.'
           type: [string, 'null']
         min_version:
           description: '`version_retired`: the lowest version the server takes, where it sets a floor, `MAJOR.MINOR` or `MAJOR.MINOR.PATCH` (`PROTOCOL.md` §11.17).'

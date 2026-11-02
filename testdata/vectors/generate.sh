@@ -107,7 +107,7 @@ for mailbox in a b; do
 done
 A=$(cat a/address); B=$(cat b/address)
 
-# Mailbox C, whose identity is of the optional type ecdsa-sha2-nistp256.
+# Mailbox C, whose identity is of type ecdsa-sha2-nistp256.
 { read -r scalar; read -r POINT; } < input/c.p256
 openssh_p256_key "$scalar" "$POINT" "$KEYS/c"
 ssh-keygen -y -f "$KEYS/c" > "$KEYS/c.pub"
@@ -594,7 +594,7 @@ refuse refuse-certificate-ended message/a-to-b.line under a-work cert/bad-ended.
 sed 's/"body":"hello"/"body":"hellp"/' message/a-to-b.line > "$L"; cat "$L" "$GOOD_SIG" > plain/refuse-line-changed-after-signing.txt
 # The signature block is a signature in its one form (sig/): whitespace in its base64 refuses it.
 { cat message/a-to-b.line; sed "2s/\$/ \r/; 3s/^/"$'\t'"/" "$GOOD_SIG"; } > plain/refuse-whitespace-in-the-signature.txt
-# A sender whose identity is of the optional type, signed by that identity, made once and kept: delivered by a client
+# A sender whose identity is P-256, signed by that identity, made once and kept: delivered by a client
 # that verifies ecdsa-sha2-nistp256, and refused with unsupported_key_type by one that does not; and the same under C's
 # certificate, which nothing revokes. Then one of a type nobody verifies: refused so if the document is the sender's,
 # and as reattributed if it is not.
@@ -724,9 +724,9 @@ at record-bad-type-another '{"type":"revocation","identity":"%s","revocation_sig
 at record-bad-type-empty '{"type":"","identity":"%s","revocation_signature":"%s"}' "$ID_A" "$REV"
 at record-bad-type-a-number '{"type":1,"identity":"%s","revocation_signature":"%s"}' "$ID_A" "$REV"
 at mailbox-ok '{"identity":"%s","prekey":"%s","prekey_signature":"%s"}' "$ID_A" "$P1" "$P1S"
-at mailbox-ok-sender-key-types '{"identity":"%s","prekey":"%s","prekey_signature":"%s","sender_key_types":["ecdsa-sha2-nistp256"]}' "$ID_A" "$P1" "$P1S"
+at mailbox-ok-sender-key-types '{"identity":"%s","prekey":"%s","prekey_signature":"%s","sender_key_types":["ssh-mldsa44-ed25519"]}' "$ID_A" "$P1" "$P1S"
 at mailbox-ok-revoked-certificates '{"identity":"%s","prekey":"%s","prekey_signature":"%s","revoked_certificates":"%s","revoked_certificates_signature":"%s"}' "$ID_A" "$P1" "$P1S" "$RC" "$RCS" # the revocation of its certificates the server holds, beside the mailbox
-at mailbox-bad-sender-key-types-a-string '{"identity":"%s","prekey":"%s","prekey_signature":"%s","sender_key_types":"any"}' "$ID_A" "$P1" "$P1S"
+at mailbox-bad-sender-key-types-a-string '{"identity":"%s","prekey":"%s","prekey_signature":"%s","sender_key_types":"ssh-mldsa44-ed25519"}' "$ID_A" "$P1" "$P1S"
 at mailbox-bad-signature-unpadded '{"identity":"%s","prekey":"%s","prekey_signature":"%s"}' "$ID_A" "$P1" "$NOPAD"
 at mailbox-bad-prekey-a-number '{"identity":"%s","prekey":1,"prekey_signature":"%s"}' "$ID_A" "$P1S"
 at mailbox-bad-revoked-certificates-a-number '{"identity":"%s","prekey":"%s","prekey_signature":"%s","revoked_certificates":4}' "$ID_A" "$P1" "$P1S"
