@@ -5,8 +5,8 @@ package client
 import "syscall"
 
 // darwinNetworkFilesystems are statfs(2)'s f_fstypename of the network
-// filesystems.
-var darwinNetworkFilesystems = map[string]bool{"nfs": true, "smbfs": true, "afpfs": true, "webdav": true, "cifs": true}
+// filesystems, those of systems older than this one's included.
+var darwinNetworkFilesystems = map[string]bool{"nfs": true, "smbfs": true, "afpfs": true, "webdav": true, "cifs": true, "acfs": true}
 
 func filesystemOf(dir string) (string, error) {
 	var s syscall.Statfs_t

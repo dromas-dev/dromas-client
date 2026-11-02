@@ -20,8 +20,8 @@ import (
 // next. A lock-free layout, Maildir's name per message renamed into place,
 // fits a file written once, and not what a mailbox reads, compares and writes
 // again, such as its revocations and a peer's serials (decided on #62, #83 and
-// #96). A base directory on NFS, where a flock is not one to rely on, is refused
-// where the system can tell ([CheckLayout], #188).
+// #96). A base directory on a network filesystem, where a flock is not one to rely
+// on, is refused on Linux and macOS ([CheckLayout], #188).
 //
 // In one process, goroutines that share a Mailbox take turns in its slot first
 // (claim), at each exported entry that reads or writes the state file, so a

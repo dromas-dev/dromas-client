@@ -131,8 +131,8 @@ func (b *Mailbox) known(ctx context.Context) (*own, error) {
 // mailbox's last read of itself, verified under its identity, that the mailbox did
 // not make: none it keeps. Signed by the identity itself, whoever made it holds
 // the identity. Under a certificate this mailbox made, whoever made it
-// holds that certificate's working key, from a copy of the mailbox's directory,
-// which holds the identity too; under one it did not, the identity certified
+// holds that certificate's working key, from a copy of the mailbox's files,
+// which may hold the identity too; under one it did not, the identity certified
 // someone else's working key, as on the lost machine a mailbox restored from its
 // identity alone meets. Each way the mailbox recommends revoking the address
 // (PROTOCOL.md §12.4), and recv renews nothing above it: Rekey, which its
@@ -246,7 +246,7 @@ func (nm *NotMade) Words() string {
 	}
 	head := fmt.Sprintf("at its read of itself at %s, this mailbox's server served a prekey statement in its name, serial %d under certificate %d, that this mailbox did not make", nm.At, nm.Serial, nm.CertificateSerial)
 	if nm.OwnCertificate {
-		return head + ", under this mailbox's own certificate: whoever made it holds this mailbox's working key, so they copied this mailbox's directory, which holds its identity too. Revoke the address, unless you know the identity was not copied, when dromas cert revoke-earlier ends every certificate before a new one instead. " + tail
+		return head + ", under this mailbox's own certificate: whoever made it holds this mailbox's working key, so they copied this mailbox's files, which may hold its identity too. Revoke the address, unless you know the identity was not copied, when dromas cert revoke-earlier ends every certificate before a new one instead. " + tail
 	}
 	return head + ", under a certificate this mailbox did not make either: this mailbox's identity certified someone else's working key. Unless it is the owner's own, from the machine this mailbox was restored from, the identity is in other hands, and only revoking the address ends that: whoever holds the identity makes a later certificate as easily as this mailbox. " + tail
 }

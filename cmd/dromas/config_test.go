@@ -179,6 +179,14 @@ func TestAConfigThatIsWrongIsFatal(t *testing.T) {
 		{"a policy", good + "[policy]\nserver = \"some\"\n", "policy.server", "policy.server"},
 		{"a drain time", good + "[recv]\ndrain-time = \"0s\"\n", "recv.drain-time", "above zero"},
 		{"a wait", good + "[recv]\nwait = \"soon\"\n", "recv.wait", "recv.wait"},
+		{"an empty server", good + "server = \"\"\n", "server", "is empty"},
+		{"an empty lifetime", good + "prekey-lifetime = \"\"\n", "prekey-lifetime", "is empty"},
+		{"an empty path", good + "inbox-dir = \"\"\n", "inbox-dir", "is empty"},
+		{"an empty policy", good + "[policy]\nunknown = \"\"\n", "policy.unknown", "is empty"},
+		{"an empty wait", good + "[recv]\nwait = \"\"\n", "recv.wait", "is empty"},
+		{"a key in another case", good + "SERVER = \"https://example.org\"\n", "SERVER", "no key"},
+		{"a table in another case", good + "[POLICY]\nunknown = \"held\"\n", "POLICY", "no key"},
+		{"a key of a table in another case", good + "[policy]\nUNKNOWN = \"held\"\n", "policy.UNKNOWN", "no key"},
 		{"two parts in one place", "base-dir = " + base + "\nmail-dir = " + base + "\n", "", "one place"},
 		{"another user's home", "base-dir = \"~bob/x\"\nmail-dir = " + mail + "\n", "base-dir", "only ~/"},
 	} {
@@ -230,6 +238,26 @@ func TestTheWorkingDirectoryIsNeverRead(t *testing.T) {
 	if err := do(t.Context(), "config", nil, nil, io.Discard, io.Discard); !errors.As(err, &bad) {
 		t.Errorf("%v", err)
 	}
+	// A relative base directory is no way to it: XDG says to ignore one, and a
+	// relative home is none.
+	for _, name := range []string{filepath.Join(".cfg", "dromas"), filepath.Join(".config", "dromas")} {
+		if err := os.MkdirAll(filepath.Join(cwd, name), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(cwd, name, "default.toml"), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("XDG_CONFIG_HOME", ".cfg")
+	if err := do(t.Context(), "config", nil, nil, io.Discard, io.Discard); !errors.As(err, &bad) {
+		t.Errorf("a relative XDG_CONFIG_HOME: %v", err)
+	}
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("HOME", ".")
+	t.Setenv("USERPROFILE", ".")
+	if err := do(t.Context(), "config", nil, nil, io.Discard, io.Discard); !errors.As(err, &bad) {
+		t.Errorf("a relative home: %v", err)
+	}
 }
 
 // A relative path in a file is under the file's directory, and on the command line
@@ -279,7 +307,7 @@ func TestInitWritesAProfilesFileAndRunsFromIt(t *testing.T) {
 		`identity-file = "~/.local/share/dromas/bot/identity"`,
 		`rotating-keys-dir = "~/.local/state/dromas/bot/keys"`,
 		`# inbox-dir = "~/.local/share/dromas/bot/mail/inbox"`,
-		`# server = "` + client.DefaultBase + `"`,
+		`server = "` + srv.URL + `"`,
 		`# prekey-lifetime = "8d"`,
 		`# [policy]`,
 	} {
@@ -444,5 +472,51 @@ func TestARecordIsPublishedWithNoConfig(t *testing.T) {
 	}
 	if es, _ := os.ReadDir(cwd); len(es) != 1 {
 		t.Errorf("the working directory holds %v", es)
+	}
+}
+
+// What init's flags say is in the file it makes, so the next command, with no
+// flag, runs the same mailbox at the same server.
+func TestInitWritesItsFlagsToTheFileItMakes(t *testing.T) {
+	cleanEnv(t)
+	srv := fakeserver.New(t, time.Now)
+	inbox := filepath.Join(t.TempDir(), "agent-inbox")
+	if err := do(t.Context(), "init", []string{"--profile", "bot", "--server", srv.URL, "--inbox-dir", inbox, "--prekey-lifetime", "2d"}, nil, io.Discard, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := do(t.Context(), "config", []string{"--profile", "bot"}, nil, &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	var got struct {
+		Values map[string]setting `json:"values"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	for key, want := range map[string]string{"server": srv.URL, "inbox-dir": inbox, "prekey-lifetime": "2d"} {
+		if v := got.Values[key]; v.Value != want || v.From != "file" {
+			t.Errorf("%s: %+v", key, v)
+		}
+	}
+}
+
+// An init whose values are refused leaves no file holding them, so the next init
+// is not refused by what the last one was.
+func TestARefusedInitWritesNoFile(t *testing.T) {
+	home := cleanEnv(t)
+	root := t.TempDir()
+	for name, args := range map[string][]string{
+		"two parts in one place": {"--base-dir", root, "--mail-dir", root},
+		"a lifetime":             {"--prekey-lifetime", "1h"},
+		"a server":               {"--server", "http://example.org"},
+	} {
+		var bad *configError
+		if err := do(t.Context(), "init", append([]string{"--profile", "bot"}, args...), nil, io.Discard, io.Discard); !errors.As(err, &bad) {
+			t.Errorf("%s: %v", name, err)
+		}
+		if _, err := os.Stat(filepath.Join(home, ".config", "dromas", "bot.toml")); err == nil {
+			t.Errorf("%s: the file was written", name)
+		}
 	}
 }

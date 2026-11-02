@@ -462,3 +462,35 @@ func TestASendNamesItsStatement(t *testing.T) {
 		}
 	}
 }
+
+// A revocation of certificates never covers the identity, so a message the identity
+// signed, refused for another reason, keeps who signed it in its record at a
+// reader that holds one.
+func TestARefusedMessageTheIdentitySignedKeepsItsSigner(t *testing.T) {
+	t.Parallel()
+	e := newWorkEnv(t)
+	a := e.mailbox()
+	e.working = false
+	b := e.mailbox()
+	e.clock.Add(2 * time.Second)
+	if _, err := a.Rekey(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if certs, err := a.RevokeEarlier(t.Context()); err != nil || certs == nil {
+		t.Fatalf("revoke earlier: %+v, %v", certs, err)
+	}
+	messageAs(t, e, a, b, identityKey(t, a), "first, so the reader looks up its sender")
+	if res := receive(t, b); len(res.Delivered) != 1 || !keptList(b, a.Address()) {
+		t.Fatalf("the first message: %+v, kept %v", res, keptList(b, a.Address()))
+	}
+	line := e.line(a.Identity().Document(), a.Address(), b.Address(), "refused for its msg_id")
+	line = bytes.Replace(line, []byte(`"msg_id":"`), []byte(`"msg_id":"!`), 1)
+	e.seal(b, line, forge.Sign(t, identityKey(t, a), line, b.Address()))
+	res := receive(t, b)
+	if len(res.Refused) != 1 {
+		t.Fatalf("%+v", res)
+	}
+	if q := refusedAs(t, b, res.Refused[0].ID); q.SignedBy != a.Address().String() {
+		t.Errorf("signed_by %q, claims %q", q.SignedBy, q.ClaimsIdentity)
+	}
+}

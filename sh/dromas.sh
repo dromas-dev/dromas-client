@@ -17,7 +17,7 @@
 #   bash dromas.sh help [<command>]                this, or a command's lines; --help after a command does the same, and runs nothing
 #   The README has the rest: https://github.com/dromas-dev/dromas-client#readme
 #
-# Or source it at the top of every shell call and call the dr_* functions. Agent tools run each command in a fresh
+# Or source it at the top of every shell call and call the dr_* functions, which leaves out the command line's refusal of an ssh-keygen that reads no P-256 key (dr_p256). Agent tools run each command in a fresh
 # shell, so all state lives in files in the mailbox's directory, never in variables.
 #
 # It gives up conveniences the Go client has: recv drains once and never waits for a message, and each step runs several
@@ -257,7 +257,7 @@ dr_idcheck(){ # <identity document> [address] → 0 only for a two-line document
 }
 dr_sigmax(){ case $(sed -n 2p "$1" | cut -d' ' -f1) in ssh-ed25519) echo 850 ;; ecdsa-sha2-nistp256) echo 947 ;; *) return 1 ;; esac; }      # <identity document> → the most bytes a signature by a mailbox of its key type may be, every byte of the file (PROTOCOL.md §3.2): its largest in the one form, in any namespace, by the identity or under a certificate it made. Nothing for a type this script does not verify
 dr_bound(){ local m; m=$(dr_sigmax "$2") && [ "$(wc -c < "$1")" -le "$m" ]; }      # <signature file> <identity document> → 0 only for a signature no longer than its identity's key type allows
-dr_blob(){ # <signature file> → the SSHSIG blob it armors, in hex, only for armour in its one form, the bytes ssh-keygen -Y sign and the Go client write (PROTOCOL.md §3.2), and at most 975 bytes, the most any identity key type allows (dr_sigmax): the BEGIN line, the base64 of the blob in its one encoding in lines of 70 characters, the END line, each ending in LF, and nothing before or after. The file is compared, as bytes, with the armour written back from the blob it holds, as the Go client's Dearmor compares it: any other form, CRLF, whitespace or a NUL among them, is refused. 1 for anything else
+dr_blob(){ # <signature file> → the SSHSIG blob it armors, in hex, only for armour in its one form, the bytes ssh-keygen -Y sign and the Go client write (PROTOCOL.md §3.2), and at most 947 bytes, the most any identity key type allows (dr_sigmax): the BEGIN line, the base64 of the blob in its one encoding in lines of 70 characters, the END line, each ending in LF, and nothing before or after. The file is compared, as bytes, with the armour written back from the blob it holds, as the Go client's Dearmor compares it: any other form, CRLF, whitespace or a NUL among them, is refused. 1 for anything else
   local t h
   [ "$(wc -c < "$1")" -le 947 ] || return 1
   t=$(sed '1d;$d' "$1" | tr -d '\n')      # what lies between the first line and the last, read as text: whatever it drops or a file holds besides, the comparison below refuses
@@ -757,7 +757,7 @@ dr_renew(){ # → what dr_rekey does, the lock held. A serial is signed ONCE
     dr_bytes "$DR/self.json" identity "$DR/self.doc" && dr_bytes "$DR/self.json" prekey "$DR/self.txt" && dr_bytes "$DR/self.json" prekey_signature "$DR/self.sig" ||
       dr_refuse "the server's answer for this mailbox is not one this client reads: one JSON object, each byte field base64" || return 1
     [ -s "$DR/self.txt" ] && [ -s "$DR/self.sig" ] || dr_refuse "the server sent no prekey for this mailbox" || return 1
-    r=$(dr_prekeycheck "$DR/self.txt" "$DR/self.sig" "$A" "$DR/identity.doc") || dr_refuse "this mailbox's current prekey, as served: $r" || return 1      # its own record, by every rule but its dates (PROTOCOL.md §12.4): whether its identity signed it, and where it stands in the mailbox's order
+    r=$(dr_prekeycheck "$DR/self.txt" "$DR/self.sig" "$A" "$DR/identity.doc") || dr_refuse "this mailbox's current prekey, as served: $r" || return 1      # its own record, by every rule, its dates too, where PROTOCOL.md §12.4 asks for all but those: this script makes no certificate, so it stops at one it did not make either way: whether its identity signed it, and where it stands in the mailbox's order
     s=${r%% *}
     if [ "${r##* }" != 0 ]; then      # this mailbox makes no certificate, so a statement under one is not its own: its identity certified someone else's working key, and is in other hands, unless it is the owner's own, from a machine this mailbox was restored from. Said, and nothing renewed: a statement under a certificate stands above every one an identity signs (PROTOCOL.md §5.3), so none this mailbox can sign is later
       dr_out prekey_not_made --argjson serial "$s" --argjson certificate_serial "${r##* }" --arg at "$(jq -nr --argjson t "$(dr_now)" '$t | todate')" --arg detail "this mailbox's server served a prekey statement in its name, serial $s under certificate ${r##* }, that this mailbox did not make, under a certificate this mailbox did not make either: this mailbox's identity certified someone else's working key. Unless it is the owner's own, from the machine this mailbox was restored from, the identity is in other hands, and only revoking the address ends that (the Go client's dromas revocation publish, with the address in full)"

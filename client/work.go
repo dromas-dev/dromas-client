@@ -124,7 +124,7 @@ func (b *Mailbox) worker(n uint64) (*sign.Work, *protocol.Certificate, error) {
 // working keys: the one under its current certificate, which signs its passes,
 // and the one the waiting prekey statement is signed with.
 func (b *Mailbox) dropWork(n uint64) error {
-	names, err := filepath.Glob(b.path("work", "*-cert.pub"))
+	names, err := matching(b.path("work", "*-cert.pub"))
 	if err != nil {
 		return err
 	}

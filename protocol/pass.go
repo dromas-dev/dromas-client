@@ -17,7 +17,7 @@ import (
 )
 
 // A mailbox proves itself to a server with a pass: a short statement of who is
-// calling, which server, and until when, signed by the mailbox's working key. It
+// calling, which server, and until when, signed by the mailbox's current signer. It
 // says nothing of what a call does, so the pass hands a server no proof of
 // any send (PROTOCOL.md §8).
 
@@ -99,7 +99,7 @@ func PassStatement(a Address, server string, notAfter time.Time) []byte {
 }
 
 // Pass is what an Authorization header carries: whose pass it is, when it
-// runs out, and the working key's signature on the statement.
+// runs out, and its signer's signature on the statement.
 type Pass struct {
 	Address   Address
 	NotAfter  time.Time
@@ -332,8 +332,8 @@ func trimOWS(s string) string { return strings.TrimLeft(s, " \t") }
 // identity is id, made for server, not run out, running out at most
 // MaxPassLifetime from now, and signed by that identity or a working key of it
 // under a certificate valid at now. It returns the signer: a server takes a
-// pass only by the signer of the mailbox's current statement, and only for a
-// name that is the server's own, which are the caller's to check.
+// pass only by the identity or the current statement's certificate, and only
+// for a name that is the server's own, which are the caller's to check.
 func (p *Pass) Verify(id *Identity, server string, now time.Time) (*Signer, error) {
 	if p.Address != id.Address() {
 		return nil, fmt.Errorf("%w: it is another mailbox's", ErrPass)

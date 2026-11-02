@@ -28,7 +28,7 @@ func rewrap(t *testing.T, blob, key []byte) []byte {
 // VerifySigned takes a signature by either form a mailbox signs with, for an
 // identity of either type: the identity's own key, byte for byte, which ranks
 // 0, or a working key under a certificate the identity made, which ranks at
-// its serial. Holding the signer to the address's mode is Admits'.
+// its serial. Holding the signer to a revocation of certificates is Admits'.
 func TestVerifySignedTakesEitherForm(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, 10, 31, 12, 0, 0, 0, time.UTC)

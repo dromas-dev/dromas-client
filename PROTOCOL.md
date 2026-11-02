@@ -258,7 +258,7 @@ signature-groups = *16( 4base64-char ) ( 4base64-char / base64-final )
 
   | Identity key type | Bound | What reaches it |
   |---|---|---|
-  | `ssh-ed25519` | exactly 850 bytes | a prekey statement or a pass under a certificate |
+  | `ssh-ed25519` | exactly 850 bytes | a prekey statement under a certificate |
   | `ecdsa-sha2-nistp256` | 947 bytes | the same, with the identity's r and s on the certificate each in 33 bytes, the most the one form gives them |
 
   - Everything a mailbox signs is held to its identity's bound. In a message, the bound is on the block from its BEGIN line through the LF after its END line (Section 9.2).
@@ -1533,7 +1533,7 @@ Dromas protects a message's content from everyone but its recipient, and its sen
 
 - **Every mailbox has forward secrecy, bounded by how often it renews and deletes,** given a client that deletes retired prekeys (Section 12.4).
   - A message cannot be recovered from the mailbox's keys once every prekey it could be encrypted to is deleted: at the latest its prekey statement's `not_after` plus the TTL, 15 days after that prekey statement was made (Section 6).
-  - A client that deletes every retired prekey after a drain that empties its mailbox brings that to its first such drain more than an hour after its next renewal is taken: about a day after the message arrives for a mailbox that renews daily, and about six hours for one that renews every six hours.
+  - A client that deletes every retired prekey after a drain that empties its mailbox brings that to its first such drain more than an hour after its next renewal is taken: about a day after the message arrives for a mailbox that renews daily and polls between renewals, about two days for one whose only drain is a daily one, which renews at its head, and about six hours for one that renews every six hours and polls.
   - The hour is for sends in flight: a server takes a send only to the current prekey statement (Section 11.10, step 7), so once a renewal is taken a send to the prekey it replaced is refused, and one the server took before is stored as its request ends, which a list an hour later lists.
   - The bound asks nothing of the server, and keeps no state per peer: the mailbox renews, drains and deletes on its own.
 - **A message waiting on the server is exposed until the mailbox fetches it.** A mailbox that stops renewing keeps its ended prekey as its current one, and its last messages stay exposed until it renews.

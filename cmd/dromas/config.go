@@ -7,7 +7,9 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -104,12 +106,27 @@ type configError struct {
 
 func (e *configError) Error() string { return e.msg }
 
-// configDir is the directory a profile's file is in.
+// homeDir is the home directory. A relative one would read the working directory
+// as if it were someone's home, so it is none.
+func homeDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	if !filepath.IsAbs(home) {
+		return "", fmt.Errorf("the home directory is not an absolute path: %s", home)
+	}
+	return home, nil
+}
+
+// configDir is the directory a profile's file is in. A relative
+// $XDG_CONFIG_HOME is ignored, as the XDG Base Directory spec has it: it would
+// read the working directory.
 func configDir() (string, error) {
-	if d := os.Getenv("XDG_CONFIG_HOME"); d != "" {
+	if d := os.Getenv("XDG_CONFIG_HOME"); filepath.IsAbs(d) {
 		return filepath.Join(d, "dromas"), nil
 	}
-	home, err := os.UserHomeDir()
+	home, err := homeDir()
 	if err != nil {
 		return "", err
 	}
@@ -120,7 +137,7 @@ func configDir() (string, error) {
 // other relative one is under rel. Nothing else in it is expanded.
 func expand(path, rel string) (string, error) {
 	if path == "~" || strings.HasPrefix(path, "~/") || strings.HasPrefix(path, `~\`) {
-		home, err := os.UserHomeDir()
+		home, err := homeDir()
 		if err != nil {
 			return "", fmt.Errorf("%s names the home directory, and there is none: %w", path, err)
 		}
@@ -175,7 +192,7 @@ func loadConfig(c *cobra.Command, g *globals, isInit, noMailbox bool) (*config, 
 		file = filepath.Join(dir, cfg.profile+".toml")
 	}
 	var fc fileConfig
-	found := false
+	found, template := false, ""
 	if file != "" {
 		_, err := os.Stat(file) //nolint:gosec // the config file its owner named
 		switch {
@@ -186,7 +203,10 @@ func loadConfig(c *cobra.Command, g *globals, isInit, noMailbox bool) (*config, 
 		case named != "":
 			return nil, &configError{file: file, msg: fmt.Sprintf("no config file at %s", file)}
 		case isInit:
-			if err := writeTemplate(file, cfg.profile, g); err != nil {
+			// Written once what it says is known to run: a refused value in it would
+			// stay, and refuse the next init from the file.
+			template = templateFor(cfg.profile, g)
+			if _, err := toml.Decode(template, &fc); err != nil {
 				return nil, &configError{file: file, msg: err.Error()}
 			}
 			found = true
@@ -197,8 +217,10 @@ func loadConfig(c *cobra.Command, g *globals, isInit, noMailbox bool) (*config, 
 	}
 	rel := "."
 	if found {
-		if err := readConfig(file, &fc); err != nil {
-			return nil, err
+		if template == "" {
+			if err := readConfig(file, &fc); err != nil {
+				return nil, err
+			}
 		}
 		cfg.file = file
 		rel = filepath.Dir(file)
@@ -206,7 +228,54 @@ func loadConfig(c *cobra.Command, g *globals, isInit, noMailbox bool) (*config, 
 	if err := cfg.resolve(g, &fc, rel, noMailbox); err != nil {
 		return nil, err
 	}
+	if template != "" {
+		if err := writeConfigFile(file, template); err != nil {
+			return nil, &configError{file: file, msg: err.Error()}
+		}
+	}
 	return cfg, nil
+}
+
+// eachKey calls f with each key a config file may hold, by its path of names,
+// and where its value was decoded to: a table's own, then its keys.
+func eachKey(v reflect.Value, path []string, f func(path []string, value reflect.Value) error) error {
+	t := v.Type()
+	for i := range t.NumField() {
+		p := append(slices.Clip(path), t.Field(i).Tag.Get("toml"))
+		if err := f(p, v.Field(i)); err != nil {
+			return err
+		}
+		if t.Field(i).Type.Kind() == reflect.Struct {
+			if err := eachKey(v.Field(i), p, f); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// checkKeys refuses what the decoder lets through: it takes a key in another case
+// for the key, and of two such keeps either, by a map's order; and an empty
+// string decodes as no value, which would take the default, the public server
+// for a private one's, where a template's variable came out empty.
+func checkKeys(file string, md toml.MetaData, fc *fileConfig) error {
+	known := map[string]bool{}
+	if err := eachKey(reflect.ValueOf(fc).Elem(), nil, func(path []string, value reflect.Value) error {
+		name := strings.Join(path, ".")
+		known[name] = true
+		if value.Kind() == reflect.String && value.String() == "" && md.IsDefined(path...) {
+			return &configError{file: file, key: name, msg: fmt.Sprintf("%s: %s is empty: give it a value, or remove it for its default", file, name)}
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	for _, k := range md.Keys() {
+		if name := strings.Join(k, "."); !known[name] {
+			return &configError{file: file, key: name, msg: fmt.Sprintf("%s: this client reads no key %s", file, name)}
+		}
+	}
+	return nil
 }
 
 // readConfig reads a config file, refusing one others can write, one that is not
@@ -226,7 +295,7 @@ func readConfig(file string, fc *fileConfig) error {
 	if un := md.Undecoded(); len(un) > 0 {
 		return &configError{file: file, key: un[0].String(), msg: fmt.Sprintf("%s: this client reads no key %s", file, un[0])}
 	}
-	return nil
+	return checkKeys(file, md, fc)
 }
 
 // resolve takes each setting from the first place that says it, and refuses
@@ -387,17 +456,17 @@ func tomlString(s string) string {
 // homeBase is an XDG base directory for a template: its variable's value, or its
 // default under ~/, written so.
 func homeBase(env, def string) string {
-	if d := os.Getenv(env); d != "" {
+	if d := os.Getenv(env); filepath.IsAbs(d) {
 		return d
 	}
 	return "~/" + def
 }
 
-// writeTemplate writes a profile's config file where it has none: every path in
-// full, and every default commented out, as OpenSSH ships sshd_config, since an
-// active default would hold its value through an upgrade. What the command line
-// says goes in as it says it.
-func writeTemplate(file, profile string, g *globals) error {
+// templateFor is a profile's config file where it has none: every path in full,
+// and every default commented out, as OpenSSH ships sshd_config, since an active
+// default would hold its value through an upgrade. What the command line says
+// goes in as it says it.
+func templateFor(profile string, g *globals) string {
 	// Under ~/ a path is written with / on every system, which expand reads.
 	join := func(a string, elem ...string) string {
 		if strings.HasPrefix(a, "~/") {
@@ -429,13 +498,25 @@ func writeTemplate(file, profile string, g *globals) error {
 	fmt.Fprintf(&b, "# dromas profile %q. Commented lines show the default: uncomment to change.\n", profile)
 	b.WriteString("# `dromas config` prints every value as resolved.\n")
 	fmt.Fprintf(&b, "base-dir = %s\nmail-dir = %s\nidentity-file = %s\nrotating-keys-dir = %s\n\n", tomlString(base), tomlString(mail), tomlString(identity), tomlString(keys))
-	fmt.Fprintf(&b, "# inbox-dir = %s\n", tomlString(join(mail, "inbox")))
-	fmt.Fprintf(&b, "# server = %s\n", tomlString(client.DefaultBase))
-	fmt.Fprintf(&b, "# prekey-lifetime = %s\n", tomlString(formatTime(protocol.PrekeyLifetime)))
+	setting := func(key, given, def string) {
+		if given != "" {
+			fmt.Fprintf(&b, "%s = %s\n", key, tomlString(given))
+		} else {
+			fmt.Fprintf(&b, "# %s = %s\n", key, tomlString(def))
+		}
+	}
+	setting("inbox-dir", abs(g.inbox), join(mail, "inbox"))
+	setting("server", g.server, client.DefaultBase)
+	setting("prekey-lifetime", g.prekeyLifetime, formatTime(protocol.PrekeyLifetime))
 	b.WriteString("\n# [policy]\n")
 	fmt.Fprintf(&b, "# unknown = %s\n# server = %s\n", tomlString(client.LandHeld), tomlString(client.AdmitAll))
 	b.WriteString("\n# [recv]\n")
 	fmt.Fprintf(&b, "# drain-time = %s\n# headers = false\n", tomlString(strings.TrimSuffix(client.DefaultDrainTime.String(), "0s")))
+	return b.String()
+}
+
+// writeConfigFile puts a new config file in place whole.
+func writeConfigFile(file, text string) error {
 	if err := os.MkdirAll(filepath.Dir(file), 0o700); err != nil { //nolint:gosec // the config directory of a profile whose name is held to profileGrammar
 		return err
 	}
@@ -444,7 +525,7 @@ func writeTemplate(file, profile string, g *globals) error {
 		return err
 	}
 	defer os.Remove(tmp.Name()) //nolint:errcheck // gone after the rename
-	if _, err := tmp.WriteString(b.String()); err != nil {
+	if _, err := tmp.WriteString(text); err != nil {
 		tmp.Close() //nolint:errcheck,gosec // the write error wins
 		return err
 	}

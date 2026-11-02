@@ -11,14 +11,16 @@ import (
 // rename, so a reader never sees half of it, and syncs the file and its
 // directory, so it survives a power loss once writeFile returns: a message is
 // acked off the server only after it is on disk.
-func writeFile(name string, data []byte) error { return writeWith(name, data, nil) }
+func writeFile(name string, data []byte) error {
+	return writeWith(name, data, func(dir string) (*os.File, error) { return os.CreateTemp(dir, ".tmp-*") })
+}
 
-// writeKey is writeFile for a private key, which is protected before it has
-// its name (protectKeyFile).
-func writeKey(name string, data []byte) error { return writeWith(name, data, protectKeyFile) }
+// writeKey is writeFile for a private key, whose temporary file is its owner's
+// alone before it holds a byte (newKeyTemp).
+func writeKey(name string, data []byte) error { return writeWith(name, data, newKeyTemp) }
 
-func writeWith(name string, data []byte, protect func(string) error) error {
-	tmp, err := os.CreateTemp(filepath.Dir(name), ".tmp-*")
+func writeWith(name string, data []byte, create func(dir string) (*os.File, error)) error {
+	tmp, err := create(filepath.Dir(name))
 	if err != nil {
 		return err
 	}
@@ -34,15 +36,36 @@ func writeWith(name string, data []byte, protect func(string) error) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	if protect != nil {
-		if err := protect(tmp.Name()); err != nil {
-			return err
-		}
-	}
 	if err := os.Rename(tmp.Name(), name); err != nil {
 		return err
 	}
 	return syncDir(filepath.Dir(name))
+}
+
+// matching is the files of one directory whose names match pattern's last element,
+// in order, as filepath.Glob's answer is, but where the directory cannot be read
+// it says so: Glob answers none, which reads as an empty folder. A directory
+// that is not there holds none.
+func matching(pattern string) ([]string, error) {
+	dir, name := filepath.Split(pattern)
+	es, err := os.ReadDir(dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, e := range es {
+		ok, err := filepath.Match(name, e.Name())
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			out = append(out, filepath.Join(dir, e.Name()))
+		}
+	}
+	return out, nil
 }
 
 // exists reports whether name exists and is not empty, as the recipe's [ -s ].

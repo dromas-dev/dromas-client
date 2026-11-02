@@ -5,6 +5,7 @@ package client
 import (
 	"fmt"
 	"os"
+	"syscall"
 )
 
 const keyFix = "chmod 600 it, or set the mode of the mount it comes from: a Kubernetes volume's defaultMode: 0400, a Compose secret's mode: 0400."
@@ -24,8 +25,11 @@ func checkKeyFile(path string) error {
 
 // CheckConfigFile refuses a config file others can write, as ssh_config(5)
 // does: whoever can write it says where the mailbox's keys are and which
-// server it calls.
-func CheckConfigFile(path string) error {
+// server it calls. Its owner can, whatever its mode says, so one who is neither
+// this user nor root is refused too, as ssh does.
+func CheckConfigFile(path string) error { return checkConfigFile(path, os.Getuid()) }
+
+func checkConfigFile(path string, me int) error {
 	fi, err := os.Stat(path)
 	if err != nil {
 		return err
@@ -33,8 +37,12 @@ func CheckConfigFile(path string) error {
 	if m := fi.Mode().Perm(); m&0o022 != 0 {
 		return fmt.Errorf("%s is writable by others (mode %04o): chmod go-w it", path, m)
 	}
+	if st, ok := fi.Sys().(*syscall.Stat_t); ok && st.Uid != 0 && int64(st.Uid) != int64(me) {
+		return fmt.Errorf("%s is owned by another user (uid %d): chown it to yourself", path, st.Uid)
+	}
 	return nil
 }
 
-// protectKeyFile has nothing to do where a new file's mode is 0600 (writeFile).
-func protectKeyFile(string) error { return nil }
+// newKeyTemp is an empty file in dir for a private key: mode 0600, which
+// os.CreateTemp gives every file.
+func newKeyTemp(dir string) (*os.File, error) { return os.CreateTemp(dir, ".tmp-*") }
