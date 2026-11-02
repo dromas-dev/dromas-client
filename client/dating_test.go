@@ -50,7 +50,7 @@ func TestAPostIsDatedAtThePost(t *testing.T) {
 	if err != nil || len(sent) != 1 {
 		t.Fatalf("flush: %v, %v", sent, err)
 	}
-	record, err := os.ReadFile(filepath.Join(s.Dir(), "sent", filepath.Base(strings.TrimSuffix(outbox[0], ".P"))+".json"))
+	record, err := os.ReadFile(filepath.Join(s.Dir(), "mail", "sent", filepath.Base(strings.TrimSuffix(outbox[0], ".P"))+".json"))
 	if err != nil || !strings.Contains(string(record), `"sent_at":"`+posted.UTC().Format(protocol.TimeLayout)+`"`) {
 		t.Errorf("sent/ keeps %s, want the envelope dated at its post, %s (%v)", record, posted.UTC().Format(protocol.TimeLayout), err)
 	}

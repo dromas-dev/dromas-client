@@ -43,7 +43,7 @@ func TestAClockThatJumpsDuringARenewalDeletesNoKey(t *testing.T) {
 	send(t, a, b, "first, sealed to the prekey about to retire")
 	send(t, a, b, "second, sealed to it too")
 	e.clock.Add(2 * time.Second)
-	keys, _ := filepath.Glob(filepath.Join(b.Dir(), "prekeys", "*.agekey"))
+	keys, _ := filepath.Glob(filepath.Join(b.Dir(), "keys", "prekeys", "*.agekey"))
 	var off time.Duration
 	o := e.skewed(&off)
 	o.HTTPClient = &http.Client{Transport: jumpAtRenewal{&off, 70 * 24 * time.Hour}}
@@ -52,7 +52,7 @@ func TestAClockThatJumpsDuringARenewalDeletesNoKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, rerr := jumpy.Rekey(ctx)
-	after, _ := filepath.Glob(filepath.Join(b.Dir(), "prekeys", "*.agekey"))
+	after, _ := filepath.Glob(filepath.Join(b.Dir(), "keys", "prekeys", "*.agekey"))
 	t.Logf("renewal: %v; prekey keys %d before, %d after (the new one among them)", rerr, len(keys), len(after))
 	right, err := client.Open(b.Dir(), e.opts())
 	if err != nil {
@@ -82,7 +82,7 @@ func TestAClockThatJumpsDuringTheRemedyDeletesNoKey(t *testing.T) {
 	send(t, a, b, "first, sealed to the prekey about to retire")
 	send(t, a, b, "second, sealed to it too")
 	e.clock.Add(2 * time.Second)
-	keys, _ := filepath.Glob(filepath.Join(b.Dir(), "prekeys", "*.agekey"))
+	keys, _ := filepath.Glob(filepath.Join(b.Dir(), "keys", "prekeys", "*.agekey"))
 	var off time.Duration
 	o := e.skewed(&off)
 	o.HTTPClient = &http.Client{Transport: jumpAtRenewal{&off, 70 * 24 * time.Hour}}
@@ -91,7 +91,7 @@ func TestAClockThatJumpsDuringTheRemedyDeletesNoKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	r, rerr := jumpy.RenewAndRevoke(ctx)
-	after, _ := filepath.Glob(filepath.Join(b.Dir(), "prekeys", "*.agekey"))
+	after, _ := filepath.Glob(filepath.Join(b.Dir(), "keys", "prekeys", "*.agekey"))
 	t.Logf("remedy: %+v, %v; prekey keys %d before, %d after (the new one among them)", r, rerr, len(keys), len(after))
 	right, err := client.Open(b.Dir(), e.opts())
 	if err != nil {
@@ -129,7 +129,7 @@ func TestAClockSteppedBackBeforeARenewalDeletesNoKey(t *testing.T) {
 	send(t, a, b, "first, sealed to the prekey about to retire")
 	send(t, a, b, "second, sealed to it too")
 	e.clock.Add(2 * time.Second)
-	keys, _ := filepath.Glob(filepath.Join(b.Dir(), "prekeys", "*.agekey"))
+	keys, _ := filepath.Glob(filepath.Join(b.Dir(), "keys", "prekeys", "*.agekey"))
 	off := 70 * 24 * time.Hour
 	o := e.skewed(&off)
 	o.HTTPClient = &http.Client{Transport: rightAtFirstCall{&off}}
@@ -138,7 +138,7 @@ func TestAClockSteppedBackBeforeARenewalDeletesNoKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, rerr := stepped.Rekey(ctx)
-	after, _ := filepath.Glob(filepath.Join(b.Dir(), "prekeys", "*.agekey"))
+	after, _ := filepath.Glob(filepath.Join(b.Dir(), "keys", "prekeys", "*.agekey"))
 	t.Logf("renewal: %v; prekey keys %d before, %d after (the new one among them)", rerr, len(keys), len(after))
 	right, err := client.Open(b.Dir(), e.opts())
 	if err != nil {

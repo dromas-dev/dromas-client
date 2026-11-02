@@ -134,7 +134,7 @@ func TestADeliveryLeavesNothingOfAnEarlierRefusal(t *testing.T) {
 	id := e.seal(b, line, forge.Sign(t, worker(t, a), line, b.Address()))
 	says(e, protocol.CodeUnavailable, "DELETE", "/messages/"+id)
 	res, err := b.Receive(ctx)
-	if err == nil || len(res.Refused) != 1 || res.Refused[0].Code != protocol.RefusedFuture || !exists(filepath.Join(b.Dir(), "refused", id+".json")) || !has(b, "refused/"+id+".reason") {
+	if err == nil || len(res.Refused) != 1 || res.Refused[0].Code != protocol.RefusedFuture || !exists(filepath.Join(b.Dir(), "mail", "refused", id+".json")) || !has(b, "refused/"+id+".reason") {
 		t.Fatalf("a message dated ahead, whose ack fails: %+v, %v", res, err)
 	}
 	e.srv.SetMiddle(nil)
@@ -142,7 +142,7 @@ func TestADeliveryLeavesNothingOfAnEarlierRefusal(t *testing.T) {
 	if res := receive(t, b); len(res.Delivered) != 1 || res.Delivered[0].ID != id {
 		t.Fatalf("the same message once the clock reached it: %+v", res)
 	}
-	if qs, err := b.RefusedMessages(t.Context()); err != nil || len(qs) != 0 || exists(filepath.Join(b.Dir(), "refused", id+".json")) || has(b, "refused/"+id+".reason") {
+	if qs, err := b.RefusedMessages(t.Context()); err != nil || len(qs) != 0 || exists(filepath.Join(b.Dir(), "mail", "refused", id+".json")) || has(b, "refused/"+id+".reason") {
 		t.Errorf("after its delivery the mailbox keeps %+v, %v of its refusal", qs, err)
 	}
 }

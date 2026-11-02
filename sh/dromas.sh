@@ -32,7 +32,7 @@
 set -o pipefail; umask 077
 export LC_ALL=C   # every pattern and tool reads bytes, as the Go client does: under another locale [0-9] can take a digit that is not ASCII, and [A-Z] can miss I
 DR_SERVER_URL=${DR_SERVER_URL:-https://dromas.dev}
-DR=${DR_HOME:-${XDG_CONFIG_HOME:-$HOME/.config}/dromas-sh/${DR_MAILBOX:-default}}   # one mailbox per directory, of this script's own: never the Go client's (its DROMAS_HOME and ~/.config/dromas/, dr_ownmailbox), and never the working directory
+DR=${DR_HOME:-${XDG_CONFIG_HOME:-$HOME/.config}/dromas-sh/${DR_MAILBOX:-default}}   # one mailbox per directory, of this script's own: never the Go client's (its DROMAS_CONFIG and ~/.config/dromas/, dr_ownmailbox), and never the working directory
 DR_VERSION=0.1.0   # the version every request names in Dromas-Version (PROTOCOL.md §11.17): the Go client's release minor this script implements, at patch 0
 DR_LOCK_WAIT=${DR_LOCK_WAIT:-120}   # how many seconds a command waits for the mailbox's lock while another command of the mailbox holds it: what apt waits for its own lock when no one is at a terminal
 DR_P256='ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBGD+1LolWp0xyWHrdMY1bWjASbiSO2H6bOZpYi5g8p+2eQP+EAi4vJmkGunpVii8ZPLxsgwtfp9Rd6PClNRGIpk='   # a P-256 key, mailbox C's identity in this repo's testdata/vectors/ (RFC 6979 §A.2.5's published test key), for dr_p256 to ask ssh-keygen to read
@@ -206,7 +206,7 @@ dr_prekey(){ # <serial> → prekeys/<serial>.agekey and its statement, signed by
 }
 dr_init(){ # → creates this mailbox, or finishes a half-done init, and registers it, its identity signing its first statement; prints its address and link. The registration carries a pass its identity signs, so the mailbox is in use at once
   dr_ownmailbox || return 1
-  dr_dirs && dr_putline "$DR/.gitignore" '*' || return 1      # the mailbox ignores itself, wherever it is
+  dr_dirs || return 1
   [ -s "$DR/identity" ] || { rm -f "$DR/identity" "$DR/identity.pub"; ssh-keygen -q -t ed25519 -N '' -C '' -f "$DR/identity" < /dev/null; } || return 1      # an empty identity, as a crash before the sync below leaves one, is no key, and nothing was registered with it, so it is made again, as the Go client does
   if dr_held; then dr_identity; else dr_lock true; fi && sync "$DR/identity" "$DR/identity.pub" "$DR" || return 1      # identity.doc and address made under the mailbox's lock, as every command that writes the mailbox makes them (dr_lock): a command beside init reads them. The identity on disk before it is registered
   [ ! -s "$DR/serial" ] || { dr_addr; return; }      # registered already

@@ -232,9 +232,13 @@ func failure(err error) []any {
 func report(err error, stderr io.Writer) int {
 	var look *needsALook
 	var wrong *usageError
+	var badConfig *configError
 	switch {
 	case err == nil:
 		return 0
+	case errors.As(err, &badConfig):
+		_, _ = fmt.Fprintf(stderr, "%s\n", line("config_error", "file", omit(badConfig.file), "key", omit(badConfig.key), "detail", badConfig.msg))
+		return 2
 	case errors.As(err, &wrong):
 		_, _ = fmt.Fprintf(stderr, "%s\n", line("usage_error", "usage", omit(wrong.usage), "help", wrong.help, "detail", wrong.msg))
 		return 2

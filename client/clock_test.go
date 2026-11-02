@@ -298,7 +298,7 @@ func TestInitNeverDropsAKeyAMessageMayBeWaitingFor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	keyFile := only(t, filepath.Join(dir, "prekeys", "*.agekey"))
+	keyFile := only(t, filepath.Join(dir, "keys", "prekeys", "*.agekey"))
 	key := mustRead(t, keyFile)
 	if _, err := e.mailbox().Send(ctx, address, "to the first prekey"); err != nil {
 		t.Fatalf("a message to the mailbox the server registered: %v", err)
@@ -439,7 +439,7 @@ func TestAClockThatJumpsDuringADrainDeletesNoKey(t *testing.T) {
 	if _, err := b.Rekey(ctx); err != nil {
 		t.Fatal(err)
 	}
-	keys, _ := filepath.Glob(filepath.Join(b.Dir(), "prekeys", "*.agekey"))
+	keys, _ := filepath.Glob(filepath.Join(b.Dir(), "keys", "prekeys", "*.agekey"))
 	var off time.Duration
 	o := e.skewed(&off)
 	o.HTTPClient = &http.Client{Transport: jumpAtFetch{&off, 70 * 24 * time.Hour}}
@@ -450,7 +450,7 @@ func TestAClockThatJumpsDuringADrainDeletesNoKey(t *testing.T) {
 	if _, err := jumpy.Receive(ctx); err == nil {
 		t.Fatal("a drain whose clock jumped 70 days went through")
 	}
-	if after, _ := filepath.Glob(filepath.Join(b.Dir(), "prekeys", "*.agekey")); len(after) < len(keys) {
+	if after, _ := filepath.Glob(filepath.Join(b.Dir(), "keys", "prekeys", "*.agekey")); len(after) < len(keys) {
 		t.Fatalf("%d prekeys before a drain whose clock jumped, %d after", len(keys), len(after))
 	}
 	right, err := client.Open(b.Dir(), e.opts())

@@ -174,7 +174,7 @@ func numberOf(t *testing.T, b *client.Mailbox) uint64 {
 // not: after a renewal the server did not take, the number that attempt took.
 func begunAt(t *testing.T, b *client.Mailbox) uint64 {
 	t.Helper()
-	names, err := filepath.Glob(filepath.Join(b.Dir(), "prekeys", "*.agekey"))
+	names, err := filepath.Glob(filepath.Join(b.Dir(), "keys", "prekeys", "*.agekey"))
 	if err != nil || len(names) == 0 {
 		t.Fatalf("no prekey in %s: %v", b.Dir(), err)
 	}
@@ -202,13 +202,13 @@ func only(t *testing.T, pattern string) string {
 // prekeyFile names a mailbox's file for prekey n: ext is ".agekey", ".txt" or
 // ".txt.sig".
 func prekeyFile(b *client.Mailbox, n uint64, ext string) string {
-	return filepath.Join(b.Dir(), "prekeys", strconv.FormatUint(n, 10)+ext)
+	return filepath.Join(b.Dir(), "keys", "prekeys", strconv.FormatUint(n, 10)+ext)
 }
 
 // workFile names a mailbox's file for working key n: ext is "", ".pub" or
 // "-cert.pub".
 func workFile(b *client.Mailbox, n uint64, ext string) string {
-	return filepath.Join(b.Dir(), "work", strconv.FormatUint(n, 10)+ext)
+	return filepath.Join(b.Dir(), "keys", "work", strconv.FormatUint(n, 10)+ext)
 }
 
 // worker loads the signer a mailbox has in use from the mailbox's state

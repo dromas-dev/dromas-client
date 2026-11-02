@@ -25,7 +25,7 @@ import (
 // each thing that has more than one thing done to it.
 func (e *cli) tree() *cobra.Command {
 	root := e.group("dromas", "", "",
-		e.initCmd(), e.addrCmd(), e.sendCmd(), e.recvCmd(), e.statusCmd(), e.versionCmd(),
+		e.initCmd(), e.addrCmd(), e.sendCmd(), e.recvCmd(), e.statusCmd(), e.configCmd(), e.versionCmd(),
 		e.group("inbox", "messages recv delivered: list, show",
 			`recv keeps each message it delivers in inbox/, as the "message" line it
 printed, until its file is deleted: deleting it forgets the message. These
@@ -40,7 +40,7 @@ block deletes them. A message that failed a check is refused/'s, never held.`,
 		e.group("peer", "who may write to this mailbox: allow, block, list",
 			`A message from a sender this mailbox has not allowed is held in held/ (dromas held
 list lists it), and one from a sender it blocked is dropped. Sending to a mailbox, or
-naming it with dromas alias add, allows it too. The mailbox's policy file says
+naming it with dromas alias add, allows it too. The config file's [policy] says
 where a message from a sender not allowed lands, and whom its server takes
 messages from: dromas help has it.`,
 			e.allowCmd(), e.blockCmd(), e.peerListCmd()),
@@ -163,8 +163,9 @@ func (e *cli) initCmd() *cobra.Command {
 --offline, its identity certifies a working key with each prekey, for as long
 as its server takes one, and the working key signs: for good, since its
 server and its correspondents then take no statement its identity signs. Run
-in a directory holding only an identity, init restores that mailbox, under a
-certificate where its server serves a statement under one or --offline asks.`,
+with an identity file and nothing else of the mailbox, init restores that
+mailbox, under a certificate where its server serves a statement under one or
+--offline asks. A profile with no config file gets one, each path in full.`,
 		checked(nargs(0, 0), func(c *cobra.Command, _ []string) error {
 			if idType != "" && !slices.Contains(protocol.IdentityTypes(), idType) {
 				return wrong(c, "%s makes an identity of the key type %s, and %q is not one", c.CommandPath(), strings.Join(protocol.IdentityTypes(), " or "), idType)
@@ -182,6 +183,13 @@ certificate where its server serves a statement under one or --offline asks.`,
 			b, err := client.Init(c.Context(), e.dir, opt)
 			if err != nil {
 				return err
+			}
+			if inGit := b.KeysInGit(); len(inGit) > 0 {
+				words := strings.Join(inGit, "; ")
+				if w, ok := warning.(string); ok {
+					words = w + " " + words
+				}
+				warning = words
 			}
 			return e.out(line("mailbox", "address", b.Address(), "link", b.Link(), "detail", warning))
 		})
@@ -854,39 +862,21 @@ and certificate once the mailbox has published one under a certificate.`,
 const shortLifetime = 2*24*time.Hour + time.Hour + protocol.MaxSkew
 
 func (e *cli) lifetimeCmd() *cobra.Command {
-	return command("lifetime [<time>]", "how long each new prekey is valid for: print it, or set it",
-		fmt.Sprintf(`Print how long each new prekey of this mailbox is valid for, or set it, from
-%s to %s, the default. A time is written as sshd writes one: numbers, each
-with its unit, s, m, h, d or w, added together, as in 2d2h or 90m; a number
-with no unit is seconds. recv renews the prekey once it is a day old, or
-sooner where the lifetime is too short for that. With a lifetime of %s or
-more, a recv once a day renews it in time; under that, this command says how
+	return command("lifetime", "how long each new prekey is valid for: print it",
+		fmt.Sprintf(`Print how long each new prekey of this mailbox is valid for, which the config
+file's prekey-lifetime sets, from %s to %s, the default. A time is written as sshd
+writes one: numbers, each with its unit, s, m, h, d or w, added together, as in
+2d2h or 90m; a number with no unit is seconds. recv renews the prekey once it is a
+day old, or sooner where the lifetime is too short for that. With a lifetime of
+%s or more, a recv once a day renews it in time; under that, this command says how
 often recv must run, or the prekey runs out, or comes so near it that a sender
 whose clock is ahead refuses it, and senders are refused until the mailbox
 renews. A lifetime set lower holds from the next recv, which renews a prekey
 made for longer.`, formatTime(client.MinPrekeyLifetime), formatTime(protocol.PrekeyLifetime), formatTime(shortLifetime)),
-		checked(nargs(0, 1), func(c *cobra.Command, args []string) error {
-			if len(args) == 0 {
-				return nil
-			}
-			d, err := parseTime(args[0])
-			if err != nil {
-				return wrong(c, "%v", err)
-			}
-			if d < client.MinPrekeyLifetime || d > protocol.PrekeyLifetime {
-				return wrong(c, "a prekey lifetime is from %s to %s, and %s is not", formatTime(client.MinPrekeyLifetime), formatTime(protocol.PrekeyLifetime), formatTime(d))
-			}
-			return nil
-		}), func(c *cobra.Command, args []string) error {
+		nargs(0, 0), func(c *cobra.Command, _ []string) error {
 			b, err := e.mailbox()
 			if err != nil {
 				return err
-			}
-			if len(args) == 1 {
-				d, _ := parseTime(args[0])
-				if err := b.SetPrekeyLifetime(c.Context(), d); err != nil {
-					return err
-				}
 			}
 			d, err := b.PrekeyLifetime(c.Context())
 			if err != nil {
@@ -921,7 +911,7 @@ var timeUnits = map[byte]time.Duration{'s': time.Second, 'm': time.Minute, 'h': 
 // is under a second, which the truncation drops: what parseTime takes there
 // is the seconds the rest of the time names, every time convtime takes reads
 // as the same seconds here, and the only time parseTime reads is one the
-// mailbox's owner types (prekey lifetime).
+// mailbox's owner writes (prekey-lifetime).
 func parseTime(s string) (time.Duration, error) {
 	no := fmt.Errorf("%.40q is no time: one is numbers, each with its unit (s, m, h, d or w), as in 2d1h", s)
 	if s == "" {

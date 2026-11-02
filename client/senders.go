@@ -38,8 +38,8 @@ const (
 	AdmitAllowed = "allowed"
 )
 
-// Policy is what a mailbox's policy file says. A mailbox with none, or a line left
-// out, has the default.
+// Policy is a mailbox's policy. A field left empty takes the next source's
+// ([Mailbox.Policy]).
 type Policy struct {
 	// Unknown is where a message from a sender the mailbox has not allowed lands:
 	// LandHeld or LandInbox.
@@ -49,7 +49,7 @@ type Policy struct {
 	Server string `json:"server"`
 }
 
-// DefaultPolicy is the policy of a mailbox whose policy file says nothing: a message
+// DefaultPolicy is the policy of a mailbox nothing has set one for: a message
 // from a sender the mailbox has not allowed is held, and the server refuses
 // only senders the mailbox has blocked.
 func DefaultPolicy() Policy { return Policy{Unknown: LandHeld, Server: AdmitAll} }
@@ -61,11 +61,20 @@ func (p Policy) check() error {
 	return nil
 }
 
-// Policy reads the mailbox's policy file: "<setting> <value>" lines, "unknown
-// held" or "unknown inbox", and "server all" or "server allowed", each at
-// most once, with blank lines and lines starting with "#" skipped. A file
-// with any other line is an error, never a default: a policy that cannot be
-// read stops what depends on it until it is put right.
+// checkSet holds a policy whose fields may be left empty to the values there are.
+func (p Policy) checkSet() error {
+	if (p.Unknown != "" && p.Unknown != LandHeld && p.Unknown != LandInbox) || (p.Server != "" && p.Server != AdmitAll && p.Server != AdmitAllowed) {
+		return errors.New(`a policy's unknown is "held" or "inbox", and its server "all" or "allowed"`)
+	}
+	return nil
+}
+
+// keyPolicy is what SetPolicy or a restore recorded, in the mailbox's bucket.
+const keyPolicy = "policy"
+
+// Policy is the mailbox's policy, each field from the first that says it: what
+// its owner set (Options.Policy), what SetPolicy or a restore adopting its
+// server's ACL recorded in the state file, and the default.
 func (b *Mailbox) Policy(ctx context.Context) (Policy, error) {
 	return reading(ctx, b, b.policy)
 }
@@ -73,51 +82,46 @@ func (b *Mailbox) Policy(ctx context.Context) (Policy, error) {
 // policy is Policy, read under the reading or command that holds the mailbox.
 func (b *Mailbox) policy() (Policy, error) {
 	p := DefaultPolicy()
-	data, err := os.ReadFile(b.path("policy"))
-	if errors.Is(err, fs.ErrNotExist) {
-		return p, nil
-	}
-	if err != nil {
+	if err := b.view(func(s store) error {
+		raw := s.get(bucketMailbox, keyPolicy)
+		if raw == nil {
+			return nil
+		}
+		return json.Unmarshal(raw, &p)
+	}); err != nil {
 		return p, err
 	}
-	seen := map[string]bool{}
-	for i, line := range strings.Split(string(data), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		f := strings.Fields(line)
-		if len(f) == 2 && seen[f[0]] {
-			return p, refuse("%s, line %d: %s is set twice", b.path("policy"), i+1, f[0])
-		}
-		switch {
-		case len(f) == 2 && f[0] == "unknown" && (f[1] == LandHeld || f[1] == LandInbox):
-			p.Unknown = f[1]
-		case len(f) == 2 && f[0] == "server" && (f[1] == AdmitAll || f[1] == AdmitAllowed):
-			p.Server = f[1]
-		default:
-			return p, refuse(`%s, line %d: not "unknown held", "unknown inbox", "server all" or "server allowed"`, b.path("policy"), i+1)
-		}
-		seen[f[0]] = true
+	if b.policySet.Unknown != "" {
+		p.Unknown = b.policySet.Unknown
+	}
+	if b.policySet.Server != "" {
+		p.Server = b.policySet.Server
 	}
 	return p, nil
 }
 
-// SetPolicy writes the mailbox's policy file. The server learns what it changes
-// at the mailbox's next send, recv, allow or block ([Mailbox.SyncACL]).
+// recordPolicy keeps p in the state file.
+func (b *Mailbox) recordPolicy(p Policy) error {
+	raw, err := json.Marshal(p)
+	if err != nil {
+		return err
+	}
+	return b.update(func(s store) error { return s.put(bucketMailbox, keyPolicy, raw) })
+}
+
+// SetPolicy records the mailbox's policy in its state file, under what its owner
+// set in Options.Policy. The server learns what it changes at the mailbox's next
+// send, recv, allow or block ([Mailbox.SyncACL]).
 func (b *Mailbox) SetPolicy(ctx context.Context, p Policy) error {
 	if err := p.check(); err != nil {
 		return err
 	}
-	return b.lockedFinishedDo(ctx, func() error { return writeFile(b.path("policy"), p.file()) })
+	return b.lockedFinishedDo(ctx, func() error { return b.recordPolicy(p) })
 }
-
-// file is the policy file that says p.
-func (p Policy) file() []byte { return []byte("unknown " + p.Unknown + "\nserver " + p.Server + "\n") }
 
 // addresses reads one of the mailbox's address lists, allowed or blocked: an
 // address to a line, with blank lines and lines starting with "#" skipped,
-// as the policy file's are and OpenSSH's list files' (#181). Any other line
+// as OpenSSH's list files' are (#181). Any other line
 // is an error, a "#" after an address on its line among them.
 func (b *Mailbox) addresses(name string) ([]protocol.Address, error) {
 	data, err := os.ReadFile(b.path(name))
@@ -395,16 +399,23 @@ func (b *Mailbox) allow(a protocol.Address) ([]Delivery, error) {
 		if m.From != a {
 			continue
 		}
-		if err := os.Rename(b.path("held", m.ID+".json"), b.path("inbox", m.ID+".json")); err != nil {
+		// Written and then removed, since inbox-dir may be on another
+		// filesystem: a crash between leaves it in both, and the next allow
+		// finishes.
+		raw, err := os.ReadFile(b.path("held", m.ID+".json")) //nolint:gosec // a path inside the mailbox's own directory
+		if err != nil {
+			return moved, err
+		}
+		if err := writeFile(b.path("inbox", m.ID+".json"), raw); err != nil {
+			return moved, err
+		}
+		if err := os.Remove(b.path("held", m.ID+".json")); err != nil {
 			return moved, err
 		}
 		moved = append(moved, Delivery{ID: m.ID, Envelope: m.Env, Line: m.Line})
 	}
 	if len(moved) == 0 {
 		return nil, nil
-	}
-	if err := syncDir(b.path("inbox")); err != nil {
-		return moved, err
 	}
 	return moved, syncDir(b.path("held"))
 }
@@ -765,7 +776,7 @@ func (b *Mailbox) keepHeld(acl *protocol.ACL) error {
 // applies from then on (#366).
 //
 // A renewal of a mailbox that has published nothing, and that has none of its
-// allowed, blocked and policy files, marks the adoption as begun before it
+// allowed and blocked files, marks the adoption as begun before it
 // signs anything (beginAdoption, in readOwn). Once a renewal is taken, which
 // gives the mailbox a pass, the mailbox reads GET …/acl and writes its lists from it
 // (adoptPending): Init's restore and Rekey do at once, and syncACL and
@@ -787,7 +798,7 @@ func (b *Mailbox) beginAdoption() error {
 	if err != nil || published > 0 {
 		return err
 	}
-	for _, name := range []string{"allowed", "blocked", "policy"} {
+	for _, name := range []string{"allowed", "blocked"} {
 		if _, err := os.Lstat(b.path(name)); !errors.Is(err, fs.ErrNotExist) {
 			return err
 		}
@@ -798,8 +809,8 @@ func (b *Mailbox) beginAdoption() error {
 // adoptPending adopts the ACL the mailbox's server holds, when a restore marked
 // the adoption as begun: it reads GET …/acl and adds its entries to the
 // mailbox's lists, a deny's to blocked and an allow list's to allowed, and with
-// an allow list the policy "server allowed", unless the mailbox has a policy
-// file. Then, in one transaction, the ACL read is kept as the one the server
+// an allow list records the policy "server allowed", which what its owner set
+// (Options.Policy) stands over. Then, in one transaction, the ACL read is kept as the one the server
 // last took, and the mark goes. Run again after a crash, it adds nothing
 // twice. What no file of the mailbox says, a deny of AnyAddress or addresses
 // beside an allow of AnyAddress (unsaid), is not adopted: the mailbox's next ACL
@@ -821,11 +832,7 @@ func (b *Mailbox) adoptPending(ctx context.Context) (*protocol.ACL, error) {
 		if _, err := b.addAll("allowed", held.Allow.Addrs); err != nil {
 			return nil, err
 		}
-		if _, err := os.Lstat(b.path("policy")); errors.Is(err, fs.ErrNotExist) {
-			if err := writeFile(b.path("policy"), Policy{Unknown: LandHeld, Server: AdmitAllowed}.file()); err != nil {
-				return nil, err
-			}
-		} else if err != nil {
+		if err := b.recordPolicy(Policy{Unknown: LandHeld, Server: AdmitAllowed}); err != nil {
 			return nil, err
 		}
 	}

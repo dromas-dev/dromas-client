@@ -41,7 +41,7 @@ func (b *Mailbox) workStem(n uint64) string { return b.path("work", strconv.Form
 // the mailbox holds of n has signed either.
 func (b *Mailbox) makeWork(n uint64, lifetime time.Duration) (*sign.Work, *protocol.Certificate, error) {
 	stem := b.workStem(n)
-	if err := os.MkdirAll(b.path("work"), 0o700); err != nil {
+	if err := makeDir(b.path("work")); err != nil {
 		return nil, nil, err
 	}
 	priv, err := newKey(protocol.WorkingKeyType(b.id.Type()))
@@ -62,7 +62,7 @@ func (b *Mailbox) makeWork(n uint64, lifetime time.Duration) (*sign.Work, *proto
 	}
 	// The certificate last: a key with no certificate is one that signed
 	// nothing, and is made again.
-	if err := writeFile(stem, pem.EncodeToMemory(block)); err != nil {
+	if err := writeKey(stem, pem.EncodeToMemory(block)); err != nil {
 		return nil, nil, err
 	}
 	if err := writeFile(stem+".pub", ssh.MarshalAuthorizedKey(sshPub)); err != nil {
@@ -82,6 +82,9 @@ func (b *Mailbox) worker(n uint64) (*sign.Work, *protocol.Certificate, error) {
 	pemBytes, err := os.ReadFile(stem) //nolint:gosec // a path inside the mailbox's own directory
 	if err != nil {
 		return nil, nil, fmt.Errorf("this mailbox holds no working key %d: dromas prekey renew makes one: %w", n, err)
+	}
+	if err := checkKeyFile(stem); err != nil {
+		return nil, nil, err
 	}
 	raw, err := ssh.ParseRawPrivateKey(pemBytes)
 	if err != nil {

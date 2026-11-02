@@ -18,7 +18,7 @@ var oldWords = regexp.MustCompile(`(?i)(^|[^a-z])(mail|mails|box|boxes)([^a-z]|$
 // and mailbox, never mail or box. The lines are read from this package's
 // source, as TestNoLineCarriesAnEnvelopeMemberBesideTheEnvelope reads them.
 func TestTheClientSaysMessageAndMailbox(t *testing.T) {
-	t.Setenv("DROMAS_HOME", t.TempDir())
+	useMailbox(t, t.TempDir())
 	for _, s := range []string{"held mail", "a box", "box_unread", "mail_headers"} {
 		if !oldWords.MatchString(s) {
 			t.Fatalf("the reading misses %q", s)

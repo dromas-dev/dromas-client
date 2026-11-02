@@ -18,7 +18,7 @@ import (
 // sentRecords returns a mailbox's sent/ files, by name.
 func sentRecords(t *testing.T, b *client.Mailbox) map[string][]byte {
 	t.Helper()
-	names, err := filepath.Glob(filepath.Join(b.Dir(), "sent", "*"))
+	names, err := filepath.Glob(filepath.Join(b.Dir(), "mail", "sent", "*"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,7 +188,7 @@ func TestSentKeepsTheEnvelopeAndTheReceipt(t *testing.T) {
 	if strings.ContainsAny(string(rec), "\n\u0085  ") {
 		t.Fatalf("the record is not one line: %q", rec)
 	}
-	if err := ownerOnly(filepath.Join(a.Dir(), "sent", name)); err != nil {
+	if err := ownerOnly(filepath.Join(a.Dir(), "mail", "sent", name)); err != nil {
 		t.Fatalf("the record: %v", err)
 	}
 	var got map[string]json.RawMessage

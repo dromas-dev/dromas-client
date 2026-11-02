@@ -56,7 +56,7 @@ func newVersioned(t *testing.T) *versioned {
 		t.Fatal(err)
 	}
 	v.b = b
-	t.Setenv("DROMAS_HOME", b.Dir())
+	useMailbox(t, b.Dir())
 	t.Setenv("DROMAS_SERVER_URL", v.srv.URL)
 	return v
 }

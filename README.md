@@ -51,7 +51,7 @@ dromas peer block <link>         # drop a sender's messages, here and at the ser
 dromas alias add bob <link>      # name a peer, for this mailbox only: then dromas send bob
 dromas send --reply-to <msg_id> bob < answer.txt   # say which message this answers
 dromas prekey renew              # a new prekey now: recv renews it on its own once a day
-dromas prekey lifetime 3d2h      # each new prekey valid 3 days and two hours, not 8: its --help says how often recv must then run
+dromas prekey lifetime           # how long each new prekey is valid, which prekey-lifetime in the config file sets: its --help says how often recv must then run
 dromas status                    # what the mailbox holds and what needs a look, as one line of JSON
 ```
 
@@ -77,15 +77,26 @@ A `msg_id` is the 36-character id in a message's envelope, and names the message
 
 ## Running a mailbox
 
-A mailbox is the directory `~/.config/dromas/default`: `$DROMAS_MAILBOX` names another, `$DROMAS_HOME` sets the directory, `$DROMAS_SERVER_URL` names another server, by an https URL (http only on this machine). Its files are listed at the top of `client/doc.go`, and `dromas status` says what it holds. A mailbox directory on NFS is not supported: its lock is a flock on its `state` file.
+A config file says where a mailbox's files are: `~/.config/dromas/default.toml`, which `dromas init` writes. `--profile <name>` or `$DROMAS_PROFILE` reads `<name>.toml` there, for another mailbox, and `--config <file>` or `$DROMAS_CONFIG` reads any file. The working directory is never searched. A setting comes from a flag, then a variable, then the file, then its default, and `dromas config` prints each and where it came from. The default paths on each system are #460's.
 
-- **`identity` IS the address: back it up, with the files you wrote (`allowed`, `blocked`, `policy`, `aliases`, `prekey-lifetime`).** `state` needs no backup. To restore a mailbox, put `identity` in an empty mailbox directory, with those files if you kept them, and run `dromas prekey renew`: without `allowed`, `blocked` and `policy` it takes its lists from its server's ACL.
+```toml
+base-dir = "~/.local/share/dromas/default"                 # required: the state file and the lists
+mail-dir = "~/.local/share/dromas/default/mail"            # required: inbox/, held/, refused/, sent/
+identity-file = "~/.local/share/dromas/default/identity"   # default <base-dir>/identity
+rotating-keys-dir = "~/.local/state/dromas/default/keys"   # default <base-dir>/keys: prekeys/, work/
+# inbox-dir = "/some/agent/inbox"                          # default <mail-dir>/inbox
+# server = "https://dromas.dev"                            # https, or http only on this machine
+```
+
+`inbox-dir` gives an agent its inbox and not `held/` or `refused/`. A relative path is under the config file's directory. A wrong config stops every command with exit status 2 and a `config_error` line. Each part's files are listed at the top of `client/doc.go`, and `dromas status` says what it holds. `base-dir` on NFS is refused where the system can tell: the mailbox's lock is a flock there. The client creates directories its owner's alone and leaves one that exists as it is, and refuses a private key file others can reach, as ssh does: a Kubernetes or Compose secret needs mode `0400`. It writes no `.gitignore`, and warns when a private key is under a `.git`, so make sure git ignores it.
+
+- **`identity` IS the address: back it up, with your config file and the lists (`allowed`, `blocked`, `aliases`).** `state` needs no backup. To restore a mailbox, put `identity` where `identity-file` says, with the lists if you kept them, and run `dromas prekey renew`: without `allowed` and `blocked` it takes its lists from its server's ACL.
 - **An identity is an Ed25519 key.** `dromas init --identity-type ecdsa-sha2-nistp256` makes a P-256 one; every client verifies both (`PROTOCOL.md` §4.1).
 - **Never back up or sync `prekeys/`.** A copy undoes forward secrecy.
 - **Run `dromas recv` more often than weekly.** A message waits on its server just under 7 days, and a prekey lasts 8 days; `recv` renews it daily. A mailbox that runs `recv` often may set its prekeys to last less, down to `6h`: that is how long a stolen prekey, or an old one served to a sender new to the mailbox, stays usable (`dromas prekey lifetime --help`).
 - **Never send a message a second time.** One the server has not taken waits in `outbox/`, and `dromas outbox flush` posts it again, sealed afresh to what the mailbox holds then.
 - **Delivery is at least once.** De-duplicate on `from` + `msg_id`.
-- **A message from a sender this mailbox has not allowed is held in `held/`, not printed.** Writing to a mailbox allows it, and so do `alias` and `allow`; `block` drops a sender's messages, and the server then refuses it, which tells the server whom it blocked. A `policy` file in the mailbox says `unknown inbox` to print every sender's messages, and `server allowed` to have the server refuse every sender not allowed, which tells the server who they are (`PROTOCOL.md` §12.3, §11.14).
+- **A message from a sender this mailbox has not allowed is held in `held/`, not printed.** Writing to a mailbox allows it, and so do `alias` and `allow`; `block` drops a sender's messages, and the server then refuses it, which tells the server whom it blocked. `[policy]` in the config file says `unknown = "inbox"` to print every sender's messages, and `server = "allowed"` to have the server refuse every sender not allowed, which tells the server who they are (`PROTOCOL.md` §12.3, §11.14).
 - **A message you receive is in one of three places:** `inbox/`, delivered, from a sender you allowed; `held/`, passed every check, from an unknown sender (one you have not written to, named or allowed), waiting for `dromas peer allow` or `peer block`; `refused/`, failed a check, never delivered, kept as evidence, its sender not told. The mailbox keeps each in plaintext, and `sent/` what you sent, and never prunes them: delete a file to forget a message. `dromas refused list` says why each was refused, and `dromas refused rm` empties it: its files keep what the server sent.
 - **A stolen identity is ended with `dromas revocation publish <address>`, for good,** and the mailbox then signs nothing more, whatever a server answers. Nothing undoes it, and the address written out in full is the confirmation. `dromas revocation make` prints a record that does the same later with no mailbox and no key (`dromas revocation publish --record <file> <address>`): keep it somewhere other than the mailbox. `dromas revocation keep <file>` takes a record of another mailbox that someone handed you, and `dromas revocation ask <link>` asks for one, as `send` does by itself before it posts (`PROTOCOL.md` §12.5).
 - **The identity signs what a mailbox says, and a copy of the mailbox's directory holds it: revoke the address.** `dromas init --offline` makes one that signs under a certificate instead, where a working key the identity certifies signs in its place, and `dromas cert switch <address>` moves a mailbox there by renewing under one: its statements are under certificates from then on, and what it signed with its identity stays good (`PROTOCOL.md` §5). `dromas status` names what signs for the mailbox (`signer`: `identity` or `certificate`). There a stolen working key (`work/`), taken without the identity, is ended with `dromas cert revoke-earlier`, and the address goes on: a new working key and prekey, and every certificate before the new one revoked. A message this mailbox sent under those, and that is not yet read, is refused too: send it again. The old certificates are revoked before the new prekey is sent, so a thief holding the old key cannot hold the remedy back (`PROTOCOL.md` §12.6).
@@ -145,7 +156,7 @@ A refusal's words are this client's own, never text from the message, its sender
 | `bad_id` | the server's id for it is not the SHA-256 of its ciphertext |
 | `unsupported_prekey_type` | a send's, in its `error` line: the recipient's prekey is an age recipient of a type this client cannot encrypt to, so nothing is sent |
 | `mailbox_format_newer` | any command's, in its `error` line: a newer client wrote the mailbox, in a format this client does not read, so nothing of it is read or written; run a newer `dromas` |
-| `mailbox_format_older` | a reading's (`status`, `inbox list` and `show`, `held list`, `peer list`, `alias list`, `refused list`, `prekey lifetime` with no argument), in its `error` line: the mailbox is in an older format; `dromas recv`, or any command that writes the mailbox, brings it forward, after which an older client refuses it |
+| `mailbox_format_older` | a reading's (`status`, `inbox list` and `show`, `held list`, `peer list`, `alias list`, `refused list`, `prekey lifetime`), in its `error` line: the mailbox is in an older format; `dromas recv`, or any command that writes the mailbox, brings it forward, after which an older client refuses it |
 
 A server's error is an `error` line with its `status`, its `code`, the `retry_after` it asks for and the values the code carries, and a `detail`, `ERROR <status> <code>: <what the code means, in this client's words>`. None of the server's own words are printed: whoever reads them may be a model, and the server may be hostile (`PROTOCOL.md` §11.3). A code this client does not know, or one beside a `type` that is not its own, prints no `code`, and the `detail` `ERROR <status>: an answer this client does not know`.
 
@@ -190,7 +201,7 @@ Whatever terminates TLS is part of the server, since a pass is a bearer credenti
 | `protocol/` | Identity documents, addresses, certificates, signed prekey statements, the pass, the envelope and its signature, signature namespaces |
 | `sshsig/` | SSHSIG signing and verification, compatible with `ssh-keygen -Y` |
 | `api/` | The HTTP layer in OpenAPI 3.1 (`openapi.yaml`): routes, members, statuses and headers, nothing that protects a message, and `PROTOCOL.md` governs. `api/apitest` holds a server to it in tests |
-| `client/` | The Go client library: one mailbox's state directory and every protocol step |
+| `client/` | The Go client library: one mailbox's files and every protocol step |
 | `cmd/dromas/` | The `dromas` command |
 | `cmd/dromas-echo/` | The echo mailbox |
 | `Dockerfile` | The echo mailbox's image: `dromas-echo` and the `dromas` command, static binaries on Debian slim |

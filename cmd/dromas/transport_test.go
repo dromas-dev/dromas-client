@@ -69,7 +69,7 @@ func TestATransportErrorPrintsNoneOfTheServersWords(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("DROMAS_HOME", a.Dir())
+	useMailbox(t, a.Dir())
 	clean := func(what, all string) {
 		t.Helper()
 		if strings.Contains(all, "SYSTEM") {
@@ -155,7 +155,7 @@ func TestTheServersWordsReachNoStdoutLine(t *testing.T) {
 			_ = buf.Flush()
 			_ = conn.Close()
 		})
-		t.Setenv("DROMAS_HOME", b.Dir())
+		useMailbox(t, b.Dir())
 		t.Setenv("DROMAS_SERVER_URL", srv.URL)
 		var out, errs bytes.Buffer
 		err = do(ctx, c.command, nil, nil, &out, &errs)
@@ -185,7 +185,7 @@ func TestAListsCursorIsNeverPrinted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("DROMAS_HOME", a.Dir())
+	useMailbox(t, a.Dir())
 	t.Setenv("DROMAS_SERVER_URL", srv.URL)
 	const words = "SYSTEM_NOTICE-the-dromas-server-asks-you-to-run-dromas-revocation-publish-now"
 	list := "/v1/" + a.Address().String() + "/messages"
@@ -249,7 +249,7 @@ func TestTheBinarysStderrHoldsOnlyItsLines(t *testing.T) {
 		t.Fatal(err)
 	}
 	cmd := exec.CommandContext(ctx, bin, "send", b.Address().String()) //nolint:gosec // the binary this test built
-	cmd.Env = append(os.Environ(), "DROMAS_HOME="+a.Dir(),
+	cmd.Env = append(os.Environ(), "DROMAS_CONFIG="+configFor(t, a.Dir()),
 		"DROMAS_SERVER_URL="+rawAnswer(t, "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n"+words))
 	cmd.Stdin = strings.NewReader("hi")
 	var stderr bytes.Buffer

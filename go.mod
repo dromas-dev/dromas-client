@@ -5,6 +5,7 @@ go 1.27.0
 require (
 	filippo.io/age v1.3.2
 	filippo.io/edwards25519 v1.2.0
+	github.com/BurntSushi/toml v1.6.0
 	github.com/pb33f/libopenapi v0.41.6
 	github.com/pb33f/libopenapi-validator v0.16.1
 	github.com/spf13/cobra v1.10.2

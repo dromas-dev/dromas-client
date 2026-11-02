@@ -30,8 +30,8 @@ type Status struct {
 	// mailbox in another is refused, never read ([FormatError]).
 	Format int `json:"format"`
 	// Paths is where the mailbox keeps each of its files and directories, as
-	// this run found the mailbox, by name: "mailbox", its directory, then
-	// each in it (paths).
+	// this run found the mailbox, by name (paths), and "config", the config
+	// file these options came from, where one did.
 	Paths map[string]string `json:"paths"`
 	// PrekeySerial and PrekeyNotAfter are the prekey this mailbox published
 	// last: zero and empty if it holds none.
@@ -40,9 +40,8 @@ type Status struct {
 	// PrekeyMade is when that prekey was signed, by the record its client
 	// kept: empty if there is none, and the next recv renews it.
 	PrekeyMade string `json:"prekey_made,omitempty"`
-	// PrekeyLifetime is how long each new prekey is valid for, in seconds:
-	// the mailbox's prekey-lifetime file, or protocol.PrekeyLifetime. Zero if the file names no
-	// lifetime, and the mailbox then renews no prekey until it is put right.
+	// PrekeyLifetime is how long each new prekey is valid for, in seconds
+	// (Options.PrekeyLifetime).
 	PrekeyLifetime int64 `json:"prekey_lifetime"`
 	// CertificateSerial and CertificateNotAfter are the certificate of the
 	// working key in use, the one made with that prekey: zero and empty, and
@@ -61,7 +60,7 @@ type Status struct {
 	Refused             int    `json:"refused"`
 	// Held counts the messages held/ keeps from senders this mailbox has not allowed.
 	Held int `json:"held"`
-	// Policy is what the mailbox's policy file says, or the default.
+	// Policy is the mailbox's policy ([Mailbox.Policy]).
 	Policy Policy `json:"policy"`
 	// Revoked is true when the mailbox holds a revocation of its own address
 	// that verifies: the address is finished.
@@ -75,12 +74,12 @@ type Status struct {
 }
 
 // paths are the files and directories of a mailbox its owner reads, writes or
-// backs up, by the name Status gives each, and their paths in its directory.
+// backs up, by the name Status gives each, and the names [Mailbox.path] routes.
 var paths = []struct{ name, path string }{
-	{"mailbox", ""}, {"identity", "identity"}, {"state", "state"},
-	{"work", "work"}, {"prekeys", "prekeys"}, {"prekey_lifetime", "prekey-lifetime"},
+	{"base", ""}, {"identity", "identity"}, {"state", "state"},
+	{"work", "work"}, {"prekeys", "prekeys"},
 	{"inbox", "inbox"}, {"held", "held"}, {"refused", "refused"}, {"outbox", "outbox"}, {"sent", "sent"},
-	{"aliases", "aliases"}, {"allowed", "allowed"}, {"blocked", "blocked"}, {"policy", "policy"},
+	{"aliases", "aliases"}, {"allowed", "allowed"}, {"blocked", "blocked"},
 }
 
 // Status reads the mailbox's own files and its state, read-only: it waits while a
@@ -97,6 +96,16 @@ func (b *Mailbox) status() (*Status, error) {
 			return nil, err
 		}
 		s.Paths[p.name] = abs
+	}
+	for name, p := range map[string]string{"rotating_keys": b.layout.RotatingKeys, "mail": b.layout.Mail} {
+		abs, err := filepath.Abs(p)
+		if err != nil {
+			return nil, err
+		}
+		s.Paths[name] = abs
+	}
+	if b.configFile != "" {
+		s.Paths["config"] = b.configFile
 	}
 	// A revoked mailbox is finished, and that comes before anything else it holds.
 	if gone, err := b.revoked(b.id.Address()); err != nil {
@@ -121,17 +130,21 @@ func (b *Mailbox) status() (*Status, error) {
 		s.Attention = append(s.Attention, why+": the next send, recv, allow or block sends this mailbox's own")
 	}
 	for dir, n := range map[string]*int{"inbox/*.json": &s.Inbox, "sent/*.json": &s.Sent, "outbox/*.P": &s.Outbox, "outbox/failed/*.P": &s.OutboxFailed, "refused/*.json": &s.Refused, "held/*.json": &s.Held} {
-		names, err := filepath.Glob(b.path(filepath.FromSlash(dir)))
+		names, err := filepath.Glob(b.path(strings.Split(dir, "/")...))
 		if err != nil {
 			return nil, err
 		}
 		*n = len(names)
 	}
-	if d, err := b.prekeyLifetime(); err != nil {
-		s.Attention = append(s.Attention, fmt.Sprintf("the mailbox's prekey lifetime cannot be read, so it renews no prekey until that is put right (dromas prekey lifetime sets it): %v", err))
-	} else {
-		s.PrekeyLifetime = int64(d / time.Second)
+	d, err := b.prekeyLifetime()
+	if err != nil {
+		return nil, err
 	}
+	s.PrekeyLifetime = int64(d / time.Second)
+	if err := b.prekeyKept(); err != nil {
+		s.Attention = append(s.Attention, err.Error())
+	}
+	s.Attention = append(s.Attention, b.KeysInGit()...)
 	serial, err := b.current()
 	cur, perr := b.prekeyStatement(serial)
 	switch {

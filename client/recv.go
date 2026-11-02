@@ -158,6 +158,9 @@ func (b *Mailbox) Receive(ctx context.Context) (*Result, error) {
 }
 
 func (b *Mailbox) receive(ctx context.Context) (*Result, error) {
+	if err := b.prekeyKept(); err != nil {
+		return nil, err
+	}
 	// What this command has asked as it went: the renewal's ask for the
 	// mailbox's own revocation, then the drain's about each sender.
 	asked := newLookups()
@@ -950,4 +953,20 @@ func (b *Mailbox) keepETag(list *protocol.MessageList, tag string) error {
 		}
 		return s.del(bucketMailbox, "etag")
 	})
+}
+
+// prekeyKept refuses a mailbox whose state file records a prekey it published that
+// is not in its rotating keys' directory: rotating-keys-dir now names another
+// place, or the keys are lost. Receive stops there, ahead of the renewal it would
+// otherwise make, which would hide it while the mail sealed to the missing keys
+// was refused. [Mailbox.Rekey] is the deliberate recovery.
+func (b *Mailbox) prekeyKept() error {
+	serial, err := b.publishedSerial()
+	if err != nil || serial == 0 {
+		return err
+	}
+	if name := b.path("prekeys", strconv.FormatUint(serial, 10)+".agekey"); !exists(name) {
+		return refuse("this mailbox's state file records prekey %d, which is not at %s: put rotating-keys-dir right, or run dromas prekey renew to publish a new prekey, and mail sealed to the missing one is lost", serial, name)
+	}
+	return nil
 }
