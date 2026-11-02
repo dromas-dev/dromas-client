@@ -1429,13 +1429,13 @@ A client drains every page of its list (Section 11.11) and fetches the message o
 
   | The prekey statement is | What is stolen | The mailbox |
   |---|---|---|
-  | signed by its identity, or under a certificate of a working key the mailbox did not make | the mailbox's identity | SHOULD recommend that the owner revoke the address (Section 10.1). A revocation of certificates cannot end the use of the stolen identity, because anyone who has the identity can make a higher certificate as easily (Section 15.5) |
+  | signed by its identity, or under a certificate of a working key the mailbox did not make | the mailbox's identity | SHOULD recommend that the owner revoke the address (Section 10.1), except that a restored mailbox makes this recommendation only as the next bullet says. A revocation of certificates cannot end the use of the stolen identity, because anyone who has the identity can make a higher certificate as easily (Section 15.5) |
   | under a certificate of the mailbox's own working key, where the identity is kept beside the mailbox's other keys | that working key, and the identity kept beside that working key | SHOULD recommend revoking the address |
   | under a certificate of the mailbox's own working key, where the identity is kept elsewhere | that working key | SHOULD recommend the remedy (Section 12.6) |
 
 - **When a mailbox's server serves a prekey statement that the mailbox did not make:**
   - A mailbox that has registered or renewed a prekey statement of its own MUST NOT renew above a prekey statement it did not make, unless its owner asks.
-  - A mailbox that has registered or renewed no prekey statement, restored from its identity alone, is served the lost machine's prekey statement as one the mailbox did not make. The restored mailbox's first renewal gains control of the mailbox.
+  - A mailbox that has registered or renewed no prekey statement, restored from its identity alone, is served the lost machine's prekey statement as one the mailbox did not make. The restored mailbox's first renewal gains control of the mailbox. The restored mailbox cannot tell the lost machine's prekey statement from a thief's. So the restored mailbox tells its owner what the server served, and recommends revoking the address only if the owner did not make that prekey statement.
   - A mailbox MUST NOT sign messages under a certificate of its own working key when such a prekey statement shows that working key is stolen. After the remedy runs, or after the address is revoked, readers refuse those messages too. So the outbox waits for the mailbox's next certificate.
   - A mailbox that signs its messages with its identity does not wait on account of such a prekey statement, because no certificate of its own is in doubt.
 - **A mailbox moves to certificates by renewing under a certificate (Section 11.9), and only when its owner asks.** From then on, the mailbox's prekey statements are under certificates (Section 5.3). Everything the mailbox signed with the identity stays valid.
