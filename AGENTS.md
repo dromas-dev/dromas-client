@@ -32,6 +32,36 @@ Each commit carries your human's sign-off, made with `git commit -s` (the Develo
 - **A behaviour is described once, beside the code that does it:** in its doc comment, or the command's help, and held by a test. Nothing here or in the README restates it. A rule in this file is a rule, with the code that keeps it named; a sentence that only says what a function does is that function's doc comment.
 - **Layout:** the repo's is `README.md` § What is here; a mailbox's files are at the top of `client/doc.go`.
 
+### How a page is written
+
+These rules apply to every page and every comment. They come before "The README says as little as it can" and "each rule once": the goal is one reading, not fewer words. `TestThePagesReadPlainly` holds the pages it lists to the rules a test can measure, and a page joins that list once it is rewritten by them.
+
+- **Write for a reader who knows TLS, SSH, age and the RFCs, and has never seen this project.**
+  - Use the word that reader already knows: accept, reject, valid, malformed, permanently, request, response, decrypt.
+  - A word of this project's own is only for a concept with no standard name. Define it once, in `PROTOCOL.md` §2.3, and use it only in that sense.
+  - A common verb never doubles as a defined term. A reader who meets "take" as both *accept* and a date has two readings of every sentence that uses it.
+- **One sentence states one fact or one rule.** Aim for 25 words or fewer. Split any sentence over 40 words.
+- **The party that acts is the subject of the sentence:** the sender, the reader, the server, the client or the mailbox. Prefer the active voice.
+- **Repeat the noun rather than write "it" or "its".** A pronoun is fine only when its noun is the subject of the same sentence and nothing else could be meant.
+  - Comparable specs have 3 to 10 "it", "its" or "itself" per 1,000 words: C2SP age, RFC 8555, RFC 9180, Signal's X3DH and NIP-44, measured 2026-11-02. `TestThePagesReadPlainly` allows a listed page 15.
+- **Name things instead of pointing at them.**
+  - "The party that terminates TLS", not "whatever terminates TLS".
+  - "The server's record of the mailbox", not "what the server holds of it".
+  - "Whatever" and "whoever" are fine only where they mean "any".
+- **Say what happens.** Use a negative only for a prohibition, or where the absence is itself the fact. "The reader acks a refused message and does not deliver it" reads once. "A refused message is never delivered, and is acked" needs a second read.
+- **A colon introduces a list, a definition or an example, and a sentence has one colon at most.**
+  - A reason starts with "because".
+  - A consequence starts with "so".
+  - An example starts with "for example".
+- **Write subject, verb, object.** Don't front the object ("What it verified, it keeps for good"). Don't stack "of" ("the date of the pass of the upload").
+- **Bold a short label or a whole sentence.** Never bold the first half of a sentence that plain text finishes.
+- **A ban on a word is narrow.**
+  - "Never 'mail' or 'box'" bans those two words.
+  - "No 'was', 'since' or 'once' of this project's past" bans telling history. "Once" meaning "after" is fine.
+  - Don't coin a substitute to avoid a banned word. Use the plain word the rule still allows.
+- **A rule is still exact.** Plain words keep every condition: "only", "at most", "before" and "whenever" stay where they are. A shorter sentence that drops a condition is a change to the protocol.
+- **Read a changed page as a stranger before it merges.** Give the changed section, and nothing else, to a fresh session with no project context, and have it restate each rule. Any difference from the intended meaning marks a sentence that reads two ways.
+
 ### How a design is chosen
 
 - **Priorities, in this order:** the correct encryption; then a server that is feasible and fast, not as cheap as possible; then simple things simple for the user.
@@ -112,7 +142,7 @@ Each rule names the code that keeps it and, where one exists, the test that hold
 - **Every send is padded, at the seal and never before,** with bytes after the signature (`protocol/pad.go`, `dr_padding`; `PROTOCOL.md` §9.3). The block is counted on the ciphertext, from age's file sizes (`SealedSize`), and each client checks the size of what age wrote and refuses a mismatch. No flag turns padding off or on. Change the arithmetic in both clients together: `TestPaddingIsTheGoClients` holds the script to the Go client, and `TestSealedSizeIsWhatAgeWrites` holds the header sizes to age itself, so an age release that changes them fails there first.
 - **A mailbox reads the recipient's mailbox before it posts, and seals to what it then holds** (`readMailbox`, `resolve`, `post`, `trySend` and `seal` in `client/`, `dr_lookup`, `dr_post`, `dr_seal`; `PROTOCOL.md` §11.8, §12.2, §12.5; decided on #55, #91, #112 and #22).
   - **The read comes before anything is sealed or posted, at every post,** a new message or one that waited: one `GET /v1/<address>`, which carries the prekey and what the server holds of the mailbox's revocations. A read of a mailbox carries no pass, of another mailbox or its own (`lookup` in `client/api.go`, `dr_look`; §11.8, §11.5; decided on #214 and #352): the read is public, and a server reads none on it.
-  - 🛑 **No answer holds the message in the outbox:** a failed read's code is never read as an answer about the message, never passes through `undeliverable`, and never moves an entry to `outbox/failed/` (`lookupError`). "None held" is kept nowhere: nobody signs it, so it has no lifetime, and the one a cache would need is nobody's to invent.
+  - 🛑 **No answer holds the message in the outbox:** a failed read's code is never read as an answer about the message, never passes through `undeliverable`, and never moves an entry to `outbox/failed/` (`lookupError`). "No revocation shown" is kept nowhere: nobody signs it, so it has no lifetime, and the one a cache would need is nobody's to invent.
   - **A seal is made for one post and never kept.** The outbox holds the envelope alone, as written; every post, a retry included, dates it last, once the recipient's mailbox is read, never before it was written and never more than `protocol.TTL` after (its `sent_at` and no other member: the outbox is the mailbox's own, so `seal` writes the line again with `Envelope.Line`, and `dr_seal` with jq, on the envelope the script has just built, each read back as the envelope it was, by `sameEnvelope` and in `dr_seal`; decided on #195, #278, #279 and #357), and seals it to the statement `resolve` passes then, signed by the signer in use. 🛑 **Do not keep a seal to post again:** each check a kept seal needs (a revocation since, a renewal recorded since, a seal cut short: #112, #91, #113) grows with every finding, and all it saves is a lost answer's one send, which the reader's `(from, msg_id)` check already makes harmless. `TestAPostIsDatedAtThePost` holds the outbox to envelopes alone.
   - **A mailbox signs no message by a signer it holds revoked** (`seal`, `dr_seal`; decided on #177), **nor under one whose working key a statement it did not make shows another holds** (`seal`, `NotMade.OwnCertificate`; #428): the entry waits in the outbox, and once `recv` or `prekey renew` has the renewal taken, the next flush seals it under the new certificate.
 - **Whatever verifies is kept, from a server or from a file** (`Ask`, `KeepRevocation`). A record handed over is refused whole when a part of it does not verify, and its owner is told (`KeepRevocation`); a server's answer that does not verify counts as nothing shown.
