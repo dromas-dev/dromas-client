@@ -1487,8 +1487,8 @@ The remedy is for a working key stolen without the identity that certified that 
 
 1. **Look up the mailbox.** The client looks up the mailbox at the mailbox's own server. The client verifies any revocation of the mailbox's certificates that the lookup carries, and keeps each one that verifies. The remedy goes on even if the client cannot use the lookup's answer.
 2. **Revoke every certificate below the certificate serial that the client's clock gives.** The client signs one of these:
-   - a revocation of certificates through the serial one below that certificate serial;
-   - again, a revocation of certificates through a higher revocation serial that is already kept.
+   - a new revocation of certificates through the serial one below that certificate serial;
+   - a new signature on a revocation of certificates through a higher revocation serial that is already kept.
 
    The client publishes the signed revocation once (Section 11.15).
    - A `409 conflict` means the server keeps a revocation of certificates through a higher revocation serial. The client then looks up the mailbox again. If that revocation verifies, the client keeps that revocation and renews above that higher revocation serial.
