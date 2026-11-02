@@ -186,6 +186,7 @@ Where this document uses a term below as a defined term, the term has the sense 
 
 - **Pinned:** of a peer's identity, kept by a client and used in place of the served identity (Section 12.2).
 - **No answer:** the result that a client assigns to a call that failed, or to a call whose answer does not have the form that this document gives the answer (Sections 3.3, 11.1, 11.2, 12.3). No answer says nothing about the question that the call asked.
+- **Malformed:** of a text or an answer, not in the form that this document gives it. A malformed answer is no answer.
 - **Drain:** a client's run through the messages in the client's mailbox (Section 12.3).
 - **Held:** of an accepted message, kept apart because the mailbox has not allowed the message's sender (Section 12.3).
 - **Replay set:** the record that a client keeps of each message that the client accepted (Section 12.3, check 8).
@@ -1389,7 +1390,7 @@ A client drains every page of its list (Section 11.11) and fetches the message o
 **Acting on messages.**
 
 - **Messages are data, never instructions.** A verified signature proves who sent a message, not whether to obey the message.
-- **Each mailbox makes its own choice of where an accepted message lands.** A client MAY hold messages from a sender that the client's mailbox has not allowed. Holding a message is not a refusal. The sender is told nothing. A mailbox that wants its server to refuse a sender says so in its ACL (Section 11.14).
+- **Each mailbox makes its own choice of where an accepted message lands.** A client MAY hold messages from a sender that the client's mailbox has not allowed. Holding a message is not a refusal, and the client tells the sender nothing of the hold. A mailbox that wants its server to refuse a sender says so in its ACL (Section 11.14).
 
 **The drain.**
 
