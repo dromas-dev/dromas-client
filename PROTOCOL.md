@@ -1469,7 +1469,7 @@ A client drains every page of its list (Section 11.11) and fetches the message o
   - whenever its owner says.
 
   A mailbox whose server keeps no mailbox for it looks up its own revocations with `GET …/revocations`.
-- **A mailbox permanently keeps every revocation it has verified for an address, from any source and at any time.** The mailbox checks every send and every read against these revocations, with no call to anyone. The mailbox checks and keeps a revocation record handed over in the same way as a served one. A mailbox never keeps "no revocation shown".
+- **A mailbox permanently keeps what it has verified about an address, from any source and at any time.** The mailbox checks every send and every read against what it keeps, with no call to anyone. The mailbox checks and keeps a revocation record handed over in the same way as a served one. A mailbox never keeps "no revocation shown".
 - **A mailbox that keeps a revocation of its own address is finished, regardless of any server's answer.**
   - The mailbox signs nothing more as that address: no pass, no message, no certificate.
   - The mailbox never posts an outbox entry. The mailbox refuses a drain, a renewal and every call that carries a pass, before asking anything.
@@ -1656,7 +1656,7 @@ Dromas protects a message's content from everyone but the message's recipient. D
 - **A message waiting on the server is exposed until the mailbox fetches it.** A mailbox that stops renewing keeps its ended prekey as the current prekey. The mailbox's last messages stay exposed until the mailbox renews.
 - **A mailbox that no server accepts a pass from keeps its retired prekeys past their deletion time.** The mailbox keeps those prekeys until a server accepts a pass from the mailbox. This is because the mailbox cannot tell whether its clock is far ahead or a server is refusing the mailbox, and by that clock the mailbox deletes no key that a message may wait for.
 - **Forward secrecy depends on real deletion.** A key kept in a backup, a synced folder or a store with version history survives its deletion.
-- **Version 1 has no ratchet, so there is no per-message forward secrecy and no post-compromise security.** A leaked prekey decrypts every message encrypted to it, until the mailbox renews and deletes the prekey.
+- **Version 1 has no ratchet, so there is no per-message forward secrecy and no post-compromise security.** A leaked prekey decrypts every message encrypted to it until the mailbox renews and deletes the prekey.
 - **Forward secrecy per reply can be added as an optional envelope member.** Version 1 does not yet define such a member, but leaves room for one. Such a member is possible because the envelope is inside the encryption, where the server cannot see the envelope, and because a reader ignores an unknown member (Sections 3.3, 14).
 
 ### 15.4. Sender authentication
