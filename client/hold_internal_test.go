@@ -3,6 +3,7 @@ package client
 import (
 	"crypto/x509"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -80,3 +81,47 @@ func TestASilentDropHalvesTheKeepAlive(t *testing.T) {
 		}
 	}
 }
+
+// Holds can meet one dead connection several times before its health check closes
+// it, and one drop is taught once; another connection's teaches again.
+func TestADeadConnectionTeachesOnce(t *testing.T) {
+	var h holding
+	one, two := &net.TCPConn{}, &net.TCPConn{}
+	_, first := h.droppedOn(one, 5*time.Minute, true)
+	if _, ka := h.droppedOn(one, 5*time.Minute, true); ka != first {
+		t.Errorf("keep-alive %v, then %v from one connection", first, ka)
+	}
+	if _, ka := h.droppedOn(one, time.Minute, false); ka != first {
+		t.Errorf("keep-alive %v, then %v when it closed", first, ka)
+	}
+	if _, ka := h.droppedOn(two, 5*time.Minute, true); ka >= first {
+		t.Errorf("keep-alive %v, then %v from another connection", first, ka)
+	}
+	// A hold that never got a connection names none to have taught.
+	var none holding
+	_, a := none.droppedOn(nil, 5*time.Minute, true)
+	if _, b := none.droppedOn(nil, 5*time.Minute, true); b >= a {
+		t.Errorf("keep-alive %v, then %v", a, b)
+	}
+}
+
+type closeCounter struct {
+	http.RoundTripper
+	closed int
+}
+
+func (c *closeCounter) CloseIdleConnections() { c.closed++ }
+
+// A mailbox's client closes its idle connections through the transport every
+// mailbox's calls go through: http.Client reaches only one that has the method.
+func TestClosingIdleConnectionsReachesTheTransport(t *testing.T) {
+	next := &closeCounter{}
+	c := &http.Client{Transport: transport{next}}
+	c.CloseIdleConnections()
+	if next.closed != 1 {
+		t.Errorf("reached it %d times", next.closed)
+	}
+	(&http.Client{Transport: transport{roundTripperOnly{}}}).CloseIdleConnections() // has no method: nothing to reach
+}
+
+type roundTripperOnly struct{ http.RoundTripper }

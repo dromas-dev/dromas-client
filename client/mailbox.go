@@ -264,6 +264,14 @@ func (t transport) RoundTrip(r *http.Request) (*http.Response, error) {
 	return t.next.RoundTrip(r)
 }
 
+// CloseIdleConnections is what http.Client.CloseIdleConnections calls, which
+// reaches only a transport that has it.
+func (t transport) CloseIdleConnections() {
+	if c, ok := t.next.(interface{ CloseIdleConnections() }); ok {
+		c.CloseIdleConnections()
+	}
+}
+
 // newTransport is rt, or net/http's default, held to checkServerURL
 // (transport). A transport of net/http's own type calls a server on this
 // machine, or one named localhost in any case, through no proxy, whatever

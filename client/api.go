@@ -139,12 +139,9 @@ func (b *Mailbox) exchange(ctx context.Context, method, path string, in any, hdr
 	name = method + " " + name
 	resp, err := b.http.Do(req)
 	if err != nil {
-		if errors.Is(context.Cause(ctx), errHeldOut) {
-			// net/http reports it as the context canceled.
-			err = errHeldOut
-		}
-		return nil, noAnswer(name, "no answer that is HTTP", cut.why(err))
+		return nil, noAnswer(name, "no answer that is HTTP", cut.why(heldOut(ctx, err)))
 	}
+	b.holding.http2.Store(resp.ProtoMajor == 2)
 	// What every answer says of this client's version, 2xx or not, is kept
 	// for its command to say (Versions): a Deprecation and a Sunset of their
 	// forms, and nothing else of the header.
@@ -178,7 +175,7 @@ func (b *Mailbox) exchange(ctx context.Context, method, path string, in any, hdr
 	}
 	data, err := io.ReadAll(io.LimitReader(resp.Body, limit))
 	if err != nil {
-		return nil, noAnswer(name, "an answer whose body could not be read", cut.why(err))
+		return nil, noAnswer(name, "an answer whose body could not be read", cut.why(heldOut(ctx, err)))
 	}
 	if !answered {
 		e := &APIError{Status: resp.StatusCode, Version: b.version}
@@ -384,6 +381,15 @@ func (e *transportError) Unwrap() error { return e.cause }
 
 // noAnswer is err, net/http's, as a transportError: the kind its cause
 // shows, or otherwise the kind given.
+// heldOut is err, or errHeldOut where a held list's bound made it: net/http and an
+// answer's body report the cut as the context canceled.
+func heldOut(ctx context.Context, err error) error {
+	if errors.Is(context.Cause(ctx), errHeldOut) {
+		return errHeldOut
+	}
+	return err
+}
+
 func noAnswer(call, otherwise string, err error) error {
 	var timeout net.Error
 	var certificate *tls.CertificateVerificationError

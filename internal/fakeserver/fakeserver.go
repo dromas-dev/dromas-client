@@ -128,6 +128,16 @@ func NewInMemory(t testing.TB, now func() time.Time) *Server {
 	return s
 }
 
+// NewInMemoryHTTP2 is NewInMemory over TLS and HTTP/2, the protocol the default
+// client negotiates with a server that has it.
+func NewInMemoryHTTP2(t testing.TB, now func() time.Time) *Server {
+	s, h := newServer(t, now)
+	srv := httptest.NewTestServer(t, h)
+	srv.EnableHTTP2 = true
+	s.URL, s.srv = "https://example.com", srv
+	return s
+}
+
 // Client is the client that reaches a server NewInMemory made.
 func (s *Server) Client() *http.Client { return s.srv.Client() }
 

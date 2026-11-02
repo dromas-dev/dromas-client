@@ -10,6 +10,7 @@ import (
 	"net/http/httptrace"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/dromas-dev/dromas-client/protocol"
@@ -32,11 +33,21 @@ import (
 //     drops silently) names only a bound above that, so keep-alive halves
 //     at each such drop: a search for a bound no answer names, as path MTU
 //     discovery's binary search halves its range at each failed probe
-//     (RFC 4821 §7.3).
+//     (RFC 4821 §7.3). A connection teaches this once, however many holds
+//     meet it dead (holding.droppedOn).
+//   - An HTTP/2 connection. A cancelled stream leaves its connection in the
+//     pool, dead or not, and the kernel may not give up on it for 15 minutes
+//     or more, so HTTP/2's own health check closes it, as Kubernetes' client
+//     does for this same failure (apimachinery's pkg/util/net/http.go):
+//     a PING after healthCheckAfter with no frame read, closed if
+//     healthCheckWait passes unanswered. Theirs pings every 30 s; here that
+//     is traffic across many held connections for what a hold's bound finds
+//     anyway, so it is set above a hold and its margin, and the answer that
+//     ends each hold resets it: no live connection pays for it.
 //   - The request. Each asks the server to hold it for the mailbox's wait,
 //     DefaultHold at first, and ends at that wait and a margin from the
 //     connection it got last, whether answered or not: a dead path is found
-//     there, never by a probe. Only a connection that drops with keep-alive
+//     there, never by a probe on a live one. Only a connection that drops with keep-alive
 //     at its floor shortens the wait, never below MinHold: a path whose
 //     probes keep nothing alive (an HTTP proxy's timeout, which TCP's
 //     keep-alive does not reach). Holds start at most about once a minute
@@ -56,6 +67,18 @@ const MinHold = time.Minute
 // wait at the latest.
 const holdMargin = 15 * time.Second
 
+// healthCheckAfter is how long an HTTP/2 connection goes with no frame read
+// before it is sent a PING, and healthCheckWait how long that PING may go
+// unanswered before the connection is closed (http.HTTP2Config). The first is
+// above DefaultHold and holdMargin, so a live connection's holds never reach it,
+// and above gRPC's 5 minutes, the least a server of theirs takes pings at by
+// default (gRFC A8). The second is Kubernetes'. A hold begun on a connection
+// its last one found dead ends after the two's excess over that hold and margin.
+const (
+	healthCheckAfter = DefaultHold + holdMargin + 10*time.Second
+	healthCheckWait  = 15 * time.Second
+)
+
 // holdEvery and holdBurst pace the holds a mailbox starts: one a minute on
 // average, two at once.
 const (
@@ -73,7 +96,9 @@ type holding struct {
 	mu        sync.Mutex
 	wait      time.Duration // the wait it asks for; DefaultHold when zero
 	keepAlive time.Duration // the keep-alive a new connection gets; none when zero
+	taught    net.Conn      // the connection whose drop was learned last, compared alone
 	starts    *rate.Limiter
+	http2     atomic.Bool // the last answer came over HTTP/2
 }
 
 func (h *holding) current() (wait, keepAlive time.Duration) {
@@ -121,6 +146,22 @@ func (h *holding) dropped(held time.Duration, silent bool) (wait, keepAlive time
 	return h.wait, h.keepAlive
 }
 
+// droppedOn is dropped, once a connection: over HTTP/2 a dead connection stays in
+// the pool until its health check closes it, so several holds can meet it, and
+// one drop is not several. A nil conn is one the hold never got.
+func (h *holding) droppedOn(conn net.Conn, held time.Duration, silent bool) (wait, keepAlive time.Duration) {
+	h.mu.Lock()
+	again := conn != nil && conn == h.taught
+	if !again {
+		h.taught = conn
+	}
+	h.mu.Unlock()
+	if again {
+		return h.current()
+	}
+	return h.dropped(held, silent)
+}
+
 func (h *holding) limiter() *rate.Limiter {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -152,10 +193,11 @@ func (h *holding) dialer() *net.Dialer {
 
 // defaultTransport is the default client's: net/http's own, a TLS session
 // cache so that a new connection resumes (RFC 8446 §2.2; no early data),
-// and a dialer that sends keep-alive only as h says.
+// HTTP/2's health check, and a dialer that sends keep-alive only as h says.
 func defaultTransport(h *holding) *http.Transport {
 	t := http.DefaultTransport.(*http.Transport).Clone()
 	t.TLSClientConfig = &tls.Config{ClientSessionCache: tls.NewLRUClientSessionCache(0)}
+	t.HTTP2 = &http.HTTP2Config{SendPingTimeout: healthCheckAfter, PingTimeout: healthCheckWait}
 	t.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
 		return h.dialer().DialContext(ctx, network, addr)
 	}
@@ -168,10 +210,11 @@ type HoldResult struct {
 	// receive to find out (its pass refused): a Receive follows.
 	Changed bool
 	// Dropped reports that a connection of the hold dropped: before the
-	// hold's answer, seen as it dropped or only at the hold's deadline, or
-	// on a reused connection that net/http sent the request again past,
-	// which the hold's answer then follows. Wait and KeepAlive are then what
-	// the mailbox asks for from now on.
+	// hold's answer, seen as it dropped or only at the hold's deadline, or,
+	// over HTTP/1.1, on a reused connection that net/http sent the request
+	// again past, which the hold's answer then follows. Wait and KeepAlive are
+	// then what the mailbox's default client asks for from now on: a given
+	// client's dialer is its own, so nothing applies KeepAlive there.
 	Dropped bool
 	// After is how long the request was held on the connection it got
 	// last.
@@ -187,9 +230,8 @@ type heldFor struct{}
 var errHeldOut = fmt.Errorf("no answer within the wait: %w", context.DeadlineExceeded)
 
 // heldBound is ctx, cut with errHeldOut once d passes from the connection
-// its request got last: net/http sends a GET again, once, on a new
-// connection when a reused one drops before its answer, and that request's
-// bound is its own.
+// its request got last: net/http may send a GET again on another connection,
+// and that request's bound is its own.
 func heldBound(ctx context.Context, d time.Duration) (context.Context, func()) {
 	ctx, cancel := context.WithCancelCause(ctx)
 	t := time.AfterFunc(d, func() { cancel(errHeldOut) })
@@ -287,34 +329,36 @@ func (b *Mailbox) Hold(ctx context.Context, wait time.Duration) (*HoldResult, er
 	hdr := http.Header{"If-None-Match": {k.tag}, "Authorization": {k.pass}}
 	path := k.path + "?wait=" + strconv.FormatInt(int64(wait/time.Second), 10)
 	// How long the request was held is timed from the connection it got
-	// last: net/http sends a GET again, once, on a new connection when a
-	// reused one drops before its answer, and a drop is the connection's.
-	// A connection asked for after one was got is asked for past a drop,
-	// seen as it came; it is learned then, before the next is dialled.
+	// last, and a drop is the connection's. Over HTTP/1.1 net/http sends a GET
+	// again on a new connection when a reused one drops before its answer, so a
+	// connection asked for after one was got is asked for past a drop, seen as it
+	// came; it is learned then, before the next is dialled. Over HTTP/2 a lost
+	// connection is not sent again past: one asked for then follows a server's
+	// GOAWAY or REFUSED_STREAM, which says nothing of the network.
 	h := &HoldResult{}
 	var mu sync.Mutex
-	var got bool
+	var conn net.Conn
 	start := time.Now()
 	trace := &httptrace.ClientTrace{
 		GetConn: func(string) {
 			mu.Lock()
 			defer mu.Unlock()
-			if lived := time.Since(start); got && lived >= MinHold/2 {
+			if lived := time.Since(start); conn != nil && lived >= MinHold/2 && !b.holding.http2.Load() {
 				h.Dropped = true
-				h.Wait, h.KeepAlive = b.holding.dropped(lived, false)
+				h.Wait, h.KeepAlive = b.holding.droppedOn(conn, lived, false)
 			}
 		},
-		GotConn: func(httptrace.GotConnInfo) {
+		GotConn: func(info httptrace.GotConnInfo) {
 			mu.Lock()
 			defer mu.Unlock()
-			got, start = true, time.Now()
+			conn, start = info.Conn, time.Now()
 		},
 	}
 	held := httptrace.WithClientTrace(context.WithValue(ctx, heldFor{}, wait+holdMargin), trace)
 	var list protocol.MessageList
 	resp, err := b.exchange(held, http.MethodGet, path, nil, hdr, &list)
 	mu.Lock()
-	after := time.Since(start)
+	after, last := time.Since(start), conn
 	h.After = after
 	mu.Unlock()
 	err = b.provedLocked(ctx, http.MethodGet, path, err)
@@ -325,12 +369,14 @@ func (b *Mailbox) Hold(ctx context.Context, wait time.Duration) (*HoldResult, er
 		h.Changed = true
 	case ctx.Err() == nil && errors.As(err, &te) && after >= MinHold/2:
 		// The connection dropped part way through a hold, or its answer
-		// never came: a network that forgets a silent connection.
+		// never came: a network that forgets a silent connection. Over HTTP/1.1
+		// the next connection is a new one; over HTTP/2 the connection may yet
+		// be busy with the stream just cancelled, and goes by its health check.
 		b.http.CloseIdleConnections()
 		h.Dropped = true
-		h.Wait, h.KeepAlive = b.holding.dropped(after, timedOut(err))
+		h.Wait, h.KeepAlive = b.holding.droppedOn(last, after, timedOut(err))
 	case errors.As(err, &te):
-		// No answer at all: the next connection is a new one.
+		// No answer at all.
 		b.http.CloseIdleConnections()
 		return nil, err
 	default:
