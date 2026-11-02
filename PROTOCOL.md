@@ -429,7 +429,7 @@ A certificate is an OpenSSH user certificate. A verifier MUST check every row of
   | the same signer | the one with the higher prekey serial |
   | different certificates of the same certificate serial | neither |
 
-  Once a prekey statement under a certificate is accepted, a prekey statement that the identity signs is earlier than the accepted one. A server and a sender refuse the identity's prekey statement.
+  Once a prekey statement under a certificate is accepted, a prekey statement that the identity signs is earlier than the accepted one. From then on, a server and a sender refuse a prekey statement that the identity signs.
 - **Who orders them.** A server orders a mailbox's prekey statements by `(c, p)` (Section 11.9). A sender does the same, by the prekey statements the sender has seen (Sections 6, 12.2).
 - **A signer of a higher rank retires different things at each party:**
   - at the server, every prekey statement by a signer of a lower rank (Section 11.9), and the pass by every certificate other than the current certificate (Section 8). The server still accepts the identity's pass.
@@ -538,10 +538,10 @@ server-port    = %x31-39 *4DIGIT   ; no leading zero, at most 65535
   The exception: on a registration (Section 11.7) and on a renewal (Section 11.9), the server accepts a pass by the certificate of the prekey statement that the call brings, in place of the current certificate.
 
   A server accepts a pass only where the pass's server name is the server's own. A server reads a pass by the form of the pass's signer (Section 5).
-- **A client whose pass a server refuses signs another pass and tries once more.** The client MUST NOT retry more than once. The client MUST NOT retry at all after a `certificate_revoked` that the client finds final when the mailbox looks itself up (Section 12.5). When a server refuses both passes for their time, the client's clock is wrong (Section 15.7).
-- **A lookup (Section 11.8), the link page (Section 4.3), publishing a revocation and looking up revocations (Section 11.15) require no pass.** A server reads no pass on these calls, whatever `Authorization` they carry.
+- **A client whose pass a server refuses signs another pass and tries once more.** The client MUST NOT retry more than once. The client MUST NOT retry at all after a `certificate_revoked` that the client finds final when the mailbox looks itself up (Section 12.5). When a server refuses both passes for their time, the cause is the mailbox's clock (Section 15.7).
+- **A lookup (Section 11.8), the link page (Section 4.3), publishing a revocation and looking up revocations (Section 11.15) use no pass.** A server reads no pass on these calls, whatever `Authorization` they carry.
 
-**Refusals.** Each refusal of a pass is a `401`. `certificate_revoked` comes first, and otherwise this table gives the code:
+**Refusals.** Each refusal below is a `401`. `certificate_revoked` comes first, and otherwise this table gives the code:
 
 | Code | When |
 |---|---|
@@ -705,7 +705,7 @@ The identity revokes every certificate it made through a revocation serial, incl
 
   The address stays in use.
 - **A mailbox MUST NOT sign a message under a certificate that a revocation it keeps covers.**
-- **A mailbox MUST NOT make a certificate that its identity has revoked.** The mailbox's next certificate serial is above the highest revocation serial that the mailbox keeps, or that the mailbox's server shows the mailbox (Section 5.2). A revocation of certificates through 2^53 − 1 leaves no certificate to make.
+- **A mailbox MUST NOT make a certificate that its identity has revoked.** That is, the mailbox's next certificate serial is above the highest revocation serial that the mailbox keeps or that the mailbox's server shows the mailbox (Section 5.2). A revocation of certificates through 2^53 − 1 leaves no certificate to make.
 - **This section does not fix how long a revocation of certificates is kept.** Every certificate that the revocation covers and that a server accepted ends at most the server's maximum (Section 11.18) after the certificate's start.
 
 ### 10.3. The revocation record
@@ -717,16 +717,16 @@ A revocation record carries an identity's revocations, and the record proves its
 ```
 
 - **`type`.** The value is `"revocation_record"`.
-  - Every writer writes this member. A server writes the member in its answers, where `api/openapi.yaml` requires the member. A client writes the member in every revocation record it sends, keeps and prints.
+  - Every writer writes this member. A server writes the member in its answers, and `api/openapi.yaml` requires the member there. A client writes the member in every revocation record it sends, keeps and prints.
   - A reader accepts a revocation record without this member.
-  - A reader MUST refuse a revocation record that names another type. A server refuses such a record with `400 bad_request`, and `type` in `member`.
+  - A reader MUST refuse a revocation record that names another type (a server refuses with `400 bad_request`, and `type` in `member`).
 - **`identity`.** This member is the identity document, which MUST hash to the address and meet its key checks (Section 4.1).
 - **`revocation_signature`.** If present, this member is the revocation of the address (Section 10.1): the revocation's armoured signature, in base64.
 - **`revoked_certificates` and `revoked_certificates_signature`.** If present, these two members are the revocation of certificates (Section 10.2): the revocation statement's three lines and the armoured signature over those lines, each in base64. The revocation statement MUST have exactly that form, with the address as its line 2.
 - **The members are in any order.** A revocation record carries at least one of the two revocations.
 - **A revocation record from a file counts the same as one from a server.**
   - A verifier rebuilds the revocation statement of the address from the address.
-  - The verifier checks the revocation of certificates against the form `revocation-of-certificates`.
+  - The verifier checks that the revocation of certificates has the form `revocation-of-certificates`, with the address as its line 2.
   - The verifier verifies each signature under the identity document's key.
 
 ## 11. The HTTP API
@@ -969,7 +969,7 @@ The server checks:
 
 ### 11.8. Look up a mailbox
 
-A lookup, `GET /v1/<A>`, requires no pass (Section 8). The lookup answers with the information a sender needs before posting, and with the information a mailbox checks about itself (Sections 12.4, 12.5).
+A lookup, `GET /v1/<A>`, uses no pass (Section 8). The lookup answers with the information a sender needs before posting, and with the information a mailbox checks about itself (Sections 12.4, 12.5).
 
 - **An active mailbox.** The server answers `200` with `identity`, `prekey` and `prekey_signature`. The answer also carries `sender_key_types` if the mailbox declared any. If the server keeps a revocation of the mailbox's certificates, the answer also carries `revoked_certificates` with `revoked_certificates_signature`.
 - **An unknown address.** The server answers `404 no_such_mailbox`, whatever certificates the address's identity has revoked. Looking up revocations serves those revocations (Section 11.15).
@@ -1148,7 +1148,7 @@ A mailbox's ACL says from which senders the mailbox's server accepts messages to
 
 ### 11.15. Revocations
 
-The two calls in this section require no pass (Section 8).
+The two calls in this section use no pass (Section 8).
 
 - **Publish a revocation: `PUT /v1/<A>/revocations`.** The call's body is a revocation record (Section 10.3). The server verifies the revocation record as a client does. The server keeps permanently each revocation that verifies, whether or not a mailbox is at the address.
   - **The server answers a revocation it already keeps from its stored revocations.** That answer comes ahead of every other refusal of this call, and ahead of every count except the budgets that bound any call (Section 11.5). Two kinds of body count as a revocation the server already keeps:
@@ -1244,7 +1244,7 @@ A mailbox may belong to one account at its server. The protocol fixes how a mail
 
 ### 11.18. The server's document
 
-`GET /v1/` requires no pass. The server answers with its version policy and the capabilities it serves, the same to every caller:
+`GET /v1/` uses no pass. The server answers with its version policy and the capabilities it serves, the same to every caller:
 
 - **`min_version`:** the version floor, when the server sets one.
 - **`latest_version`:** the latest version the server names, when the server names one.
