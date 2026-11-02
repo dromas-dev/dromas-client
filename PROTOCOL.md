@@ -661,7 +661,7 @@ A sender pads every message so that the message's ciphertext is a whole number o
 
 ### 9.4. Encryption
 
-The sender encrypts the plaintext to the recipient's prekey with age (C2SP age), in the binary format, not armoured. As a shell command: `{ cat P P.sig; padding; } | age -r <recipient> > m.age`. The age file has one `mlkem768x25519` stanza. A sender adds no other native stanza.
+The sender encrypts the plaintext to the recipient's prekey with age (C2SP age), in the binary format, not armoured. As a shell command: `{ cat P P.sig; padding; } | age -r <recipient> > m.age`. The age file has one `mlkem768x25519` stanza. A sender adds no other stanza, apart from a stanza that a server ignores (Section 11.10, step 7).
 
 ## 10. Revocation
 
@@ -801,7 +801,7 @@ This table gives each code's meaning, and how a client acts on the code:
 | 400 | `prekey_not_new` | a prekey equal to the current prekey, or to a retired prekey the server keeps (Section 11.9) |
 | 400 | `prekey_time` | at the server's clock, a certificate that has not yet begun or has ended, or a prekey statement that has ended or ends more than 8 days and an hour ahead. The cause is nearly always the client's clock |
 | 400 | `certificate_too_long` | a certificate that runs longer than the server's maximum (Section 11.7, step 6); `max_certificate_lifetime` gives the maximum |
-| 400 | `wrong_recipient_type` | a send's age file that does not have exactly one native stanza of the current prekey's type (Section 11.10, step 7) |
+| 400 | `wrong_recipient_type` | a send's age file that does not have exactly one native stanza of the current prekey's type, or that has anything beside that stanza and the grease stanzas that the server ignores (Section 11.10, step 7) |
 | 400 | `bad_revocation` | a revocation whose signature is not the identity's signature over the revocation's revocation statement (Section 11.15) |
 | 401 | `unauthorized`, `pass_expired`, `certificate_not_current`, `certificate_revoked` | the server refuses the pass; Section 8's table gives when the server answers each code. On `certificate_not_current`, `certificate_serial` names the certificate concerned (Section 8) |
 | 403 | `unknown_sender` | the mailbox that a send's pass names is not registered |
@@ -1038,7 +1038,7 @@ The server checks the steps below. Only step 9 stores anything. The server spend
    | `B`'s current prekey is past its `not_after`, or the current signer is one `B`'s identity has revoked | `409 prekey_expired` |
    | The sender's identity key is of an optional type (Section 4.1) that `B` did not declare (Section 7) | `403 sender_key_type` |
    | `statement` is not the hash of `B`'s current statement | `409 stale_prekey` |
-   | The age file does not have **exactly one native stanza** (`mlkem768x25519`) of the current prekey's type | `wrong_recipient_type` |
+   | The age file does not have **exactly one native stanza** (`mlkem768x25519`) of the current prekey's type, or has anything beside that stanza and the grease stanzas that the server ignores | `wrong_recipient_type` |
 
    The server ignores a stanza whose type matches `^[!-~]{1,8}-grease$` and that has at most 4 arguments, as age has a reader ignore a stanza that the reader does not recognise. Only the message cap bounds the body of such a stanza. The server cannot check which key the file is sealed to.
 8. **Quotas, counted only for sends that carried their sender's pass:**
