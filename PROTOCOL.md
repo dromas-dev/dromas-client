@@ -922,7 +922,11 @@ This table gives the answer to each call in each state:
 - **There is no `DELETE` of a mailbox.** A mailbox leaves a server in one of two ways: the mailbox's identity revokes the address permanently, or the mailbox stops renewing and is forgotten. To stop accepting messages for a while, a mailbox sets its ACL (Section 11.14).
 - **Forgotten.** Section 13 gives the date until which a server keeps a mailbox. A mailbox that has stopped renewing is forgotten once that date has passed. The mailbox is then unknown. The mailbox comes back by registering anew, without its ACL or its account. The server still keeps the revocations that the mailbox's identity made.
 - **There is no pending state.** A registration carries a pass that is minutes old, so a mailbox is active from its first call.
-- **A repeated request.** A request that the server has applied, sent again byte for byte, gets `200` and the same result. A different request that conflicts with the applied request gets `409 conflict`. A send of a ciphertext that the recipient already stores is answered as Section 11.10, step 6, says.
+- **A repeated request.** The server answers two kinds of repeat from the server's current record:
+  - an identical retry (Section 2.3) gets `200` and the same result;
+  - a revocation that the server already keeps gets the answer that Section 11.15 gives.
+
+  A send of a ciphertext that the recipient already stores is answered as Section 11.10, step 6, says. The server answers any other request as the section of that request's call says, even when the request is a copy of one that the server has applied.
 
 ### 11.7. Register
 
