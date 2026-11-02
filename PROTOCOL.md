@@ -198,7 +198,7 @@ Where this document uses a term below as a defined term, the term has the sense 
 **Time**
 
 - **Skew allowance:** one hour, which the maker of a time-limited object leaves for clocks that differ (Section 3.4).
-- **Message margin:** the time that a client leaves before a certificate ends, for what the client signed under that certificate to be read.
+- **Message margin:** the time that a client leaves before a certificate ends, for what the client signed under that certificate to be read. The message margin is at least the TTL.
 
 ## 3. Primitives
 
@@ -1511,7 +1511,7 @@ A mailbox whose identity is kept elsewhere signs under certificates. The identit
 
   A prekey never leaves the mailbox. The identity holder has no key that decrypts messages.
 - **Between certificates, the mailbox renews under its current certificate.** Each renewal brings a new prekey at a higher prekey serial.
-- **A reader accepts a message signed under a certificate only while the certificate is valid at the reader's clock (Section 5.2).** A message can wait the TTL before a reader reads the message. So an identity holder gives the mailbox a certificate at least as often as the server's maximum, less the client's message margin (Section 2.3).
+- **A reader accepts a message signed under a certificate only while the certificate is valid at the reader's clock (Section 5.2).** A message can wait the TTL before a reader reads the message. So an identity holder gives the mailbox the next certificate before the current certificate's `valid before`, less the message margin (Section 2.3). For a certificate of the full maximum, that is the server's maximum less the skew allowance and the message margin, counted from when the identity holder made the certificate.
 - **After the certificate has ended, the mailbox's server accepts no pass under that certificate.** Nothing goes on until the identity holder gives the mailbox a certificate of higher rank. While the server keeps the mailbox, the server accepts the renewal under that new certificate (Sections 11.9, 13). After the server has forgotten the mailbox, that renewal registers the mailbox anew (Section 12.4).
 - **Wherever Sections 12.5 and 12.6 have a mailbox renew under a new certificate, this mailbox waits for its identity holder to give it a new certificate.** A certificate that the identity holder gives this mailbox counts as the owner asking (Section 12.4).
 - **A renewal answered `409 conflict` or `401 certificate_not_current` is final for the renewal's prekey statement (Section 12.4).** The mailbox signs no prekey statement at a higher prekey serial to get above the served one, because anyone who has the same working key can sign at any prekey serial. Only a certificate of higher rank gets above the served prekey statement.
@@ -1692,7 +1692,7 @@ Dromas protects a message's content from everyone but the message's recipient. D
   - A renewal under a new certificate ends the stolen key at the server at once, and at every sender that has seen the new certificate.
   - A revocation of the stolen key's certificate ends the key wherever the revocation is seen (Section 12.6).
   - Messages that the owner sent under a revoked certificate, and that are still unread, are refused along with the thief's messages.
-- **The party that has the identity key chooses how long a certificate runs, up to the server's maximum.** A shorter certificate ends a stolen working key sooner, and needs the identity more often. A reader checks a certificate at the reader's own clock, because nothing vouches for when a signature was made. A message may also wait the TTL before it is read. So a certificate signs messages that every reader accepts for the server's maximum less the client's message margin (Section 2.3).
+- **The party that has the identity key chooses how long a certificate runs, up to the server's maximum.** A shorter certificate ends a stolen working key sooner, and needs the identity more often. A reader checks a certificate at the reader's own clock, because nothing vouches for when a signature was made. A message may also wait the TTL before it is read. So a certificate signs messages that every reader accepts until the certificate's `valid before`, less the message margin (Section 2.3). For a certificate of the full maximum, that is the server's maximum less the skew allowance and the message margin, counted from when the maker made the certificate.
 - **A stolen pass works only for the minutes that the pass has left, and only at the server that the pass names.** A stolen pass:
   - gives the mailbox's metadata and ciphertext;
   - gives control of the mailbox's availability: deleting unacked messages permanently, leaving the mailbox's account, and setting the mailbox's ACL, with which the stolen pass can pause the mailbox until the owner sets the next ACL;
