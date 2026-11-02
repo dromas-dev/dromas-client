@@ -5,11 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/fs"
-	"os"
-	"regexp"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/dromas-dev/dromas-client/protocol"
@@ -32,7 +28,7 @@ import (
 // or the mailbox's shorter one, whatever the server does with what it was sent. It needs only the identity, so it also
 // recovers a mailbox that lost its prekeys or its working key, and such a mailbox
 // needs no record of the numbers the lost machine used; one that lost its
-// allowed, blocked and policy files too takes them from the ACL its server
+// allowed and blocked files too takes them from the ACL its server
 // holds (adoptPending). The upload carries a pass by the statement's signer,
 // and the server then takes no pass by an older one.
 // [Mailbox.Receive] renews the prekey once it is more than a day old, or
@@ -652,52 +648,23 @@ func RecvWithin(lifetime time.Duration) time.Duration {
 	return lifetime - margin(lifetime) - renewTime(lifetime) - renewAt(lifetime)
 }
 
-// lifetimeGrammar is what a mailbox's prekey-lifetime file holds: a number of
-// seconds, alone on its line. Both clients hold the file to it.
-var lifetimeGrammar = regexp.MustCompile(`\A[1-9][0-9]{0,9}\n?\z`)
-
-// PrekeyLifetime is how long each new prekey of this mailbox is valid for: the
-// seconds its prekey-lifetime file names, or protocol.PrekeyLifetime when it
-// has none. A file that names anything but a lifetime from
-// MinPrekeyLifetime to protocol.PrekeyLifetime is an error, never read as the
-// default: the mailbox renews no prekey until it is put right.
+// PrekeyLifetime is how long each new prekey of this mailbox is valid for
+// (Options.PrekeyLifetime). The prekey in use keeps its own, and Receive renews
+// it at once if it was made for longer.
 func (b *Mailbox) PrekeyLifetime(ctx context.Context) (time.Duration, error) {
 	return reading(ctx, b, b.prekeyLifetime)
 }
 
 // prekeyLifetime is PrekeyLifetime, read under the reading or command that holds the mailbox.
 func (b *Mailbox) prekeyLifetime() (time.Duration, error) {
-	raw, err := os.ReadFile(b.path("prekey-lifetime"))
-	if errors.Is(err, fs.ErrNotExist) {
-		return protocol.PrekeyLifetime, nil
+	if b.prekeyLife != 0 {
+		return b.prekeyLife, nil
 	}
-	if err != nil {
-		return 0, err
-	}
-	if lifetimeGrammar.Match(raw) {
-		n, err := strconv.ParseInt(strings.TrimSuffix(string(raw), "\n"), 10, 64)
-		if d := time.Duration(n) * time.Second; err == nil && d >= MinPrekeyLifetime && d <= protocol.PrekeyLifetime {
-			return d, nil
-		}
-	}
-	return 0, fmt.Errorf("this mailbox's prekey-lifetime file names no lifetime: %s", lifetimeRule)
+	return protocol.PrekeyLifetime, nil
 }
 
 // lifetimeRule is what a prekey lifetime is, as a mailbox's owner is told it.
-var lifetimeRule = fmt.Sprintf("one is a number of seconds, alone on its line, from %d (%d hours) to %d (%d days)", int64(MinPrekeyLifetime/time.Second), int64(MinPrekeyLifetime/time.Hour), int64(protocol.PrekeyLifetime/time.Second), int64(protocol.PrekeyLifetime/(24*time.Hour)))
-
-// SetPrekeyLifetime writes the mailbox's prekey-lifetime file: each prekey made
-// from now on is valid for d, a whole number of seconds from
-// MinPrekeyLifetime to protocol.PrekeyLifetime. The prekey in use keeps its
-// own; Receive renews it at once if it was made for longer.
-func (b *Mailbox) SetPrekeyLifetime(ctx context.Context, d time.Duration) error {
-	if d < MinPrekeyLifetime || d > protocol.PrekeyLifetime || d%time.Second != 0 {
-		return fmt.Errorf("%v is no prekey lifetime: %s", d, lifetimeRule)
-	}
-	return b.lockedFinishedDo(ctx, func() error {
-		return writeFile(b.path("prekey-lifetime"), []byte(strconv.FormatInt(int64(d/time.Second), 10)+"\n"))
-	})
-}
+var lifetimeRule = fmt.Sprintf("one is a whole number of seconds from %d (%d hours) to %d (%d days)", int64(MinPrekeyLifetime/time.Second), int64(MinPrekeyLifetime/time.Hour), int64(protocol.PrekeyLifetime/time.Second), int64(protocol.PrekeyLifetime/(24*time.Hour)))
 
 // retiredGrace is how long after the server took a renewal the list of a
 // drain must be taken before the drain may delete retired prekeys

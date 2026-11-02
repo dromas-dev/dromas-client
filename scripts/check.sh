@@ -35,7 +35,7 @@ if [ -n "$darwin" ] && command -v brew > /dev/null; then
     if [ -d "$d" ]; then PATH="$d:$PATH"; fi
   done
 fi
-unset DROMAS_HOME DROMAS_MAILBOX DR_HOME DR_MAILBOX # no test may meet a real mailbox
+unset DROMAS_CONFIG DROMAS_PROFILE DR_HOME DR_MAILBOX # no test may meet a real mailbox
 
 # A test skips when a tool it runs is missing. A runner with every tool skips
 # nothing, so a skip fails `full`, but for these.

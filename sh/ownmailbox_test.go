@@ -22,14 +22,14 @@ import (
 
 // The script's mailbox is a directory of its own, by its own variables: its
 // default is not the Go client's, nor is a directory the Go client's
-// DROMAS_HOME names, and it refuses a directory holding the Go client's
+// DROMAS_CONFIG names, and it refuses a directory holding the Go client's
 // state file, at init and at every command that writes the mailbox, writing
 // nothing there (#331).
 func TestTheScriptRunsAMailboxOfItsOwnOnly(t *testing.T) {
 	t.Parallel()
 	need(t, append(scriptTools, "curl")...)
 	home := t.TempDir()
-	out, err := bash(t, []string{"HOME=" + home, "DR_HOME=", "DR_MAILBOX=", "XDG_CONFIG_HOME=", "DROMAS_HOME=" + filepath.Join(home, "go-mailbox")}, `printf '%s' "$DR"`)
+	out, err := bash(t, []string{"HOME=" + home, "DR_HOME=", "DR_MAILBOX=", "XDG_CONFIG_HOME=", "DROMAS_CONFIG=" + filepath.Join(home, "go-mailbox.toml")}, `printf '%s' "$DR"`)
 	if err != nil || out != filepath.Join(home, ".config", "dromas-sh", "default") {
 		t.Fatalf("the script's default mailbox: %q, %v", out, err)
 	}

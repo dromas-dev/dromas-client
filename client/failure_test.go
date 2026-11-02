@@ -174,8 +174,8 @@ func TestRestoreFromIdentity(t *testing.T) {
 	if r.Address() != b.Address() {
 		t.Fatal("the restored mailbox has another address")
 	}
-	if got, err := os.ReadFile(filepath.Join(dir, ".gitignore")); err != nil || string(got) != "*\n" {
-		t.Errorf("the restored mailbox's .gitignore: %q, %v", got, err)
+	if exists(filepath.Join(dir, ".gitignore")) {
+		t.Error("the restored mailbox wrote a .gitignore")
 	}
 	landAll(t, r)
 	p, err := r.Rekey(context.Background())
@@ -444,7 +444,7 @@ func TestLocalFaultLeavesTheMessage(t *testing.T) {
 			return func() { b.SetRecord(t, "seen-floor", nil) }
 		}},
 		{"a prekey file unreadable", func(t *testing.T, b *client.Mailbox, _ protocol.Address) func() {
-			k := filepath.Join(b.Dir(), "prekeys", "9.agekey")
+			k := filepath.Join(b.Dir(), "keys", "prekeys", "9.agekey")
 			if err := os.WriteFile(k, []byte("not an age key\n"), 0o600); err != nil {
 				t.Fatal(err)
 			}
@@ -462,7 +462,7 @@ func TestLocalFaultLeavesTheMessage(t *testing.T) {
 			if err == nil || (res != nil && (len(res.Refused) != 0 || len(res.Delivered) != 0)) {
 				t.Fatalf("drain on a broken mailbox: %v, %+v", err, res)
 			}
-			if q, _ := os.ReadDir(filepath.Join(b.Dir(), "refused")); len(q) != 0 || e.srv.Count(b.Address()) != 1 {
+			if q, _ := os.ReadDir(filepath.Join(b.Dir(), "mail", "refused")); len(q) != 0 || e.srv.Count(b.Address()) != 1 {
 				t.Fatal("a broken mailbox kept in refused/ or acked a message it could not judge")
 			}
 			fix()

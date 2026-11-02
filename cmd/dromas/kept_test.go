@@ -70,10 +70,10 @@ func TestOnlyRecvsOwnLineIsShown(t *testing.T) {
 	if err != nil || len(res.Delivered) != 3 || len(res.Held) != 1 {
 		t.Fatalf("%+v %v", res, err)
 	}
-	t.Setenv("DROMAS_HOME", b.Dir())
+	useMailbox(t, b.Dir())
 	t.Setenv("DROMAS_SERVER_URL", srv.URL)
 	for _, d := range res.Delivered {
-		kept := must(t, filepath.Join(b.Dir(), "inbox", d.ID+".json"))
+		kept := must(t, filepath.Join(b.Dir(), "mail", "inbox", d.ID+".json"))
 		var out bytes.Buffer
 		if err := do(ctx, "inbox show", []string{d.ID}, strings.NewReader(""), &out, io.Discard); err != nil || unseen(out.String()) || out.String() != `{"type":"message","id":"`+d.ID+`","envelope":`+string(kept)+"}\n" {
 			t.Errorf("show of recv's own line: %v, printed %+q, kept %+q", err, out.String(), kept)
@@ -81,7 +81,7 @@ func TestOnlyRecvsOwnLineIsShown(t *testing.T) {
 	}
 	// Each tag character as escapeUnseen writes it, put back raw.
 	raw := regexp.MustCompile(`[\\]udb40[\\]udc([0-9a-f]{2})`)
-	inbox, held := filepath.Join(b.Dir(), "inbox", res.Delivered[0].ID+".json"), filepath.Join(b.Dir(), "held", res.Held[0].ID+".json")
+	inbox, held := filepath.Join(b.Dir(), "mail", "inbox", res.Delivered[0].ID+".json"), filepath.Join(b.Dir(), "mail", "held", res.Held[0].ID+".json")
 	bare := func(kept []byte) []byte {
 		b := raw.ReplaceAllFunc(kept, func(m []byte) []byte {
 			n, _ := strconv.ParseUint(string(m[len(m)-2:]), 16, 8)
@@ -160,12 +160,12 @@ func TestShowHoldsTheFileToTheLineRecvKept(t *testing.T) {
 	if err != nil || len(res.Held) != 1 {
 		t.Fatalf("%+v %v", res, err)
 	}
-	held := filepath.Join(b.Dir(), "held", res.Held[0].ID+".json")
+	held := filepath.Join(b.Dir(), "mail", "held", res.Held[0].ID+".json")
 	line := must(t, held)
-	t.Setenv("DROMAS_HOME", b.Dir())
+	useMailbox(t, b.Dir())
 	t.Setenv("DROMAS_SERVER_URL", srv.URL)
 	id := res.Held[0].ID
-	inbox := filepath.Join(b.Dir(), "inbox", id+".json")
+	inbox := filepath.Join(b.Dir(), "mail", "inbox", id+".json")
 	for _, c := range []struct{ name, kept string }{
 		{"empty", ""},
 		{"cut short", string(line[:len(line)/2])},

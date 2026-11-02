@@ -33,7 +33,7 @@ func TestAMailboxRecordsItsFormatAtItsFirstWrite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if st.Format != 1 || st.Paths["mailbox"] != dir || st.Paths["state"] != filepath.Join(dir, "state") || st.Paths["prekey_lifetime"] != filepath.Join(dir, "prekey-lifetime") {
+	if st.Format != 1 || st.Paths["base"] != dir || st.Paths["state"] != filepath.Join(dir, "state") || st.Paths["prekeys"] != filepath.Join(dir, "keys", "prekeys") {
 		t.Fatalf("status: format %d, paths %v", st.Format, st.Paths)
 	}
 
@@ -79,7 +79,7 @@ func TestANewerFormatIsRefusedByEveryEntryWritingNothing(t *testing.T) {
 	}
 	newer := client.ClientFormat() + 1
 	client.SetFormat(t, b.Dir(), []byte(strconv.Itoa(newer)))
-	if err := os.Remove(filepath.Join(b.Dir(), "sent")); err != nil {
+	if err := os.Remove(filepath.Join(b.Dir(), "mail", "sent")); err != nil {
 		t.Fatal(err)
 	}
 	before := snapshot(b.Dir())
@@ -92,7 +92,7 @@ func TestANewerFormatIsRefusedByEveryEntryWritingNothing(t *testing.T) {
 		if got := changes(before, snapshot(b.Dir())); got != "nothing" {
 			t.Fatalf("%s on a newer format changed %s", name, got)
 		}
-		if _, err := os.Stat(filepath.Join(b.Dir(), "sent")); !errors.Is(err, os.ErrNotExist) {
+		if _, err := os.Stat(filepath.Join(b.Dir(), "mail", "sent")); !errors.Is(err, os.ErrNotExist) {
 			t.Fatalf("%s on a newer format made sent/: %v", name, err)
 		}
 	}

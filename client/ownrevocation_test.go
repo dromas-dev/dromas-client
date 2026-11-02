@@ -328,7 +328,6 @@ func lockingCommands(ctx context.Context, a, b *client.Mailbox, rec *protocol.Re
 			return a.SetPolicy(ctx, client.Policy{Unknown: client.LandInbox, Server: client.AdmitAll})
 		}},
 		{"RebuildAllowed", func() error { _, err := a.RebuildAllowed(ctx); return err }},
-		{"SetPrekeyLifetime", func() error { return a.SetPrekeyLifetime(ctx, protocol.PrekeyLifetime) }},
 	}
 	return refused, run
 }
@@ -339,7 +338,7 @@ func signed(t *testing.T, a *client.Mailbox) []string {
 	t.Helper()
 	var names []string
 	for _, d := range []string{"work", "prekeys"} {
-		es, err := os.ReadDir(filepath.Join(a.Dir(), d))
+		es, err := os.ReadDir(filepath.Join(a.Dir(), "keys", d))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -586,8 +585,8 @@ func TestInitOfAMailboxThatHoldsItsOwnRevocationSignsNothing(t *testing.T) {
 		return false
 	})
 	_, err = client.Init(ctx, dir, e.opts())
-	made, _ := filepath.Glob(filepath.Join(dir, "work", "*"))
-	stmts, _ := filepath.Glob(filepath.Join(dir, "prekeys", "*"))
+	made, _ := filepath.Glob(filepath.Join(dir, "keys", "work", "*"))
+	stmts, _ := filepath.Glob(filepath.Join(dir, "keys", "prekeys", "*"))
 	var gone *client.RevokedError
 	if !errors.As(err, &gone) || !gone.Own || calls.Load() != 0 || len(made) != 0 || len(stmts) != 0 {
 		t.Errorf("init of a mailbox that holds its own revocation: %v; %d requests; it made %v and %v", err, calls.Load(), made, stmts)
@@ -689,7 +688,7 @@ func TestAFastClockDeletesNoKeyAMessageWaitsFor(t *testing.T) {
 	if _, err := b.Rekey(ctx); err != nil {
 		t.Fatal(err)
 	}
-	keys, _ := filepath.Glob(filepath.Join(b.Dir(), "prekeys", "*.agekey"))
+	keys, _ := filepath.Glob(filepath.Join(b.Dir(), "keys", "prekeys", "*.agekey"))
 	off := 70 * 24 * time.Hour
 	fast, err := client.Open(b.Dir(), e.skewed(&off))
 	if err != nil {
@@ -698,7 +697,7 @@ func TestAFastClockDeletesNoKeyAMessageWaitsFor(t *testing.T) {
 	if _, err := fast.Receive(ctx); err == nil {
 		t.Fatal("a drain at a clock 70 days ahead went through")
 	}
-	if after, _ := filepath.Glob(filepath.Join(b.Dir(), "prekeys", "*.agekey")); len(after) < len(keys) {
+	if after, _ := filepath.Glob(filepath.Join(b.Dir(), "keys", "prekeys", "*.agekey")); len(after) < len(keys) {
 		t.Fatalf("%d prekeys before the drain at a fast clock, %d after", len(keys), len(after))
 	}
 	off = 0

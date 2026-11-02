@@ -3,8 +3,6 @@ package client_test
 import (
 	"context"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -180,51 +178,27 @@ func TestAPrekeyWithNoRecordIsRenewedAndItsKeysKept(t *testing.T) {
 	}
 }
 
-// A prekey-lifetime file that names no lifetime is never read as the
-// default: no prekey is signed, a receive that is due to renew fails, and
-// status says why. One that names one, with or without its line feed, is
-// read.
-func TestALifetimeOutOfFormIsNeverTheDefault(t *testing.T) {
+// A lifetime that is out of range, or not a whole number of seconds, is refused
+// before anything of the mailbox is read, and one in range is what it says.
+func TestALifetimeOutOfRangeIsRefused(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
-	for _, raw := range []string{"", "\n", "abc\n", "0\n", "3600\n", "18000\n", "21599\n", "691201\n", "2851200\n", "090000\n", " 90000\n", "90000 \n", "90000\n\n", "90000\r\n", "9e4\n", "+90000\n", "1d1h\n", "99999999999\n"} {
-		e := newEnv(t)
-		b := e.mailbox()
-		n := numberOf(t, b)
-		if err := os.WriteFile(filepath.Join(b.Dir(), "prekey-lifetime"), []byte(raw), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := b.PrekeyLifetime(t.Context()); err == nil {
-			t.Errorf("%q was read as a lifetime", raw)
-		}
-		if _, err := b.Rekey(ctx); err == nil || numberOf(t, b) != n {
-			t.Errorf("%q: a prekey was published: %v", raw, err)
-		}
-		e.clock.Add(25 * time.Hour)
-		if res, err := b.Receive(ctx); err != nil || res.RenewErr == nil || !strings.Contains(res.RenewErr.Error(), "prekey-lifetime") || numberOf(t, b) != n {
-			t.Errorf("%q: a receive due to renew: %+v, %v", raw, res, err)
-		}
-		if st, err := b.Status(t.Context()); err != nil || st.PrekeyLifetime != 0 || !strings.Contains(strings.Join(st.Attention, " "), "prekey lifetime cannot be read") {
-			t.Errorf("%q: status %+v, %v", raw, st, err)
+	e := newEnv(t)
+	dir := e.mailbox().Dir()
+	for _, d := range []time.Duration{client.MinPrekeyLifetime - time.Second, protocol.PrekeyLifetime + time.Second, client.MinPrekeyLifetime + time.Millisecond} {
+		opt := e.opts()
+		opt.PrekeyLifetime = d
+		if _, err := client.Open(dir, opt); err == nil || !strings.Contains(err.Error(), "no prekey lifetime") {
+			t.Errorf("a lifetime of %v: %v", d, err)
 		}
 	}
-	for raw, want := range map[string]time.Duration{"21600": client.MinPrekeyLifetime, "21600\n": client.MinPrekeyLifetime, "691200\n": protocol.PrekeyLifetime, "172800\n": 48 * time.Hour} {
-		b := newEnv(t).mailbox()
-		if err := os.WriteFile(filepath.Join(b.Dir(), "prekey-lifetime"), []byte(raw), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		if got, err := b.PrekeyLifetime(t.Context()); err != nil || got != want {
-			t.Errorf("%q: %v, %v", raw, got, err)
-		}
+	opt := e.opts()
+	opt.PrekeyLifetime = client.MinPrekeyLifetime
+	b, err := client.Open(dir, opt)
+	if err != nil {
+		t.Fatal(err)
 	}
-	b := newEnv(t).mailbox()
-	for _, d := range []time.Duration{0, client.MinPrekeyLifetime - time.Second, protocol.PrekeyLifetime + time.Second, client.MinPrekeyLifetime + time.Millisecond} {
-		if err := b.SetPrekeyLifetime(ctx, d); err == nil {
-			t.Errorf("a lifetime of %v was set", d)
-		}
-	}
-	if exists(filepath.Join(b.Dir(), "prekey-lifetime")) {
-		t.Fatal("a refused lifetime was written")
+	if got, err := b.PrekeyLifetime(t.Context()); err != nil || got != client.MinPrekeyLifetime {
+		t.Errorf("%v, %v", got, err)
 	}
 }
 

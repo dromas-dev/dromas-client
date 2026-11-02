@@ -316,7 +316,7 @@ func partwayShort(path string, a protocol.Address) string {
 func keysOf(dir string) []string {
 	var names []string
 	for _, d := range []string{"work", "prekeys"} {
-		es, _ := os.ReadDir(filepath.Join(dir, d))
+		es, _ := os.ReadDir(filepath.Join(dir, "keys", d))
 		for _, e := range es {
 			names = append(names, d+"/"+e.Name())
 		}

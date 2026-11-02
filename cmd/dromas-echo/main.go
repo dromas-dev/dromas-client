@@ -51,8 +51,7 @@ is answered, signed, with what was checked and the body it carried.
   --signer    identity (the default), where the identity signs, or
               certificate, where a working key it certifies signs: for good,
               once the mailbox is registered or renewed so
-  --dir       the mailbox's state directory, which belongs in memory (a tmpfs):
-              $DROMAS_HOME, or ${XDG_CONFIG_HOME:-~/.config}/dromas/${DROMAS_MAILBOX:-default}
+  --dir       the mailbox's base directory, which belongs in memory (a tmpfs)
 
 The server is $DROMAS_SERVER_URL, or https://dromas.dev.
 `
@@ -88,16 +87,9 @@ func run(ctx context.Context, args []string, logw io.Writer) error {
 	if err := fl.Parse(args); err != nil {
 		return err
 	}
-	if *identity == "" || fl.NArg() != 0 || *signer != client.SignerIdentity && *signer != client.SignerCertificate {
+	if *identity == "" || *dir == "" || fl.NArg() != 0 || *signer != client.SignerIdentity && *signer != client.SignerCertificate {
 		fl.Usage()
 		return flag.ErrHelp
-	}
-	if *dir == "" {
-		d, err := client.Dir()
-		if err != nil {
-			return err
-		}
-		*dir = d
 	}
 	opt := client.Options{Base: os.Getenv("DROMAS_SERVER_URL"), WorkingKey: *signer == client.SignerCertificate}
 	logger := log.New(logw, "", log.LstdFlags|log.LUTC)

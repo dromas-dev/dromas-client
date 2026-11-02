@@ -661,7 +661,7 @@ func TestASentMsgIDIsTheEnvelopes(t *testing.T) {
 	if err != nil || len(sent) != 1 || sent[0].MsgID != own {
 		t.Fatalf("flush of an entry renamed: %+v, %v; want the envelope's msg_id %s", sent, err, own)
 	}
-	if !exists(filepath.Join(a.Dir(), "sent", b.Address().String()+"."+own+".json")) || exists(filepath.Join(a.Dir(), "sent", b.Address().String()+"."+other+".json")) {
+	if !exists(filepath.Join(a.Dir(), "mail", "sent", b.Address().String()+"."+own+".json")) || exists(filepath.Join(a.Dir(), "mail", "sent", b.Address().String()+"."+other+".json")) {
 		t.Error("sent/ keeps the message under the entry's name, not its envelope's msg_id")
 	}
 	if res := receive(t, b); len(res.Delivered) != 1 || res.Delivered[0].Envelope.MsgID != own {

@@ -408,3 +408,13 @@ func (b *Mailbox) SetRecord(t *testing.T, name string, v []byte) {
 // which would make what a mailbox has: for a test that looks at a directory as a
 // command left it.
 func RecordsAt(dir string) (map[string][]byte, error) { return (&Mailbox{dir: dir}).Records() }
+
+// SetPrekeyLifetime is what Options.PrekeyLifetime says, for a mailbox already
+// open.
+func (b *Mailbox) SetPrekeyLifetime(_ context.Context, d time.Duration) error {
+	if d < MinPrekeyLifetime || d > protocol.PrekeyLifetime || d%time.Second != 0 {
+		return fmt.Errorf("%v is no prekey lifetime: %s", d, lifetimeRule)
+	}
+	b.prekeyLife = d
+	return nil
+}

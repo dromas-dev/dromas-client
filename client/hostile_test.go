@@ -76,7 +76,7 @@ func TestARefusalNeverQuotesTheMessage(t *testing.T) {
 		if kept, _ := stateOf(b, "refused/"+r.ID+".reason"); string(kept) != r.Code+": "+r.Reason {
 			t.Errorf("the mailbox keeps %q as why %s was refused", kept, r.ID)
 		}
-		if !exists(filepath.Join(b.Dir(), "refused", r.ID+".json")) {
+		if !exists(filepath.Join(b.Dir(), "mail", "refused", r.ID+".json")) {
 			t.Errorf("%s was not kept in refused/", r.ID)
 		}
 	}
@@ -356,7 +356,7 @@ func TestRefusedKeepsNoServerTextInTheClear(t *testing.T) {
 	}
 	read := func(id string) map[string]any {
 		t.Helper()
-		data, err := os.ReadFile(filepath.Join(b.Dir(), "refused", id+".json")) //nolint:gosec // the test's own directory
+		data, err := os.ReadFile(filepath.Join(b.Dir(), "mail", "refused", id+".json")) //nolint:gosec // the test's own directory
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -400,7 +400,7 @@ func TestRefusedKeepsNoServerTextInTheClear(t *testing.T) {
 	old := strings.Repeat("e", 64)
 	// One whose findings and reason are not of their form lists none either.
 	j := `{"at":"` + injected + `","signed_by":"` + injected + `","claims_identity":"` + injected + `","certificate_serial":1.5,"certificate_began":"` + injected + `","certificate_ends":"` + injected + `","sent_at":"` + injected + `","msg_id":"` + injected + `"}`
-	if err := os.WriteFile(filepath.Join(b.Dir(), "refused", old+".json"), []byte(`{"id":"`+injected+`","from":"`+injected+`","received_at":"`+injected+`","ciphertext":"QUJD","judged":`+j+`}`), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(b.Dir(), "mail", "refused", old+".json"), []byte(`{"id":"`+injected+`","from":"`+injected+`","received_at":"`+injected+`","ciphertext":"QUJD","judged":`+j+`}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if qs, err := b.RefusedMessages(t.Context()); err != nil || len(qs) != 3 || !slices.Contains(qs, client.RefusedMessage{ID: old, Code: "unknown"}) {
@@ -410,7 +410,7 @@ func TestRefusedKeepsNoServerTextInTheClear(t *testing.T) {
 	// writes: a file that carries findings of their form lists none of them
 	// (#280).
 	planted := `{"at":"2026-10-21T00:00:00Z","signed_by":"` + a.Address().String() + `","certificate_serial":7,"sent_at":"2026-10-21T00:00:00Z","msg_id":"` + strings.Repeat("0", 8) + "-0000-4000-8000-" + strings.Repeat("0", 12) + `"}`
-	if err := os.WriteFile(filepath.Join(b.Dir(), "refused", old+".json"), []byte(`{"id":"`+old+`","ciphertext":"QUJD","judged":`+planted+`}`), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(b.Dir(), "mail", "refused", old+".json"), []byte(`{"id":"`+old+`","ciphertext":"QUJD","judged":`+planted+`}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if qs, err := b.RefusedMessages(t.Context()); err != nil || len(qs) != 3 || !slices.Contains(qs, client.RefusedMessage{ID: old, Code: "unknown"}) {
@@ -422,7 +422,7 @@ func TestRefusedKeepsNoServerTextInTheClear(t *testing.T) {
 	other := strings.Repeat("d", 64)
 	at := `"2026-10-21T00:00:00Z"`
 	for _, rec := range []string{`{"RECEIVED_AT":` + at + `}`, `{"received_at":` + at + `,"received_at":` + at + `}`} {
-		f := filepath.Join(b.Dir(), "refused", other+".json")
+		f := filepath.Join(b.Dir(), "mail", "refused", other+".json")
 		if err := os.WriteFile(f, []byte(rec), 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -458,7 +458,7 @@ func TestRefusedKeepsNoServerTextInTheClear(t *testing.T) {
 	if gone, err := b.RemoveRefused(ctx, nil); err != nil || len(gone) != 1 || gone[0] != second.Refused[0].ID {
 		t.Fatalf("RemoveRefused all: %v, %v", gone, err)
 	}
-	left, _ := filepath.Glob(filepath.Join(b.Dir(), "refused", "*"))
+	left, _ := filepath.Glob(filepath.Join(b.Dir(), "mail", "refused", "*"))
 	if st, _ := b.Status(t.Context()); len(left) != 0 || len(st.Attention) != 0 {
 		t.Fatalf("after: %v, %+v", left, st.Attention)
 	}
@@ -525,8 +525,8 @@ func TestAFetchIsTheSizeItsListGives(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), "bytes of ciphertext the list gives") {
 				t.Fatalf("the drain: %v", err)
 			}
-			q, _ := filepath.Glob(filepath.Join(b.Dir(), "refused", "*"))
-			in, _ := filepath.Glob(filepath.Join(b.Dir(), "inbox", "*"))
+			q, _ := filepath.Glob(filepath.Join(b.Dir(), "mail", "refused", "*"))
+			in, _ := filepath.Glob(filepath.Join(b.Dir(), "mail", "inbox", "*"))
 			if len(q) != 0 || len(in) != 0 || e.srv.Count(b.Address()) != 1 {
 				t.Fatalf("refused %d, delivered %d, %d left on the server", len(q), len(in), e.srv.Count(b.Address()))
 			}

@@ -191,7 +191,7 @@ func TestForgeries(t *testing.T) {
 		if bytes.Contains(d.Line, []byte("\n")) || bytes.Contains(d.Line, []byte(c.Address().String())) || bytes.Contains(d.Line, []byte("identity")) {
 			t.Fatalf("the line to print is not the checked envelope alone: %s", d.Line)
 		}
-		if in, _ := os.ReadFile(filepath.Join(b.Dir(), "inbox", d.ID+".json")); !bytes.Equal(in, d.Line) {
+		if in, _ := os.ReadFile(filepath.Join(b.Dir(), "mail", "inbox", d.ID+".json")); !bytes.Equal(in, d.Line) {
 			t.Fatal("inbox/ does not hold the checked line")
 		}
 		if pinnedPeer(b, c.Address()) {
@@ -442,10 +442,10 @@ func TestForgeries(t *testing.T) {
 		})
 		res := receive(t, b)
 		refusedFor(t, res, client.RefusedID, "not the SHA-256")
-		if res.Refused[0].ID != realID || !exists(filepath.Join(b.Dir(), "refused", realID+".json")) {
+		if res.Refused[0].ID != realID || !exists(filepath.Join(b.Dir(), "mail", "refused", realID+".json")) {
 			t.Fatalf("kept in refused/ as %s, not by the ciphertext's hash", res.Refused[0].ID)
 		}
-		if exists(filepath.Join(b.Dir(), "inbox", fake+".json")) || exists(filepath.Join(b.Dir(), "refused", fake+".json")) {
+		if exists(filepath.Join(b.Dir(), "mail", "inbox", fake+".json")) || exists(filepath.Join(b.Dir(), "mail", "refused", fake+".json")) {
 			t.Fatal("a file was named by the server's id")
 		}
 	})

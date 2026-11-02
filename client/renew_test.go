@@ -937,7 +937,9 @@ func TestAServerThatFailsEveryRenewalGetsEachKeyOnce(t *testing.T) {
 	// clock lets it (PROTOCOL.md §12.4), and this mailbox cannot tell a lost
 	// pass from a clock far ahead. One whose deletion time came before that
 	// pass went then.
-	stem := func(l lease) string { return filepath.Join(b.Dir(), "prekeys", strconv.FormatUint(l.p.Serial, 10)) }
+	stem := func(l lease) string {
+		return filepath.Join(b.Dir(), "keys", "prekeys", strconv.FormatUint(l.p.Serial, 10))
+	}
 	lastPass := e.clock.Now().Add(-time.Duration(days-ended+1) * 24 * time.Hour)
 	var waiting []lease
 	for _, key := range order {

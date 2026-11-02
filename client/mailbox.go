@@ -92,19 +92,37 @@ type Options struct {
 	// use. Another is for a test, and must be of a request's form
 	// (protocol.ParseVersion).
 	Version string
+	// Layout says where the parts of the mailbox are that need not be under its
+	// base directory.
+	Layout Layout
+	// ConfigFile is the config file these options came from, which [Status]
+	// names; empty if none did.
+	ConfigFile string
+	// Policy is what its owner set of the mailbox's policy: a field left empty
+	// takes what SetPolicy or a restore recorded, or the default ([Mailbox.Policy]).
+	Policy Policy
+	// PrekeyLifetime is how long each new prekey is valid for, from
+	// MinPrekeyLifetime to protocol.PrekeyLifetime, in whole seconds; zero is
+	// protocol.PrekeyLifetime.
+	PrekeyLifetime time.Duration
 	// Versions, if not nil, keeps what every mailbox made with these options
 	// meets of its version, for the caller to say once its command is done
 	// ([Versions]). Otherwise each Mailbox keeps its own.
 	Versions *Versions
 }
 
-// Mailbox is one mailbox: its state directory and the server it talks to. It is
+// Mailbox is one mailbox: its files and the server it talks to. It is
 // safe for concurrent use: a command or reading of one goroutine waits for
 // another's, as one of another process does.
 type Mailbox struct {
-	dir  string
-	base string
-	http *http.Client
+	// dir is the base directory, and layout where the rest is.
+	dir        string
+	layout     Layout
+	configFile string
+	policySet  Policy
+	prekeyLife time.Duration
+	base       string
+	http       *http.Client
 	// stall is set where http is the default client, whose requests are
 	// bounded by requestTimeout (stall); one given is used as it is.
 	stall bool
@@ -152,11 +170,10 @@ type Mailbox struct {
 	met     *Versions
 }
 
-// Open opens an existing mailbox's state directory, reading its identity alone
-// and guarding its directory (guardDir): the mailbox's format is read, and its
-// other directories made, by each command, once it has the state file
-// (bringForward, makeDirs). A directory
-// holding only the identity, a mailbox restored from its backup, gets the
+// Open opens an existing mailbox by its base directory, reading its identity
+// alone: the mailbox's format is read, and its other directories made, by each
+// command, once it has the state file (bringForward, makeDirs). A mailbox
+// holding only the identity, one restored from its backup, gets the
 // mailbox's other directories at its first command that writes it;
 // [Mailbox.Rekey] then gives it a working key and a prekey, and the lists its
 // server's ACL holds when it has none of its own.
@@ -168,9 +185,6 @@ func Open(dir string, opt Options) (*Mailbox, error) {
 	if err := b.loadIdentity(); err != nil {
 		return nil, err
 	}
-	if err := b.guardDir(); err != nil {
-		return nil, err
-	}
 	return b, nil
 }
 
@@ -180,7 +194,19 @@ func Open(dir string, opt Options) (*Mailbox, error) {
 // HTTP client takes every request through one transport (newTransport) and
 // follows no redirect (followNone).
 func newMailbox(dir string, opt Options) (*Mailbox, error) {
-	b := &Mailbox{dir: dir, base: strings.TrimRight(opt.Base, "/"), http: opt.HTTPClient, now: opt.Now, identityType: opt.IdentityType, workingKey: opt.WorkingKey, waiting: opt.Waiting, slot: make(chan struct{}, 1)}
+	// No directory is a mailbox that keeps nothing ([Publish], [Revoke]).
+	if dir != "" {
+		if err := CheckLayout(dir, opt.Layout); err != nil {
+			return nil, err
+		}
+	}
+	if err := opt.Policy.checkSet(); err != nil {
+		return nil, err
+	}
+	if d := opt.PrekeyLifetime; d != 0 && (d < MinPrekeyLifetime || d > protocol.PrekeyLifetime || d%time.Second != 0) {
+		return nil, fmt.Errorf("%v is no prekey lifetime: %s", d, lifetimeRule)
+	}
+	b := &Mailbox{dir: dir, layout: opt.Layout.resolved(dir), configFile: opt.ConfigFile, policySet: opt.Policy, prekeyLife: opt.PrekeyLifetime, base: strings.TrimRight(opt.Base, "/"), http: opt.HTTPClient, now: opt.Now, identityType: opt.IdentityType, workingKey: opt.WorkingKey, waiting: opt.Waiting, slot: make(chan struct{}, 1)}
 	if b.base == "" {
 		b.base = DefaultBase
 	}
@@ -263,6 +289,9 @@ func newTransport(rt http.RoundTripper) http.RoundTripper {
 // subdomain of it, whatever its scheme or port. The script's curl follows none either.
 func followNone(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 
+// CheckServerURL holds s to what [Options.Base] takes (checkServerURL).
+func CheckServerURL(s string) error { return checkServerURL(s) }
+
 // checkServerURL holds the URL of the server a mailbox calls to https, or to http only for a server on this
 // machine (onThisMachine). A pass is a bearer credential for the minutes it
 // has left, and a lookup names the address it asks about, so neither
@@ -313,12 +342,8 @@ func (b *Mailbox) Destination(s string) (protocol.Address, error) {
 // Identity returns the mailbox's identity.
 func (b *Mailbox) Identity() *protocol.Identity { return b.id }
 
-// Dir returns the mailbox's state directory.
+// Dir returns the mailbox's base directory.
 func (b *Mailbox) Dir() string { return b.dir }
-
-func (b *Mailbox) path(elem ...string) string {
-	return filepath.Join(append([]string{b.dir}, elem...)...)
-}
 
 // Init creates a mailbox in dir, or finishes an init that stopped half way, or
 // restores a mailbox from its identity alone: it makes the identity if it is
@@ -339,10 +364,7 @@ func Init(ctx context.Context, dir string, opt Options) (*Mailbox, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return nil, err
-	}
-	if err := b.guardDir(); err != nil {
+	if err := makeDir(dir); err != nil {
 		return nil, err
 	}
 	// Under the mailbox's lock from its identity on, as every command that writes
@@ -366,6 +388,9 @@ func (b *Mailbox) init(ctx context.Context) (*Mailbox, error) {
 	}
 	if t := b.identityType; t != "" && t != b.id.Type() {
 		return nil, fmt.Errorf("this mailbox's identity is already a key of the type %s: its address is that key's, so its type cannot change", b.id.Type())
+	}
+	if err := b.bindState(); err != nil {
+		return nil, err
 	}
 	if err := b.finished(); err != nil {
 		return nil, err
@@ -520,43 +545,15 @@ func (b *Mailbox) recordTaken(n uint64, pass string, at taken) error {
 	return b.dropWork(n)
 }
 
-// guardDir makes the mailbox's directory its owner's alone (private) and gives
-// it its .gitignore, at every open: a mailbox restored from its identity alone,
-// or a directory made before the mailbox by someone else, is held to it too.
-// Both are the directory's own, outside any format (client/format.go).
-func (b *Mailbox) guardDir() error {
-	if err := private(b.dir); err != nil {
-		return fmt.Errorf("the mailbox's directory, made its owner's alone: %w", err)
-	}
-	// The directory ignores itself, wherever it is and whatever made it: a
-	// mailbox restored from its identity alone too (#292). Written only where its
-	// bytes differ, since every command opens the mailbox.
-	if got, err := os.ReadFile(b.path(".gitignore")); err != nil || string(got) != "*\n" {
-		return writeFile(b.path(".gitignore"), []byte("*\n"))
-	}
-	return nil
-}
-
-// makeDirs makes the mailbox's directories that are missing, and each its
-// owner's alone (private), at every command that writes the mailbox, once its
-// format is this client's (hold): a mailbox restored from its identity alone,
-// or a directory made before the mailbox by someone else, is held to it too.
+// makeDirs makes the mailbox's directories that are missing, at every command
+// that writes the mailbox, once its format is this client's (hold): a mailbox
+// restored from its identity alone gets them too. One that exists is left as it
+// is (makeDir).
 func (b *Mailbox) makeDirs() error {
-	made := false
 	for _, d := range []string{"work", "prekeys", "inbox", "held", "refused", "outbox", "sent"} {
-		if _, err := os.Stat(b.path(d)); err != nil {
-			if err := os.MkdirAll(b.path(d), 0o700); err != nil {
-				return err
-			}
-			made = true
+		if err := makeDir(b.path(d)); err != nil {
+			return err
 		}
-		if err := private(b.path(d)); err != nil {
-			return fmt.Errorf("the mailbox's %s/, made its owner's alone: %w", d, err)
-		}
-	}
-	// A new directory is there after a crash only once its parent is synced.
-	if made {
-		return syncDir(b.dir)
 	}
 	return nil
 }
@@ -594,10 +591,13 @@ func (b *Mailbox) newIdentityKey() error {
 	if err != nil {
 		return err
 	}
+	if err := makeDir(filepath.Dir(b.path("identity"))); err != nil {
+		return err
+	}
 	if err := writeFile(b.path("identity.pub"), ssh.MarshalAuthorizedKey(sshPub)); err != nil {
 		return err
 	}
-	return writeFile(b.path("identity"), pem.EncodeToMemory(block))
+	return writeKey(b.path("identity"), pem.EncodeToMemory(block))
 }
 
 // loadIdentity reads the identity key, and writes identity.doc and address
@@ -606,6 +606,9 @@ func (b *Mailbox) loadIdentity() error {
 	pemBytes, err := os.ReadFile(b.path("identity"))
 	if err != nil {
 		return fmt.Errorf("no mailbox here: %w", err)
+	}
+	if err := checkKeyFile(b.path("identity")); err != nil {
+		return err
 	}
 	raw, err := ssh.ParseRawPrivateKey(pemBytes)
 	var missing *ssh.PassphraseMissingError
@@ -627,6 +630,9 @@ func (b *Mailbox) loadIdentity() error {
 		return err
 	}
 	b.identity, b.id = sign.NewIdentity(signer, b.finished), id
+	if err := makeDir(b.dir); err != nil {
+		return err
+	}
 	if doc, err := os.ReadFile(b.path("identity.doc")); err != nil || !bytes.Equal(doc, id.Document()) {
 		if err := writeFile(b.path("identity.doc"), id.Document()); err != nil {
 			return err
@@ -847,7 +853,7 @@ func newAgeKey(name string, now time.Time) error {
 	if err != nil {
 		return err
 	}
-	return writeFile(name, fmt.Appendf(nil, "# created: %s\n# public key: %s\n%s\n", now.Format(time.RFC3339), k.Recipient().String(), k.String()))
+	return writeKey(name, fmt.Appendf(nil, "# created: %s\n# public key: %s\n%s\n", now.Format(time.RFC3339), k.Recipient().String(), k.String()))
 }
 
 // keyType returns the type of the key in an age key file, or "" if it holds
@@ -864,6 +870,9 @@ func keyType(name string) protocol.KeyType {
 }
 
 func readAgeKeys(name string) ([]age.Identity, error) {
+	if err := checkKeyFile(name); err != nil {
+		return nil, err
+	}
 	f, err := os.Open(name) //nolint:gosec // a path inside the mailbox's own directory
 	if err != nil {
 		return nil, err

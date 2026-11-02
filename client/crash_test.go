@@ -120,7 +120,7 @@ func crash(t *testing.T, e *env, b *client.Mailbox, command, step string, to pro
 // there.
 func inbox(t *testing.T, b *client.Mailbox) []string {
 	t.Helper()
-	names, err := filepath.Glob(filepath.Join(b.Dir(), "inbox", "*.json"))
+	names, err := filepath.Glob(filepath.Join(b.Dir(), "mail", "inbox", "*.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -697,7 +697,7 @@ func TestASendKilledAtEachStepIsReadOnce(t *testing.T) {
 			if left, _ := filepath.Glob(filepath.Join(x.Dir(), "outbox", "*.P")); len(left) != 0 {
 				t.Fatalf("the outbox keeps %v", left)
 			}
-			if sent, _ := filepath.Glob(filepath.Join(x.Dir(), "sent", "*.json")); len(sent) != 1 {
+			if sent, _ := filepath.Glob(filepath.Join(x.Dir(), "mail", "sent", "*.json")); len(sent) != 1 {
 				t.Fatalf("sent/ keeps %v", sent)
 			}
 			whole(t, e, b, x, "sent by a process killed on its way")

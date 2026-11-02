@@ -379,7 +379,7 @@ func TestNoAnswerAboutASenderStopsTheDrain(t *testing.T) {
 	if err == nil || len(res.Delivered) != 0 || len(res.Refused) != 0 || e.srv.Count(b.Address()) != 1 {
 		t.Fatalf("a drain with no answer: %v, %+v, %d left on the server", err, res, e.srv.Count(b.Address()))
 	}
-	if q, _ := os.ReadDir(filepath.Join(b.Dir(), "refused")); len(q) != 0 {
+	if q, _ := os.ReadDir(filepath.Join(b.Dir(), "mail", "refused")); len(q) != 0 {
 		t.Fatal("a message nobody could judge was kept in refused/")
 	}
 	// Nor has a 2xx whose body is no mailbox, as PROTOCOL.md §3.3 reads one.

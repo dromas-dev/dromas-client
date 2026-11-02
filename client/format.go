@@ -15,9 +15,9 @@ import (
 // the oldest, so that bringing it forward reads every older layout right. So
 // each step that changes the layout recognises the old form from the files
 // themselves, and does nothing where it finds none. The identity, the address
-// and identity document Open derives from it, and the directory's .gitignore
-// are outside every format: Open reads and writes them before the format is
-// read, so no format moves them.
+// and the identity document Open derives from it are outside every format: Open
+// reads and writes them before the format is read, so no format moves them.
+// Where a part of the mailbox is, is its Layout's and no format's.
 const (
 	bucketMeta = "meta"
 	keyFormat  = "format"
@@ -120,4 +120,38 @@ func (b *Mailbox) bringForward() error {
 	}
 	b.format = n
 	return nil
+}
+
+// keyAddress is the address a state file belongs to, in its meta bucket.
+const keyAddress = "address"
+
+// stateIsOurs refuses a state file that recorded another identity's address:
+// what it holds of pins, replays, prekeys and renewals is that mailbox's, and an
+// identity-file or base-dir pointed elsewhere would act on it under this one's.
+func (b *Mailbox) stateIsOurs(s store) error {
+	if b.id == nil {
+		return nil
+	}
+	if got := s.get(bucketMeta, keyAddress); got != nil && string(got) != b.id.Address().String() {
+		return fmt.Errorf("the state file in %s belongs to the address %s, and this mailbox's identity, %s, is that of %s: base-dir and identity-file name two mailboxes", b.dir, got, b.path("identity"), b.id.Address())
+	}
+	return nil
+}
+
+// bindState records the identity's address in the state file, or refuses one
+// that recorded another's (stateIsOurs). Where the mailbox has no identity yet,
+// its first command makes it, and Init binds it then.
+func (b *Mailbox) bindState() error {
+	if b.id == nil {
+		return nil
+	}
+	return b.update(func(s store) error {
+		if err := b.stateIsOurs(s); err != nil {
+			return err
+		}
+		if s.get(bucketMeta, keyAddress) != nil {
+			return nil
+		}
+		return s.put(bucketMeta, keyAddress, []byte(b.id.Address().String()))
+	})
 }

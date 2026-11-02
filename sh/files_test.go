@@ -381,27 +381,6 @@ mv(){ printf '%s mv %s\n' "${FUNCNAME[1]}" "$*" >> "$LOG"; command mv "$@"; }
 	}
 }
 
-// .gitignore is written beside and moved into place, as every file a mailbox
-// keeps is, so a crash leaves the old file or the new one (#239): each write
-// is a new file, never one written in place.
-func TestGitignoreIsMovedIntoPlace(t *testing.T) {
-	t.Parallel()
-	need(t, append(scriptTools, "curl")...)
-	srv := fakeserver.New(t, time.Now)
-	dir := t.TempDir()
-	env := []string{"DR_HOME=" + dir, "DR_SERVER_URL=" + srv.URL}
-	if _, err := bash(t, env, "dr_init"); err != nil {
-		t.Fatal(err)
-	}
-	gi := stats(t, dir, ".gitignore")[".gitignore"]
-	if _, err := bash(t, env, "dr_init"); err != nil {
-		t.Fatal(err)
-	}
-	if os.SameFile(gi, stats(t, dir, ".gitignore")[".gitignore"]) || string(mustRead(t, filepath.Join(dir, ".gitignore"))) != "*\n" {
-		t.Errorf("init wrote .gitignore in place, or not as *: %q", mustRead(t, filepath.Join(dir, ".gitignore")))
-	}
-}
-
 // A mailbox its server has forgotten renews as a registration, once it has read
 // what the server holds of its revocations (PROTOCOL.md §12.4, §13). A 2xx
 // there that is no record, not JSON or not an object, stops the renewal with

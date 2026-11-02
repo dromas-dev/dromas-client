@@ -16,6 +16,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -29,15 +30,19 @@ import (
 )
 
 // about is the end of the top-level help: what holds for every command.
-const about = `The mailbox lives in $DROMAS_HOME, or ${XDG_CONFIG_HOME:-~/.config}/dromas/${DROMAS_MAILBOX:-default}.
+const about = `A config file says where the mailbox's files are: <profile>.toml in
+${XDG_CONFIG_HOME:-~/.config}/dromas, where --profile or $DROMAS_PROFILE names the
+profile and default is the one with neither, or the file --config or
+$DROMAS_CONFIG names. dromas init writes a profile's. A flag beats a variable and
+a variable the file, and dromas config prints every setting and where it came from.
 Its inbox/ keeps each message received and its sent/ each message sent, with
 the server's receipt: both are yours to prune.
-The server is $DROMAS_SERVER_URL, or https://dromas.dev: https, or http only
-to a server on this machine, and a redirect is never followed.
-The mailbox's policy file says where a message from a sender it has not allowed
-lands, "unknown held" (the default) or "unknown inbox", and whom its server
-takes messages from, "server all" (the default: everyone it has not blocked) or
-"server allowed" (only those it allowed, which tells the server who they are).
+The server is https, or http only to a server on this machine, and a redirect
+is never followed.
+The file's [policy] says where a message from a sender the mailbox has not allowed
+lands, unknown = "held" (the default) or "inbox", and whom its server takes
+messages from, server = "all" (the default: everyone it has not blocked) or
+"allowed" (only those it allowed, which tells the server who they are).
 
 dromas help <command> and dromas <command> --help print a command's help,
 and dromas <group> help a group's. --help after a command prints its help
@@ -51,8 +56,8 @@ command line was wrong ("usage_error"), and one that says it is waiting
 ("waiting"). A "detail" is this client's own words, never a sender's or a
 server's. Help is the one thing printed as text.
 
-Exit status: 0, done. 1, the command failed. 2, the command line was wrong
-and nothing ran. 3, the command did its work and the mailbox needs a look: from
+Exit status: 0, done. 1, the command failed. 2, the command line or the config
+was wrong ("config_error") and nothing ran. 3, the command did its work and the mailbox needs a look: from
 recv, messages were received as printed and the prekey, due for renewal, was not
 renewed ("renewal_failed"), its server served a prekey the mailbox did not make
 ("prekey_not_made"), the mailbox's ACL was not sent to its server
@@ -119,21 +124,34 @@ func (e *usageError) Error() string { return e.msg }
 type cli struct {
 	dir            string
 	opt            client.Options
+	flags          globals
+	cfg            *config
 	stdin          io.Reader
 	stdout, stderr io.Writer
 }
 
-func (e *cli) mailbox() (*client.Mailbox, error) { return client.Open(e.dir, e.opt) }
+func (e *cli) mailbox() (*client.Mailbox, error) {
+	if e.dir == "" { // a command that needs no mailbox ran with no config: never the working directory
+		return nil, errors.New("no mailbox: no config file names one")
+	}
+	return client.Open(e.dir, e.opt)
+}
 
 // environment reads where the mailbox is and how to reach its server, once the
 // command line is known to be one that runs.
-func (e *cli) environment() error {
-	dir, err := client.Dir()
+func (e *cli) environment(c *cobra.Command) error {
+	// A record is published from anywhere: it needs a server, and no mailbox.
+	none := c.Name() == "publish" && c.Flags().Changed("record")
+	cfg, err := loadConfig(c, &e.flags, c.Name() == "init" && c.Parent() == c.Root(), none)
 	if err != nil {
 		return err
 	}
-	e.dir = dir
-	e.opt.Base = os.Getenv("DROMAS_SERVER_URL")
+	if err := cfg.apply(c); err != nil {
+		return err
+	}
+	e.cfg, e.dir = cfg, cfg.dir
+	e.opt.Base, e.opt.Layout, e.opt.ConfigFile = cfg.server, cfg.layout, cfg.file
+	e.opt.Policy, e.opt.PrekeyLifetime = cfg.policy, cfg.lifetime
 	return nil
 }
 
@@ -170,12 +188,13 @@ func runWith(ctx context.Context, opt client.Options, args []string, stdin io.Re
 	}
 	e := &cli{opt: opt, stdin: stdin, stdout: stdout, stderr: stderr}
 	root := e.tree()
+	e.flags.add(root)
 	root.PersistentPreRunE = func(c *cobra.Command, _ []string) error {
 		// A group runs nothing of its own, and help and version read nothing.
 		if c.HasSubCommands() || c.Name() == "help" || (c.Name() == "version" && c.Parent() == root) {
 			return nil
 		}
-		return e.environment()
+		return e.environment(c)
 	}
 	// Cobra reads the process's own arguments when it is given none.
 	root.SetArgs(append([]string{}, args...))
@@ -344,6 +363,7 @@ func helpText(c *cobra.Command) string {
 		list(false)
 		b.WriteString("\nGroups, each with commands of its own (dromas <group> --help lists them):\n")
 		list(true)
+		fmt.Fprintf(&b, "\nFlags every command takes:\n%s", c.PersistentFlags().FlagUsages())
 		b.WriteString("\n" + about)
 	case c.HasSubCommands():
 		fmt.Fprintf(&b, "usage: %s <command> [arguments]\n\n%s\n\nCommands:\n", c.CommandPath(), c.Long)

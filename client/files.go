@@ -7,35 +7,17 @@ import (
 	"path/filepath"
 )
 
-// Dir returns the state directory of the mailbox to use, as the stock recipe
-// finds it: $DROMAS_HOME if set, otherwise
-// ${XDG_CONFIG_HOME:-$HOME/.config}/dromas/${DROMAS_MAILBOX:-default}, the
-// XDG Base Directory Specification's home for configuration. It is never the
-// working directory, which for a coding agent is a git repository.
-func Dir() (string, error) {
-	if d := os.Getenv("DROMAS_HOME"); d != "" {
-		return d, nil
-	}
-	base := os.Getenv("XDG_CONFIG_HOME")
-	if base == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", err
-		}
-		base = filepath.Join(home, ".config")
-	}
-	mailbox := os.Getenv("DROMAS_MAILBOX")
-	if mailbox == "" {
-		mailbox = "default"
-	}
-	return filepath.Join(base, "dromas", mailbox), nil
-}
-
 // writeFile writes a file with mode 0600 through a temporary file and a
 // rename, so a reader never sees half of it, and syncs the file and its
 // directory, so it survives a power loss once writeFile returns: a message is
 // acked off the server only after it is on disk.
-func writeFile(name string, data []byte) error {
+func writeFile(name string, data []byte) error { return writeWith(name, data, nil) }
+
+// writeKey is writeFile for a private key, which is protected before it has
+// its name (protectKeyFile).
+func writeKey(name string, data []byte) error { return writeWith(name, data, protectKeyFile) }
+
+func writeWith(name string, data []byte, protect func(string) error) error {
 	tmp, err := os.CreateTemp(filepath.Dir(name), ".tmp-*")
 	if err != nil {
 		return err
@@ -51,6 +33,11 @@ func writeFile(name string, data []byte) error {
 	}
 	if err := tmp.Close(); err != nil {
 		return err
+	}
+	if protect != nil {
+		if err := protect(tmp.Name()); err != nil {
+			return err
+		}
 	}
 	if err := os.Rename(tmp.Name(), name); err != nil {
 		return err

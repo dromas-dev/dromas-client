@@ -36,7 +36,7 @@ func TestAMessageFromASenderNotAllowedIsHeld(t *testing.T) {
 	if len(res.Delivered) != 0 || len(res.Held) != 2 || len(res.Refused) != 0 || e.srv.Count(b.Address()) != 0 {
 		t.Fatalf("a stranger's message: %+v, %d left on the server", res, e.srv.Count(b.Address()))
 	}
-	if inbox, _ := filepath.Glob(filepath.Join(b.Dir(), "inbox", "*.json")); len(inbox) != 0 {
+	if inbox, _ := filepath.Glob(filepath.Join(b.Dir(), "mail", "inbox", "*.json")); len(inbox) != 0 {
 		t.Fatalf("inbox/ holds %v", inbox)
 	}
 	st, err := b.Status(t.Context())
@@ -51,10 +51,10 @@ func TestAMessageFromASenderNotAllowedIsHeld(t *testing.T) {
 	if err != nil || len(moved) != 2 || bodyOf(t, moved[0])+bodyOf(t, moved[1]) != "firstsecond" && bodyOf(t, moved[0])+bodyOf(t, moved[1]) != "secondfirst" {
 		t.Fatalf("allow: %+v, %v", moved, err)
 	}
-	if left, _ := filepath.Glob(filepath.Join(b.Dir(), "held", "*.json")); len(left) != 0 {
+	if left, _ := filepath.Glob(filepath.Join(b.Dir(), "mail", "held", "*.json")); len(left) != 0 {
 		t.Fatalf("held/ still holds %v", left)
 	}
-	if inbox, _ := filepath.Glob(filepath.Join(b.Dir(), "inbox", "*.json")); len(inbox) != 2 {
+	if inbox, _ := filepath.Glob(filepath.Join(b.Dir(), "mail", "inbox", "*.json")); len(inbox) != 2 {
 		t.Fatalf("inbox/ holds %v", inbox)
 	}
 	send(t, a, b, "third")
@@ -147,7 +147,7 @@ func TestBlockDropsASendersMessagesHereAndAtTheServer(t *testing.T) {
 	if n, err := b.Block(ctx, c.Address()); err != nil || n != 1 {
 		t.Fatalf("block c: %d, %v", n, err)
 	}
-	if left, _ := filepath.Glob(filepath.Join(b.Dir(), "held", "*.json")); len(left) != 0 {
+	if left, _ := filepath.Glob(filepath.Join(b.Dir(), "mail", "held", "*.json")); len(left) != 0 {
 		t.Fatalf("held/ still holds %v", left)
 	}
 	if blocked, err := b.Blocked(t.Context()); err != nil || len(blocked) != 2 {
@@ -191,7 +191,7 @@ func TestAPolicyCanLandEverySendersMessagesInInbox(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
 	a, b := e.heldMailbox(), e.heldMailbox()
-	if err := os.WriteFile(filepath.Join(b.Dir(), "policy"), []byte("# every sender\nunknown inbox\n"), 0o600); err != nil {
+	if err := b.SetPolicy(t.Context(), client.Policy{Unknown: client.LandInbox, Server: client.AdmitAll}); err != nil {
 		t.Fatal(err)
 	}
 	send(t, a, b, "to an open mailbox")
@@ -749,7 +749,6 @@ func TestARestoredMailboxAdoptsItsServersACL(t *testing.T) {
 		{"blocked", func(own *protocol.ACL) *protocol.ACL {
 			return &protocol.ACL{Allow: protocol.ACLList{Any: true}, Deny: own.Deny}
 		}},
-		{"policy", func(*protocol.ACL) *protocol.ACL { return &protocol.ACL{} }},
 	} {
 		t.Run("with its "+kept.file+" file", func(t *testing.T) {
 			e := newEnv(t)
@@ -766,7 +765,7 @@ func TestARestoredMailboxAdoptsItsServersACL(t *testing.T) {
 			if _, err := r.Rekey(ctx); err != nil {
 				t.Fatal(err)
 			}
-			for _, f := range []string{"allowed", "blocked", "policy"} {
+			for _, f := range []string{"allowed", "blocked"} {
 				if _, err := os.Stat(filepath.Join(r.Dir(), f)); f != kept.file && !errors.Is(err, os.ErrNotExist) {
 					t.Errorf("a mailbox restored with its %s file wrote %s: %v", kept.file, f, err)
 				}
@@ -857,14 +856,14 @@ func TestAnACLIsSentAgainWhenTheMailboxChanged(t *testing.T) {
 	}
 }
 
-// A policy or a list that cannot be read stops the drain before anything is
-// acked, and status says so: it is never read as the default.
-func TestAPolicyThatCannotBeReadStopsTheDrain(t *testing.T) {
+// A list that cannot be read stops the drain before anything is acked, and
+// status says so: it is never read as the default.
+func TestAListThatCannotBeReadStopsTheDrain(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
 	a, b := e.heldMailbox(), e.heldMailbox()
 	send(t, a, b, "waits")
-	for name, text := range map[string]string{"policy": "unknown deliver\n", "allowed": "not an address\n", "blocked": strings.ToUpper(a.Address().String()) + "\n"} {
+	for name, text := range map[string]string{"allowed": "not an address\n", "blocked": strings.ToUpper(a.Address().String()) + "\n"} {
 		if err := os.WriteFile(filepath.Join(b.Dir(), name), []byte(text), 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -924,8 +923,8 @@ func TestAllowingABlockedSenderDoesNothing(t *testing.T) {
 		t.Fatal(err)
 	}
 	moved, err := b.Allow(ctx, a.Address())
-	inbox, _ := filepath.Glob(filepath.Join(b.Dir(), "inbox", "*.json"))
-	held, _ := filepath.Glob(filepath.Join(b.Dir(), "held", "*.json"))
+	inbox, _ := filepath.Glob(filepath.Join(b.Dir(), "mail", "inbox", "*.json"))
+	held, _ := filepath.Glob(filepath.Join(b.Dir(), "mail", "held", "*.json"))
 	allowed, _ := b.Allowed(t.Context())
 	if err == nil || !strings.Contains(err.Error(), "is blocked") || len(moved) != 0 || len(inbox) != 0 || len(held) != 1 || slices.Contains(allowed, a.Address()) {
 		t.Fatalf("allow of a blocked sender: %v, moved %d, inbox %d, held %d, allowed %v", err, len(moved), len(inbox), len(held), allowed)
