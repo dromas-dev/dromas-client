@@ -1151,24 +1151,23 @@ A mailbox's ACL says from which senders the mailbox's server accepts messages to
 
 The two calls in this section accept no pass (Section 8).
 
-- **Publish a revocation: `PUT /v1/<A>/revocations`.** The call's body is a revocation record (Section 10.3). The server verifies the revocation record as a client does. The server keeps permanently each revocation that verifies, whether or not a mailbox is at the address.
+- **Publish a revocation: `PUT /v1/<A>/revocations`.** The call's body is a revocation record (Section 10.3). The server verifies the revocation record as a client does. The server keeps permanently each revocation that verifies, whether or not a mailbox is at the address. A revocation of the address that does not verify is the one exception, as below.
   - **The server answers a revocation it already keeps from its stored revocations.** That answer comes ahead of every other refusal of this call, and ahead of every count except the budgets that bound any call (Section 11.5). Two kinds of body count as a revocation the server already keeps:
     - any body for an address the server keeps revoked;
     - a body that carries only a revocation of certificates, through a revocation serial no higher than the one the server keeps.
 
   | The body carries | Answer |
   |---|---|
-  | a revocation of the address | `201 {}`. A mailbox at the address is revoked permanently. The server deletes the mailbox's messages and everything else that the server holds of the mailbox |
+  | a revocation of the address that verifies | `201 {}`. A mailbox at the address is revoked permanently. The server deletes the mailbox's messages and everything else that the server holds of the mailbox |
   | a revocation of certificates, through a revocation serial no lower than the one kept, if one is kept | `200 {}` |
   | a revocation of certificates through a lower revocation serial than the one kept | `409 conflict` (RFC 9110 §9.3.4), with `through` naming the revocation serial kept |
   | anything, for an address already revoked | `410 revoked`, with the address's revocation record |
   | an identity document that does not hash to the address | `400 identity_mismatch` |
-  | a signature that does not verify | `400 bad_revocation` |
+  | a revocation of the address that does not verify, or a revocation of certificates that does not verify with no revocation of the address beside it | `400 bad_revocation` |
 
-  **A body that carries both revocations:**
-  - a revocation of certificates through a revocation serial no higher than the one kept changes nothing, whether or not that revocation verifies;
-  - the server keeps the revocation of the address if that revocation verifies (`201`);
-  - if any other part does not verify, the server refuses the whole body and keeps nothing in it.
+  **A body that carries a revocation of the address:**
+  - The server keeps a revocation of the address that verifies, and answers `201`, whatever is beside that revocation.
+  - The server answers a revocation of the address that does not verify with `400 bad_revocation`. The server keeps nothing in that body, even a revocation of certificates that verifies.
 
   **A revocation of the address is counted against no mailbox.** The server counts the revocation against the caller's IP address. For an address that the server keeps nothing of, the server MAY also count the revocation as a registration (`registrations`).
 

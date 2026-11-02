@@ -114,15 +114,17 @@ func (b *Mailbox) held(a protocol.Address) (*Held, error) {
 
 // KeepRevocation takes a record someone handed over, of this mailbox's own
 // address or of anyone's: a revocation of the address, a revocation of its
-// certificates, or both. Each part is checked, and what verifies is kept. It
-// is the answer to a server that hides one: the record proves itself
-// wherever it came from. A record with a part that does not verify is
-// refused whole, and nothing of it is kept: whoever handed it over is told,
-// where a server's answer that does not verify counts as nothing shown.
+// certificates, or both. Each part is checked on its own, and each part that
+// verifies is kept, whichever part: the record is the answer to a server that
+// hides one, and proves itself wherever it came from. A part that does not
+// verify is still an error, which names that part and what was kept, because
+// whoever handed the record over is told, where a server's answer that does
+// not verify counts as nothing shown. A record in which nothing verifies keeps
+// nothing, and comes back with no [Held].
 //
-// It returns the address and what this mailbox then holds about it. A revocation
-// of certificates through no higher a serial than the one held changes
-// nothing.
+// It returns the address and what this mailbox then holds about it, beside the
+// error where a part failed. A revocation of certificates through no higher a
+// serial than the one held changes nothing.
 func (b *Mailbox) KeepRevocation(ctx context.Context, rec *protocol.Revocations) (a protocol.Address, h *Held, err error) {
 	_, err = lockedFinished(ctx, b, func() (struct{}, error) {
 		a, h, err = b.keepRevocationRecord(rec)
@@ -140,24 +142,35 @@ func (b *Mailbox) keepRevocationRecord(rec *protocol.Revocations) (protocol.Addr
 		return a, nil, refuse("the record holds no revocation of the address and none of its certificates")
 	}
 	var id *protocol.Identity
+	var failed, kept []string
 	if len(rec.Revocation) > 0 {
 		var err error
-		id, err = protocol.VerifyRevocation(a, rec.Identity, rec.Revocation)
-		if errors.Is(err, protocol.ErrIdentityType) {
-			return a, nil, refuse("the record's identity is of a key type this client does not verify, so its revocation cannot be checked here")
-		}
-		if err != nil {
-			return a, nil, refuse("the record is not a revocation: %v", err)
+		switch id, err = protocol.VerifyRevocation(a, rec.Identity, rec.Revocation); {
+		case errors.Is(err, protocol.ErrIdentityType):
+			failed = append(failed, "the record's identity is of a key type this client does not verify, so its revocation cannot be checked here")
+		case err != nil:
+			failed = append(failed, fmt.Sprintf("the record's revocation of the address does not verify: %v", err))
+		default:
+			kept = append(kept, "its revocation of the address")
 		}
 	}
+	certsGood := false
 	if len(rec.RevokedCertificates) > 0 {
 		_, err := protocol.VerifyRevokedCertificates(a, rec.Identity, rec.RevokedCertificates, rec.RevokedCertificatesSignature)
-		if errors.Is(err, protocol.ErrIdentityType) {
-			return a, nil, refuse("the record's identity is of a key type this client does not verify, so its revocation of certificates cannot be checked here")
+		switch {
+		case errors.Is(err, protocol.ErrIdentityType):
+			failed = append(failed, "the record's identity is of a key type this client does not verify, so its revocation of certificates cannot be checked here")
+		case err != nil:
+			failed = append(failed, fmt.Sprintf("the record's revocation of certificates does not verify: %v", err))
+		default:
+			certsGood = true
+			kept = append(kept, "its revocation of certificates, or a higher one it holds")
 		}
-		if err != nil {
-			return a, nil, refuse("the record's revocation of certificates: %v", err)
-		}
+	}
+	if len(kept) == 0 {
+		return a, nil, refuse("%s: nothing of the record is kept", strings.Join(failed, "; "))
+	}
+	if certsGood {
 		if err := b.keepRevokedCerts(a, rec.Identity, rec.RevokedCertificates, rec.RevokedCertificatesSignature); err != nil {
 			return a, nil, err
 		}
@@ -168,7 +181,13 @@ func (b *Mailbox) keepRevocationRecord(rec *protocol.Revocations) (protocol.Addr
 		}
 	}
 	h, err := b.held(a)
-	return a, h, err
+	if err != nil {
+		return a, nil, err
+	}
+	if len(failed) > 0 {
+		return a, h, refuse("%s: this mailbox keeps %s, which verifies", strings.Join(failed, "; "), strings.Join(kept, " and "))
+	}
+	return a, h, nil
 }
 
 // Ask asks this mailbox's server what it holds about a, keeps what verifies, and

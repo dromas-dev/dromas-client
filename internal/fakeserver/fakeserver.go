@@ -642,12 +642,22 @@ func (s *Server) revoke(w http.ResponseWriter, r *http.Request) {
 		revoked(w, identity, kept, "this address is revoked")
 		return
 	}
+	// A revocation of the address comes first: one that does not verify is
+	// refused with nothing kept, and one that verifies is kept whatever is
+	// beside it (PROTOCOL.md §11.15).
+	if len(req.Revocation) > 0 || len(req.RevokedCertificates) == 0 {
+		if _, err := protocol.VerifyRevocation(a, req.Identity, req.Revocation); err != nil {
+			problem(w, protocol.CodeBadRevocation, "not a revocation of this address")
+			return
+		}
+	}
 	// A revocation of certificates: the address goes on. The highest serial
-	// it runs through stands. Beside a revocation of the address, a lower one
-	// changes nothing, and the address's is kept (PROTOCOL.md §11.15).
+	// it runs through stands. Beside a revocation of the address, one that
+	// does not verify or runs lower changes nothing.
 	if len(req.RevokedCertificates) > 0 {
 		certs, err := protocol.VerifyRevokedCertificates(a, req.Identity, req.RevokedCertificates, req.RevokedCertificatesSignature)
 		switch {
+		case err != nil && len(req.Revocation) > 0:
 		case err != nil:
 			problem(w, protocol.CodeBadRevocation, "not a revocation of this address's certificates")
 			return
@@ -666,10 +676,6 @@ func (s *Server) revoke(w http.ResponseWriter, r *http.Request) {
 			WriteJSON(w, http.StatusOK, struct{}{})
 			return
 		}
-	}
-	if _, err := protocol.VerifyRevocation(a, req.Identity, req.Revocation); err != nil {
-		problem(w, protocol.CodeBadRevocation, "not a revocation of this address")
-		return
 	}
 	kept.revoked = req.Revocation
 	if b != nil {

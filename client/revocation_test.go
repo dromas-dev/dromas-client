@@ -759,3 +759,59 @@ func TestAKeptRevocationRefusesAMessageWithNoLookup(t *testing.T) {
 		})
 	}
 }
+
+// A record handed over keeps each part that verifies, whichever part, and says
+// which failed and what it kept, as a served record keeps what verifies
+// (PROTOCOL.md §12.5); and no publish sends a record with a bad part.
+func TestARecordHandedOverKeepsEachPartThatVerifies(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	e := newWorkEnv(t)
+	c := e.mailbox()
+
+	d := e.mailbox()
+	rev, err := d.Revocation(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	certs, err := protocol.NewRevokedCertificates(d.Address(), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byWorker, err := protocol.SignRevokedCertificates(worker(t, d), certs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	goodAddress := &protocol.Revocations{Identity: rev.Identity, Revocation: rev.Revocation, RevokedCertificates: certs.Statement(), RevokedCertificatesSignature: byWorker}
+	_, held, err := c.KeepRevocation(ctx, goodAddress)
+	if err == nil || held == nil || !held.Revoked || !keptRevocation(c, d.Address()) || keptList(c, d.Address()) {
+		t.Fatalf("a good revocation of the address beside a bad revocation of certificates: %+v, %v", held, err)
+	}
+	if !strings.Contains(err.Error(), "revocation of certificates does not verify") || !strings.Contains(err.Error(), "keeps its revocation of the address") {
+		t.Fatalf("what it said: %v", err)
+	}
+
+	f := e.mailbox()
+	goodCerts := certsRecord(t, f.Dir(), 7)
+	goodCerts.Revocation = rev.Revocation // the other mailbox's, so it does not verify here
+	_, held, err = c.KeepRevocation(ctx, goodCerts)
+	if err == nil || held == nil || held.Revoked || held.Certificates == nil || held.Certificates.Through != 7 || keptRevocation(c, f.Address()) || !keptList(c, f.Address()) {
+		t.Fatalf("a good revocation of certificates beside a bad revocation of the address: %+v, %v", held, err)
+	}
+	if !strings.Contains(err.Error(), "revocation of the address does not verify") || !strings.Contains(err.Error(), "keeps its revocation of certificates") {
+		t.Fatalf("what it said: %v", err)
+	}
+
+	op := watch(e, nil)
+	for name, bad := range map[string]*protocol.Revocations{"the first": goodAddress, "the second": goodCerts} {
+		if _, err := c.Publish(ctx, bad); err == nil {
+			t.Fatalf("%s was published", name)
+		}
+		if _, err := client.Publish(ctx, e.opts(), bad); err == nil {
+			t.Fatalf("%s was published with no mailbox", name)
+		}
+	}
+	if n := op.count(http.MethodPut, "/revocations"); n != 0 {
+		t.Fatalf("%d records with a bad part reached the server", n)
+	}
+}

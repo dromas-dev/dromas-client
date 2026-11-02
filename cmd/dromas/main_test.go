@@ -1740,6 +1740,16 @@ func TestRevocationCommands(t *testing.T) {
 	if out, _, err := cmd(b, "revocation keep", junk); err == nil || out != "" {
 		t.Fatalf("revocation keep took junk: %q", out)
 	}
+	// A record with one good part keeps that part, says so on stdout, and the
+	// command still fails, naming the part that did not verify.
+	partly := filepath.Join(t.TempDir(), "partly.json")
+	partlyGood := strings.Replace(out, `"revocation_signature"`, `"revoked_certificates":"eA==","revoked_certificates_signature":"eA==","revocation_signature"`, 1)
+	if err := os.WriteFile(partly, []byte(partlyGood), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if out, _, err := cmd(b, "revocation keep", partly); err == nil || !strings.Contains(err.Error(), "revocation of certificates does not verify") || out != `{"type":"revoked","address":"`+a.Address().String()+`"}`+"\n" {
+		t.Fatalf("revocation keep of a record with one good part: %v %q", err, out)
+	}
 
 	// The record alone revokes, from a directory that holds no mailbox.
 	published := `","detail":"published to the server"}` + "\n"
