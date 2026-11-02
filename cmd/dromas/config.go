@@ -520,7 +520,7 @@ func writeConfigFile(file, text string) error {
 	if err := os.MkdirAll(filepath.Dir(file), 0o700); err != nil { //nolint:gosec // the config directory of a profile whose name is held to profileGrammar
 		return err
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(file), ".tmp-*") //nolint:gosec // as above
+	tmp, err := client.NewPrivateTemp(filepath.Dir(file))
 	if err != nil {
 		return err
 	}

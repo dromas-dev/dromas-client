@@ -96,7 +96,7 @@ func (b *Mailbox) makeState() error {
 	if _, err := os.Lstat(b.path("state")); !errors.Is(err, fs.ErrNotExist) {
 		return err
 	}
-	tmp, err := os.CreateTemp(b.dir, ".tmp-*")
+	tmp, err := NewPrivateTemp(b.dir)
 	if err != nil {
 		return err
 	}
