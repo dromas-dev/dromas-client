@@ -46,6 +46,10 @@ func (l Layout) resolved(dir string) Layout {
 	return l
 }
 
+// Path is where a file of the mailbox is, by its names in client/doc.go: its
+// first name says which part, as "sent" and a file in it.
+func (b *Mailbox) Path(elem ...string) string { return b.path(elem...) }
+
 // path is where a part of the mailbox is: elem's first name says which part,
 // and anything else is in the base directory.
 func (b *Mailbox) path(elem ...string) string {
