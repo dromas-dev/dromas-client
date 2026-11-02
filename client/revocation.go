@@ -576,7 +576,7 @@ func (b *Mailbox) RenewAndRevoke(ctx context.Context) (*Remedy, error) {
 // only revoking the address answers a copy of it (PROTOCOL.md §12.6).
 func certificatesOwn(certified bool) error {
 	if !certified {
-		return refuse("this mailbox's identity signs, and it has no certificate to revoke: a copy of its directory holds the identity, so revoke the address (dromas revocation publish, with the address in full)")
+		return refuse("this mailbox's identity signs, and it has no certificate to revoke: whoever copied the identity signs as this mailbox, so revoke the address (dromas revocation publish, with the address in full)")
 	}
 	return nil
 }

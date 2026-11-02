@@ -49,6 +49,31 @@ func TestAPrivateKeyOthersCanReachIsRefused(t *testing.T) {
 	}
 }
 
+// A working key others can reach is refused where it signs: a send, whose pass and
+// message it signs.
+func TestAWorkingKeyOthersCanReachIsRefused(t *testing.T) {
+	t.Parallel()
+	e := newWorkEnv(t)
+	a, b := e.mailbox(), e.mailbox()
+	if !certified(t, a) {
+		t.Fatal("not under a certificate")
+	}
+	keys, err := filepath.Glob(filepath.Join(a.Dir(), "keys", "work", "*"))
+	if err != nil || len(keys) == 0 {
+		t.Fatal(keys, err)
+	}
+	for _, k := range keys {
+		if !strings.Contains(filepath.Base(k), ".") {
+			if err := os.Chmod(k, 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if _, err := a.Send(t.Context(), b.Address(), "x"); err == nil || !strings.Contains(err.Error(), "accessible by others") {
+		t.Errorf("send: %v", err)
+	}
+}
+
 // A config file others can write is refused, one others can only read is not: a
 // ConfigMap arrives 0644.
 func TestAConfigFileOthersCanWriteIsRefused(t *testing.T) {
@@ -104,5 +129,53 @@ func TestAllowingASenderCrossesFilesystems(t *testing.T) {
 	}
 	if n, _ := filepath.Glob(filepath.Join(root, "base", "mail", "held", "*.json")); len(n) != 0 {
 		t.Errorf("held/ still holds %v", n)
+	}
+}
+
+// A config file its user does not own is refused, as ssh refuses ~/.ssh/config: its
+// owner can write it whatever its mode says. Root's is taken: a ConfigMap is
+// root's, and root can write anything.
+func TestAConfigFileAnotherUserOwnsIsRefused(t *testing.T) {
+	t.Parallel()
+	file := filepath.Join(t.TempDir(), "c.toml")
+	if err := os.WriteFile(file, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	me := os.Getuid()
+	if me == 0 { // a file owned by neither root nor the user the test says it is
+		if err := os.Chown(file, 1, 1); err != nil {
+			t.Fatal(err)
+		}
+		me = 1
+	}
+	if err := client.CheckConfigFileAs(file, me); err != nil {
+		t.Errorf("its own user's: %v", err)
+	}
+	if err := client.CheckConfigFileAs(file, me+1); err == nil || !strings.Contains(err.Error(), "owned by another user") {
+		t.Errorf("another user's: %v", err)
+	}
+	if err := client.CheckConfigFileAs("/etc/passwd", me+1); err != nil {
+		t.Errorf("root's: %v", err)
+	}
+}
+
+// A mail directory that cannot be read says so: it never reads as an empty one.
+func TestAFolderThatCannotBeReadIsNotEmpty(t *testing.T) {
+	t.Parallel()
+	if os.Getuid() == 0 {
+		return // root reads it anyway
+	}
+	e := newEnv(t)
+	b := e.mailbox()
+	held := filepath.Join(b.Dir(), "mail", "held")
+	if err := os.Chmod(held, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(held, 0o700) })
+	if _, err := b.HeldMessages(t.Context()); err == nil {
+		t.Error("a folder that cannot be read was listed as empty")
+	}
+	if _, err := b.Status(t.Context()); err == nil {
+		t.Error("status counted a folder that cannot be read as empty")
 	}
 }

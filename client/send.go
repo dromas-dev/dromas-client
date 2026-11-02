@@ -204,7 +204,7 @@ func (b *Mailbox) Flush(ctx context.Context) ([]*Sent, error) {
 }
 
 func (b *Mailbox) flush(ctx context.Context) ([]*Sent, error) {
-	names, err := filepath.Glob(b.path("outbox", "*.P"))
+	names, err := matching(b.path("outbox", "*.P"))
 	if err != nil {
 		return nil, err
 	}

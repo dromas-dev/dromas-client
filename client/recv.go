@@ -658,7 +658,7 @@ func (b *Mailbox) judge(ctx context.Context, ct []byte, asked *lookups) (verdict
 			if err != nil {
 				return verdict{}, fmt.Errorf("a fault of this mailbox, so the message stays on the server: %w", err)
 			}
-			if held.Revoked || held.Certificates != nil && held.Certificates.Revokes(found.Rank) {
+			if held.Revoked || found.Rank != 0 && held.Certificates != nil && held.Certificates.Revokes(found.Rank) {
 				*found = protocol.Findings{At: found.At, Identity: found.Identity}
 			}
 		}

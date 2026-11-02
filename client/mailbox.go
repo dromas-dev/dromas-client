@@ -67,10 +67,8 @@ type Options struct {
 	Now func() time.Time
 	// IdentityType is the type of identity key Init makes for a new mailbox:
 	// protocol.IdentityEd25519 if empty, and that is the one to use. Every
-	// client verifies an Ed25519 identity; a mailbox of any other type can
-	// neither send to nor receive from a mailbox whose client does not verify
-	// that type. An existing identity key is used as it is, whatever this
-	// says.
+	// client verifies every type PROTOCOL.md §4.1 defines. An existing identity
+	// key is used as it is, whatever this says.
 	IdentityType string
 	// WorkingKey has Init register the mailbox it makes or restores under a
 	// certificate (dromas init --offline), whose working key then signs, and
@@ -195,7 +193,8 @@ func Open(dir string, opt Options) (*Mailbox, error) {
 // follows no redirect (followNone).
 func newMailbox(dir string, opt Options) (*Mailbox, error) {
 	// No directory is a mailbox that keeps nothing ([Publish], [Revoke]). The
-	// default layout's parts cannot overlap, so only its base directory is read.
+	// default layout's parts are apart but for a link made inside it, which Init
+	// and the command line check for, so only its base directory is read.
 	switch {
 	case dir == "":
 	case opt.Layout == (Layout{}):
@@ -384,8 +383,27 @@ func Init(ctx context.Context, dir string, opt Options) (*Mailbox, error) {
 }
 
 func (b *Mailbox) init(ctx context.Context) (*Mailbox, error) {
+	// A filesystem that ignores case or normalisation shows two names of one
+	// place only once it exists (CheckLayout): the mailbox's directories do now, and
+	// no key is written yet.
+	if err := makeDir(filepath.Dir(b.path("identity"))); err != nil {
+		return nil, err
+	}
+	if err := CheckLayout(b.dir, b.layout); err != nil {
+		return nil, err
+	}
 	fresh := !exists(b.path("identity"))
 	if fresh {
+		// A state file bound to an address is that identity's: a new key at another
+		// path would be refused by it, and left behind.
+		if err := b.view(func(s store) error {
+			if got := s.get(bucketMeta, keyAddress); got != nil {
+				return fmt.Errorf("the state file in %s belongs to the address %s, and %s holds no key: base-dir and identity-file name two mailboxes", b.dir, got, b.path("identity"))
+			}
+			return nil
+		}); err != nil {
+			return nil, err
+		}
 		if err := b.newIdentityKey(); err != nil {
 			return nil, err
 		}
@@ -637,6 +655,13 @@ func (b *Mailbox) loadIdentity() error {
 		return err
 	}
 	b.identity, b.id = sign.NewIdentity(signer, b.finished), id
+	// Beside a state file the address is whose that state is, so no command runs
+	// on it, or rewrites it, under another identity. It is read here, and the state
+	// file only under its lock, which a running command holds (stateIsOurs).
+	addr := []byte(id.Address().String() + "\n")
+	if a, err := os.ReadFile(b.path("address")); err == nil && !bytes.Equal(a, addr) && exists(b.path("state")) {
+		return fmt.Errorf("the mailbox in %s belongs to the address %s, and this mailbox's identity, %s, is that of %s: base-dir and identity-file name two mailboxes", b.dir, bytes.TrimSpace(a), b.path("identity"), id.Address())
+	}
 	if err := makeDir(b.dir); err != nil {
 		return err
 	}
@@ -645,7 +670,6 @@ func (b *Mailbox) loadIdentity() error {
 			return err
 		}
 	}
-	addr := []byte(id.Address().String() + "\n")
 	if a, err := os.ReadFile(b.path("address")); err != nil || !bytes.Equal(a, addr) {
 		return writeFile(b.path("address"), addr)
 	}
@@ -895,7 +919,7 @@ func readAgeKeys(name string) ([]age.Identity, error) {
 // prekeyIdentities returns every retained prekey, to decrypt with once
 // oneNative has taken the file (decrypt).
 func (b *Mailbox) prekeyIdentities() ([]age.Identity, error) {
-	names, err := filepath.Glob(b.path("prekeys", "*.agekey"))
+	names, err := matching(b.path("prekeys", "*.agekey"))
 	if err != nil {
 		return nil, err
 	}

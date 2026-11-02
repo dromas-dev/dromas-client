@@ -115,8 +115,8 @@ var identityTypes = map[string]struct {
 	// declares (§7).
 	optional bool
 }{
-	// Its bound is exact: a prekey statement or a pass under a certificate,
-	// each 850 bytes in the one form.
+	// Its bound is exact: a prekey statement under a certificate, 850 bytes in
+	// the one form.
 	IdentityEd25519: {
 		check: func(k ssh.PublicKey) error {
 			return checkEd25519(k.(ssh.CryptoPublicKey).CryptoPublicKey().(ed25519.PublicKey))

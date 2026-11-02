@@ -260,7 +260,7 @@ func (b *Mailbox) RefusedMessages(ctx context.Context) ([]RefusedMessage, error)
 
 // refusedMessages is RefusedMessages inside a command or a reading.
 func (b *Mailbox) refusedMessages() ([]RefusedMessage, error) {
-	names, err := filepath.Glob(b.path("refused", "*.json"))
+	names, err := matching(b.path("refused", "*.json"))
 	if err != nil {
 		return nil, err
 	}

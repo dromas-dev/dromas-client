@@ -81,11 +81,16 @@ type layoutPart struct {
 	inside     []string
 }
 
+// baseFiles are the base directory's own places, by client/doc.go's list. A path
+// the Layout names on one of these would have the client write over it: the
+// address, over the file it took the key from.
+var baseFiles = []string{"identity.doc", "address", "state", "gate", "partial", "allowed", "blocked", "aliases"}
+
 func layoutParts(dir string, l Layout) []layoutPart {
 	base := []string{"base-dir"}
 	keys := []string{"base-dir", "rotating-keys-dir"}
 	mail := []string{"base-dir", "mail-dir"}
-	return []layoutPart{
+	parts := []layoutPart{
 		{name: "base-dir", path: dir},
 		{name: "mail-dir", path: l.Mail, inside: base},
 		{name: "identity-file", path: l.IdentityFile, file: true, inside: base},
@@ -96,7 +101,13 @@ func layoutParts(dir string, l Layout) []layoutPart {
 		{name: "held/", path: filepath.Join(l.Mail, "held"), inside: mail},
 		{name: "refused/", path: filepath.Join(l.Mail, "refused"), inside: mail},
 		{name: "sent/", path: filepath.Join(l.Mail, "sent"), inside: mail},
+		{name: "identity-file's .pub", path: l.IdentityFile + ".pub", file: true, inside: base},
+		{name: "outbox/", path: filepath.Join(dir, "outbox"), inside: base},
 	}
+	for _, f := range baseFiles {
+		parts = append(parts, layoutPart{name: f, path: filepath.Join(dir, f), file: true, inside: base})
+	}
+	return parts
 }
 
 // CheckLayout refuses a layout whose parts overlap, whose directory is a file
@@ -223,7 +234,11 @@ func makeDir(path string) error {
 	}
 	for i := len(missing) - 1; i >= 0; i-- {
 		d := missing[i]
-		if err := os.Mkdir(d, 0o700); err != nil && !errors.Is(err, fs.ErrExist) {
+		err := os.Mkdir(d, 0o700)
+		if errors.Is(err, fs.ErrExist) { // another process made it, so it is left as this one finds it
+			continue
+		}
+		if err != nil {
 			return err
 		}
 		if err := private(d); err != nil {
@@ -236,15 +251,15 @@ func makeDir(path string) error {
 	return nil
 }
 
-// gitAbove is the work tree above path, or "" if it is in none: a .git above
-// it, of whichever kind. git is not run, since it executes configuration it
-// finds inside a repository.
+// gitAbove is the work tree path is in, or "" if it is in none: a .git at it or
+// above it, of whichever kind. git is not run, since it executes configuration
+// it finds inside a repository.
 func gitAbove(path string) string {
 	where, err := realPath(path)
 	if err != nil {
 		return ""
 	}
-	for p := filepath.Dir(where); ; p = filepath.Dir(p) {
+	for p := where; ; p = filepath.Dir(p) {
 		if _, err := os.Lstat(filepath.Join(p, ".git")); err == nil {
 			return p
 		}

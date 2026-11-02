@@ -16,6 +16,21 @@ import (
 	bolt "go.etcd.io/bbolt"
 )
 
+// CheckKeyFile is checkKeyFile, for a test of what it refuses.
+func CheckKeyFile(path string) error { return checkKeyFile(path) }
+
+// NewKeyTemp is newKeyTemp.
+var NewKeyTemp = newKeyTemp
+
+// LayoutPartPaths is every place CheckLayout holds apart.
+func LayoutPartPaths(dir string, l Layout) []string {
+	var out []string
+	for _, p := range layoutParts(dir, l.resolved(dir)) {
+		out = append(out, p.path)
+	}
+	return out
+}
+
 // Code is the error's code, if err is an [APIError], for a test that knows
 // which call answered.
 func Code(err error) protocol.Code { return code(err) }

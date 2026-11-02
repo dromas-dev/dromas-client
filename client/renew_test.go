@@ -1087,3 +1087,80 @@ func TestADrainMendedPartWaySaysWhatItsFirstPassDelivered(t *testing.T) {
 		t.Fatalf("a drain mended after its second page: renewed %v, delivered %q, want all three", res.Renewed != nil, got)
 	}
 }
+
+// emptyListOnce answers b's next list as empty, as a send that passed the server's
+// check before a take looks, whose write lands after the list.
+func emptyListOnce(e *env, b *client.Mailbox) {
+	var armed atomic.Bool
+	armed.Store(true)
+	e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
+		if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/messages") && strings.Contains(r.URL.Path, b.Address().String()) && armed.CompareAndSwap(true, false) {
+			w.Header().Set("Retry-After", "60")
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(protocol.MessageList{Count: 0, Messages: []protocol.MessageInfo{}})
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// A statement signed and passed over was never taken, so the prekey below it stayed
+// current until the renewal above: when it was made retires nothing, and a message
+// sealed to that prekey as the renewal lands is delivered (#642).
+func TestAPreKeyBelowAStatementNeverTakenKeepsItsHour(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	a, b := e.mailbox(), e.mailbox()
+	e.clock.Add(25 * time.Hour)
+	forge.FailOnce(e.srv, http.MethodPut, "/prekey")
+	if res := receive(t, b); res.RenewErr == nil {
+		t.Fatal("the renewal did not fail")
+	}
+	e.clock.Add(2 * time.Hour)
+	lifetimeOf(t, b, 6*24*time.Hour) // the waiting statement is spent
+	send(t, a, b, "sealed to the first key, stored as its renewal is taken")
+	emptyListOnce(e, b)
+	res := receive(t, b)
+	e.srv.SetMiddle(nil)
+	if res.Renewed == nil {
+		t.Fatalf("no renewal: %v", res.RenewErr)
+	}
+	if res := receive(t, b); len(res.Delivered) != 1 {
+		t.Errorf("delivered %d, refused %+v", len(res.Delivered), res.Refused)
+	}
+}
+
+// Where a renewal's take is unknown, a read of itself having learned it, when it
+// was made retires nothing either (#642).
+func TestAPreKeyBelowAStatementWhoseTakeIsUnknownKeepsItsHour(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	a, b := e.mailbox(), e.mailbox()
+	e.clock.Add(25 * time.Hour)
+	forge.FailOnce(e.srv, http.MethodPut, "/prekey")
+	if res := receive(t, b); res.RenewErr == nil {
+		t.Fatal("the renewal did not fail")
+	}
+	e.clock.Add(2 * time.Hour)
+	var lost atomic.Bool
+	lost.Store(true)
+	e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
+		if r.Method == http.MethodPut && strings.HasSuffix(r.URL.Path, "/prekey") && lost.CompareAndSwap(true, false) {
+			next.ServeHTTP(httptest.NewRecorder(), r) // taken
+			panic(http.ErrAbortHandler)               // and no answer
+		}
+		next.ServeHTTP(w, r)
+	})
+	send(t, a, b, "sealed to the first key, stored as its renewal is taken")
+	_, _ = b.Rekey(t.Context()) //nolint:errcheck // its answer is what is lost
+	e.clock.Add(30 * time.Second)
+	if _, err := b.Rekey(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	emptyListOnce(e, b)
+	receive(t, b)
+	e.srv.SetMiddle(nil)
+	if res := receive(t, b); len(res.Delivered) != 1 {
+		t.Errorf("delivered %d, refused %+v", len(res.Delivered), res.Refused)
+	}
+}

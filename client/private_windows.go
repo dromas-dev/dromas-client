@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 
 	"golang.org/x/sys/windows"
 )
@@ -24,11 +25,7 @@ import (
 // set: a volume that keeps no access lists, as FAT does, takes the call and
 // keeps nothing, and a mailbox is never made there.
 func private(dir string) error {
-	user, err := windows.GetCurrentProcessToken().GetTokenUser()
-	if err != nil {
-		return fmt.Errorf("the user running the client: %w", err)
-	}
-	want, err := windows.SecurityDescriptorFromString("D:P(A;OICI;FA;;;" + user.User.Sid.String() + ")(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)")
+	want, err := ownersAlone("OICI")
 	if err != nil {
 		return err
 	}
@@ -48,9 +45,42 @@ func private(dir string) error {
 		return err
 	}
 	if !ok {
-		return errors.New("its volume keeps no access list, so nothing can make it its owner's alone")
+		return errNoAccessList
 	}
 	return nil
+}
+
+var errNoAccessList = errors.New("its volume keeps no access list, so nothing can make it its owner's alone")
+
+// processUser is the user running the client. It is read once: every key read
+// asks.
+var processUser = sync.OnceValues(func() (*windows.SID, error) {
+	user, err := windows.GetCurrentProcessToken().GetTokenUser()
+	if err != nil {
+		return nil, fmt.Errorf("the user running the client: %w", err)
+	}
+	return user.User.Sid.Copy()
+})
+
+// ownersAlone is a protected access list that gives full control to the user
+// running the client, to SYSTEM and to the local Administrators, each entry with
+// these flags. Each trustee has one entry: Windows keeps one of a user that is
+// SYSTEM, which a list naming it twice would never read back as.
+func ownersAlone(flags string) (*windows.SECURITY_DESCRIPTOR, error) {
+	self, err := processUser()
+	if err != nil {
+		return nil, err
+	}
+	return windows.SecurityDescriptorFromString(ownersAloneText(self, flags))
+}
+
+func ownersAloneText(self *windows.SID, flags string) string {
+	entry := func(trustee string) string { return "(A;" + flags + ";FA;;;" + trustee + ")" }
+	list := "D:P"
+	if !self.IsWellKnown(windows.WinLocalSystemSid) {
+		list += entry(self.String())
+	}
+	return list + entry("SY") + entry("BA")
 }
 
 // hasDACL is whether dir's access list is protected and allows what want's

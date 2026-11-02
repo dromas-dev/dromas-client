@@ -19,6 +19,7 @@ const scriptVersion = "0.1.0"
 // words, with min_version once it has its form. It changes no exit status:
 // the script has none for a mailbox that needs a look.
 func TestTheScriptNamesItsVersionAndSaysASunset(t *testing.T) {
+	needP256(t)
 	w := newWorld(t)
 	b := w.mailbox()
 	script := abs(t, "dromas.sh")

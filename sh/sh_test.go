@@ -1139,6 +1139,11 @@ func TestTheScriptDeclaresNoSenderKeyType(t *testing.T) {
 	if got := sent(b, "rekey.json"); got != "false" {
 		t.Errorf("a renewal sends a declaration: %s", got)
 	}
+	w.srv.Forget(b.addr)
+	b.must("dr_rekey")
+	if got := sent(b, "register.json"); got != "false" {
+		t.Errorf("a registration inside a renewal sends a declaration: %s", got)
+	}
 }
 
 // A build of ssh-keygen that reads no P-256 key, as OpenSSH built without
@@ -1157,12 +1162,24 @@ func TestTheScriptRefusesAnSSHKeygenThatReadsNoP256Key(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(bin, "ssh-keygen"), []byte(shim), 0o700); err != nil { //nolint:gosec // the test's own shim
 		t.Fatal(err)
 	}
-	for _, args := range [][]string{{"init"}, {"addr"}, {"recv"}, {"prekey", "renew"}} {
+	called := filepath.Join(t.TempDir(), "curl-called")
+	if err := os.WriteFile(filepath.Join(bin, "curl"), []byte("#!/usr/bin/env bash\ntouch "+called+"\n"), 0o700); err != nil { //nolint:gosec // the test's own shim
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"init"}, {"addr"}, {"recv"}, {"prekey", "renew"}, {"send", "d_" + strings.Repeat("A", 64)}} {
+		home := t.TempDir()
 		cmd := exec.Command("bash", append([]string{abs(t, "dromas.sh")}, args...)...)
-		cmd.Env = append(os.Environ(), "DR_HOME="+t.TempDir(), "DR_SERVER_URL=http://127.0.0.1:9", "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+		cmd.Stdin = strings.NewReader("a body")
+		cmd.Env = append(os.Environ(), "DR_HOME="+home, "DR_SERVER_URL=http://127.0.0.1:9", "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 		out, err := cmd.CombinedOutput()
-		if err == nil || !strings.Contains(string(out), "this ssh-keygen reads no P-256 key") || strings.Contains(string(out), "curl") {
+		if err == nil || !strings.Contains(string(out), "this ssh-keygen reads no P-256 key") {
 			t.Errorf("dromas.sh %s on an ssh-keygen that reads no P-256 key: %v %q", strings.Join(args, " "), err, out)
+		}
+		if _, err := os.Stat(called); err == nil {
+			t.Errorf("dromas.sh %s called a server before it refused", strings.Join(args, " "))
+		}
+		if es, err := os.ReadDir(home); err != nil || len(es) != 0 {
+			t.Errorf("dromas.sh %s made %v before it refused: %v", strings.Join(args, " "), es, err)
 		}
 	}
 }

@@ -91,6 +91,11 @@ func TestCrashChild(t *testing.T) {
 		}
 	})
 	now := time.Unix(o.Now, 0).UTC()
+	if o.Command == newOfflineInit { // there is no mailbox to open
+		_, err := client.Init(context.Background(), o.Dir, client.Options{Base: o.Base, Now: func() time.Time { return now }, WorkingKey: true})
+		fmt.Printf("ended before %s: %v\n", o.Step, err)
+		return
+	}
 	b, err := client.Open(o.Dir, client.Options{Base: o.Base, Now: func() time.Time { return now }})
 	if err != nil {
 		t.Fatal(err)
@@ -103,7 +108,13 @@ func TestCrashChild(t *testing.T) {
 // fails the test unless it died there.
 func crash(t *testing.T, e *env, b *client.Mailbox, command, step string, to protocol.Address) {
 	t.Helper()
-	order, err := json.Marshal(crashOrder{Step: step, Dir: b.Dir(), Base: e.srv.URL, Command: command, To: to.String(), Now: e.clock.Now().Unix()})
+	crashIn(t, e, b.Dir(), command, step, to)
+}
+
+// crashIn is crash, by the mailbox's directory.
+func crashIn(t *testing.T, e *env, dir, command, step string, to protocol.Address) {
+	t.Helper()
+	order, err := json.Marshal(crashOrder{Step: step, Dir: dir, Base: e.srv.URL, Command: command, To: to.String(), Now: e.clock.Now().Unix()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -205,6 +216,39 @@ func renewalSteps(working bool) []string {
 		return client.Steps("renewal")
 	}
 	return slices.DeleteFunc(slices.Clone(client.Steps("renewal")), func(s string) bool { return s == "working key made" })
+}
+
+// newOfflineInit is init --offline in an empty directory, which TestCrashChild runs
+// with no mailbox to open first.
+const newOfflineInit = "a new init --offline"
+
+// init --offline in an empty directory, killed at each step of its renewal, a path
+// of its own, since a new identity has nothing at its server to read: run again,
+// it goes on, and comes back whole under a certificate.
+func TestANewOfflineInitKilledAtEachStepComesBackUnderACertificate(t *testing.T) {
+	t.Parallel()
+	if testing.Short() {
+		t.Skip("long: -short skips it; scripts/check.sh full and CI run it")
+	}
+	for _, step := range renewalSteps(true) {
+		t.Run(step, func(t *testing.T) {
+			e := newEnv(t)
+			a := e.mailbox()
+			dir := filepath.Join(t.TempDir(), "mailbox")
+			crashIn(t, e, dir, newOfflineInit, step, protocol.Address{})
+			opt := e.opts()
+			opt.WorkingKey = true
+			b, err := client.Init(t.Context(), dir, opt)
+			if err != nil {
+				t.Fatalf("again after %s: %v", step, err)
+			}
+			landAll(t, b)
+			if !certified(t, b) {
+				t.Fatal("not under a certificate")
+			}
+			whole(t, e, b, a)
+		})
+	}
 }
 
 // A restore told to register under a certificate (init --offline), at a

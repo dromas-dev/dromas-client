@@ -130,7 +130,7 @@ func (b *Mailbox) status() (*Status, error) {
 		s.Attention = append(s.Attention, why+": the next send, recv, allow or block sends this mailbox's own")
 	}
 	for dir, n := range map[string]*int{"inbox/*.json": &s.Inbox, "sent/*.json": &s.Sent, "outbox/*.P": &s.Outbox, "outbox/failed/*.P": &s.OutboxFailed, "refused/*.json": &s.Refused, "held/*.json": &s.Held} {
-		names, err := filepath.Glob(b.path(strings.Split(dir, "/")...))
+		names, err := matching(b.path(strings.Split(dir, "/")...))
 		if err != nil {
 			return nil, err
 		}

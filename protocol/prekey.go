@@ -235,7 +235,7 @@ func bech32HRP(s string) (string, bool) {
 // at now, and parses it. The signature must be by that identity or a working
 // key it certified, under a certificate valid at now, in id's prekey
 // namespace, and the statement must name id's own address. It returns the
-// signer too: holding it to the mailbox's mode, and to the highest it has seen,
+// signer too: holding it to the highest it has seen, and to any revocation of certificates,
 // is the caller's. The key's type is checked last, so ErrPrekeyType is a
 // statement good in every other way, and comes with the statement and its
 // signer, for a caller to hold to its own rules first.

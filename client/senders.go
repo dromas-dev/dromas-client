@@ -297,7 +297,7 @@ type keptMessage struct {
 // differ; the id makes it the same on every run. A file that is not one of
 // this client's lines ([Mailbox.keptLine]) is skipped.
 func (b *Mailbox) keptMessages(dir string) ([]keptMessage, error) {
-	names, err := filepath.Glob(b.path(dir, "*.json"))
+	names, err := matching(b.path(dir, "*.json"))
 	if err != nil {
 		return nil, err
 	}
@@ -476,7 +476,7 @@ func (b *Mailbox) rebuildAllowed() (int, error) {
 	for _, a := range as {
 		addrs = append(addrs, a.Address)
 	}
-	sent, err := filepath.Glob(b.path("sent", "*.json"))
+	sent, err := matching(b.path("sent", "*.json"))
 	if err != nil {
 		return 0, err
 	}
