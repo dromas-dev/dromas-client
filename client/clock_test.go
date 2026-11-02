@@ -576,6 +576,9 @@ func TestAPrekeyPastItsDeletionTimeWithNoServerConfirmingItIsSaid(t *testing.T) 
 	if _, err := b.Revoke(ctx, rec); err != nil {
 		t.Fatal(err)
 	}
+	if _, _, err := b.KeepRevocation(ctx, rec); err != nil {
+		t.Fatal(err)
+	}
 	e.clock.Add(past)
 	if said() {
 		t.Fatal("said of a mailbox that is finished")
