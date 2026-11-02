@@ -145,13 +145,16 @@ func (b *Mailbox) bindState() error {
 	if b.id == nil {
 		return nil
 	}
+	// A read first: every command comes here, and a write transaction syncs the
+	// file even when it changes nothing.
+	bound := false
+	if err := b.view(func(s store) error {
+		bound = s.get(bucketMeta, keyAddress) != nil
+		return b.stateIsOurs(s)
+	}); err != nil || bound {
+		return err
+	}
 	return b.update(func(s store) error {
-		if err := b.stateIsOurs(s); err != nil {
-			return err
-		}
-		if s.get(bucketMeta, keyAddress) != nil {
-			return nil
-		}
 		return s.put(bucketMeta, keyAddress, []byte(b.id.Address().String()))
 	})
 }

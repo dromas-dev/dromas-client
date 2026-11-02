@@ -194,8 +194,15 @@ func Open(dir string, opt Options) (*Mailbox, error) {
 // HTTP client takes every request through one transport (newTransport) and
 // follows no redirect (followNone).
 func newMailbox(dir string, opt Options) (*Mailbox, error) {
-	// No directory is a mailbox that keeps nothing ([Publish], [Revoke]).
-	if dir != "" {
+	// No directory is a mailbox that keeps nothing ([Publish], [Revoke]). The
+	// default layout's parts cannot overlap, so only its base directory is read.
+	switch {
+	case dir == "":
+	case opt.Layout == (Layout{}):
+		if err := checkBaseLocal(dir); err != nil {
+			return nil, err
+		}
+	default:
 		if err := CheckLayout(dir, opt.Layout); err != nil {
 			return nil, err
 		}
