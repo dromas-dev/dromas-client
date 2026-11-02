@@ -1508,7 +1508,7 @@ A mailbox whose identity is kept elsewhere signs under certificates. The identit
      - every rule of Section 5.2;
      - a certificate serial no lower than the one the mailbox gave;
      - the key the mailbox made.
-  4. The mailbox renews under the certificate (Section 11.9). If the certificate began less than an hour before the mailbox's clock (Section 12.4), the mailbox uses the certificate only after that hour has passed.
+  4. The mailbox renews under the certificate (Section 11.9). The mailbox uses any certificate that began less than an hour before the mailbox's clock (Section 12.4) only after that hour has passed.
 
   A prekey never leaves the mailbox. The identity holder has no key that decrypts messages.
 - **Between certificates, the mailbox renews under its current certificate.** Each renewal brings a new prekey at a higher prekey serial.
