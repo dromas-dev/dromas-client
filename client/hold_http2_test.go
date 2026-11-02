@@ -95,6 +95,14 @@ func newHTTP2Mailbox(t *testing.T) (*env, *http2Mailbox) {
 		m.lives = append(m.lives, client.KeepAliveOf(m.b))
 		return tls.Client(f, config), nil
 	})
+	// A connection left to its idle time outlives a test that ends sooner.
+	t.Cleanup(func() {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		for _, c := range m.conns {
+			_ = c.Close()
+		}
+	})
 	receive(t, m.b)
 	if m.dials() != 1 {
 		t.Fatalf("%d connections for one receive", m.dials())
@@ -188,6 +196,25 @@ func TestACallOverHTTP2AfterADropGetsANewConnection(t *testing.T) {
 			t.Errorf("the next call: %v", err)
 		}
 		if m.dials() != 2 {
+			t.Errorf("%d connections", m.dials())
+		}
+	})
+}
+
+// A deadline of the caller's says nothing of the connection, which stays.
+func TestACallersDeadlineOverHTTP2KeepsTheConnection(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		e, m := newHTTP2Mailbox(t)
+		e.srv.SetMiddle(func(_ http.ResponseWriter, r *http.Request, _ http.Handler) { <-r.Context().Done() })
+		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+		defer cancel()
+		if _, err := m.b.Receive(ctx); err == nil {
+			t.Fatal("the call went through")
+		}
+		e.srv.SetMiddle(nil)
+		time.Sleep(time.Second) // the cancelled stream's reset, read
+		receive(t, m.b)
+		if m.dials() != 1 {
 			t.Errorf("%d connections", m.dials())
 		}
 	})

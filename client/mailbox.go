@@ -281,15 +281,23 @@ func (t *transport) CloseIdleConnections() {
 	}
 }
 
+// current is what a call goes through, for renew.
+func (t *transport) current() *http.RoundTripper { return t.next.Load() }
+
 // renew has the next call make a new connection, leaving what the current ones
 // carry to end as it will: a clone of a transport of net/http's own shares no
 // pool with it (see hold.go, of an HTTP/2 connection). Another transport can only
-// be asked to close what is idle.
-func (t *transport) renew() {
+// be asked to close what is idle. was is what the call that failed went through:
+// where another has renewed since, the connection in use is not the one it failed
+// on, and stays.
+func (t *transport) renew(was *http.RoundTripper) {
+	if t.next.Load() != was {
+		return
+	}
 	t.CloseIdleConnections()
-	if c, ok := (*t.next.Load()).(*http.Transport); ok {
+	if c, ok := (*was).(*http.Transport); ok {
 		var fresh http.RoundTripper = c.Clone()
-		t.next.Store(&fresh)
+		t.next.CompareAndSwap(was, &fresh)
 	}
 }
 

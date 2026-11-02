@@ -127,7 +127,7 @@ func TestARenewedTransportResumesAndKeepsItsHealthCheck(t *testing.T) {
 			t.Fatalf("HTTP/%d", resp.ProtoMajor)
 		}
 		resumed = append(resumed, resp.TLS.DidResume)
-		wrapped.renew()
+		wrapped.renew(wrapped.current())
 	}
 	if resumed[0] || !resumed[1] {
 		t.Errorf("resumed %v, want a full handshake then a resumed one", resumed)
@@ -148,5 +148,20 @@ func TestTheHealthCheckIsAboveAnythingALiveConnectionDoes(t *testing.T) {
 	}
 	if connectionIdle != http.DefaultTransport.(*http.Transport).IdleConnTimeout {
 		t.Logf("connectionIdle %v differs from net/http's default", connectionIdle)
+	}
+}
+
+// A renew by a call on what has since been renewed leaves the new connection be.
+func TestARenewAfterAnotherLeavesItsTransport(t *testing.T) {
+	tr := newRoundTripper(defaultTransport(&holding{}))
+	was := tr.current()
+	tr.renew(was)
+	now := tr.current()
+	if now == was {
+		t.Fatal("no new transport")
+	}
+	tr.renew(was)
+	if tr.current() != now {
+		t.Error("a second renew by the old one replaced the new one")
 	}
 }

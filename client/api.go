@@ -99,6 +99,7 @@ func (b *Mailbox) exchange(ctx context.Context, method, path string, in any, hdr
 	}
 	_, rawIn := in.(*ciphertext)
 	ct, raw := out.(*ciphertext)
+	outer, was := ctx, b.http.Transport.(*transport).current()
 	// The default client bounds a call by requestTimeout: a ciphertext's
 	// bytes, sent or fetched, by their stalls alone, so one of any size moves
 	// on a slow link that keeps moving, and the rest of that call, and any
@@ -139,7 +140,7 @@ func (b *Mailbox) exchange(ctx context.Context, method, path string, in any, hdr
 	name = method + " " + name
 	resp, err := b.http.Do(req)
 	if err != nil {
-		return nil, noAnswer(name, "no answer that is HTTP", b.cutOff(cut.why(heldOut(ctx, err))))
+		return nil, noAnswer(name, "no answer that is HTTP", b.cutOff(outer, was, cut.why(heldOut(ctx, err))))
 	}
 	b.holding.http2.Store(resp.ProtoMajor == 2)
 	// What every answer says of this client's version, 2xx or not, is kept
@@ -165,7 +166,7 @@ func (b *Mailbox) exchange(ctx context.Context, method, path string, in any, hdr
 	if raw && answered {
 		readErr, err := ct.read(name, resp)
 		if readErr != nil {
-			return nil, noAnswer(name, "an answer whose body could not be read", b.cutOff(cut.why(readErr)))
+			return nil, noAnswer(name, "an answer whose body could not be read", b.cutOff(outer, was, cut.why(readErr)))
 		}
 		return resp, err
 	}
@@ -175,7 +176,7 @@ func (b *Mailbox) exchange(ctx context.Context, method, path string, in any, hdr
 	}
 	data, err := io.ReadAll(io.LimitReader(resp.Body, limit))
 	if err != nil {
-		return nil, noAnswer(name, "an answer whose body could not be read", b.cutOff(cut.why(heldOut(ctx, err))))
+		return nil, noAnswer(name, "an answer whose body could not be read", b.cutOff(outer, was, cut.why(heldOut(ctx, err))))
 	}
 	if !answered {
 		e := &APIError{Status: resp.StatusCode, Version: b.version}
@@ -388,14 +389,13 @@ func heldOut(ctx context.Context, err error) error {
 	return err
 }
 
-// cutOff is err, and where a bound on the call's time made it, the mailbox's next
-// call makes a new connection: nothing came back on this one for that long, and
-// over HTTP/2 the next would be sent down it (transport.renew).
-func (b *Mailbox) cutOff(err error) error {
-	if timedOut(err) {
-		if t, ok := b.http.Transport.(*transport); ok {
-			t.renew()
-		}
+// cutOff is err, and where the mailbox's own bound on the call's time made it, the
+// mailbox's next call makes a new connection: nothing came back on this one for that
+// long, and over HTTP/2 the next would be sent down it (transport.renew). A deadline
+// of its caller's (outer) says nothing of the connection.
+func (b *Mailbox) cutOff(outer context.Context, was *http.RoundTripper, err error) error {
+	if timedOut(err) && outer.Err() == nil {
+		b.http.Transport.(*transport).renew(was)
 	}
 	return err
 }
