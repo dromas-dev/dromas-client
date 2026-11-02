@@ -124,7 +124,7 @@ cert() { # <kept file> <signing key> <certified key> <ssh-keygen options…>
 good() { echo -I dromas-cert-v1 -n "$1" -z "${2:-$SA}" -V "${3:-$V_OK}" -O clear; } # <address> [serial] [validity] → the options of a certificate every check passes
 sign() { ssh-keygen -q -Y sign -n "$2" -f "$KEYS/$1" "${@:3}"; } # <key> <namespace> [-O …] < message > signature, by a bare key: an identity's, for a revocation
 under() { cp "$2" "$KEYS/$1-cert.pub"; ssh-keygen -q -Y sign -n "$3" -f "$KEYS/$1-cert.pub" "${@:4}"; } # <working key> <certificate> <namespace> [-O …] < message > signature under that certificate
-statement() { printf 'dromas-prekey-v1\n%s\n%s\n%s\n%s\n' "$@"; } # <address> <serial> <recipient> <not_after>
+statement() { printf 'dromas-prekey-v1\n%s\n%s\n%s\n%s\n%s\n' "$@"; } # <address> <its signer's rank> <serial> <recipient> <not_after>
 
 # Each mailbox's working key, certified by its identity. A reader takes a signature under each: A's above A's
 # revocation of its certificates, and B's and C's, whose certificates nothing revokes.
@@ -139,12 +139,12 @@ sign a "dromas-revoke-certs-v1:$A" < a/revoked-certs.txt > a/revoked-certs.sig
 # The three mailboxes, their prekeys and A's revocation. A's statements are signed by its working key under its
 # certificate, B's and C's by the identity itself; C's, an ECDSA signature, is made once and kept.
 [ "$(age-keygen -y input/b-1.pq.key)" = "$(cat input/b-1.pq)" ] || { echo "input/b-1.pq is not the recipient of input/b-1.pq.key" >&2; exit 1; }
-statement "$A" 1 "$(cat input/a-1.pq)" "$NOT_AFTER" > a/prekey-1.txt
-statement "$A" 2 "$(cat input/a-2.pq)" "$NOT_AFTER" > a/prekey-2.txt
-statement "$B" 1 "$(cat input/b-1.pq)" "$NOT_AFTER" > b/prekey-1.txt
+statement "$A" "$SA" 1 "$(cat input/a-1.pq)" "$NOT_AFTER" > a/prekey-1.txt
+statement "$A" "$SA" 2 "$(cat input/a-2.pq)" "$NOT_AFTER" > a/prekey-2.txt
+statement "$B" 0 1 "$(cat input/b-1.pq)" "$NOT_AFTER" > b/prekey-1.txt
 for f in a/prekey-1 a/prekey-2; do under a-work a/work-cert.pub "dromas-prekey-v1:$A" < "$f.txt" > "$f.txt.sig"; done
 sign b "dromas-prekey-v1:$B" < b/prekey-1.txt > b/prekey-1.txt.sig
-statement "$C" 1 "$(cat input/b-1.pq)" "$NOT_AFTER" > c/prekey-1.txt
+statement "$C" 0 1 "$(cat input/b-1.pq)" "$NOT_AFTER" > c/prekey-1.txt
 [ -e c/prekey-1.txt.sig ] || sign c "dromas-prekey-v1:$C" < c/prekey-1.txt > c/prekey-1.txt.sig
 printf 'dromas-revoke-v1\n%s\n' "$A" > a/revoke.txt
 sign a "dromas-revoke-v1:$A" < a/revoke.txt > a/revoke.sig
@@ -249,11 +249,13 @@ pv ok-as-long-as-a-pass-can-be 'dromas-pass address="%s", not_after="%s", signat
 pv bad-a-byte-longer-than-a-pass-can-be 'dromas-pass address="%s", not_after="%s", signature="%s"%s,' "$A" "$PT" "$PS" "${PC// /,}"
 
 # Certificates every implementation must refuse for mailbox A at ./now, each with a signature made under
-# it over a/prekey-1.txt in A's prekey namespace: the signature itself is good, the certificate is not.
+# it in A's prekey namespace over the statement beside it (.txt), which names that certificate's serial as its
+# signer's rank: the signature itself is good and its rank is its signer's, and the certificate is not.
 badcert() { # <name> <signing key> <certified key> <ssh-keygen options…>
   local name=$1 key=$3
   cert "cert/$name.pub" "${@:2}"
-  under "$key" "cert/$name.pub" "dromas-prekey-v1:$A" < a/prekey-1.txt > "cert/$name.sig"
+  statement "$A" "$(ssh-keygen -L -f "cert/$name.pub" | sed -n 's/^ *Serial: //p')" 1 "$(cat input/a-1.pq)" "$NOT_AFTER" > "cert/$name.txt"
+  under "$key" "cert/$name.pub" "dromas-prekey-v1:$A" < "cert/$name.txt" > "cert/$name.sig"
 }
 badcert bad-critical-option a a-work $(good "$A") -O force-command=true
 # A certificate is in the one form its makers write, ssh-keygen -s … -O clear: no extension, an empty reserved field and a
@@ -268,10 +270,11 @@ badcert bad-serial-zero a a-work $(good "$A" 0)
 badcert bad-serial-above-2-53 a a-work $(good "$A" 9007199254740992)
 badcert bad-host-certificate a a-work $(good "$A") -h
 badcert bad-signed-by-b b a-work $(good "$A")
-# The re-wrap: SSHSIG does not sign its signing-key field, so the identity's own signature, rank 0, verifies under a
-# certificate of the identity's own key, which would rank it above A's revocation of certificates and above every
-# statement the identity signed. Its signature is A's identity's over a/prekey-1.txt with that certificate put in its
-# key's place, which is what ssh-keygen signs under it (checked below, once the helpers that take a blob apart are defined).
+# The re-wrap: SSHSIG does not sign its signing-key field, so the identity's own signature verifies under a certificate
+# of the identity's own key, above A's revocation of certificates. Its statement names that certificate's serial, so the
+# rank line passes and that the certified key is the identity's is all that refuses it. Its signature is A's identity's
+# over that statement with the certificate put in its key's place, which is what ssh-keygen signs under it (checked
+# below, once the helpers that take a blob apart are defined).
 badcert bad-certifies-the-identity a a $(good "$A")
 badcert bad-revoked a a-work $(good "$A" "$THROUGH")      # good in every way, and at the serial A's revocation of certificates runs through
 badcert bad-ended a a-work $(good "$A" "$SA" "$V_ENDED")
@@ -350,13 +353,14 @@ armor "$(restr "$X" "$o" "$(restr "$g" "$i" "$(restr "$rs" 0 "00$(content "$rs" 
 # Two more, made by protocol's TestVectorsEd25519R, since they need arithmetic on the curve: sig/ok-r-small-order.sig, whose
 # R is the neutral point, and sig/bad-r-plus-order-2.sig, whose R has a point of order 2 added. OpenSSH's own Ed25519 from
 # 10.6p1 judges both the other way (PROTOCOL.md Appendix A).
-W=$(blob cert/bad-certifies-the-identity.sig); V=$(blob <(sign a "dromas-prekey-v1:$A" < a/prekey-1.txt))
+W=$(blob cert/bad-certifies-the-identity.sig); V=$(blob <(sign a "dromas-prekey-v1:$A" < cert/bad-certifies-the-identity.txt))
 [ "$(restr "$V" 20 "$(content "$W" 20)")" = "$W" ] || { echo "cert/bad-certifies-the-identity.sig is not the identity's own signature re-wrapped" >&2; exit 1; }
 # A certificate of a working key of small order, the neutral point, which ssh-keygen certifies as it reads any 32 bytes,
-# and a signature under it over a/prekey-1.txt that Ed25519's equation takes, R the neutral point and S zero: the check
-# on the working key is all that refuses it.
+# and a signature under it over the statement beside it that Ed25519's equation takes, R the neutral point and S zero: the
+# check on the working key is all that refuses it.
 printf 'ssh-ed25519 %s\n' "$(bin "$(str "$(asc ssh-ed25519)")$(str 01$(printf '%062d' 0))" | b64)" > "$KEYS/small-work.pub"
 cert cert/bad-working-key-small-order.pub a small-work $(good "$A")
+cp a/prekey-1.txt cert/bad-working-key-small-order.txt
 X=$(blob a/prekey-1.txt.sig); X=$(restr "$X" 20 "$(cut -d' ' -f2 cert/bad-working-key-small-order.pub | base64 -d | od -An -v -tx1 | tr -d ' \n')")
 o=$(skip "$X" "$(skip "$X" "$(skip "$X" "$(skip "$X" 20)")")")      # the signature: its type, then R and S in one string
 armor "$(restr "$X" "$o" "$(str "$(asc ssh-ed25519)")$(str 01$(printf '%0126d' 0))")" > cert/bad-working-key-small-order.sig
@@ -424,53 +428,73 @@ PQ=$(cat input/a-1.pq)
 bad() { local name=$1; shift; printf "$@" > "prekey/$name.txt"; under a-work a/work-cert.pub "dromas-prekey-v1:$A" < "prekey/$name.txt" > "prekey/$name.txt.sig"; }
 cp a/prekey-1.txt prekey/bad-wrong-namespace.txt; under a-work a/work-cert.pub "dromas-msg-v1:$A" < a/prekey-1.txt > prekey/bad-wrong-namespace.txt.sig
 cp a/prekey-1.txt prekey/bad-signed-by-b.txt; under b-work b/work-cert.pub "dromas-prekey-v1:$A" < a/prekey-1.txt > prekey/bad-signed-by-b.txt.sig
-cp a/prekey-1.txt prekey/signed-by-the-identity.txt; sign a "dromas-prekey-v1:$A" < a/prekey-1.txt > prekey/signed-by-the-identity.txt.sig
+statement "$A" 0 1 "$PQ" "$NOT_AFTER" > prekey/signed-by-the-identity.txt; sign a "dromas-prekey-v1:$A" < prekey/signed-by-the-identity.txt > prekey/signed-by-the-identity.txt.sig
 cp a/prekey-1.txt prekey/bad-signed-by-a-bare-working-key.txt; sign a-work "dromas-prekey-v1:$A" < a/prekey-1.txt > prekey/bad-signed-by-a-bare-working-key.txt.sig
 # A statement may outlive the certificate it is signed under, whose end a sender reads apart: this one's certificate,
 # a later one of A's second working key, ends in 5 days.
 cert prekey/outlives-its-certificate.cert.pub a a-work-2 $(good "$A" $((SA + 1)) "$V_SHORT")
-cp a/prekey-1.txt prekey/outlives-its-certificate.txt; under a-work-2 prekey/outlives-its-certificate.cert.pub "dromas-prekey-v1:$A" < a/prekey-1.txt > prekey/outlives-its-certificate.txt.sig
+statement "$A" $((SA + 1)) 1 "$PQ" "$NOT_AFTER" > prekey/outlives-its-certificate.txt; under a-work-2 prekey/outlives-its-certificate.cert.pub "dromas-prekey-v1:$A" < prekey/outlives-its-certificate.txt > prekey/outlives-its-certificate.txt.sig
 # B's and C's own statements, each signed under its own mailbox's certificate in its own namespace: valid for each,
 # whose certificates nothing revokes.
-cp b/prekey-1.txt prekey/b-signed-under-its-certificate.txt; under b-work b/work-cert.pub "dromas-prekey-v1:$B" < b/prekey-1.txt > prekey/b-signed-under-its-certificate.txt.sig
-cp c/prekey-1.txt prekey/c-signed-under-its-certificate.txt; under c-work c/work-cert.pub "dromas-prekey-v1:$C" < c/prekey-1.txt > prekey/c-signed-under-its-certificate.txt.sig
-bad bad-names-another-mailbox 'dromas-prekey-v1\n%s\n1\n%s\n%s\n' "$B" "$PQ" "$NOT_AFTER"
-bad bad-serial-zero 'dromas-prekey-v1\n%s\n0\n%s\n%s\n' "$A" "$PQ" "$NOT_AFTER"
-bad bad-serial-leading-zero 'dromas-prekey-v1\n%s\n01\n%s\n%s\n' "$A" "$PQ" "$NOT_AFTER"
-bad bad-serial-19-digits 'dromas-prekey-v1\n%s\n1000000000000000000\n%s\n%s\n' "$A" "$PQ" "$NOT_AFTER"
-bad bad-serial-above-2-53 'dromas-prekey-v1\n%s\n9007199254740992\n%s\n%s\n' "$A" "$PQ" "$NOT_AFTER" # an answer names a serial as a JSON number, and 2^53 - 1 is the most one holds exactly
-bad bad-serial-negative 'dromas-prekey-v1\n%s\n-1\n%s\n%s\n' "$A" "$PQ" "$NOT_AFTER"
-bad bad-never 'dromas-prekey-v1\n%s\n1\n%s\nnever\n' "$A" "$PQ"
-bad bad-time-lowercase-z 'dromas-prekey-v1\n%s\n1\n%s\n2026-10-17T00:00:00z\n' "$A" "$PQ"
-bad bad-time-fraction 'dromas-prekey-v1\n%s\n1\n%s\n2026-10-17T00:00:00.5Z\n' "$A" "$PQ"
-bad bad-time-offset 'dromas-prekey-v1\n%s\n1\n%s\n2026-10-17T00:00:00+00:00\n' "$A" "$PQ"
-bad bad-tag 'dromas-prekey-v2\n%s\n1\n%s\n%s\n' "$A" "$PQ" "$NOT_AFTER"
-bad bad-address-uppercase 'dromas-prekey-v1\n%s\n1\n%s\n%s\n' "$(printf '%s' "$A" | tr a-z A-Z)" "$PQ" "$NOT_AFTER"
-bad bad-four-lines 'dromas-prekey-v1\n%s\n1\n%s\n' "$A" "$PQ"
-bad bad-six-lines 'dromas-prekey-v1\n%s\n1\n%s\n%s\n\n' "$A" "$PQ" "$NOT_AFTER"
-bad bad-crlf 'dromas-prekey-v1\r\n%s\r\n1\r\n%s\r\n%s\r\n' "$A" "$PQ" "$NOT_AFTER"
-bad bad-no-final-newline 'dromas-prekey-v1\n%s\n1\n%s\n%s' "$A" "$PQ" "$NOT_AFTER"
+statement "$B" "$SA" 1 "$(cat input/b-1.pq)" "$NOT_AFTER" > prekey/b-signed-under-its-certificate.txt; under b-work b/work-cert.pub "dromas-prekey-v1:$B" < prekey/b-signed-under-its-certificate.txt > prekey/b-signed-under-its-certificate.txt.sig
+statement "$C" "$SA" 1 "$(cat input/b-1.pq)" "$NOT_AFTER" > prekey/c-signed-under-its-certificate.txt; under c-work c/work-cert.pub "dromas-prekey-v1:$C" < prekey/c-signed-under-its-certificate.txt > prekey/c-signed-under-its-certificate.txt.sig
+bad bad-names-another-mailbox 'dromas-prekey-v1\n%s\n%s\n1\n%s\n%s\n' "$B" "$SA" "$PQ" "$NOT_AFTER"
+bad bad-serial-zero 'dromas-prekey-v1\n%s\n%s\n0\n%s\n%s\n' "$A" "$SA" "$PQ" "$NOT_AFTER"
+bad bad-serial-leading-zero 'dromas-prekey-v1\n%s\n%s\n01\n%s\n%s\n' "$A" "$SA" "$PQ" "$NOT_AFTER"
+bad bad-serial-19-digits 'dromas-prekey-v1\n%s\n%s\n1000000000000000000\n%s\n%s\n' "$A" "$SA" "$PQ" "$NOT_AFTER"
+bad bad-serial-above-2-53 'dromas-prekey-v1\n%s\n%s\n9007199254740992\n%s\n%s\n' "$A" "$SA" "$PQ" "$NOT_AFTER" # an answer names a serial as a JSON number, and 2^53 - 1 is the most one holds exactly
+bad bad-serial-negative 'dromas-prekey-v1\n%s\n%s\n-1\n%s\n%s\n' "$A" "$SA" "$PQ" "$NOT_AFTER"
+bad bad-never 'dromas-prekey-v1\n%s\n%s\n1\n%s\nnever\n' "$A" "$SA" "$PQ"
+bad bad-time-lowercase-z 'dromas-prekey-v1\n%s\n%s\n1\n%s\n2026-10-17T00:00:00z\n' "$A" "$SA" "$PQ"
+bad bad-time-fraction 'dromas-prekey-v1\n%s\n%s\n1\n%s\n2026-10-17T00:00:00.5Z\n' "$A" "$SA" "$PQ"
+bad bad-time-offset 'dromas-prekey-v1\n%s\n%s\n1\n%s\n2026-10-17T00:00:00+00:00\n' "$A" "$SA" "$PQ"
+bad bad-tag 'dromas-prekey-v2\n%s\n%s\n1\n%s\n%s\n' "$A" "$SA" "$PQ" "$NOT_AFTER"
+bad bad-address-uppercase 'dromas-prekey-v1\n%s\n%s\n1\n%s\n%s\n' "$(printf '%s' "$A" | tr a-z A-Z)" "$SA" "$PQ" "$NOT_AFTER"
+bad bad-five-lines 'dromas-prekey-v1\n%s\n%s\n1\n%s\n' "$A" "$SA" "$PQ"
+bad bad-seven-lines 'dromas-prekey-v1\n%s\n%s\n1\n%s\n%s\n\n' "$A" "$SA" "$PQ" "$NOT_AFTER"
+# The rank line (PROTOCOL.md §6). A statement's rank is its signer's, and any other makes it invalid: too high, too low, a
+# certificate's under the identity, 0 under a certificate. No rank at all is the line missing. A rank of another form is
+# one its signer holds but for its form, so the form is all that refuses each: a leading zero under the certificate of that
+# number, and 0 written twice under the identity.
+bad bad-rank-too-high 'dromas-prekey-v1\n%s\n%s\n1\n%s\n%s\n' "$A" $((SA + 1)) "$PQ" "$NOT_AFTER"
+bad bad-rank-too-low 'dromas-prekey-v1\n%s\n%s\n1\n%s\n%s\n' "$A" $((SA - 1)) "$PQ" "$NOT_AFTER"
+bad bad-rank-0-under-a-certificate 'dromas-prekey-v1\n%s\n0\n1\n%s\n%s\n' "$A" "$PQ" "$NOT_AFTER"
+bad bad-rank-missing 'dromas-prekey-v1\n%s\n1\n%s\n%s\n' "$A" "$PQ" "$NOT_AFTER"
+bad bad-rank-leading-zero 'dromas-prekey-v1\n%s\n0%s\n1\n%s\n%s\n' "$A" "$SA" "$PQ" "$NOT_AFTER"
+statement "$A" "$SA" 1 "$PQ" "$NOT_AFTER" > prekey/bad-rank-a-certificate-s-by-the-identity.txt; sign a "dromas-prekey-v1:$A" < prekey/bad-rank-a-certificate-s-by-the-identity.txt > prekey/bad-rank-a-certificate-s-by-the-identity.txt.sig
+statement "$A" 00 1 "$PQ" "$NOT_AFTER" > prekey/bad-rank-0-written-twice.txt; sign a "dromas-prekey-v1:$A" < prekey/bad-rank-0-written-twice.txt > prekey/bad-rank-0-written-twice.txt.sig
+# The substitution the rank line stops. SSHSIG signs no signing key, so a statement signed under one certificate of a
+# working key verifies shown under another certificate of that key. Here is a/prekey-1.txt, signed under A's certificate,
+# shown under a later certificate of the same working key: its signature is good under what it carries, and the rank it
+# names is all that refuses it. Without that line an older statement stands above a sender's floor.
+cert prekey/bad-rank-under-another-certificate.cert.pub a a-work $(good "$A" $((SA + 2)))
+cp a/prekey-1.txt prekey/bad-rank-under-another-certificate.txt
+armor "$(restr "$(blob a/prekey-1.txt.sig)" 20 "$(cut -d' ' -f2 prekey/bad-rank-under-another-certificate.cert.pub | base64 -d | od -An -v -tx1 | tr -d ' \n')")" > prekey/bad-rank-under-another-certificate.txt.sig
+[ "$(blob prekey/bad-rank-under-another-certificate.txt.sig)" = "$(blob <(under a-work prekey/bad-rank-under-another-certificate.cert.pub "dromas-prekey-v1:$A" < a/prekey-1.txt))" ] || { echo "prekey/bad-rank-under-another-certificate.txt.sig is not what that certificate's working key signs" >&2; exit 1; }
+bad bad-crlf 'dromas-prekey-v1\r\n%s\r\n%s\r\n1\r\n%s\r\n%s\r\n' "$A" "$SA" "$PQ" "$NOT_AFTER"
+bad bad-no-final-newline 'dromas-prekey-v1\n%s\n%s\n1\n%s\n%s' "$A" "$SA" "$PQ" "$NOT_AFTER"
 # A NUL in each line, which a reader that takes a line through a shell variable drops; and a serial with a digit that is not
 # ASCII (U+0661), which [0-9] takes in some locales.
-bad bad-nul-in-the-tag 'dromas-prekey-v1\x00\n%s\n1\n%s\n%s\n' "$A" "$PQ" "$NOT_AFTER"
-bad bad-nul-in-the-address 'dromas-prekey-v1\n%s\x00%s\n1\n%s\n%s\n' "${A:0:32}" "${A:32}" "$PQ" "$NOT_AFTER"
-bad bad-nul-in-the-serial 'dromas-prekey-v1\n%s\n1\x002\n%s\n%s\n' "$A" "$PQ" "$NOT_AFTER"
-bad bad-nul-in-the-recipient 'dromas-prekey-v1\n%s\n1\n%s\x00%s\n%s\n' "$A" "${PQ:0:16}" "${PQ:16}" "$NOT_AFTER"
-bad bad-nul-in-not-after 'dromas-prekey-v1\n%s\n1\n%s\n%s\x00%s\n' "$A" "$PQ" "${NOT_AFTER:0:10}" "${NOT_AFTER:10}"
-bad bad-serial-a-digit-not-ascii 'dromas-prekey-v1\n%s\n1\xd9\xa1\n%s\n%s\n' "$A" "$PQ" "$NOT_AFTER"
-bad bad-recipient-uppercase-pq 'dromas-prekey-v1\n%s\n1\n%s\n%s\n' "$A" "$(printf '%s' "$PQ" | tr a-z A-Z)" "$NOT_AFTER"
-bad bad-recipient-not-age 'dromas-prekey-v1\n%s\n1\n%s\n%s\n' "$A" "$GOOD" "$NOT_AFTER"
-bad bad-recipient-small-order-pq 'dromas-prekey-v1\n%s\n1\n%s\n%s\n' "$A" "$(cat input/small-order.pq)" "$NOT_AFTER"
-bad expired 'dromas-prekey-v1\n%s\n1\n%s\n%s\n' "$A" "$PQ" "$NOW"
-bad longest 'dromas-prekey-v1\n%s\n1\n%s\n2026-10-18T01:00:00Z\n' "$A" "$PQ"
-bad too-long 'dromas-prekey-v1\n%s\n1\n%s\n2026-10-18T01:00:01Z\n' "$A" "$PQ"
+bad bad-nul-in-the-tag 'dromas-prekey-v1\x00\n%s\n%s\n1\n%s\n%s\n' "$A" "$SA" "$PQ" "$NOT_AFTER"
+bad bad-nul-in-the-address 'dromas-prekey-v1\n%s\x00%s\n%s\n1\n%s\n%s\n' "${A:0:32}" "${A:32}" "$SA" "$PQ" "$NOT_AFTER"
+bad bad-nul-in-the-rank 'dromas-prekey-v1\n%s\n1791\x00590400\n1\n%s\n%s\n' "$A" "$PQ" "$NOT_AFTER"
+bad bad-nul-in-the-serial 'dromas-prekey-v1\n%s\n%s\n1\x002\n%s\n%s\n' "$A" "$SA" "$PQ" "$NOT_AFTER"
+bad bad-nul-in-the-recipient 'dromas-prekey-v1\n%s\n%s\n1\n%s\x00%s\n%s\n' "$A" "$SA" "${PQ:0:16}" "${PQ:16}" "$NOT_AFTER"
+bad bad-nul-in-not-after 'dromas-prekey-v1\n%s\n%s\n1\n%s\n%s\x00%s\n' "$A" "$SA" "$PQ" "${NOT_AFTER:0:10}" "${NOT_AFTER:10}"
+bad bad-serial-a-digit-not-ascii 'dromas-prekey-v1\n%s\n%s\n1\xd9\xa1\n%s\n%s\n' "$A" "$SA" "$PQ" "$NOT_AFTER"
+bad bad-recipient-uppercase-pq 'dromas-prekey-v1\n%s\n%s\n1\n%s\n%s\n' "$A" "$SA" "$(printf '%s' "$PQ" | tr a-z A-Z)" "$NOT_AFTER"
+bad bad-recipient-not-age 'dromas-prekey-v1\n%s\n%s\n1\n%s\n%s\n' "$A" "$SA" "$GOOD" "$NOT_AFTER"
+bad bad-recipient-small-order-pq 'dromas-prekey-v1\n%s\n%s\n1\n%s\n%s\n' "$A" "$SA" "$(cat input/small-order.pq)" "$NOT_AFTER"
+bad expired 'dromas-prekey-v1\n%s\n%s\n1\n%s\n%s\n' "$A" "$SA" "$PQ" "$NOW"
+bad longest 'dromas-prekey-v1\n%s\n%s\n1\n%s\n2026-10-18T01:00:00Z\n' "$A" "$SA" "$PQ"
+bad too-long 'dromas-prekey-v1\n%s\n%s\n1\n%s\n2026-10-18T01:00:01Z\n' "$A" "$SA" "$PQ"
 # A well-formed age recipient of a type nobody defines, so no client has it: RFC 7748 §6.1's published X25519 test key
 # (Alice's public key) under the human-readable part age1nosuchtype. Good in every other way, so a sender refuses it as
 # unsupported_prekey_type, never as a statement that does not verify.
 [ "$(bech32 age b77249f1180299c3eb1399abb0cced137e6923bf34ce8b2d8d50c374feafa915)" = "$(cat input/other.x25519)" ] || { echo "bech32 does not write input/other.x25519's key as age wrote it" >&2; exit 1; }
-bad unsupported-type 'dromas-prekey-v1\n%s\n1\n%s\n%s\n' "$A" "$(bech32 age1nosuchtype 8520f0098930a754748b7ddcb43ef75a0dbf3a0d26381af4eba4a98eaa9b4e6a)" "$NOT_AFTER"
+bad unsupported-type 'dromas-prekey-v1\n%s\n%s\n1\n%s\n%s\n' "$A" "$SA" "$(bech32 age1nosuchtype 8520f0098930a754748b7ddcb43ef75a0dbf3a0d26381af4eba4a98eaa9b4e6a)" "$NOT_AFTER"
 # And the same for an age recipient of a type that is no prekey's, X25519's, as age wrote it (its secret key discarded).
-bad unsupported-type-x25519 'dromas-prekey-v1\n%s\n1\n%s\n%s\n' "$A" "$(cat input/other.x25519)" "$NOT_AFTER"
+bad unsupported-type-x25519 'dromas-prekey-v1\n%s\n%s\n1\n%s\n%s\n' "$A" "$SA" "$(cat input/other.x25519)" "$NOT_AFTER"
 
 # Envelopes, judged as a message whose signature by A verified, received by mailbox B, at ./now.
 case_env() { local name=$1; shift; printf "$@" > "envelope/$name.json"; }
