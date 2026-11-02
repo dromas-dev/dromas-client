@@ -1726,6 +1726,7 @@ Dromas protects a message's content from everyone but the message's recipient. D
 
 - **The server sees the social graph, times, IP addresses and each message's size to within a padding block.** Padding hides a length, not a pattern of traffic: who writes to whom, when and how often. A sender other than the reference clients may pad differently or not at all, and the server cannot tell.
 - **Once a message is stored, the server keeps no sender beside the message's recipient (Section 13).** The server sees the sender at the send, with the sender's IP address and the time. The server also sees the message while the message is live. A server that turns hostile can record all of this from then on.
+- **A lookup shows anyone who has the address when the mailbox renews.** A prekey serial and a `not_after` read the clock of the prekey statement's maker, and a lookup needs no pass (Section 11.8).
 - **The lookup before a post tells the server that the mailbox is about to be written to.** The post tells the server the same thing a moment later.
 - **A lookup answered with gzip has a length that depends on the mailbox's own bytes.** So the length can help a network observer narrow down whom a sender is about to write to.
 - **Only a lookup's answer is compressed (Section 11.2).** A list, for example, sets values that senders chose beside the mailbox's own values (BREACH, RFC 7457 §2.6).
