@@ -586,13 +586,13 @@ msg-id    = 8lowhexdig "-" 4lowhexdig "-" 4lowhexdig "-" 4lowhexdig "-"
 lowhexdig = DIGIT / %x61-66   ; HEXDIG in lowercase
 ```
 
-- **An empty string in `subject`, `in_reply_to` or `supersedes` is the same as the member left out.** A writer leaves out a member whose value would be an empty string.
+- **An empty string in `subject`, `in_reply_to` or `supersedes` is the same as the member left out.** A writer leaves out `subject`, `in_reply_to` or `supersedes` when the member's value would be an empty string.
 - **A sender MUST refuse an `in_reply_to` or `supersedes` that is not a `msg_id`.** A reader checks only that each is a string.
 - **The line is compact UTF-8 JSON.** The JSON text contains no line feed, so the LF that ends the line is the line's only LF. A sender writes the line without escaping `<`, `>`, `&` or non-ASCII characters.
 - **A sender MUST check the envelope against the rules that the envelope's reader applies:** Section 3.3, and Section 12.3, check 3 (JSON). The body is nested at most 31 deep, so the envelope is nested at most 32 deep.
 - **A sender MUST refuse the whole of an envelope that breaks a rule, without repair, before the outbox keeps the envelope.** A sender writes, in compact form, an envelope that meets the rules. The envelope's members are in the order given. The envelope's strings and numbers are the values given.
 - **A reader accepts, as the envelope, any JSON text on the line that Section 3.3 accepts, whatever spelling the sender's encoder chose.** The reader MUST read the members from the line exactly as decrypted.
-- **`v` changes only for a breaking change.** A reader MUST refuse an unknown `v`.
+- **`v` changes only for a breaking change.** A reader MUST refuse a `v` that the reader does not know.
 - **A reader ignores a member that this version does not define (Section 3.3).** So two clients can agree on members of their own.
   - A member that this protocol defines has a plain name.
   - Any other member SHOULD have a collision-resistant name that contains a domain its writer controls (`example.com/compress`), and never an `x-` prefix (RFC 6648). RFC 7519 §4.2 names a public claim in the same way.
@@ -651,7 +651,7 @@ A sender pads every message so that the message's ciphertext is a whole number o
   - A ciphertext that is already a whole number of blocks gets no padding.
   - The padding is not signed.
 - **Examples.** A ciphertext of 40,000 bytes has a block of 4 KiB, and is padded to 40,960 bytes. A ciphertext of 70,000 bytes has a block of 8 KiB, and is padded to 73,728 bytes.
-- **The sender measures the ciphertext.** An age file (C2SP age) that has one native stanza and no other stanza, for a plaintext of L bytes, has this many bytes:
+- **The ciphertext is what is measured.** An age file (C2SP age) that has one native stanza and no other stanza, for a plaintext of L bytes, has this many bytes:
 
       H + 16 + L + 16 × max(1, ⌈L / 65,536⌉)
 
@@ -1158,7 +1158,7 @@ The two calls in this section accept no pass (Section 8).
 
   | The body carries | Answer |
   |---|---|
-  | a revocation of the address | `201 {}`. A mailbox at the address is revoked permanently. The server deletes the mailbox's messages and the server's record of the mailbox |
+  | a revocation of the address | `201 {}`. A mailbox at the address is revoked permanently. The server deletes the mailbox's messages and everything else that the server holds of the mailbox |
   | a revocation of certificates, through a revocation serial no lower than the one kept, if one is kept | `200 {}` |
   | a revocation of certificates through a lower revocation serial than the one kept | `409 conflict` (RFC 9110 §9.3.4), with `through` naming the revocation serial kept |
   | anything, for an address already revoked | `410 revoked`, with the address's revocation record |
@@ -1172,7 +1172,7 @@ The two calls in this section accept no pass (Section 8).
 
   **A revocation of the address is counted against no mailbox.** The server counts the revocation against the caller's IP address. For an address that the server keeps nothing of, the server MAY also count the revocation as a registration (`registrations`).
 
-  **A revocation record kept for an address with no mailbox binds a later registration.** While the address is revoked, the server answers that registration `410 revoked`. The server accepts no certificate that the identity revoked.
+  **A revocation record kept for an address with no mailbox binds a later registration.** While the address is revoked, the server answers that registration `410 revoked`. In that registration, the server accepts no certificate that the identity revoked.
 - **Look up revocations: `GET /v1/<A>/revocations`.** The server answers `200` with the revocation record it keeps for the address, whether or not a mailbox is there. Otherwise the server answers `404 not_revoked`.
 
 ### 11.16. Accounts
@@ -1190,7 +1190,7 @@ A mailbox may belong to one account at its server. The protocol fixes how a mail
   base64url-char = ALPHA / DIGIT / "-" / "_"
   ```
 
-  - A client checks an adopt key against that form, and reads nothing else of the key.
+  - A client requires an adopt key to match that form, and reads nothing else of the key.
   - A client MUST NOT accept an adopt key as a command-line argument, because process lists and transcripts keep command-line arguments.
   - An adopt key that this server did not make, or that is spent, expired or revoked → `403 adopt_key_refused`.
 - **Account id.** An account id has the form `account-id`.
