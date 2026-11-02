@@ -864,7 +864,7 @@ A server chooses what it limits and by how much. No limit's value is part of the
   - a revocation the server already keeps (Section 11.15);
   - a send of a ciphertext that the recipient stores (Section 11.10, step 6).
 
-  Only the budgets that bound any call may defer such a request with a `429`: the IP address's `requests` and `misses`, and the mailbox's `calls`.
+  Only the budgets that bound any call may defer such a request with a `429`. These are the budgets that the server spends before the server can tell that the request changes nothing, for example the IP address's `requests`, `misses` and `sends_before_pass`, and the mailbox's `calls`.
 
 **Who a call is counted against.** Here, an **IP address** is the IPv4 address or the IPv6 /64 that a call comes from. No caller is exempt.
 
