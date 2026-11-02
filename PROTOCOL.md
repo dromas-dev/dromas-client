@@ -1408,7 +1408,8 @@ A client drains every page of its list (Section 11.11) and fetches the message o
   - A client renews while enough of the prekey's lifetime is left for the clocks of the mailbox's senders and for the renewal's own calls.
   - For a prekey lifetime of a day or more, enough is the skew allowance (Section 3.4) for senders' clocks, and an hour for the calls.
   - For a shorter prekey lifetime, enough is five minutes for senders' clocks, and five minutes for the calls.
-- **A client signs each prekey serial one time only.** If the server did not accept a renewal, the client sends that renewal again exactly as signed. The client signs a new key only at a later prekey serial. The client keeps a key that is passed over, and deletes that key as a retired prekey.
+- **A client signs each prekey serial one time only.** The client signs a new key only at a later prekey serial. The client keeps a key that is passed over, and deletes that key as a retired prekey.
+- **A client passes over a waiting renewal that the client finds the client's server cannot accept.** A client MUST pass over a renewal whose prekey statement has ended at the client's clock. The client sends any other waiting renewal again exactly as signed.
 - **Two answers to a renewal are final for the renewal's prekey statement:** `409 conflict`, and `401 certificate_not_current` under the second pass that Section 8 allows. Such an answer is final because the server keeps a prekey statement no earlier than the renewal's, and accepts only a later one (Section 11.9). After such an answer, the mailbox looks itself up (Section 11.8):
   - If the server serves the mailbox's own prekey statement, the server accepted the renewal and the answer to the renewal was lost.
   - If the server serves any other prekey statement, that prekey statement is one the mailbox did not make. The rules below decide whether the mailbox renews again.
