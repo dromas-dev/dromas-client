@@ -145,7 +145,7 @@ Where this document uses a term below as a defined term, the term has the sense 
 - **Revocation of the address:** the revocation statement that revokes an address (Section 10.1).
 - **Revocation of certificates:** the revocation statement that revokes certificates through its **revocation serial**, the `through` value (Section 10.2): every certificate of the statement's address whose certificate serial is at or below the revocation serial.
 - **Revocation record:** the JSON object that contains an identity's revocations (Section 10.3).
-- **No revocation shown:** an answer that shows no revocation that a client can verify (Section 12.3, check 7).
+- **No revocation shown:** an answer that shows no revocation that a client can verify (Section 12.5).
 
 **Operations**
 
@@ -1340,15 +1340,10 @@ A client drains every page of its list (Section 11.11) and fetches the message o
    | 5 | `sent_at` is not before the mailbox's replay floor (check 8) | `stale` |
    | 5 | `sent_at` is no more than the skew allowance ahead of this mailbox's clock | `future` |
 
-7. **Check 7, revocation.** The mailbox keeps no revocation of the sender's address (Section 12.5), and no revocation of the sender's certificates that covers the signer (Section 5.1).
-   - The reader looks up the sender's mailbox (Section 11.8) once for each sender in a drain, after that sender's signature has verified. The reader verifies each revocation the lookup carries, and keeps each one that verifies.
-
-   | What the reader keeps, or the lookup shows | Outcome |
-   |---|---|
-   | a revocation of the sender's address | the reader refuses the message as `revoked`, and refuses every later message from that address the same way (Section 10.1) |
-   | a revocation of the sender's certificates through a revocation serial at or above the signer's certificate serial | the reader refuses the message as `certificate_revoked` |
-   | the sender's mailbox served with no revocation, `404 no_such_mailbox`, or `410 revoked` with nothing that verifies | "no revocation shown" |
-   | any other result | no answer: the drain stops, and the message stays on the server |
+7. **Check 7, revocation.** The reader follows three steps, in this order:
+   1. **What the reader keeps comes first, with no lookup.** A kept revocation of the sender's address (Section 12.5) refuses the message as `revoked`, now and for every later message from that address (Section 10.1). A kept revocation of the sender's certificates that covers the signer (Section 5.1) refuses the message as `certificate_revoked`.
+   2. **Otherwise the reader looks up the sender's mailbox (Section 11.8),** once for each sender in a drain, after that sender's signature has verified. An answer other than a well-formed `200`, `404 no_such_mailbox` or `410 revoked` is no answer, so the drain stops and the message stays on the server.
+   3. **On an answer, the reader keeps each revocation that verifies, and applies step 1 again.** If nothing refuses the message, the message passes this check. A revocation that does not verify counts as nothing shown, as Section 12.5 says.
 
 8. **Check 8, replay.** The reader computes the SHA-256 of the ciphertext. That hash is not in the replay set (`replay`).
    - The reader refuses a message whose listed `id` differs from that hash (`bad_id`).
