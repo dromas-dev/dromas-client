@@ -206,12 +206,12 @@ Where this document uses a term below as a defined term, the term has the sense 
 
 | Name | Role | Specification |
 |---|---|---|
-| age v1 | encryption to a prekey: `mlkem768x25519`, the hybrid ML-KEM-768 + X25519 recipient | C2SP age |
+| age v1 | encryption to a prekey: `mlkem768x25519`, the hybrid ML-KEM-768 + X25519 recipient | C2SP age v1.1.0, read 2026-11-02, whose KEM is MLKEM768-X25519 from draft-ietf-hpke-pq-03 |
 | Ed25519 | the identity key of type `ssh-ed25519`; the working key of an identity of either type of Section 4.1 | RFC 8032 |
 | ECDSA P-256 | the identity key of type `ecdsa-sha2-nistp256` | FIPS 186-5, RFC 5656 |
-| SSHSIG | every signature: the signer's signature over SHA-512 of the message, in a namespace | OpenSSH `PROTOCOL.sshsig` |
+| SSHSIG | every signature: the signer's signature over SHA-512 of the message, in a namespace | OpenSSH 10.6p1 `PROTOCOL.sshsig` |
 | SSH public key text | `<key type> <base64 of the wire key>` | RFC 4253 §6.6, RFC 8709, RFC 5656 |
-| OpenSSH certificate | the certificate of a working key | draft-ietf-sshm-cert |
+| OpenSSH certificate | the certificate of a working key | draft-ietf-sshm-cert-01 |
 | SHA-384 | the address | FIPS 180-4 |
 | SHA-256 | a message id | FIPS 180-4 |
 | UUID | an envelope's `msg_id` | RFC 9562 |
@@ -1763,9 +1763,11 @@ Dromas protects a message's content from everyone but the message's recipient. D
 
 ## 17. References
 
-- **[age]** C2SP, "age", https://c2sp.org/age
-- **[draft-ietf-sshm-cert]** "OpenSSH certificates", draft-ietf-sshm-cert
-- **[PROTOCOL.sshsig]** OpenSSH, `PROTOCOL.sshsig`
+- **[age]** C2SP, "age", v1.1.0, https://c2sp.org/age@v1.1.0, read 2026-11-02
+- **[draft-ietf-hpke-pq-03]** Barnes, Connolly, "Post-Quantum and Post-Quantum/Traditional Hybrid Algorithms for HPKE", draft-ietf-hpke-pq-03: the MLKEM768-X25519 KEM that [age] names
+- **[draft-ietf-sshm-cert-01]** Miller, "SSH Certificate Format", draft-ietf-sshm-cert-01
+- **[OpenSSH]** OpenSSH 10.6p1, the release that this document's statements about OpenSSH were read against
+- **[PROTOCOL.sshsig]** OpenSSH 10.6p1, `PROTOCOL.sshsig`
 - **[AEP-158]**, **[AEP-193]** API Enhancement Proposals: pagination; errors
 - **[BIP 173]** Bech32
 - **[FIPS 180-4]**, **[FIPS 186-5]**
