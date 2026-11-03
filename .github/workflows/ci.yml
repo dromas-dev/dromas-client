@@ -86,11 +86,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - id: go
-        run: echo "toolchain=$(curl -fsS 'https://go.dev/dl/?mode=json' | jq -r '.[0].version')" >> "$GITHUB_OUTPUT"
+      - name: latest Go
+        # In the job's environment, as cpa.sh forwards a variable from each
+        # step's own.
+        run: |
+          toolchain=$(curl -fsS 'https://go.dev/dl/?mode=json' | jq -r '.[0].version')
+          echo "GOTOOLCHAIN=$toolchain" >> "$GITHUB_ENV"
       - uses: cross-platform-actions/action@82668f1fbd89d9c99487604f822cbf6716f124d3 # v1.7.0
-        env:
-          GOTOOLCHAIN: ${{ steps.go.outputs.toolchain }}
         with:
           operating_system: ${{ matrix.os.name }}
           version: ${{ matrix.os.version }}
@@ -111,6 +113,7 @@ jobs:
           $INSTALL
           for d in /usr/pkg/bin /usr/pkg/go1*/bin; do if [ -d "$d" ]; then PATH=$d:$PATH; fi; done
           uname -a; go version; ssh -V; jq --version; bash --version | head -1
+          if [ "$(go env GOVERSION)" != "$GOTOOLCHAIN" ]; then echo "::error::Go is $(go env GOVERSION), not the latest, '$GOTOOLCHAIN'"; exit 1; fi
       - name: check
         shell: cpa.sh {0}
         run: |
