@@ -181,6 +181,11 @@ func Open(dir string, opt Options) (*Mailbox, error) {
 	if err != nil {
 		return nil, err
 	}
+	if opt.Layout == (Layout{}) {
+		if err := CheckLayout(dir, opt.Layout); err != nil {
+			return nil, err
+		}
+	}
 	if err := b.loadIdentity(); err != nil {
 		return nil, err
 	}
@@ -194,8 +199,8 @@ func Open(dir string, opt Options) (*Mailbox, error) {
 // follows no redirect (followNone).
 func newMailbox(dir string, opt Options) (*Mailbox, error) {
 	// No directory is a mailbox that keeps nothing ([Publish], [Revoke]). The
-	// default layout's parts are apart but for a link made inside it, which Init
-	// and the command line check for, so only its base directory is read.
+	// default layout's parts are apart but for a link made inside it, which Open
+	// and Init check for, so only its base directory is read here.
 	switch {
 	case dir == "":
 	case opt.Layout == (Layout{}):

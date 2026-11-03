@@ -335,6 +335,35 @@ func TestTwoNamesOfOnePlaceAreOne(t *testing.T) {
 	}
 }
 
+// Open holds the default layout's parts apart as it holds any layout's: a link
+// inside the base directory makes the mail and the rotating keys one place, and
+// Open refuses that before it reads the identity. A link to a place of its own
+// is the owner's to make, and Open takes it.
+func TestOpenRefusesADefaultLayoutWhosePartsALinkMakesOne(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	base := e.mailbox().Dir()
+	mail := filepath.Join(base, "mail")
+	if err := os.RemoveAll(mail); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(base, "keys"), mail); err != nil {
+		t.Skipf("this user may not make a symlink, as on Windows: %v", err)
+	}
+	if _, err := client.Open(base, e.opts()); err == nil || !strings.Contains(err.Error(), "mail-dir and rotating-keys-dir are one place") {
+		t.Errorf("mail is keys by a link: %v", err)
+	}
+	if err := os.Remove(mail); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(t.TempDir(), mail); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Open(base, e.opts()); err != nil {
+		t.Errorf("mail elsewhere by a link: %v", err)
+	}
+}
+
 // Where a filesystem ignores case, two parts named apart are one place once they
 // exist: init refuses that before it writes a key.
 func TestAnInitWhosePartsAreOneOnThisFilesystemWritesNoKey(t *testing.T) {
