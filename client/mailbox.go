@@ -507,6 +507,11 @@ func (b *Mailbox) init(ctx context.Context) (*Mailbox, error) {
 	if err := b.loadIdentity(); err != nil {
 		return nil, err
 	}
+	if !exists(b.path("identity.pub")) {
+		if err := b.writeIdentityPub(b.id.PublicKey()); err != nil {
+			return nil, err
+		}
+	}
 	if t := b.identityType; t != "" && t != b.id.Type() {
 		return nil, fmt.Errorf("this mailbox's identity is already a key of the type %s: its address is that key's, so its type cannot change", b.id.Type())
 	}
@@ -791,10 +796,18 @@ func (b *Mailbox) newIdentityKey() error {
 	if err := makeDir(filepath.Dir(b.path("identity"))); err != nil {
 		return err
 	}
-	if err := writeFile(b.path("identity.pub"), ssh.MarshalAuthorizedKey(sshPub)); err != nil {
+	if err := writeKey(b.path("identity"), pem.EncodeToMemory(block)); err != nil {
 		return err
 	}
-	return writeKey(b.path("identity"), pem.EncodeToMemory(block))
+	step("identity key written")
+	return b.writeIdentityPub(sshPub)
+}
+
+// writeIdentityPub writes identity.pub, the identity's public key as ssh-keygen
+// writes it beside a key. It goes after the private key, so a refused key leaves
+// nothing behind, and init writes it again from the key wherever it is missing.
+func (b *Mailbox) writeIdentityPub(pub ssh.PublicKey) error {
+	return writeFile(b.path("identity.pub"), ssh.MarshalAuthorizedKey(pub))
 }
 
 // loadIdentity reads the identity key, and writes identity.doc and address

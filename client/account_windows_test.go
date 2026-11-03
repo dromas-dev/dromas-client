@@ -267,7 +267,7 @@ func setAndJudge(t *testing.T, reach, manifest string) {
 // A volume that keeps no access list holds no key: not a new key's temporary, not an
 // identity with its base elsewhere, and not a mailbox, whether its base directory is
 // made there or was there already. A key or a config already there is refused, as
-// open to everyone. Each leaves no key and no temporary behind.
+// open to everyone. Each leaves no key, no identity.pub and no temporary behind.
 func TestAVolumeThatKeepsNoAccessListHoldsNoKey(t *testing.T) {
 	namedAccount(t)
 	t.Parallel()
@@ -314,7 +314,7 @@ func TestAVolumeThatKeepsNoAccessListHoldsNoKey(t *testing.T) {
 				if err != nil {
 					return err
 				}
-				if base := d.Name(); !d.IsDir() && (base == "identity" || strings.HasPrefix(base, ".tmp-") || strings.HasSuffix(base, ".agekey")) {
+				if base := d.Name(); !d.IsDir() && (base == "identity" || base == "identity.pub" || strings.HasPrefix(base, ".tmp-") || strings.HasSuffix(base, ".agekey")) {
 					t.Errorf("left behind: %s", p)
 				}
 				return nil

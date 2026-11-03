@@ -7,6 +7,7 @@ package client
 // what they are a step of. The crash tests kill a process at each
 // (crash_test.go), and a test holds this list to the calls in the code.
 var steps = map[string][]string{
+	"identity":   {"identity key written"},
 	"renewal":    {"renewal begun", "working key made", "prekey made", "statement kept", "renewal taken", "renewal recorded"},
 	"revocation": {"revocation published", "revocation kept"},
 	"delivery":   {"delivery written", "delivery seen"},

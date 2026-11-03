@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"os"
 	"os/exec"
@@ -20,6 +21,7 @@ import (
 	"github.com/dromas-dev/dromas-client/client"
 	"github.com/dromas-dev/dromas-client/internal/fakeserver"
 	"github.com/dromas-dev/dromas-client/protocol"
+	"golang.org/x/crypto/ssh"
 )
 
 // A crash is a mailbox's process killed between two of the steps at which a
@@ -102,8 +104,8 @@ func TestCrashChild(t *testing.T) {
 		}
 	})
 	now := time.Unix(o.Now, 0).UTC()
-	if o.Command == newOfflineInit { // there is no mailbox to open
-		_, err := client.Init(context.Background(), o.Dir, client.Options{Base: o.Base, Now: func() time.Time { return now }, WorkingKey: true})
+	if o.Command == newOfflineInit || o.Command == newInit { // there is no mailbox to open
+		_, err := client.Init(context.Background(), o.Dir, client.Options{Base: o.Base, Now: func() time.Time { return now }, WorkingKey: o.Command == newOfflineInit})
 		fmt.Printf("ended before %s: %v\n", o.Step, err)
 		return
 	}
@@ -239,6 +241,47 @@ func renewalSteps(working bool) []string {
 // newOfflineInit is init --offline in an empty directory, which TestCrashChild runs
 // with no mailbox to open first.
 const newOfflineInit = "a new init --offline"
+
+// newInit is init in an empty directory, run as newOfflineInit is.
+const newInit = "a new init"
+
+// init in an empty directory, killed once it has written the identity key: the key
+// is there and identity.pub is not, since identity.pub goes after the key. Run
+// again, init writes identity.pub from the key and comes back whole.
+func TestANewInitKilledOnceItsKeyIsWrittenWritesIdentityPubAgain(t *testing.T) {
+	t.Parallel()
+	for _, step := range client.Steps("identity") {
+		t.Run(step, func(t *testing.T) {
+			e := newEnv(t)
+			a := e.mailbox()
+			dir := filepath.Join(t.TempDir(), "mailbox")
+			crashIn(t, e, dir, newInit, step, protocol.Address{})
+			if _, err := os.Stat(filepath.Join(dir, "identity")); err != nil {
+				t.Fatalf("the identity key after a crash at %s: %v", step, err)
+			}
+			if _, err := os.Stat(filepath.Join(dir, "identity.pub")); !errors.Is(err, fs.ErrNotExist) {
+				t.Fatalf("identity.pub after a crash at %s, before the key's step is past: %v", step, err)
+			}
+			b, err := client.Init(t.Context(), dir, e.opts())
+			if err != nil {
+				t.Fatalf("again after %s: %v", step, err)
+			}
+			pub, err := os.ReadFile(b.Path("identity.pub"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			key, _, _, _, err := ssh.ParseAuthorizedKey(pub)
+			if err != nil {
+				t.Fatalf("identity.pub: %v", err)
+			}
+			if !bytes.Equal(key.Marshal(), b.Identity().PublicKey().Marshal()) {
+				t.Fatal("identity.pub is not the identity key's")
+			}
+			landAll(t, b)
+			whole(t, e, b, a)
+		})
+	}
+}
 
 // init --offline in an empty directory, killed at each step of its renewal, a path
 // of its own, since a new identity has nothing at its server to read: run again,
