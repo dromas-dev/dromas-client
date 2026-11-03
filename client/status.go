@@ -68,6 +68,13 @@ type Status struct {
 	// PrekeyNotMade is a statement the mailbox's server served in its name, at
 	// its last read of itself, that it did not make, or nil ([NotMade]).
 	PrekeyNotMade *NotMade `json:"prekey_not_made,omitempty"`
+	// Owed counts the messages inbox/ keeps whose handling, a callback's where
+	// recv --exec runs one, has not ended ([Mailbox.Follow]): the next such run
+	// begins with them.
+	Owed int `json:"owed,omitempty"`
+	// GaveUp names the messages inbox/ keeps whose handling gave up
+	// ([ErrGaveUp]), which nothing tries again.
+	GaveUp []string `json:"gave_up,omitempty"`
 	// Attention says, in words, each thing that needs a look. It is empty
 	// when nothing does.
 	Attention []string `json:"attention"`
@@ -219,6 +226,12 @@ func (b *Mailbox) status() (*Status, error) {
 	}
 	if s.Held > 0 {
 		s.Attention = append(s.Attention, fmt.Sprintf("%d held in held/ from senders this mailbox has not allowed: dromas held list lists them by sender; dromas peer allow <address> delivers a sender's to inbox/, and dromas peer block <address> deletes them", s.Held))
+	}
+	if s.Owed, s.GaveUp, err = b.owedCounts(); err != nil {
+		return nil, err
+	}
+	if len(s.GaveUp) > 0 {
+		s.Attention = append(s.Attention, fmt.Sprintf("%d in inbox/ whose callback gave up, which nothing tries again (%s): dromas inbox show <id> prints each, and deleting its file in inbox/ clears this", len(s.GaveUp), strings.Join(s.GaveUp, ", ")))
 	}
 	s.Attention = append(s.Attention, b.versionsAttention()...)
 	if s.Outbox > 0 {

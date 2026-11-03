@@ -300,6 +300,9 @@ func lockingCommands(ctx context.Context, a, b *client.Mailbox, rec *protocol.Re
 		{"Receive", func() error { _, err := a.Receive(ctx); return err }},
 		{"Hold", func() error { _, err := a.Hold(ctx, time.Second); return err }},
 		{"Await", func() error { return a.Await(ctx, time.Now().Add(2*time.Second), nil) }},
+		{"Follow", func() error {
+			return a.Follow(ctx, client.FollowOptions{Until: time.Now().Add(2 * time.Second), Owed: true}, nil)
+		}},
 		{"Rekey", func() error { _, err := a.Rekey(ctx); return err }},
 		{"RevokeEarlier", func() error { _, err := a.RevokeEarlier(ctx); return err }},
 		{"RenewAndRevoke", func() error { _, err := a.RenewAndRevoke(ctx); return err }},

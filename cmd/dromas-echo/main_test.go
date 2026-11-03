@@ -438,33 +438,82 @@ func TestEchoRefusesAnotherIdentity(t *testing.T) {
 	}
 }
 
-// The wait before the next poll is the server's: its list's Retry-After, or a
-// rate limit's.
+// The wait before the next poll is the server's, a rate limit's Retry-After.
 func TestEchoPacesItself(t *testing.T) {
-	e := newEnv(t)
-	x := e.echo()
-	polls := func(answer func(w http.ResponseWriter)) {
-		e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
-			if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/messages") {
-				answer(w)
+	synctest.Test(t, func(t *testing.T) {
+		srv := fakeserver.NewInMemory(t, time.Now)
+		opt := client.Options{Base: srv.URL, HTTPClient: srv.Client()}
+		x, err := start(context.Background(), t.TempDir(), newKey(t), opt, log.New(io.Discard, "", 0))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var lists atomic.Int32
+		var second atomic.Int64
+		began := time.Now()
+		mine := "/v1/" + x.b.Address().String() + "/messages"
+		srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
+			if r.Method == http.MethodGet && r.URL.Path == mine {
+				switch lists.Add(1) {
+				case 1:
+					w.Header().Set("Retry-After", "17")
+					fakeserver.WriteJSON(w, http.StatusTooManyRequests, protocol.Problem{Type: protocol.CodeRateLimited.TypeURI(), Code: protocol.CodeRateLimited})
+					return
+				case 2:
+					second.Store(int64(time.Since(began)))
+				}
+			}
+			next.ServeHTTP(w, r)
+		})
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan struct{})
+		go func() { defer close(done); _ = x.run(ctx) }()
+		time.Sleep(time.Minute)
+		cancel()
+		<-done
+		if d := time.Duration(second.Load()); d != 17*time.Second {
+			t.Fatalf("the list after a rate limit came at %s, want its Retry-After", d)
+		}
+	})
+}
+
+// An echo mailbox's loop that ends on a refusal no wait mends starts again
+// after a wait: it keeps running, and logs each.
+func TestEchoGoesOnAfterARefusalNoWaitMends(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		srv := fakeserver.NewInMemory(t, time.Now)
+		opt := client.Options{Base: srv.URL, HTTPClient: srv.Client()}
+		logged := make(lines, 64)
+		x, err := start(context.Background(), t.TempDir(), newKey(t), opt, log.New(logged, "", 0))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var lists atomic.Int32
+		mine := "/v1/" + x.b.Address().String() + "/messages"
+		srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
+			if r.Method == http.MethodGet && r.URL.Path == mine && lists.Add(1) <= 2 {
+				fakeserver.WriteJSON(w, http.StatusBadRequest, protocol.Problem{Type: protocol.CodeBadRequest.TypeURI(), Code: protocol.CodeBadRequest})
 				return
 			}
 			next.ServeHTTP(w, r)
 		})
-	}
-	polls(func(w http.ResponseWriter) {
-		w.Header().Set("Retry-After", "23")
-		fakeserver.WriteList(w, protocol.MessageList{Messages: []protocol.MessageInfo{}})
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan struct{})
+		go func() { defer close(done); _ = x.run(ctx) }()
+		time.Sleep(3 * defaultPause)
+		cancel()
+		<-done
+		if n := lists.Load(); n < 3 {
+			t.Fatalf("%d lists in three minutes, with the first two refused: it did not go on", n)
+		}
 	})
-	if d, hold := x.once(context.Background()); d != 23*time.Second || !hold {
-		t.Fatalf("waits %s, holding %t: want its list's Retry-After, and a hold", d, hold)
-	}
-	polls(func(w http.ResponseWriter) {
-		w.Header().Set("Retry-After", "17")
-		fakeserver.WriteJSON(w, http.StatusTooManyRequests, protocol.Problem{Type: protocol.CodeRateLimited.TypeURI(), Code: protocol.CodeRateLimited})
-	})
-	if d, hold := x.once(context.Background()); d != 17*time.Second || hold {
-		t.Fatalf("waits %s, holding %t: want the Retry-After, and no hold", d, hold)
+}
+
+// once retries replies not yet posted, then runs one drain of the mailbox's
+// loop, which answers what it delivered.
+func (e *echo) once(ctx context.Context) {
+	e.retry(ctx)
+	if err := e.b.Follow(ctx, client.FollowOptions{Until: time.Now()}, e.handle); err != nil {
+		e.log.Printf("receive: %v", err)
 	}
 }
 

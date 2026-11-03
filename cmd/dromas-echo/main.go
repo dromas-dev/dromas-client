@@ -149,9 +149,10 @@ func sleep(ctx context.Context, d time.Duration) bool {
 }
 
 type echo struct {
-	b   *client.Mailbox
-	log *log.Logger
-	now func() time.Time
+	b       *client.Mailbox
+	log     *log.Logger
+	now     func() time.Time
+	refused []string // the ids of the drain under way's refusals
 }
 
 // start copies the identity into dir and publishes a new prekey, or at the
@@ -215,101 +216,80 @@ func start(ctx context.Context, dir, identity string, opt client.Options, l *log
 	return &echo{b: b, log: l, now: now}, nil
 }
 
-// run drains the mailbox and answers, then holds its list until a message
-// arrives (client.Mailbox.Await), so a reply goes within seconds of it. A mailbox
-// with replies not yet posted holds for at most the poll interval, then
-// retries them, and drains again only once its list has changed: one list
-// an interval, the hold's, as the poll budget allows. A drain that failed,
-// or left messages on the server, waits that interval with no hold.
+// run is the mailbox's receive-and-hold loop (client.Mailbox.Follow), which
+// answers each message as it arrives, so a reply goes within seconds of it. The
+// loop ending on a refusal no wait mends or a fault of the mailbox is said, and
+// after a wait the loop starts again, because an echo mailbox has no one to
+// tell but its log.
 func (e *echo) run(ctx context.Context) error {
-	pause, hold := e.once(ctx)
 	for {
-		if hold {
-			var until time.Time
-			pending, _ := filepath.Glob(e.b.Path("outbox", "*.P"))
-			if len(pending) > 0 {
-				until = time.Now().Add(pause)
-			}
-			err := e.b.Await(ctx, until, func(h *client.HoldResult, err error) {
-				if err != nil {
-					e.log.Printf("hold: %v", err)
-					return
-				}
-				e.log.Printf("a connection dropped, after %s held: the wait is now %s, with keep-alive every %s", h.After, h.Wait, h.KeepAlive)
-			})
-			switch {
-			case ctx.Err() != nil:
-				return nil
-			case err == nil && len(pending) > 0 && !time.Now().Before(until):
-				// The interval passed with nothing new: the replies are
-				// retried, and the mailbox's list is held again, not drained.
-				e.retry(ctx)
-				continue
-			case err == nil:
-				pause, hold = e.once(ctx)
-				continue
-			}
-			e.log.Printf("hold: %v", err)
-		}
-		select {
-		case <-ctx.Done():
+		err := e.b.Follow(ctx, client.FollowOptions{Between: e.between}, e.handle)
+		if ctx.Err() != nil {
 			return nil
-		case <-time.After(pause):
 		}
-		pause, hold = e.once(ctx)
+		e.log.Printf("receive: %v", err)
+		pause, again := whenAgain(err)
+		if !again {
+			pause = defaultPause
+		}
+		if !sleep(ctx, pause) {
+			return nil
+		}
 	}
 }
 
-// once retries replies not yet posted, drains the mailbox (which renews its
-// prekey when due) and answers what it delivered. It returns how long to wait
-// before the next poll, and whether the server holds nothing more for the
-// mailbox, so its list may be held instead.
-func (e *echo) once(ctx context.Context) (time.Duration, bool) {
+// between retries replies not yet posted, and reports whether any are left. A
+// mailbox with one holds for at most the poll interval, then retries it, and
+// drains again only once its list has changed: one list an interval, the
+// hold's, as the poll budget allows.
+func (e *echo) between(ctx context.Context) bool {
 	e.retry(ctx)
-	res, err := e.b.Receive(ctx)
-	if res != nil {
-		if res.Renewed != nil {
-			e.log.Printf("a new prekey is published, serial %d", res.Renewed.Serial)
+	pending, _ := filepath.Glob(e.b.Path("outbox", "*.P"))
+	return len(pending) > 0
+}
+
+// handle logs one event of the loop, and answers a delivery.
+func (e *echo) handle(ctx context.Context, ev client.Event) error {
+	switch ev.Kind {
+	case client.EventDelivery:
+		e.reply(ctx, *ev.Delivery)
+	case client.EventRenewed:
+		e.log.Printf("a new prekey is published, serial %d", ev.Result.Renewed.Serial)
+	case client.EventRenewFailed:
+		e.log.Printf("the prekey is due for renewal and was not renewed: %v", ev.Err)
+	case client.EventDuplicate:
+		e.log.Printf("%s: a retry of a message already answered", ev.ID)
+	case client.EventRefusal:
+		// Never answered: a refusal does not say whether its sender
+		// was verified, and an unverified one can name anyone.
+		e.log.Printf("%s: refused: %s: %s", ev.Refusal.ID, ev.Refusal.Code, ev.Refusal.Reason)
+		e.refused = append(e.refused, ev.Refusal.ID)
+	case client.EventDrained:
+		e.drained(ctx)
+	case client.EventRetry:
+		if ctx.Err() == nil {
+			e.log.Printf("receive: %v", ev.Err)
 		}
-		if res.RenewErr != nil {
-			e.log.Printf("the prekey is due for renewal and was not renewed: %v", res.RenewErr)
-		}
-		for _, d := range res.Delivered {
-			e.reply(ctx, d)
-		}
-		for _, id := range res.Duplicates {
-			e.log.Printf("%s: a retry of a message already answered", id)
-		}
-		var refused []string
-		for _, r := range res.Refused {
-			// Never answered: a refusal does not say whether its sender
-			// was verified, and an unverified one can name anyone.
-			e.log.Printf("%s: refused: %s: %s", r.ID, r.Code, r.Reason)
-			refused = append(refused, r.ID)
-		}
-		if len(refused) > 0 {
-			if _, err := e.b.RemoveRefused(ctx, refused); err != nil {
-				e.log.Printf("the refused messages were not deleted from refused/: %v", err)
-			}
-		}
+	case client.EventConnectionDropped:
+		e.log.Printf("a connection dropped, after %s held: the wait is now %s, with keep-alive every %s", ev.Hold.After, ev.Hold.Wait, ev.Hold.KeepAlive)
 	}
-	// An echo mailbox keeps no record of its replies: its state is in memory.
+	return nil
+}
+
+// drained forgets what a drain left: its refused messages, and the replies
+// kept in sent/, since an echo mailbox keeps no record of its replies: its
+// state is in memory.
+func (e *echo) drained(ctx context.Context) {
+	if len(e.refused) > 0 {
+		if _, err := e.b.RemoveRefused(ctx, e.refused); err != nil {
+			e.log.Printf("the refused messages were not deleted from refused/: %v", err)
+		}
+		e.refused = nil
+	}
 	sent, _ := filepath.Glob(e.b.Path("sent", "*"))
 	for _, f := range sent {
 		e.remove(f)
 	}
-	pause := defaultPause
-	if res != nil && res.PollAfter > 0 {
-		pause = time.Duration(res.PollAfter) * time.Second
-	}
-	var ae *client.APIError
-	if errors.As(err, &ae) && ae.RetryAfter > 0 {
-		pause = ae.RetryAfter
-	}
-	if err != nil && ctx.Err() == nil {
-		e.log.Printf("receive: %v", err)
-	}
-	return pause, err == nil && res != nil && !res.More && res.Paced == 0
 }
 
 // reply answers one delivery. A reply the server did not take stays in the

@@ -270,9 +270,10 @@ twice in an object among them, is refused, and nothing is sent.`,
 }
 
 func (e *cli) recvCmd() *cobra.Command {
-	var wait, drain time.Duration
-	var headers bool
-	c := command("recv [flags]", "receive, verify and ack every message: one line of JSON each",
+	var o recvOptions
+	var drain time.Duration
+	var program string
+	c := command("recv [flags] [-- <argument>...]", "receive, verify and ack every message: one line of JSON each",
 		fmt.Sprintf(`Receive, verify and ack every message: a "message" line for each, built from the
 verified fields, with this mailbox's name for its sender as "alias" when it
 named one (dromas alias add). It also renews the prekey once a day, so run it at least
@@ -288,25 +289,64 @@ message is kept in inbox/ as ever, and dromas inbox show <id> prints its
 
 One drain runs for at most --drain-time, holding the mailbox's lock: there it
 stops with a "more" line, as at its other limits, and keeps what it read of
-the message it was fetching, which the next recv goes on from.`, formatTime(client.RecvWithin(protocol.PrekeyLifetime))),
-		checked(nargs(0, 0), func(c *cobra.Command, _ []string) error {
+the message it was fetching, which the next recv goes on from.
+
+With --wait, recv holds the mailbox's list between drains, and ends at its first
+delivery or at the end of the duration. With --follow, recv goes on after each
+delivery, without end, or until the end of --wait's duration where both are
+given: run one in the foreground under a service manager. An interrupt or a
+SIGTERM ends --follow with exit status 0. The mailbox's lock stays free
+between drains, so its other commands run meanwhile. A call that may mend is
+made again, each said on stderr ("waiting"). Exit status 4 and "fatal" in the
+"error" line say that no wait mends the refusal: a revocation, no mailbox at
+this address, or a refusal of the client's own. Exit status 1 is any other failure.
+
+With --exec, recv runs a command for each message that lands in inbox/, with
+the message's line on stdin, as recv prints it. It takes --wait or --follow.
+--exec names the program, and the arguments after -- go to it one for one: no
+shell runs, and nothing is split or expanded. The program's stdout and stderr
+are discarded. The commands run one at a time, in delivery order, with the
+mailbox's lock free, so a command may run dromas. Each message is kept in
+inbox/ first, so a command is a notification and never the only copy. A message
+held in held/ runs no command, and neither does one another recv takes, so
+run one recv for each mailbox.
+
+Exit status 0 is done, and 100 is failed for good. Any other exit status, a
+signal, a run longer than --exec-timeout (which kills the process) or a
+program that does not start is tried again, up to %d tries in all, %s apart.
+Each failed try prints an "exec_failed" line, and a message with no try left
+an "exec_gave_up" line, which dromas status then lists under attention, and
+recv goes on to the next message and exits with status 3 at its end. A
+process killed before a command's tries end runs that command again when recv
+--exec next starts, so a command runs at least once for each message and
+may run twice: it should take the "id" as the message's name.`, formatTime(client.RecvWithin(protocol.PrekeyLifetime)), execTries, execDelay),
+		checked(o.takesArguments, func(c *cobra.Command, args []string) error {
 			if drain <= 0 {
 				return wrong(c, "%s --drain-time takes a duration above zero, such as 15m", c.CommandPath())
 			}
-			return nil
-		}), func(c *cobra.Command, _ []string) error {
+			return o.check(c, program, args)
+		}), func(c *cobra.Command, args []string) error {
 			e.opt.DrainTime = drain
 			b, err := e.mailbox()
 			if err != nil {
 				return err
 			}
-			return e.recv(c, b, wait, headers)
+			if program != "" {
+				o.exec = append([]string{program}, args...)
+			}
+			if o.follow && !c.Flags().Changed("wait") {
+				o.endless = true
+			}
+			return e.recv(c, b, o)
 		})
-	c.Flags().DurationVar(&wait, "wait", 0, "hold the list until a message arrives, for at most this long, however many held requests it takes")
+	c.Flags().DurationVar(&o.wait, "wait", 0, "hold the list until a message arrives, for at most this long, however many held requests it takes")
+	c.Flags().BoolVar(&o.follow, "follow", false, "go on after each message, without end or for --wait's duration")
+	c.Flags().StringVar(&program, "exec", "", "run this `program` for each message, with its line on stdin, and the arguments after -- as its own")
+	c.Flags().DurationVar(&o.execTimeout, "exec-timeout", 5*time.Minute, "kill --exec's program when one run takes this long")
 	c.Flags().DurationVar(&drain, "drain-time", client.DefaultDrainTime, "how long one drain runs before it stops for the next recv")
 	// As an IMAP client fetches a message's ENVELOPE apart from its body (RFC
 	// 9051 §6.4.5), as email clients list headers before they open a message.
-	c.Flags().BoolVar(&headers, "headers", false, "print each message's checked fields and its body's size, without its body or subject")
+	c.Flags().BoolVar(&o.headers, "headers", false, "print each message's checked fields and its body's size, without its body or subject")
 	return c
 }
 
@@ -432,127 +472,6 @@ an id is not one, or names no message refused/ keeps.`,
 		})
 	c.Flags().BoolVar(&all, "all", false, "delete every message refused/ keeps")
 	return c
-}
-
-func (e *cli) recv(c *cobra.Command, b *client.Mailbox, wait time.Duration, headers bool) error {
-	ctx := c.Context()
-	deadline := time.Now().Add(wait)
-	// renewErr is a renewal that was due and failed, and that no later
-	// Receive of this run made good; aclErr the same for the mailbox's ACL;
-	// notMade what the mailbox's last read of itself served that it did not make;
-	// and replaced that a renewal of this run found an ACL at the server that
-	// the mailbox had not sent, and replaced it.
-	var renewErr, aclErr error
-	var notMade *client.NotMade
-	replaced := false
-	n := namesOf(c.Context(), b)
-	for {
-		res, err := b.Receive(ctx)
-		if res != nil {
-			if res.Renewed != nil {
-				renewErr = nil
-			}
-			// A message line is this client's own, from the verified fields:
-			// never the sender's bytes.
-			var lines [][]byte
-			for _, d := range res.Delivered {
-				if headers {
-					lines = append(lines, messageHeaders(d, n))
-				} else {
-					lines = append(lines, message(d, n))
-				}
-			}
-			for _, id := range res.Duplicates {
-				lines = append(lines, line("duplicate", "id", id, "detail", "a retry of a message already delivered: not delivered again"))
-			}
-			for _, r := range res.Refused {
-				lines = append(lines, line("refused", "id", r.ID, "code", r.Code, "detail", r.Reason))
-			}
-			for _, h := range res.Held {
-				lines = append(lines, line("held", "id", h.ID, "from", h.Envelope.From, "detail",
-					"from a sender this mailbox has not allowed: kept in held/ (dromas held list lists it, and dromas peer allow delivers it)"))
-			}
-			for _, id := range res.Blocked {
-				lines = append(lines, line("dropped", "id", id, "detail", "from a sender this mailbox blocked: dropped"))
-			}
-			switch {
-			case res.Paced > 0:
-				lines = append(lines, line("paced", "retry_after", seconds(res.Again()), "detail",
-					fmt.Sprintf("the server paces how many messages this mailbox takes out: the rest is still on the server; run recv again in %d seconds or later", seconds(res.Again()))))
-			case res.More:
-				lines = append(lines, line("more", "detail", "this run stopped at the most one drain takes: run recv again for the rest, which is still on the server"))
-			}
-			if res.RenewErr != nil {
-				renewErr = res.RenewErr
-				lines = append(lines, line("renewal_failed", failure(fmt.Errorf("the prekey is due for renewal and was not renewed: recv tries again within the hour, and dromas status says whether it went through: %w", res.RenewErr))...))
-			}
-			notMade = res.NotMade
-			if res.NotMade != nil {
-				lines = append(lines, notMadeLine(res.NotMade))
-			}
-			aclErr = res.ACLErr
-			if res.ACLErr != nil {
-				lines = append(lines, line("acl_not_sent", failure(fmt.Errorf("the next recv sends this mailbox's ACL, and dromas status says whether it went through: %w", res.ACLErr))...))
-			}
-			if res.ACLReplaced {
-				replaced = true
-				lines = append(lines, line("acl_replaced", "detail", "this mailbox's server held an ACL other than the one this mailbox last sent it, which another machine of this mailbox, someone holding its pass or the server itself wrote: this mailbox sent its own in its place"))
-			}
-			// Every delivery is also kept in inbox/, and every refusal in
-			// refused/, so a failed write to stdout loses nothing.
-			for _, l := range lines {
-				if werr := e.out(l); werr != nil && err == nil {
-					err = werr
-				}
-			}
-		}
-		pause := time.Minute
-		if res != nil && res.Again() > 0 {
-			pause = res.Again()
-		}
-		// A call that failed and that making again may get past (no answer,
-		// a server error, a rate limit) is made again after its Retry-After,
-		// or a minute: --wait waits it out when there is time to poll again
-		// after, as its holds do (client.Mailbox.Await).
-		var ae *client.APIError
-		if errors.As(err, &ae) && ae.RetryAfter > 0 {
-			pause = ae.RetryAfter
-		}
-		if client.Transient(err) && (res == nil || len(res.Delivered) == 0) && time.Until(deadline) > pause {
-			e.say(line("waiting", append([]any{"for", "server"}, failure(err)...)...))
-		} else if err != nil || len(res.Delivered) > 0 || !time.Now().Before(deadline) {
-			if err == nil && (renewErr != nil || aclErr != nil || notMade != nil || replaced) {
-				return &needsALook{}
-			}
-			return err
-		} else if !res.More && res.Paced == 0 {
-			// Nothing left on the server: hold the list until it changes.
-			if err := e.hold(ctx, b, deadline); err != nil {
-				return err
-			}
-			continue
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(min(pause, time.Until(deadline))):
-		}
-	}
-}
-
-// hold holds b's list until it changes or deadline passes (client.Mailbox.Await),
-// and returns for a Receive. Each held request that failed and is held again
-// is said on stderr, and so is a connection that dropped part way, with the
-// wait and keep-alive the mailbox takes from then on.
-func (e *cli) hold(ctx context.Context, b *client.Mailbox, deadline time.Time) error {
-	return b.Await(ctx, deadline, func(h *client.HoldResult, err error) {
-		if err != nil {
-			e.say(line("waiting", append([]any{"for", "server"}, failure(err)...)...))
-			return
-		}
-		e.say(line("waiting", "for", "connection", "held", seconds(h.After), "wait", seconds(h.Wait), "keep_alive", seconds(h.KeepAlive),
-			"detail", "the connection dropped while the list was held: the next one keeps alive, and the wait shortens only if that one drops too"))
-	})
 }
 
 func (e *cli) statusCmd() *cobra.Command {

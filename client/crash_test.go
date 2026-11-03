@@ -50,6 +50,9 @@ var crashCommands = map[string]func(ctx context.Context, b *client.Mailbox, o cr
 		return err
 	},
 	"receive": func(ctx context.Context, b *client.Mailbox, _ crashOrder) error { _, err := b.Receive(ctx); return err },
+	"follow": func(ctx context.Context, b *client.Mailbox, o crashOrder) error {
+		return followOwed(ctx, b, o.Dir+".handled")
+	},
 	"remedy": func(ctx context.Context, b *client.Mailbox, _ crashOrder) error {
 		_, err := b.RenewAndRevoke(ctx)
 		return err
@@ -761,6 +764,72 @@ func TestADrainKilledAtEachStepOfADeliveryDeliversOnce(t *testing.T) {
 			send(t, a, b, "waits for a drain that dies")
 			crash(t, e, b, "receive", step, protocol.Address{})
 			whole(t, e, b, a, "waits for a drain that dies")
+		})
+	}
+}
+
+// followOwed runs one drain of the loop with what it delivers owed, and appends
+// the body of each message its handler is handed to the file handled.
+func followOwed(ctx context.Context, b *client.Mailbox, handled string) error {
+	return b.Follow(ctx, client.FollowOptions{Until: time.Now(), Owed: true}, func(_ context.Context, ev client.Event) error {
+		if ev.Kind != client.EventDelivery {
+			return nil
+		}
+		var body string
+		if err := json.Unmarshal(ev.Delivery.Envelope.Body, &body); err != nil {
+			return err
+		}
+		f, err := os.OpenFile(handled, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600) //nolint:gosec // the test's own file
+		if err != nil {
+			return err
+		}
+		defer f.Close() //nolint:errcheck // written below, and a test's
+		_, err = f.WriteString(body + "\n")
+		return err
+	})
+}
+
+// A loop killed at each step of keeping a message or of handling it: the next
+// loop hands over what is owed first, then what the server still holds, so every
+// message reaches its handler at least once and inbox/ keeps each once. Only a
+// kill after the handler returned, before its record is cleared, runs a handler
+// twice. Nothing is owed after, and the mailbox is whole.
+func TestALoopKilledAtEachStepHandsEveryMessageOverAtLeastOnce(t *testing.T) {
+	t.Parallel()
+	for _, step := range append(slices.Clone(client.Steps("delivery")), client.Steps("owed")...) {
+		t.Run(step, func(t *testing.T) {
+			e := newEnv(t)
+			a, b := e.mailbox(), e.mailbox()
+			send(t, a, b, "first")
+			send(t, a, b, "second")
+			crash(t, e, b, "follow", step, protocol.Address{})
+			x, err := client.Open(b.Dir(), e.opts())
+			if err != nil {
+				t.Fatal(err)
+			}
+			handled := b.Dir() + ".handled"
+			if err := followOwed(context.Background(), x, handled); err != nil {
+				t.Fatalf("the loop after the crash: %v", err)
+			}
+			raw, err := os.ReadFile(handled)
+			if err != nil {
+				t.Fatal(err)
+			}
+			count := map[string]int{}
+			for l := range strings.Lines(string(raw)) {
+				count[strings.TrimSpace(l)]++
+			}
+			twice := 0
+			if step == "handler returned" {
+				twice = 1
+			}
+			if count["first"]+count["second"] != 2+twice || count["first"] < 1 || count["second"] < 1 {
+				t.Fatalf("handled %v after a kill at %s, want each once and %d twice", count, step, twice)
+			}
+			if st, err := x.Status(context.Background()); err != nil || st.Owed != 0 {
+				t.Fatalf("still owed: %+v, %v", st, err)
+			}
+			whole(t, e, x, a, "first", "second")
 		})
 	}
 }

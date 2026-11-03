@@ -244,19 +244,41 @@ func timedOut(err error) bool {
 
 // Transient reports whether err is a call that failed and that making it
 // again may get past: no answer, a server error, a rate limit or a request
-// timeout. A refusal no wait mends, a revocation or an answer out of its
-// form, is not.
+// timeout. So is a lock another command held for as long as a command waits for
+// it. A refusal no wait mends is not: [Fatal] names those.
 func Transient(err error) bool {
 	var ae *APIError
 	var re *RevokedError
 	switch {
 	case err == nil, errors.As(err, &re):
 		return false
+	case errors.Is(err, errLocked):
+		return true
 	case errors.As(err, &ae):
 		return ae.Status >= 500 || ae.Status == http.StatusTooManyRequests || ae.Status == http.StatusRequestTimeout
 	}
 	var te *transportError
 	return errors.As(err, &te)
+}
+
+// Fatal reports whether err is a refusal no wait mends, which only the mailbox's
+// owner or its server's operator can put right: a revocation, a mailbox in
+// another format, a server's refusal that [Transient] does not take, such as no
+// mailbox at this address, or this client's own refusal. A supervisor that
+// starts the process again gains nothing. An error that is neither Fatal nor
+// Transient, such as a fault of the disk, ends a run and may pass.
+func Fatal(err error) bool {
+	var re *RevokedError
+	var fe *FormatError
+	var ae *APIError
+	var rf *RefusedError
+	switch {
+	case err == nil, Transient(err):
+		return false
+	case errors.As(err, &re), errors.As(err, &fe), errors.As(err, &ae), errors.As(err, &rf):
+		return true
+	}
+	return false
 }
 
 // turn waits for the mailbox's turn to start a hold, one a minute on average,
@@ -292,9 +314,8 @@ func (h *holding) turn(ctx context.Context, wait time.Duration) (bool, error) {
 //
 // A mailbox with no tag kept, one whose last list found messages, or whose pass the
 // server refused, is Changed at once, for a Receive to settle. An error is a
-// call that failed and that holding again may get past ([Transient]): a
-// refusal no wait mends (a revocation, an answer out of its form) is one
-// too, which a caller tells by its kind ([APIError], [RevokedError]).
+// call that failed and that holding again may get past ([Transient]), or a
+// refusal no wait mends ([Fatal]).
 func (b *Mailbox) Hold(ctx context.Context, wait time.Duration) (*HoldResult, error) {
 	own, _ := b.holding.current()
 	wait = min(wait, own)
@@ -388,33 +409,35 @@ const ReceiveEvery = time.Hour
 // a zero until is no deadline, as for a mailbox that waits for messages for as long
 // as it runs. A call that holding again may get past (no answer, a server
 // error, a rate limit) is held again, after its Retry-After where it gives
-// one; a refusal no wait mends ends it, as its error. say, when not nil, is
-// told of each: a held request that failed, with its error, and a
-// connection that dropped, with its HoldResult. Await returns by until, its
-// waits for a turn to hold included (Hold).
+// one; a refusal no wait mends ([Fatal]) ends it, as its error. h, when not
+// nil, is handed an [EventRetry] for each held request that failed and an
+// [EventConnectionDropped] for each connection that dropped, and an error from
+// h ends Await as that error. Await returns by until, its waits for a turn to
+// hold included (Hold). [Mailbox.Follow] is the whole cycle, of which Await is
+// the part that waits.
 //
 // With under a second left Await waits it out, so the Receive after is the
 // caller's last, never one of a burst of polls until the deadline passes.
-func (b *Mailbox) Await(ctx context.Context, until time.Time, say func(*HoldResult, error)) error {
-	if say == nil {
-		say = func(*HoldResult, error) {}
+func (b *Mailbox) Await(ctx context.Context, until time.Time, h Handler) error {
+	if h == nil {
+		h = noHandler
 	}
 	if every := time.Now().Add(ReceiveEvery); until.IsZero() || every.Before(until) {
 		until = every
 	}
 	for time.Until(until) >= time.Second {
-		h, err := b.Hold(ctx, time.Until(until))
+		r, err := b.Hold(ctx, time.Until(until))
 		var ae *APIError
-		var re *RevokedError
-		var fe *FormatError
 		switch {
 		case ctx.Err() != nil:
 			return ctx.Err()
-		case errors.As(err, &re), errors.As(err, &fe), errors.As(err, &ae) && !Transient(err):
+		case Fatal(err):
 			return err
 		case err != nil:
-			say(nil, err)
-			if ae != nil && ae.RetryAfter > 0 {
+			if herr := h(ctx, Event{Kind: EventRetry, Err: err}); herr != nil {
+				return herr
+			}
+			if errors.As(err, &ae) && ae.RetryAfter > 0 {
 				select {
 				case <-ctx.Done():
 					return ctx.Err()
@@ -423,10 +446,12 @@ func (b *Mailbox) Await(ctx context.Context, until time.Time, say func(*HoldResu
 			}
 			continue
 		}
-		if h.Dropped {
-			say(h, nil)
+		if r.Dropped {
+			if herr := h(ctx, Event{Kind: EventConnectionDropped, Hold: r}); herr != nil {
+				return herr
+			}
 		}
-		if h.Changed {
+		if r.Changed {
 			return nil
 		}
 	}

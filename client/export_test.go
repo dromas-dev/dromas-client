@@ -219,6 +219,10 @@ func SetPathFault(t *testing.T, f func() error) {
 // Steps are the steps of one kind of write (steps.go).
 func Steps(kind string) []string { return steps[kind] }
 
+// ErrLocked is the error of a command that waited for the lock as long as a
+// command waits.
+var ErrLocked = errLocked
+
 // BoundFolders are the folders a mailbox does not make again once its state
 // file records them made (boundFolders).
 func BoundFolders() []string { return boundFolders }
@@ -327,6 +331,18 @@ func (b *Mailbox) Records() (map[string][]byte, error) {
 			if v := s.get(bucketIntent, k); v != nil {
 				out[k] = v
 			}
+		}
+		if err := s.each(bucketOwed, func(_, v []byte) error {
+			out["owed/"+string(v)] = v
+			return nil
+		}); err != nil {
+			return err
+		}
+		if err := s.each(bucketGaveUp, func(k, _ []byte) error {
+			out["gave-up/"+string(k)] = k
+			return nil
+		}); err != nil {
+			return err
 		}
 		return s.each(bucketRefused, func(k, v []byte) error {
 			var q refusedRecord

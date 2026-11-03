@@ -40,6 +40,9 @@ type Delivery struct {
 	// findings is what judge established, kept should the message yet be
 	// refused (bad_id).
 	findings *protocol.Findings
+	// owed is the delivery's key in the state file's owed records, where
+	// [Mailbox.Follow] made one (owe).
+	owed string
 }
 
 // Refusal is a message that failed a check. It was kept in refused/, never
@@ -117,6 +120,12 @@ type Result struct {
 	// what is deleted by it is deleted by a clock a server took, and never by
 	// a reading no server has seen.
 	listedAt taken
+	// owing has the drain record each message it lands in inbox/ as owed its
+	// handling, in the transaction that records it seen ([Mailbox.Follow]).
+	owing bool
+	// receiveWithin is RecvWithin for the prekey in use, where the mailbox knows
+	// its lifetime: how soon [Mailbox.Follow] drains again.
+	receiveWithin time.Duration
 }
 
 // Again is how long the mailbox waits before its next Receive: the server's
@@ -154,10 +163,10 @@ func (r *Result) Again() time.Duration {
 //
 // A mailbox that holds its own revocation receives nothing.
 func (b *Mailbox) Receive(ctx context.Context) (*Result, error) {
-	return locked(ctx, b, func() (*Result, error) { return b.receive(ctx) })
+	return locked(ctx, b, func() (*Result, error) { return b.receive(ctx, false) })
 }
 
-func (b *Mailbox) receive(ctx context.Context) (*Result, error) {
+func (b *Mailbox) receive(ctx context.Context, owing bool) (*Result, error) {
 	if err := b.prekeyKept(); err != nil {
 		return nil, err
 	}
@@ -174,7 +183,7 @@ func (b *Mailbox) receive(ctx context.Context) (*Result, error) {
 	// One Result for the command, which a second drain adds to: what the first
 	// landed and acked is said, whatever stopped it (#332). The two drains
 	// share one bound in time, and nothing else is under it.
-	res := &Result{}
+	res := &Result{owing: owing}
 	drainCtx, stop := context.WithTimeoutCause(ctx, b.drainBound(), errDrainTime)
 	defer stop()
 	err := b.drain(drainCtx, asked, res)
@@ -235,6 +244,9 @@ func (b *Mailbox) receive(ctx context.Context) (*Result, error) {
 		if e := b.prune(res.listedAt); err == nil {
 			err = e
 		}
+	}
+	if own, ok := b.ownLifetime(); ok {
+		res.receiveWithin = RecvWithin(own)
 	}
 	return res, err
 }
@@ -570,6 +582,11 @@ func (b *Mailbox) receiveOne(ctx context.Context, m protocol.MessageInfo, res *R
 			if err := b.update(func(s store) error {
 				if err := recordSeen(s, ct.bytes, d.Envelope); err != nil {
 					return err
+				}
+				if res.owing && where == landInbox {
+					if d.owed, err = owe(s, local); err != nil {
+						return err
+					}
 				}
 				return s.del(bucketRefused, local)
 			}); err != nil {

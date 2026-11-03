@@ -228,9 +228,10 @@ func failure(err error) []any {
 
 // report prints how a command ended, on stderr, and gives its exit status:
 // 0 done, 1 failed, 2 a command line that was wrong, 3 done and the mailbox
-// needs a look.
+// needs a look, 4 recv met a refusal no wait mends.
 func report(err error, stderr io.Writer) int {
 	var look *needsALook
+	var fatal *fatalEnd
 	var wrong *usageError
 	var badConfig *configError
 	switch {
@@ -244,6 +245,9 @@ func report(err error, stderr io.Writer) int {
 		return 2
 	case errors.As(err, &look):
 		return 3
+	case errors.As(err, &fatal):
+		_, _ = fmt.Fprintf(stderr, "%s\n", line("error", append([]any{"fatal", true}, failure(err)...)...))
+		return 4
 	}
 	_, _ = fmt.Fprintf(stderr, "%s\n", line("error", failure(err)...))
 	return 1
