@@ -1,9 +1,9 @@
 # scripts/windows-accounts.ps1: what CI's windows-accounts job runs its tests with,
 # on a runner it may change at will (never a machine you keep, which it would leave
-# with two new users, Guest enabled, two new volumes and a wider logon right). Needs
+# with two new users, two new volumes and a wider logon right). Needs
 # an elevated shell.
 #
-# Two plain users, dromas-plain and dromas-other, members of Users alone, and Guest.
+# Two plain users, dromas-plain and dromas-other, members of Users alone.
 # A folder every account can use, with the Go caches in it. A FAT32 and an exFAT
 # volume, each a virtual disk (diskpart), which keep no access list.
 $ErrorActionPreference = 'Stop'
@@ -11,8 +11,7 @@ $ErrorActionPreference = 'Stop'
 $root = 'C:\dromas-accounts'
 New-Item -ItemType Directory -Force -Path "$root\out", "$root\mod", "$root\gocache", "$root\reach" | Out-Null
 foreach ($dir in $root, $env:GITHUB_WORKSPACE) {
-  # Everyone, by its SID (Guest is in no other group they share): the folder to
-  # write, the checkout to read.
+  # Everyone, by its SID: the folder to write, the checkout to read.
   $right = if ($dir -eq $root) { 'M' } else { 'RX' }
   icacls $dir /grant "*S-1-1-0:(OI)(CI)$right" /T /Q
   if ($LASTEXITCODE -ne 0) { throw "icacls $dir" }
@@ -27,9 +26,6 @@ foreach ($name in 'dromas-plain', 'dromas-other') {
   New-LocalUser -Name $name -Password $secure -PasswordNeverExpires | Out-Null
   Add-LocalGroupMember -SID 'S-1-5-32-545' -Member $name
 }
-$guest = Get-LocalUser | Where-Object { $_.SID.Value -like '*-501' }
-Set-LocalUser -InputObject $guest -Password $secure
-Enable-LocalUser -InputObject $guest
 
 # A scheduled task needs its account to hold the right to log on as a batch job,
 # which on this image only the Administrators and service groups do; without it the

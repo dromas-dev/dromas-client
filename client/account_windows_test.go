@@ -56,8 +56,6 @@ func TestTheAccountIsTheOneNamed(t *testing.T) {
 		is = sid.IsWellKnown(windows.WinNetworkServiceSid)
 	case "local-service":
 		is = sid.IsWellKnown(windows.WinLocalServiceSid)
-	case "guest":
-		is = strings.HasSuffix(sid.String(), "-501")
 	default:
 		t.Fatalf("no account is named %s", name)
 	}

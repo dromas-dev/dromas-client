@@ -1,7 +1,7 @@
 # scripts/windows-as-account.ps1 <account> <mode>: scripts/check.sh <mode>, in Git's
 # bash, in a process of the account (plain, other, system, network-service,
-# local-service, guest), by a scheduled task, which starts a process of any of them
-# from a job. Its output comes back here and its status is this script's.
+# local-service), by a scheduled task, which starts a process of any of them from a
+# job. Its output comes back here and its status is this script's.
 # scripts/windows-accounts.ps1 makes the accounts.
 param([string]$Account, [string]$Mode)
 $ErrorActionPreference = 'Stop'
@@ -29,8 +29,7 @@ if ($service) {
   $principal = New-ScheduledTaskPrincipal -UserId $service -LogonType ServiceAccount
   Register-ScheduledTask -TaskName $task -Action $action -Settings $settings -Principal $principal | Out-Null
 } else {
-  $user = if ($Account -eq 'guest') { (Get-LocalUser | Where-Object { $_.SID.Value -like '*-501' }).Name } else { "dromas-$Account" }
-  Register-ScheduledTask -TaskName $task -Action $action -Settings $settings -User $user -Password $env:DROMAS_ACCOUNTS_PASSWORD -RunLevel Limited | Out-Null
+  Register-ScheduledTask -TaskName $task -Action $action -Settings $settings -User "dromas-$Account" -Password $env:DROMAS_ACCOUNTS_PASSWORD -RunLevel Limited | Out-Null
 }
 New-Item -ItemType File -Force -Path $out | Out-Null
 Start-ScheduledTask -TaskName $task
@@ -48,11 +47,16 @@ while ($true) {
     if ((Get-Content $done) -match '^status=(\d+)') { $status = [int]$Matches[1] }
     break
   }
-  # 0x41303: not yet run, which a logon refused leaves too. 0x41301: running.
+  # 0x41301: running. 0x41303: not yet run, which a logon refused leaves too. Any
+  # other result is a task that ended, whose status is written if it ran its command.
   $result = (Get-ScheduledTaskInfo -TaskName $task).LastTaskResult
   $elapsed = (Get-Date) - $start
   if ($result -eq 0x41303 -and $elapsed.TotalMinutes -gt 2) {
     Write-Output "::error::the task as $Account never started"
+    break
+  }
+  if ($result -notin 0x41301, 0x41303 -and -not (Test-Path $done)) {
+    Write-Output ("::error::the task as {0} ended with 0x{1:x} and wrote no status" -f $Account, $result)
     break
   }
   if ($elapsed.TotalMinutes -gt 30) {

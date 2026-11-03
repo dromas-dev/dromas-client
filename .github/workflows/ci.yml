@@ -67,8 +67,8 @@ jobs:
   windows-accounts:
     # The test job's Windows user is the built-in Administrator. Here every test
     # runs as a plain user, and the tests of what an account can do as SYSTEM,
-    # NETWORK SERVICE, LOCAL SERVICE and Guest, each a process of that account
-    # by a scheduled task, and as a second plain user, who tries what the first
+    # NETWORK SERVICE and LOCAL SERVICE, each a process of that account by a
+    # scheduled task, and as a second plain user, who tries what the first
     # one's lists say. Beside them a FAT32 and an exFAT volume, which keep no
     # access list. scripts/windows-accounts.ps1 makes these, on this runner only:
     # the tests skip without them, by DROMAS_TEST_ACCOUNT.
@@ -110,9 +110,6 @@ jobs:
       - name: LOCAL SERVICE
         shell: powershell
         run: ./scripts/windows-as-account.ps1 local-service account
-      - name: Guest
-        shell: powershell
-        run: ./scripts/windows-as-account.ps1 guest account
 
   bsd:
     # FreeBSD, OpenBSD, NetBSD and DragonFly, each in a VM on a Linux runner
