@@ -57,7 +57,8 @@ func (b *Mailbox) hold(ctx context.Context) (func() error, error) {
 		}
 	}
 	if err != nil {
-		if errors.Is(err, errLocked) || ctx.Err() != nil {
+		var judged *fileRefused
+		if errors.Is(err, errLocked) || ctx.Err() != nil || errors.As(err, &judged) {
 			return nil, err
 		}
 		return nil, fmt.Errorf("the mailbox's state file: %w", err)
