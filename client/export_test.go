@@ -181,6 +181,13 @@ func SetWriteFault(t *testing.T, f func() error) {
 	t.Cleanup(func() { failWrite = nil })
 }
 
+// SetPathFault has each read of where a path is ask f first, and fail with the
+// error it gives, for one test: a fault of the disk, which a test cannot make.
+func SetPathFault(t *testing.T, f func() error) {
+	failPath = f
+	t.Cleanup(func() { failPath = nil })
+}
+
 // Steps are the steps of one kind of write (steps.go).
 func Steps(kind string) []string { return steps[kind] }
 

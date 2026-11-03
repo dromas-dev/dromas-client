@@ -98,6 +98,10 @@ type config struct {
 	values  map[string]setting
 }
 
+// checkLayout is client.CheckLayout, but in a test of a fault of the disk, which
+// no test can make.
+var checkLayout = client.CheckLayout
+
 // configError is a config that is wrong, so nothing ran: exit status 2, with a
 // "config_error" line on stderr naming the file and the key.
 type configError struct {
@@ -348,7 +352,12 @@ func (cfg *config) resolve(g *globals, fc *fileConfig, rel string, noMailbox boo
 		if cfg.layout.Inbox, err = path("inbox-dir", g.inbox, fc.InboxDir, filepath.Join(cfg.layout.Mail, "inbox")); err != nil {
 			return err
 		}
-		if err := client.CheckLayout(cfg.dir, cfg.layout); err != nil {
+		err = checkLayout(cfg.dir, cfg.layout)
+		var fault *client.LayoutFault
+		switch {
+		case errors.As(err, &fault):
+			return err // the disk's, and the config may be right: exit status 1
+		case err != nil:
 			return bad("", "%v", err)
 		}
 	}
