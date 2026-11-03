@@ -338,13 +338,25 @@ func CheckServerURL(s string) error { return checkServerURL(s) }
 // checkServerURL holds the URL of the server a mailbox calls to https, or to http only for a server on this
 // machine (onThisMachine). A pass is a bearer credential for the minutes it
 // has left, and a lookup names the address it asks about, so neither
-// crosses a network in the clear (RFC 6750 §5.3). Nothing allows more.
+// crosses a network in the clear (RFC 6750 §5.3). Nothing allows more. https on
+// port 80 is refused too: its server name would drop the port (PROTOCOL.md §8,
+// §11.1), and no server is there.
 func checkServerURL(s string) error {
 	u, err := url.Parse(s)
+	if err == nil && httpsOnPort80(u) {
+		return fmt.Errorf("%.80q is not a server this client calls: https is never on port 80", s)
+	}
 	if err == nil && u.Host != "" && (u.Scheme == "https" || u.Scheme == "http" && onThisMachine(u.Hostname())) {
 		return nil
 	}
 	return fmt.Errorf("%.80q is not a server this client calls: one is https, or http only to this machine, by its address (127.0.0.0/8, ::1)", s)
+}
+
+// httpsOnPort80 reports whether u is https on port 80, whose server name would
+// drop the port (PROTOCOL.md §8, §11.1).
+func httpsOnPort80(u *url.URL) bool {
+	port, err := strconv.ParseUint(u.Port(), 10, 16)
+	return u.Scheme == "https" && err == nil && port == 80
 }
 
 // onThisMachine reports whether host is this machine's loopback, written as
@@ -367,19 +379,51 @@ func (b *Mailbox) Link() string { return b.base + protocol.LinkPath + b.Address(
 
 // Destination parses where to send: an address, a link to one on this mailbox's
 // server, or one of this mailbox's aliases (see [Mailbox.SetAlias]). A link to
-// another server is refused, since a mailbox sends only through its own.
+// another server is refused, since a mailbox sends only through its own: the
+// two are compared by server name (PROTOCOL.md §4.3), so one written with its
+// default port is the same server's.
 func (b *Mailbox) Destination(s string) (protocol.Address, error) {
 	if aliasGrammar.MatchString(s) {
 		return b.alias(s)
 	}
-	a, err := protocol.ParseAddress(strings.TrimPrefix(s, b.base+protocol.LinkPath))
-	switch {
-	case err == nil:
+	if !strings.Contains(s, "://") {
+		a, err := protocol.ParseAddress(s)
+		if err != nil {
+			return a, refuse("not an address, a link to one, or an alias: %s", s)
+		}
 		return a, nil
-	case strings.Contains(s, "://") && !strings.HasPrefix(s, b.base+"/"):
-		return a, refuse("a link to another server: this mailbox's server is %s", b.base)
 	}
-	return a, refuse("not an address, a link to one, or an alias: %s", s)
+	if !b.ownLink(s) {
+		return protocol.Address{}, refuse("a link to another server: this mailbox's server is %s", b.base)
+	}
+	u, err := url.Parse(s)
+	base, berr := url.Parse(b.base)
+	if err == nil && berr == nil && !strings.ContainsAny(s, "?#") {
+		if a, err := protocol.ParseAddress(strings.TrimPrefix(u.EscapedPath(), base.EscapedPath()+protocol.LinkPath)); err == nil {
+			return a, nil
+		}
+	}
+	return protocol.Address{}, refuse("not an address, a link to one, or an alias: %s", s)
+}
+
+// ownLink reports whether a link is this mailbox's server's: its server name is
+// the server's, its scheme is the base URL's, it has no user information, and
+// it is no form checkServerURL refuses for its port (https on port 80).
+func (b *Mailbox) ownLink(link string) bool {
+	own, err := b.serverName()
+	if err != nil {
+		return false
+	}
+	name, err := serverNameOf(link)
+	if err != nil || name != own {
+		return false
+	}
+	u, err := url.Parse(link)
+	if err != nil || u.User != nil || httpsOnPort80(u) {
+		return false
+	}
+	base, err := url.Parse(b.base)
+	return err == nil && u.Scheme == base.Scheme
 }
 
 // Identity returns the mailbox's identity.
@@ -844,10 +888,14 @@ func (b *Mailbox) makePrekey(ctx context.Context, serial uint64, certify bool) (
 	}
 	made := b.now().UTC().Truncate(time.Second)
 	notAfter := made.Add(lifetime)
-	if cert != nil && cert.NotAfter().Before(notAfter) {
-		notAfter = cert.NotAfter()
+	var rank uint64
+	if cert != nil {
+		rank = cert.Serial()
+		if cert.NotAfter().Before(notAfter) {
+			notAfter = cert.NotAfter()
+		}
 	}
-	p := &protocol.Prekey{Address: b.id.Address(), Serial: serial, Key: recipient, NotAfter: notAfter}
+	p := &protocol.Prekey{Address: b.id.Address(), Rank: rank, Serial: serial, Key: recipient, NotAfter: notAfter}
 	sig, err := by.Statement(p)
 	if err != nil {
 		return nil, err

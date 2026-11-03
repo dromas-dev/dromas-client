@@ -351,9 +351,16 @@ func TestVectorsCertificate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	stmt := abs(t, filepath.Join(vectors, "a/prekey-1.txt"))
+	// The statement a signature of cert/ is over is the one beside it, which
+	// names that certificate's serial as its signer's rank.
+	stmtOf := func(sig string) string {
+		if filepath.Base(filepath.Dir(sig)) == "cert" {
+			return abs(t, strings.TrimSuffix(sig, ".sig")+".txt")
+		}
+		return abs(t, filepath.Join(vectors, "a/prekey-1.txt"))
+	}
 	signed := func(addr, doc, sig string) (string, error) {
-		return bash(t, scratch(t), setNow+held(t, "a")+fmt.Sprintf("A=%s; c=$(dr_signed %s %s dromas-prekey-v1:%s %s %s) || exit\n", addr, addr, doc, a, abs(t, sig), stmt)+unrevoked)
+		return bash(t, scratch(t), setNow+held(t, "a")+fmt.Sprintf("A=%s; c=$(dr_signed %s %s dromas-prekey-v1:%s %s %s) || exit\n", addr, addr, doc, a, abs(t, sig), stmtOf(sig))+unrevoked)
 	}
 	// The script's status says which way it failed, as the Go client's error
 	// does: 2 for a certificate that has ended, 3 for one that has not begun,
@@ -361,7 +368,7 @@ func TestVectorsCertificate(t *testing.T) {
 	status := map[string]int{"bad-ended.sig": 2, "bad-not-begun.sig": 3}
 	verdict := func(sig string) (string, int) {
 		t.Helper()
-		signer, err := protocol.VerifySigned(id, mustRead(t, stmt), mustRead(t, sig), protocol.PrekeyNamespace(A), now)
+		signer, err := protocol.VerifySigned(id, mustRead(t, stmtOf(sig)), mustRead(t, sig), protocol.PrekeyNamespace(A), now)
 		if err != nil {
 			if s, ok := status[filepath.Base(sig)]; ok {
 				return "", s
@@ -408,7 +415,7 @@ func TestVectorsCertificate(t *testing.T) {
 	// them.
 	for _, name := range []string{"bad-extensions", "bad-reserved-field", "bad-nonce-of-16-bytes", "bad-key-id", "bad-serial-zero", "bad-certifies-the-identity"} {
 		verify := fmt.Sprintf(`printf '%%s cert-authority %%s\n' %s "$(sed -n 2p %s)" > "$DR/s" && ssh-keygen -Y verify -f "$DR/s" -I %s -n dromas-prekey-v1:%s -s %s -O verify-time=20261010000000Z < %s`,
-			a, aDoc, a, a, abs(t, filepath.Join(vectors, "cert", name+".sig")), stmt)
+			a, aDoc, a, a, abs(t, filepath.Join(vectors, "cert", name+".sig")), abs(t, filepath.Join(vectors, "cert", name+".txt")))
 		if _, err := bash(t, scratch(t), "mkdir -p \"$DR\"; "+verify); err != nil {
 			t.Errorf("control: ssh-keygen -Y verify refuses %s by itself: %v", name, err)
 		}
@@ -2074,11 +2081,11 @@ dr_recv`
 	}
 }
 
-// The script's pass names the server as the Go client's does, as an origin is
-// written: its host, lowercase, with no user before it, and its port as a
-// number only when that is not the scheme's default (PROTOCOL.md §8;
-// client's TestAPassNamesTheServerAsAnOrigin holds the Go client to the same).
-func TestTheScriptsPassNamesTheServerAsAnOrigin(t *testing.T) {
+// The script's pass names the server as the Go client's does: its host,
+// lowercase, with no user before it, and its port as a number, with none when
+// it is 80 or 443 (PROTOCOL.md §8; client's TestAPassNamesTheServer holds the Go
+// client to the same).
+func TestTheScriptsPassNamesTheServer(t *testing.T) {
 	t.Parallel()
 	need(t, "bash")
 	for base, want := range map[string]string{
@@ -2086,7 +2093,7 @@ func TestTheScriptsPassNamesTheServerAsAnOrigin(t *testing.T) {
 		"https://dromas.dev:443":          "dromas.dev",
 		"https://Dromas.dev:0443/":        "dromas.dev",
 		"https://someone@dromas.dev:8443": "dromas.dev:8443",
-		"https://dromas.dev:80":           "dromas.dev:80",
+		"http://dromas:443":               "dromas",
 		"http://dromas:8080":              "dromas:8080",
 		"http://dromas:80":                "dromas",
 		"http://dromas:":                  "dromas",
@@ -2107,7 +2114,8 @@ func TestBothClientsCallTheSameServers(t *testing.T) {
 	need(t, "bash", "jq")
 	const refusal = "is not a server this client calls"
 	for _, u := range []string{
-		"https://dromas.dev", "HTTPS://dromas.dev", "https://10.0.0.1:8443", "https://someone@dromas.dev",
+		"https://dromas.dev", "HTTPS://dromas.dev", "https://10.0.0.1:8443", "https://someone@dromas.dev", "https://dromas.dev:443", "https://dromas.dev:8080", "https://[2001:db8::80]", "http://127.0.0.1:80", "http://127.0.0.1:443",
+		"https://dromas.dev:80", "https://dromas.dev:0080", "https://dromas.dev:80/", "HTTPS://Dromas.dev:80", "https://someone@dromas.dev:80", "https://[::1]:80",
 		"http://127.0.0.1:8080", "http://127.255.0.9", "http://[::1]:8080", "http://[::1]", "http://someone@127.0.0.1:1",
 		"http://example.com", "http://dromas:8080", "http://10.0.0.1:8080", "http://127.0.0.256", "http://127.01.0.1",
 		"http://127.0.0.1.example", "http://localhost.example", "http://localhost:1", "http://LOCALHOST", "http://[::2]:8080", "http://[::ffff:127.0.0.1]:8080",

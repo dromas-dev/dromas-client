@@ -71,7 +71,7 @@ func TestRecvRenewsNothingAboveAStatementTheMailboxDidNotMake(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			p.Serial, p.Key = certSerial+5, k.Recipient().String()
+			p.Rank, p.Serial, p.Key = rankOf(signer), certSerial+5, k.Recipient().String()
 			sig, err := protocol.Sign(signer, p.Statement(), protocol.PrekeyNamespace(b.Address()))
 			if err != nil {
 				t.Fatal(err)

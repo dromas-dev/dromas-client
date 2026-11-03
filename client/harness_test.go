@@ -222,6 +222,15 @@ func worker(t *testing.T, b *client.Mailbox) ssh.Signer {
 	return workerAt(t, b, numberOf(t, b))
 }
 
+// rankOf is the rank a signer signs at: a certificate's serial, and 0 for a
+// bare key.
+func rankOf(by ssh.Signer) uint64 {
+	if cert, ok := by.PublicKey().(*ssh.Certificate); ok {
+		return cert.Serial
+	}
+	return 0
+}
+
 // workerAt loads the working key a mailbox made at a serial, under its
 // certificate.
 func workerAt(t *testing.T, b *client.Mailbox, serial uint64) ssh.Signer {

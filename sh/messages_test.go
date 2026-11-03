@@ -21,6 +21,7 @@ import (
 	"github.com/dromas-dev/dromas-client/internal/fakeserver"
 	"github.com/dromas-dev/dromas-client/internal/forge"
 	"github.com/dromas-dev/dromas-client/protocol"
+	"golang.org/x/crypto/ssh"
 )
 
 // The script's mailbox made, sending and reading, against a server that forges.
@@ -481,8 +482,8 @@ func mustReadString(t *testing.T, name string) string { return string(mustRead(t
 // b64 is s in standard base64, as a byte member carries it.
 func b64(s string) string { return base64.StdEncoding.EncodeToString([]byte(s)) }
 
-// keyOf is a prekey statement's key, its fourth line.
-func keyOf(st string) string { return strings.Split(st, "\n")[3] }
+// keyOf is a prekey statement's key, its fifth line.
+func keyOf(st string) string { return strings.Split(st, "\n")[4] }
 
 // withLine is a text with its line n, from 1, replaced.
 func withLine(s []byte, n int, l string) []byte {
@@ -501,10 +502,17 @@ func (w *world) prekey(b *shMailbox) stmt {
 }
 
 // statement is a prekey statement for mailbox b, at serial, for key, until
-// notAfter, signed with the key file signer as ssh-keygen signs one.
+// notAfter, signed with the key file signer as ssh-keygen signs one, and naming
+// that signer's rank: a certificate's serial, and 0 for a bare key.
 func (w *world) statement(b *shMailbox, serial uint64, key, notAfter, signer string) stmt {
 	w.t.Helper()
-	st := fmt.Appendf(nil, "dromas-prekey-v1\n%s\n%d\n%s\n%s\n", b.addr, serial, key, notAfter)
+	var rank uint64
+	if pub, _, _, _, err := ssh.ParseAuthorizedKey(mustRead(w.t, signer)); err == nil {
+		if cert, ok := pub.(*ssh.Certificate); ok {
+			rank = cert.Serial
+		}
+	}
+	st := fmt.Appendf(nil, "dromas-prekey-v1\n%s\n%d\n%d\n%s\n%s\n", b.addr, rank, serial, key, notAfter)
 	f := filepath.Join(w.t.TempDir(), "st")
 	if err := os.WriteFile(f, st, 0o600); err != nil {
 		w.t.Fatal(err)

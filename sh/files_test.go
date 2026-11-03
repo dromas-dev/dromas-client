@@ -104,7 +104,7 @@ func TestTheScriptRestoresAMailboxFromItsIdentityAlone(t *testing.T) {
 		n, _ := strconv.ParseUint(strings.TrimSpace(string(mustRead(t, filepath.Join(dir, "serial")))), 10, 64)
 		was, _ := strconv.ParseUint(strings.TrimSpace(string(mustRead(t, filepath.Join(lost, "serial")))), 10, 64)
 		st, _ := srv.Prekey(a)
-		if n < was || !forgotten && n == was || strings.Split(string(st), "\n")[2] != strconv.FormatUint(n, 10) || !exists(filepath.Join(dir, "pass")) {
+		if n < was || !forgotten && n == was || strings.Split(string(st), "\n")[3] != strconv.FormatUint(n, 10) || !exists(filepath.Join(dir, "pass")) {
 			t.Errorf("forgotten %v: the restored mailbox published %d after the lost machine's %d, served %q", forgotten, n, was, st)
 		}
 		if _, err := bash(t, env, `dr_idcheck "$DR/identity.doc" `+a.String()); err != nil {

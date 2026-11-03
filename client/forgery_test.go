@@ -3,6 +3,8 @@ package client_test
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -19,6 +21,7 @@ import (
 	"github.com/dromas-dev/dromas-client/internal/fakeserver"
 	"github.com/dromas-dev/dromas-client/internal/forge"
 	"github.com/dromas-dev/dromas-client/protocol"
+	"golang.org/x/crypto/ssh"
 )
 
 // A server can list a from beside each message, a member PROTOCOL.md §11.11
@@ -310,6 +313,110 @@ func TestForgeries(t *testing.T) {
 		}
 	})
 
+	t.Run("a statement shown under a later certificate of its working key", func(t *testing.T) {
+		// SSHSIG signs no signing key, so b's first statement verifies under
+		// any certificate of the key that signed it. Shown under one above
+		// the certificate of its second, it would stand above a sender's floor.
+		e := newWorkEnv(t)
+		a, b := e.mailbox(), e.mailbox()
+		raw, err := os.ReadFile(workFile(b, numberOf(t, b), ""))
+		if err != nil {
+			t.Fatal(err)
+		}
+		key, err := ssh.ParsePrivateKey(raw) // read before the renewal deletes it
+		if err != nil {
+			t.Fatal(err)
+		}
+		old, _ := e.srv.Prekey(b.Address())
+		if _, err := b.Rekey(ctx); err != nil {
+			t.Fatal(err)
+		}
+		send(t, a, b, "sees the second statement")
+		cert, err := protocol.NewCertificate(b.Identity(), identityKey(t, b), key.PublicKey(), numberOf(t, b)+1, e.clock.Now(), testCertLife)
+		if err != nil {
+			t.Fatal(err)
+		}
+		later, err := cert.Signer(key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sig, err := protocol.Sign(later, old, protocol.PrekeyNamespace(b.Address()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
+			if r.Method == http.MethodGet && r.URL.Path == "/v1/"+b.Address().String() {
+				fakeserver.WriteJSON(w, http.StatusOK, protocol.MailboxResponse{Identity: b.Identity().Document(), Prekey: old, PrekeySignature: sig})
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+		if _, err := a.Send(ctx, b.Address(), "secret"); err == nil || !strings.Contains(err.Error(), "a rank that is not its signer's") {
+			t.Fatalf("send: %v, want a refusal for the rank", err)
+		}
+	})
+
+	t.Run("two certificates of one serial, which a sender orders as numbers", func(t *testing.T) {
+		// §5.3's row for different certificates of the same certificate
+		// serial binds a server. A sender compares (c, p) alone, so a higher
+		// prekey serial is later, and a lower one is refused, whichever
+		// certificate each is under.
+		e := newWorkEnv(t)
+		a, b := e.mailbox(), e.mailbox()
+		n := numberOf(t, b)
+		send(t, a, b, "sees the first statement")
+		st, _ := e.srv.Prekey(b.Address())
+		p, err := protocol.ParsePrekey(st)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, raw, err := ed25519.GenerateKey(rand.Reader)
+		if err != nil {
+			t.Fatal(err)
+		}
+		other, err := ssh.NewSignerFromKey(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cert, err := protocol.NewCertificate(b.Identity(), identityKey(t, b), other.PublicKey(), n, e.clock.Now(), testCertLife)
+		if err != nil {
+			t.Fatal(err)
+		}
+		twin, err := cert.Signer(other)
+		if err != nil {
+			t.Fatal(err)
+		}
+		posted := false
+		serving := func(serial uint64) {
+			at := *p
+			at.Serial = serial
+			sig, err := protocol.Sign(twin, at.Statement(), protocol.PrekeyNamespace(b.Address()))
+			if err != nil {
+				t.Fatal(err)
+			}
+			e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
+				switch {
+				case r.Method == http.MethodGet && r.URL.Path == "/v1/"+b.Address().String():
+					fakeserver.WriteJSON(w, http.StatusOK, protocol.MailboxResponse{Identity: b.Identity().Document(), Prekey: at.Statement(), PrekeySignature: sig})
+				case r.Method == http.MethodPost:
+					posted = true
+					http.Error(w, "", http.StatusServiceUnavailable)
+				default:
+					next.ServeHTTP(w, r)
+				}
+			})
+		}
+		serving(p.Serial - 1)
+		if _, err := a.Send(ctx, b.Address(), "secret"); err == nil || !strings.Contains(err.Error(), "rollback") || posted {
+			t.Fatalf("a lower prekey serial under the other certificate: %v, posted %v, want a rollback refusal", err, posted)
+		}
+		serving(p.Serial + 1)
+		_, _ = a.Send(ctx, b.Address(), "secret")
+		if !posted {
+			t.Fatal("a higher prekey serial under the other certificate is not sealed to")
+		}
+	})
+
 	t.Run("rollback of the mailbox's own prekey", func(t *testing.T) {
 		e := newWorkEnv(t)
 		b := e.mailbox()
@@ -449,4 +556,43 @@ func TestForgeries(t *testing.T) {
 			t.Fatal("a file was named by the server's id")
 		}
 	})
+}
+
+// The fake reads a pass against its request's Host as a server name, as a real
+// server does (PROTOCOL.md §8): a Host that carries port 443 or 80 is the name
+// without it, and any other port is part of the name.
+func TestTheFakeReadsAHostAsAServerName(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	a := e.mailbox()
+	for _, c := range []struct {
+		host, named string
+		taken       bool
+	}{
+		{"dromas.example", "dromas.example", true},
+		{"dromas.example:443", "dromas.example", true},
+		{"dromas.example:80", "dromas.example", true},
+		{"dromas.example:8443", "dromas.example:8443", true},
+		{"dromas.example:8443", "dromas.example", false},
+		{"other.example:443", "dromas.example", false},
+	} {
+		h, _, err := protocol.NewPass(identityKey(t, a), a.Address(), c.named, e.clock.Now())
+		if err != nil {
+			t.Fatal(err)
+		}
+		req, err := http.NewRequest(http.MethodGet, e.srv.URL+"/v1/"+a.Address().String()+"/messages", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Host = c.host
+		req.Header.Set("Authorization", h)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		if taken := resp.StatusCode != http.StatusUnauthorized; taken != c.taken {
+			t.Errorf("Host %s, a pass that names %s: %d, want taken %v", c.host, c.named, resp.StatusCode, c.taken)
+		}
+	}
 }

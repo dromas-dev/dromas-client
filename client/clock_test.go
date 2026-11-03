@@ -477,7 +477,7 @@ func TestADrainDeletesARetiredKeyPastItsDeletionTime(t *testing.T) {
 	}
 	// Its not_after 34 days back, so its deletion time, a day back, has come.
 	lines := strings.Split(string(statement(t, b, retired, ".txt")), "\n")
-	lines[4] = e.clock.Now().Add(-34 * 24 * time.Hour).UTC().Format(protocol.TimeLayout)
+	lines[5] = e.clock.Now().Add(-34 * 24 * time.Hour).UTC().Format(protocol.TimeLayout)
 	b.SetRecord(t, "prekeys/"+strconv.FormatUint(retired, 10)+".txt", []byte(strings.Join(lines, "\n")))
 	receive(t, b)
 	if exists(prekeyFile(b, retired, ".agekey")) || !exists(prekeyFile(b, numberOf(t, b), ".agekey")) {

@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -304,9 +305,9 @@ func TestVectorCertificates(t *testing.T) {
 		t.Errorf("B took A's certificate: %v", err)
 	}
 	held := vectorRevokedCerts(t)
-	st := read(t, "a/prekey-1.txt")
 	for _, f := range glob(t, "cert/ok-*.pub") {
 		name := strings.TrimSuffix(filepath.Base(f), ".pub")
+		st := read(t, "cert/"+name+".txt")
 		cert, err := CheckCertificate(a, vectorCertificate(t, "cert/"+name+".pub"), now)
 		if err != nil {
 			t.Errorf("%s: CheckCertificate: %v", name, err)
@@ -315,6 +316,9 @@ func TestVectorCertificates(t *testing.T) {
 		signer, err := VerifySigned(a, st, read(t, "cert/"+name+".sig"), PrekeyNamespace(a.Address()), now)
 		if err != nil || Admits(held, signer) != nil {
 			t.Errorf("%s: VerifySigned: %v, with A's revocation of certificates held: %v", name, err, Admits(held, signer))
+		}
+		if p, signer, err := VerifyPrekey(a, st, read(t, "cert/"+name+".sig"), now); err != nil || p.Rank != signer.Rank() {
+			t.Errorf("%s: VerifyPrekey: %v", name, err)
 		}
 		// The edges each is at: no ceiling at a reader, and the last date.
 		switch name {
@@ -331,7 +335,14 @@ func TestVectorCertificates(t *testing.T) {
 	for _, f := range glob(t, "cert/bad-*.pub") {
 		name := strings.TrimSuffix(filepath.Base(f), ".pub")
 		key := vectorCertificate(t, "cert/"+name+".pub")
-		sig := read(t, "cert/"+name+".sig")
+		st, sig := read(t, "cert/"+name+".txt"), read(t, "cert/"+name+".sig")
+		// Its statement names its own certificate's serial, so the rank line
+		// is never what refuses it.
+		if p, err := parsePrekey(st); err != nil && name != "bad-serial-above-2-53" {
+			t.Errorf("%s: its statement: %v", name, err)
+		} else if err == nil && p.Rank != key.(*ssh.Certificate).Serial {
+			t.Errorf("%s: its statement names rank %d, its certificate's serial is %d", name, p.Rank, key.(*ssh.Certificate).Serial)
+		}
 		want := ErrCertificate
 		switch name {
 		case "bad-ended":
@@ -345,6 +356,9 @@ func TestVectorCertificates(t *testing.T) {
 			signer, err := VerifySigned(a, st, sig, PrekeyNamespace(a.Address()), now)
 			if err != nil || signer.Rank() != held.Through || !errors.Is(Admits(held, signer), ErrRevokedSigner) || Admits(nil, signer) != nil {
 				t.Errorf("%s: %v, with A's revocation of certificates held: %v, with none: %v", name, err, Admits(held, signer), Admits(nil, signer))
+			}
+			if _, _, err := VerifyPrekey(a, st, sig, now); err != nil {
+				t.Errorf("%s: VerifyPrekey: %v", name, err)
 			}
 			continue
 		}
@@ -365,9 +379,14 @@ func TestVectorCertificates(t *testing.T) {
 		}
 	}
 	// The re-wrap: cert/bad-certifies-the-identity carries A's identity's own
-	// signature, rank 0, with a certificate of the identity's key above A's
-	// revocation of certificates in its key's place.
-	own, err := Dearmor(read(t, "prekey/signed-by-the-identity.txt.sig"))
+	// signature with a certificate of the identity's key above A's revocation
+	// of certificates in its key's place.
+	identity, _ := vectorKey(t, "a")
+	armored, err := Sign(identity, read(t, "cert/bad-certifies-the-identity.txt"), PrekeyNamespace(a.Address()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	own, err := Dearmor(armored)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -411,8 +430,8 @@ func TestVectorRevokedCerts(t *testing.T) {
 }
 
 // Two certificates of A's working key out of the one form its makers write,
-// each with a signature made under it over a/prekey-1.txt in A's prekey
-// namespace: cert/bad-reserved-field, with bytes in its reserved field, and
+// each with a signature made under it over the statement beside it, which is
+// a/prekey-1.txt, in A's prekey namespace: cert/bad-reserved-field, with bytes in its reserved field, and
 // cert/bad-nonce-of-16-bytes. ssh-keygen writes neither, so they are made
 // here, the same bytes each time: each nonce is a hash of the vector's name,
 // and Ed25519 signs deterministically. The kept files are held to them, and
@@ -459,7 +478,7 @@ func TestVectorsCertificateForm(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for file, b := range map[string][]byte{"cert/" + name + ".pub": ssh.MarshalAuthorizedKey(cert), "cert/" + name + ".sig": st} {
+		for file, b := range map[string][]byte{"cert/" + name + ".pub": ssh.MarshalAuthorizedKey(cert), "cert/" + name + ".txt": read(t, "a/prekey-1.txt"), "cert/" + name + ".sig": st} {
 			if os.Getenv("DROMAS_WRITE_VECTORS") != "" {
 				if err := os.WriteFile(filepath.Join(vectors, file), b, 0o600); err != nil {
 					t.Fatal(err)
@@ -500,7 +519,7 @@ func TestVectorPrekeys(t *testing.T) {
 			t.Errorf("%s: %v", v.sig, err)
 			continue
 		}
-		if p.Serial != v.serial || p.Type() != PostQuantum || p.Expired(now) || p.CheckLifetime(now) != nil || signer.Rank() != v.rank || signer.Identity() != (v.rank == 0) {
+		if p.Rank != v.rank || p.Serial != v.serial || p.Type() != PostQuantum || p.Expired(now) || p.CheckLifetime(now) != nil || signer.Rank() != v.rank || signer.Identity() != (v.rank == 0) {
 			t.Errorf("%s: serial %d type %s expired %v lifetime %v rank %d", v.sig, p.Serial, p.Type(), p.Expired(now), p.CheckLifetime(now), signer.Rank())
 		}
 		if err := Admits(vectorHeld(t, v.id), signer); err != nil {
@@ -557,6 +576,9 @@ func TestVectorBadPrekeys(t *testing.T) {
 	// These fail at the signature or its certificate; every other bad-* is
 	// well signed, so its format is what refuses it.
 	signature := map[string]bool{"bad-wrong-namespace": true, "bad-signed-by-b": true, "bad-signed-by-a-bare-working-key": true}
+	// These are good in every way but that their rank is not their signer's:
+	// each parses, and its signature verifies under what it carries.
+	rank := map[string]bool{"bad-rank-too-high": true, "bad-rank-too-low": true, "bad-rank-0-under-a-certificate": true, "bad-rank-a-certificate-s-by-the-identity": true, "bad-rank-under-another-certificate": true}
 	// These verify, each for its own mailbox: A's identity's own, and B's and
 	// C's under each one's certificate (TestVectorPrekeys).
 	taken := map[string]*Identity{
@@ -587,6 +609,17 @@ func TestVectorBadPrekeys(t *testing.T) {
 				if _, err := VerifySigned(a, st, sig, PrekeyNamespace(a.Address()), now); err != nil {
 					t.Errorf("%s: control: the signature itself fails: %v", name, err)
 				}
+			}
+			if rank[name] {
+				by, err := VerifySigned(a, st, sig, PrekeyNamespace(a.Address()), now)
+				parsed, perr := ParsePrekey(st)
+				if err != nil || perr != nil || parsed.Rank == by.Rank() {
+					t.Errorf("%s: control: its rank is not all that is wrong with it: %v, %v", name, err, perr)
+				}
+				if _, _, err := VerifyPrekeyRecord(a, st, sig); err == nil {
+					t.Errorf("%s: VerifyPrekeyRecord takes it", name)
+				}
+				delete(rank, name)
 			}
 		case name == "expired":
 			if err != nil || !p.Expired(now) || p.CheckLifetime(now) == nil {
@@ -620,6 +653,62 @@ func TestVectorBadPrekeys(t *testing.T) {
 	for name := range taken {
 		t.Errorf("prekey/%s is missing", name)
 	}
+	for name := range rank {
+		t.Errorf("prekey/%s is missing", name)
+	}
+}
+
+// The substitution a statement's rank line stops: SSHSIG signs no signing key,
+// so A's statement under its certificate verifies shown under a later
+// certificate of the same working key, where its order stands above A's
+// prekey-2. VerifyPrekey refuses it for the rank it names, and a rank of
+// another form is refused for its form though it reads as its signer's number.
+func TestAPrekeyStatementNamesItsSignersRank(t *testing.T) {
+	now := vectorNow(t)
+	a := vectorIdentity(t, "a")
+	st, sig := read(t, "prekey/bad-rank-under-another-certificate.txt"), read(t, "prekey/bad-rank-under-another-certificate.txt.sig")
+	if !bytes.Equal(st, read(t, "a/prekey-1.txt")) {
+		t.Fatal("control: the statement is not a/prekey-1.txt")
+	}
+	by, err := VerifySigned(a, st, sig, PrekeyNamespace(a.Address()), now)
+	if err != nil || by.Rank() <= vectorRank(t) {
+		t.Fatalf("control: the signature does not verify under the later certificate: %v", err)
+	}
+	if !bytes.Equal(by.Certificate().PublicKey().(*ssh.Certificate).Key.Marshal(), vectorCertificate(t, "a/work-cert.pub").(*ssh.Certificate).Key.Marshal()) {
+		t.Fatal("control: the two certificates are not of one working key")
+	}
+	shown, _ := PrekeyOrder(st, sig)
+	two, _ := PrekeyOrder(read(t, "a/prekey-2.txt"), read(t, "a/prekey-2.txt.sig"))
+	if !two.Less(shown) {
+		t.Fatalf("control: (%d, %d) does not stand above (%d, %d)", shown.Rank, shown.Serial, two.Rank, two.Serial)
+	}
+	if _, _, err := VerifyPrekey(a, st, sig, now); err == nil {
+		t.Error("the statement is taken under another certificate of its working key")
+	}
+
+	for _, name := range []string{"bad-rank-missing", "bad-rank-leading-zero", "bad-rank-0-written-twice", "bad-nul-in-the-rank"} {
+		st := read(t, "prekey/"+name+".txt")
+		if _, err := VerifySigned(a, st, read(t, "prekey/"+name+".txt.sig"), PrekeyNamespace(a.Address()), now); err != nil {
+			t.Errorf("%s: control: the signature itself fails: %v", name, err)
+		}
+		if _, err := ParsePrekey(st); err == nil {
+			t.Errorf("%s: parsed", name)
+		}
+	}
+	for name, want := range map[string]uint64{"bad-rank-leading-zero": vectorRank(t), "bad-rank-0-written-twice": 0} {
+		line := strings.Split(string(read(t, "prekey/"+name+".txt")), "\n")[2]
+		sig := read(t, "prekey/"+name+".txt.sig")
+		by, err := VerifySigned(a, read(t, "prekey/"+name+".txt"), sig, PrekeyNamespace(a.Address()), now)
+		if n, perr := strconv.ParseUint(line, 10, 64); err != nil || perr != nil || n != want || by.Rank() != want {
+			t.Errorf("%s: control: %q does not read as its signer's rank", name, line)
+		}
+	}
+
+	// A statement's text writes the rank it holds, the line after the address.
+	p := &Prekey{Address: a.Address(), Rank: 7, Serial: 9, Key: "age1pq1x", NotAfter: now}
+	if want := PrekeyTag + "\n" + a.Address().String() + "\n7\n9\nage1pq1x\n" + now.UTC().Format(TimeLayout) + "\n"; string(p.Statement()) != want {
+		t.Errorf("Statement: %q, want %q", p.Statement(), want)
+	}
 }
 
 // A prekey's type is its key's Bech32 human-readable part, the string read as
@@ -628,7 +717,7 @@ func TestVectorBadPrekeys(t *testing.T) {
 // the last thing a statement is held to: one that fails anything else fails
 // as a statement that does not verify.
 func TestAPrekeyOfATypeThisClientLacks(t *testing.T) {
-	unknown := strings.Split(string(read(t, "prekey/unsupported-type.txt")), "\n")[3]
+	unknown := strings.Split(string(read(t, "prekey/unsupported-type.txt")), "\n")[4]
 	x25519 := strings.TrimSpace(string(read(t, "input/other.x25519")))
 	for key, hrp := range map[string]string{
 		strings.TrimSpace(string(read(t, "input/a-1.pq"))): "age1pq",
@@ -677,10 +766,12 @@ func TestAPrekeyOfATypeThisClientLacks(t *testing.T) {
 	now := vectorNow(t)
 	a, b := vectorIdentity(t, "a"), vectorIdentity(t, "b")
 	w := vectorWorker(t, "a")
+	rank := strconv.FormatUint(vectorRank(t), 10)
 	for _, st := range []string{
-		PrekeyTag + "\n" + b.Address().String() + "\n1\n" + unknown + "\n2026-11-12T00:00:00Z\n",
-		PrekeyTag + "\n" + a.Address().String() + "\n1\n" + unknown + "\n2026-11-12T00:00:00z\n",
-		PrekeyTag + "\n" + a.Address().String() + "\n01\n" + unknown + "\n2026-11-12T00:00:00Z\n",
+		PrekeyTag + "\n" + b.Address().String() + "\n" + rank + "\n1\n" + unknown + "\n2026-11-12T00:00:00Z\n",
+		PrekeyTag + "\n" + a.Address().String() + "\n" + rank + "\n1\n" + unknown + "\n2026-11-12T00:00:00z\n",
+		PrekeyTag + "\n" + a.Address().String() + "\n" + rank + "\n01\n" + unknown + "\n2026-11-12T00:00:00Z\n",
+		PrekeyTag + "\n" + a.Address().String() + "\n0\n1\n" + unknown + "\n2026-11-12T00:00:00Z\n",
 	} {
 		sig, err := Sign(w, []byte(st), PrekeyNamespace(a.Address()))
 		if err != nil {

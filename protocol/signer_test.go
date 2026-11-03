@@ -192,13 +192,13 @@ func TestTheIdentitysSignatureRewrappedInACertificateIsRefused(t *testing.T) {
 // A statement stands in its mailbox's order by (c, p): its signer's rank,
 // then its own serial (PROTOCOL.md §5). PrekeyOrder reads a bare signing key
 // as rank 0 and names the signer by the SHA-256 of its key's wire bytes,
-// verifying nothing.
+// verifying nothing: the rank is the signing key's, whatever the rank line says.
 func TestPrekeyOrderIsTheSignersRankThenTheSerial(t *testing.T) {
 	t.Parallel()
 	b := newCertMailbox(t)
 	now := time.Date(2026, 10, 31, 12, 0, 0, 0, time.UTC)
 	st := func(serial uint64) []byte {
-		return []byte(fmt.Sprintf("%s\n%s\n%d\nage1pq1x\n2026-12-01T00:00:00Z\n", PrekeyTag, b.id.Address(), serial))
+		return []byte(fmt.Sprintf("%s\n%s\n99\n%d\nage1pq1x\n2026-12-01T00:00:00Z\n", PrekeyTag, b.id.Address(), serial))
 	}
 	cert, err := NewCertificate(b.id, b.identity, b.work.PublicKey(), 1_800_000_000, now, testLifetime)
 	if err != nil {
@@ -249,7 +249,7 @@ func TestPrekeyOrderIsTheSignersRankThenTheSerial(t *testing.T) {
 // lowercase hex, the form ParseSendQuery takes.
 func TestStatementHashIsTheStatementsSHA256(t *testing.T) {
 	t.Parallel()
-	st := []byte(PrekeyTag + "\nx\n1\nage1pq1x\n2026-12-01T00:00:00Z\n")
+	st := []byte(PrekeyTag + "\nx\n0\n1\nage1pq1x\n2026-12-01T00:00:00Z\n")
 	sum := sha256.Sum256(st)
 	if got := StatementHash(st); got != fmt.Sprintf("%x", sum) || !statementGrammar.MatchString(got) {
 		t.Errorf("StatementHash: %s", got)

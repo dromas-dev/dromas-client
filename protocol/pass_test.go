@@ -384,16 +384,41 @@ func TestParsePass(t *testing.T) {
 
 func TestCheckServerName(t *testing.T) {
 	longest := strings.Repeat(strings.Repeat("a", 63)+".", 3) + strings.Repeat("a", 61)
-	for _, s := range []string{"dromas.dev", "dromas:8080", "127.0.0.1:8013", "localhost", "[::1]:8080", "a-b.example.org:443", "[2001:db8::1]", "[::ffff:192.0.2.1]:8443", "dromas.dev:1", "dromas.dev:65535", longest} {
+	for _, s := range []string{"dromas.dev", "dromas:8080", "127.0.0.1:8013", "localhost", "[::1]:8080", "a-b.example.org:8443", "[2001:db8::1]", "[::ffff:192.0.2.1]:8443", "dromas.dev:1", "dromas.dev:65535", longest} {
 		if err := CheckServerName(s); err != nil {
 			t.Errorf("%q: %v", s, err)
 		}
 	}
 	for _, s := range []string{"", "Dromas.dev", "https://dromas.dev", "dromas.dev/", "dromas.dev:", "dromas.dev:123456", "dromas dev", "dromas.dev\n", "-dromas.dev", "dromas.dev.:80x", strings.Repeat("a", 256),
 		longest + "a", "a..b", "a-.b", "a.-b", "dromas.dev.", "_dromas.dev", "dromas~dev", "dromas%2edev", strings.Repeat("a", 64) + ".dev",
-		"dromas.dev:0", "dromas.dev:0808", "dromas.dev:65536", "[:]:8080", "[:1]:8080", "[:::::1]:808", "[::1", "[192.0.2.1]", "[::1%25en0]", "[::G]", "[::A]", "[v1.x]"} {
+		"dromas.dev:80", "dromas.dev:443", "[::1]:80", "[::1]:443", "dromas.dev:0", "dromas.dev:0808", "dromas.dev:65536", "[:]:8080", "[:1]:8080", "[:::::1]:808", "[::1", "[192.0.2.1]", "[::1%25en0]", "[::G]", "[::A]", "[v1.x]"} {
 		if err := CheckServerName(s); !errors.Is(err, ErrPass) {
 			t.Errorf("%q: %v", s, err)
+		}
+	}
+}
+
+// ServerName writes a URL's host and port, or a Host, as a name CheckServerName
+// takes, wherever it can: a port of 80 or 443 goes, and what is no port stays,
+// for CheckServerName to refuse.
+func TestServerName(t *testing.T) {
+	for in, want := range map[string]string{
+		"dromas.dev": "dromas.dev", "Dromas.DEV": "dromas.dev", "dromas.dev:": "dromas.dev",
+		"dromas.dev:443": "dromas.dev", "dromas.dev:0443": "dromas.dev", "dromas.dev:80": "dromas.dev", "dromas.dev:00080": "dromas.dev",
+		"dromas.dev:8443": "dromas.dev:8443", "dromas.dev:08443": "dromas.dev:8443", "127.0.0.1:80": "127.0.0.1", "127.0.0.1:8080": "127.0.0.1:8080",
+		"[::1]": "[::1]", "[::1]:443": "[::1]", "[::1]:8080": "[::1]:8080",
+	} {
+		got := ServerName(in)
+		if got != want {
+			t.Errorf("ServerName(%q) = %q, want %q", in, got, want)
+		}
+		if err := CheckServerName(got); err != nil {
+			t.Errorf("ServerName(%q) = %q: %v", in, got, err)
+		}
+	}
+	for _, in := range []string{"dromas.dev:65536", "dromas.dev:+443", "dromas.dev:443x", "dromas.dev:0", "\u212aey.example"} {
+		if got := ServerName(in); CheckServerName(got) == nil {
+			t.Errorf("ServerName(%q) = %q, a name", in, got)
 		}
 	}
 }

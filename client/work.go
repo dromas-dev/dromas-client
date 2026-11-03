@@ -142,33 +142,20 @@ func (b *Mailbox) dropWork(n uint64) error {
 	return nil
 }
 
-// serverName is the server's name as this mailbox calls it, which a pass names:
-// the host of the server's URL, lowercase in ASCII (protocol.LowerASCII: a
-// host with a letter only Unicode's rules lower names no server), and its
-// port only when that is not the scheme's default, as an origin is written
-// (RFC 6454 §6.2): the port as a number, and none for https on 443 or http
-// on 80.
-func (b *Mailbox) serverName() (string, error) {
-	u, err := url.Parse(b.base)
+// serverName is the server's name as this mailbox calls it, which a pass names.
+func (b *Mailbox) serverName() (string, error) { return serverNameOf(b.base) }
+
+// serverNameOf is the server name of a URL (PROTOCOL.md §8): protocol.ServerName
+// of its host and port, a user before them being no part of it, and nothing for
+// a URL with no host, or a host or port that no name holds.
+func serverNameOf(s string) (string, error) {
+	u, err := url.Parse(s)
 	if err != nil || u.Host == "" {
-		return "", fmt.Errorf("the server's URL %q has no host to name in a pass", b.base)
+		return "", fmt.Errorf("the URL %.80q has no host to name in a pass", s)
 	}
-	port := u.Port()
-	name := strings.TrimSuffix(protocol.LowerASCII(u.Host), ":"+port)
-	if port != "" {
-		n, err := strconv.ParseUint(port, 10, 16)
-		if err != nil {
-			return "", fmt.Errorf("the server's URL %q has no port to name in a pass", b.base)
-		}
-		if defaultPort[protocol.LowerASCII(u.Scheme)] != n {
-			name += ":" + strconv.FormatUint(n, 10)
-		}
-	}
+	name := protocol.ServerName(u.Host)
 	return name, protocol.CheckServerName(name)
 }
-
-// defaultPort is each scheme's own port, which an origin leaves unwritten.
-var defaultPort = map[string]uint64{"https": 443, "http": 80}
 
 // passMargin is how long a kept pass must still have to run to be used
 // again: the time a call may take to reach the server.

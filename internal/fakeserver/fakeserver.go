@@ -477,7 +477,7 @@ func (s *Server) pass(w http.ResponseWriter, r *http.Request, identity []byte, u
 		problem(w, protocol.CodePassExpired, "the pass runs out too far ahead")
 		return false
 	}
-	by, err := p.Verify(id, r.Host, s.now())
+	by, err := p.Verify(id, protocol.ServerName(r.Host), s.now())
 	switch {
 	case errors.Is(err, protocol.ErrPassExpired), errors.Is(err, protocol.ErrCertificateTime):
 		problem(w, protocol.CodePassExpired, "the pass has run out, or its certificate is not valid now")
