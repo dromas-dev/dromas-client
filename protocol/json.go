@@ -171,11 +171,12 @@ func checkText(data []byte, object bool, depth int) string {
 	return ""
 }
 
-// pastBinary64 reports whether a JSON number is of greater magnitude than a
-// binary64 holds (RFC 7493 §2.2: "for example, 1E400"): strconv reads it as
-// ±Inf with ErrRange, and jq writes 1e1000000000 as the largest binary64, so
-// one text would be two values. A number too small for binary64 reads as
-// zero, and is taken (PROTOCOL.md §3.3).
+// pastBinary64 reports whether a JSON number rounds to an infinity when read as
+// a binary64 (RFC 7493 §2.2: "for example, 1E400"; PROTOCOL.md §3.3): strconv
+// reads it as ±Inf with ErrRange, and jq writes 1e1000000000 as the largest
+// binary64, so one text would be two values. A number up to the rounding
+// midpoint reads as the largest binary64, and a number too small for binary64
+// reads as zero: each is taken.
 func pastBinary64(n string) bool {
 	_, err := strconv.ParseFloat(n, 64)
 	return errors.Is(err, strconv.ErrRange)

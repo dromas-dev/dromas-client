@@ -666,6 +666,7 @@ jt ok-empty '{}'
 jt ok-whitespace '{ "a" :\t[ 1 ,\r\n 2 ] }\n'
 jt ok-numbers '{"a":[0,-0,1.5,-1e10,1E+2,0.5e-3,9007199254740993]}' # outside a member the protocol defines, any JSON number a binary64 holds
 jt ok-number-the-largest-binary64 '{"a":[1.7976931348623157e308,-1.7976931348623157e308]}'
+jt ok-number-rounds-down-to-the-largest-binary64 '{"a":1.7976931348623158e308}' # past the largest binary64, below the midpoint: read as the largest
 jt ok-number-too-small-for-binary64 '{"a":[1e-400,2e-324]}' # a binary64 reader reads each as zero
 jt bad-number-past-binary64 '{"a":1e400}' # RFC 7493 §2.2's own example
 jt bad-number-just-past-binary64 '{"a":1.797693134862315808e308}' # jq reads it through 17 digits, as the largest binary64: how jq reads a number, a difference that guards none of the five (AGENTS.md § The shell client)

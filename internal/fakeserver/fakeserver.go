@@ -48,7 +48,8 @@ type Server struct {
 	mu        sync.Mutex
 	mailboxes map[protocol.Address]*mailbox
 	held      map[protocol.Address]*held // the revocations of addresses with no mailbox here
-	keys      map[string]string          // adopt key → account, each good once
+	keys      map[string]string          // adopt key → account
+	spentKeys map[string]bool            // adopt keys used, each good once
 	middle    func(w http.ResponseWriter, r *http.Request, next http.Handler)
 	page      int                     // the most messages a list's page holds
 	hold      time.Duration           // the longest this server holds a list (SetHold)
@@ -143,7 +144,7 @@ func (s *Server) Client() *http.Client { return s.srv.Client() }
 
 // newServer is a server on the clock now, and the handler that serves it.
 func newServer(t testing.TB, now func() time.Time) (*Server, http.Handler) {
-	s := &Server{now: now, mailboxes: map[protocol.Address]*mailbox{}, held: map[protocol.Address]*held{}, keys: map[string]string{}, page: MaxPage, hold: MaxHold,
+	s := &Server{now: now, mailboxes: map[protocol.Address]*mailbox{}, held: map[protocol.Address]*held{}, spentKeys: map[string]bool{}, keys: map[string]string{}, page: MaxPage, hold: MaxHold,
 		policy: protocol.ServerDocument{Deprecations: []protocol.Scheduled{}, Sunsets: []protocol.Scheduled{}, Capabilities: []protocol.Capability{}, MaxCertificateLifetime: MaxCertificateLifetime}}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET "+protocol.DocumentPath+"{$}", s.document)
@@ -1268,11 +1269,17 @@ func (s *Server) adopt(w http.ResponseWriter, r *http.Request, b *mailbox) {
 	}
 	acc, ok := s.keys[req.Key]
 	if !ok {
-		problem(w, protocol.CodeAdoptKeyRefused, "not a key, or spent")
+		problem(w, protocol.CodeAdoptKeyRefused, "not a key")
 		return
 	}
-	delete(s.keys, req.Key)
-	b.account = acc
+	if b.account != acc { // a mailbox already in the account spends no use (PROTOCOL.md §11.16)
+		if s.spentKeys[req.Key] {
+			problem(w, protocol.CodeAdoptKeyRefused, "spent")
+			return
+		}
+		s.spentKeys[req.Key] = true
+		b.account = acc
+	}
 	WriteJSON(w, http.StatusOK, protocol.AccountResponse{Account: acc})
 }
 
