@@ -147,6 +147,38 @@ func TestALowerLifetimeHoldsFromTheNextReceive(t *testing.T) {
 	}
 }
 
+// A lifetime raised while a short prekey is in use changes nothing of when that
+// prekey is renewed: at RenewAt of the lifetime it was made for, since it ends by
+// that one. The renewal is made for the raised lifetime.
+func TestARaisedLifetimeRenewsAShortPrekeyByItsOwnLifetime(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	e := newEnv(t)
+	off := -9 * time.Minute // the mailbox's clock, apart from the server's
+	o := e.skewed(&off)
+	b, err := client.Init(ctx, t.TempDir(), o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lifetimeOf(t, b, client.MinPrekeyLifetime)
+	if _, err := b.Rekey(ctx); err != nil {
+		t.Fatal(err)
+	}
+	lifetimeOf(t, b, protocol.PrekeyLifetime)
+	e.clock.Add(client.RenewAt(client.MinPrekeyLifetime))
+	if res := receive(t, b); res.Renewed != nil {
+		t.Fatalf("renewed a prekey RenewAt old, which it is to be older than: %+v", res.Renewed)
+	}
+	e.clock.Add(time.Second)
+	res := receive(t, b)
+	if res.Renewed == nil {
+		t.Fatal("a short prekey past RenewAt of its own lifetime was not renewed")
+	}
+	if want := o.Now().Add(protocol.PrekeyLifetime); !res.Renewed.NotAfter.Equal(want) {
+		t.Errorf("the renewal ends at %v, want %v", res.Renewed.NotAfter, want)
+	}
+}
+
 // A prekey with no record of when it was made is renewed at the next
 // receive, and while the mailbox knows neither when the newest retired prekey
 // was made nor when its server took it or the current one, every retired key
