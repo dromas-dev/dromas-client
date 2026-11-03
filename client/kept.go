@@ -31,7 +31,7 @@ func (b *Mailbox) InboxMessage(ctx context.Context, id string) (Delivery, error)
 	if !IsID(id) {
 		return Delivery{}, errors.New("not a message's id: 64 lowercase hex, as recv prints it")
 	}
-	return reading(ctx, b, func() (Delivery, error) { return b.inboxMessage(id) })
+	return reading(ctx, b, there(b, func() (Delivery, error) { return b.inboxMessage(id) }))
 }
 
 // inboxMessage is InboxMessage, read under the reading or command that holds
@@ -58,7 +58,7 @@ func (b *Mailbox) inboxMessage(id string) (Delivery, error) {
 // [Mailbox.InboxMessage] refuses it. It reads only inbox/, once the mailbox's
 // format is this client's, and calls no server.
 func (b *Mailbox) Inbox(ctx context.Context) ([]Delivery, error) {
-	return reading(ctx, b, b.inbox)
+	return reading(ctx, b, there(b, b.inbox))
 }
 
 // inbox is Inbox, read under the reading or command that holds the mailbox.
@@ -255,7 +255,7 @@ type RefusedMessage struct {
 // or one this client did not write, has the code "unknown" and nothing from
 // it. Each value is held to its form again as it is read.
 func (b *Mailbox) RefusedMessages(ctx context.Context) ([]RefusedMessage, error) {
-	return reading(ctx, b, b.refusedMessages)
+	return reading(ctx, b, there(b, b.refusedMessages))
 }
 
 // refusedMessages is RefusedMessages inside a command or a reading.

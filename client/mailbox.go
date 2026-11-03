@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net"
 	"net/http"
 	"net/url"
@@ -170,10 +171,10 @@ type Mailbox struct {
 }
 
 // Open opens an existing mailbox by its base directory, reading its identity
-// alone: the mailbox's format is read, and its other directories made, by each
-// command, once it has the state file (bringForward, makeDirs). A mailbox
-// holding only the identity, one restored from its backup, gets the
-// mailbox's other directories at its first command that writes it;
+// alone: the mailbox's format is read, and its other directories made or
+// refused as missing, by each command, once it has the state file (bringForward,
+// makeDirs). A mailbox holding only the identity, one restored from its backup,
+// gets the mailbox's other directories at its first command that writes it;
 // [Mailbox.Rekey] then gives it a working key and a prekey, and the lists its
 // server's ACL holds when it has none of its own.
 func Open(dir string, opt Options) (*Mailbox, error) {
@@ -665,17 +666,90 @@ func (b *Mailbox) recordTaken(n uint64, pass string, at taken) error {
 	return b.dropWork(n)
 }
 
-// makeDirs makes the mailbox's directories that are missing, at every command
-// that writes the mailbox, once its format is this client's (hold): a mailbox
-// restored from its identity alone gets them too. One that exists is left as it
-// is (makeDir).
+// boundFolders are the directories the state file's record of them binds
+// (makeDirs): each may be on a volume of its own, under mail-dir, inbox-dir or
+// rotating-keys-dir. outbox/ is in the base directory beside the state file,
+// which is never split ([Layout]), so its absence says nothing of a volume, and
+// it is made at every command.
+var boundFolders = []string{"work", "prekeys", "inbox", "held", "refused", "sent"}
+
+// keyFoldersMade is the record, in the mailbox's own bucket, that the
+// mailbox's directories were made.
+const keyFoldersMade = "folders-made"
+
+// makeDirs makes the mailbox's directories at every command that writes the
+// mailbox, once its format is this client's (hold), until the state file records
+// that they are made: a new state file, which init and a restore both make,
+// records nothing, and a crash before the record leaves the next command to
+// finish. After the record, a missing folder of boundFolders is refused
+// (foldersThere), because a folder made again on the disk under a mountpoint
+// would take messages the server then deletes, hidden once the volume returns.
+// One that exists is left as it is (makeDir).
 func (b *Mailbox) makeDirs() error {
-	for _, d := range []string{"work", "prekeys", "inbox", "held", "refused", "outbox", "sent"} {
+	// A read first: every command comes here, and a write transaction syncs the
+	// file even when it changes nothing.
+	made, err := b.foldersMade()
+	if err != nil {
+		return err
+	}
+	if made {
+		if err := b.foldersThere(); err != nil {
+			return err
+		}
+		return makeDir(b.path("outbox"))
+	}
+	step("folders to make")
+	for _, d := range append([]string{"outbox"}, boundFolders...) {
 		if err := makeDir(b.path(d)); err != nil {
 			return err
 		}
 	}
-	return nil
+	step("folders made")
+	return b.update(func(s store) error { return s.put(bucketMailbox, keyFoldersMade, []byte("1")) })
+}
+
+// foldersMade reports whether the state file records the directories made.
+func (b *Mailbox) foldersMade() (made bool, err error) {
+	err = b.view(func(s store) error {
+		made = s.get(bucketMailbox, keyFoldersMade) != nil
+		return nil
+	})
+	return made, err
+}
+
+// foldersThere refuses a mailbox whose state file records its directories made
+// and that misses one of boundFolders, naming each. A state file with no record
+// refuses nothing. It only reads, so a reading can ask it too.
+func (b *Mailbox) foldersThere() error {
+	made, err := b.foldersMade()
+	if err != nil || !made {
+		return err
+	}
+	var missing []string
+	for _, d := range boundFolders {
+		_, err := os.Stat(b.path(d))
+		switch {
+		case errors.Is(err, fs.ErrNotExist):
+			missing = append(missing, b.path(d))
+		case err != nil:
+			return err
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	return refuse("%s: missing, and this mailbox's state file records that it made them. The volume they are on may not be mounted, or the config file may name another place, so this command listed, fetched and acked nothing. Mount the volume or put the config file right. If a folder was removed on purpose, make it again, empty, and run the command again", strings.Join(missing, ", "))
+}
+
+// there is f, a reading of a folder, refused first where a folder is missing
+// (foldersThere): a folder on a volume that is not mounted would read as empty.
+func there[T any](b *Mailbox, f func() (T, error)) func() (T, error) {
+	return func() (v T, err error) {
+		if err := b.foldersThere(); err != nil {
+			return v, err
+		}
+		return f()
+	}
 }
 
 // newKey makes a new private key of the SSH key type t: an identity key, or a

@@ -219,6 +219,10 @@ func SetPathFault(t *testing.T, f func() error) {
 // Steps are the steps of one kind of write (steps.go).
 func Steps(kind string) []string { return steps[kind] }
 
+// BoundFolders are the folders a mailbox does not make again once its state
+// file records them made (boundFolders).
+func BoundFolders() []string { return boundFolders }
+
 // PutRevocations puts a record to the server as it is, with none of the
 // checks Revoke makes first: what a client that skipped them would send.
 func PutRevocations(ctx context.Context, opt Options, a protocol.Address, rec *protocol.Revocations) (*http.Response, error) {

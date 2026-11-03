@@ -141,6 +141,9 @@ func (b *Mailbox) status() (*Status, error) {
 		return nil, err
 	}
 	s.PrekeyLifetime = int64(d / time.Second)
+	if err := b.foldersThere(); err != nil {
+		s.Attention = append(s.Attention, err.Error())
+	}
 	if err := b.prekeyKept(); err != nil {
 		s.Attention = append(s.Attention, err.Error())
 	}
