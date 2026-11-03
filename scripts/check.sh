@@ -7,6 +7,9 @@
 #   scripts/check.sh norace  full without the race test: CI's BSD jobs, but for the daily run
 #   scripts/check.sh push    full, then golangci-lint and govulncheck: before a push
 #   scripts/check.sh vuln    govulncheck alone, at the version pinned here
+#   scripts/check.sh account the tests of what a Windows account can do, each of
+#                            which must pass: CI's windows-accounts job, as each
+#                            account (scripts/windows-as-account.ps1)
 #
 # The tests build with -tags dromas_nofsync, so no write is flushed to the
 # disk (client/fsync.go): a test kills a process, never the machine. -short
@@ -52,6 +55,11 @@ case $(uname -s) in
   Linux) ;;
   *) allowed+=(-e 'no second filesystem to write to at /dev/shm') ;;
 esac
+# On Windows, what needs the accounts only the windows-accounts job makes; under
+# one of them, nothing skips for that.
+if [ -z "${DROMAS_TEST_ACCOUNT-}" ]; then
+  allowed+=(-e 'run by the windows-accounts job')
+fi
 
 pkgs=$(go list ./...)
 if [ -n "$nosh" ]; then
@@ -111,6 +119,27 @@ full() {
   esac
 }
 
+# The tests of what an account can do, read from the files that hold them. A
+# test that does not run under this account fails this: it passed nothing.
+account() {
+  local names dir status=0 name
+  [ -n "${DROMAS_TEST_ACCOUNT-}" ] || { fail "no account is named in DROMAS_TEST_ACCOUNT"; return 1; }
+  names=$(sed -n 's/^func \(Test[A-Za-z0-9_]*\).*/\1/p' client/account_windows_test.go client/perm_windows_test.go client/private_windows_internal_test.go client/private_test.go)
+  dir=$(mktemp -d)
+  set +e
+  go test -tags "$tags" -count=1 -timeout "$timeout" -json -run "^($(paste -sd '|' - <<< "$names"))\$" ./client | tee "$dir/test.json" | jq -rj --unbuffered 'select(.Action == "output") | .Output'
+  status=${PIPESTATUS[0]}
+  set -e
+  for name in $names; do
+    if ! jq -es --arg name "$name" 'any(.[]; .Action == "pass" and .Test == $name)' "$dir/test.json" > /dev/null; then
+      fail "$name did not pass under $DROMAS_TEST_ACCOUNT"
+      status=1
+    fi
+  done
+  rm -rf "$dir"
+  return "$status"
+}
+
 # Every module before any test, the tools' too: internal/agetool builds age
 # with go tool, which otherwise fetches its modules mid-test, so a fetch that
 # times out reads as a failed test (v0.1.1's first tag run, macos-26-intel:
@@ -132,5 +161,6 @@ case ${1:-quick} in
     go run "$govulncheck" ./...
     ;;
   vuln) go run "$govulncheck" ./... ;;
-  *) sed -n '5,9p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2 ;;
+  account) account ;;
+  *) sed -n '5,12p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2 ;;
 esac
