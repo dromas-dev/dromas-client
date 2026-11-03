@@ -1,0 +1,346 @@
+package main
+
+import (
+	"bytes"
+	"errors"
+	"fmt"
+	"io"
+	"net"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/dromas-dev/dromas-client/client"
+	"github.com/spf13/cobra"
+	"golang.org/x/term"
+)
+
+// The identity's key is in the mailbox's own agent, never the shell's by
+// default, since the shell's is the one ssh forwards; or in its file, unlocked
+// by an askpass program or at a terminal. The agent is stock ssh-agent, which
+// dromas agent start runs, and dromas agent add loads the key with stock
+// ssh-add, each saying the line it runs.
+
+// agentDefaultWords is the default socket, as help says it.
+const agentDefaultWords = "$XDG_RUNTIME_DIR/dromas/agent.sock, or dromas/agent.sock in the user's cache directory, and none on Windows"
+
+// defaultAgent is the default socket of the mailbox's agent: one for the user,
+// apart from the shell's.
+func defaultAgent() string {
+	if runtime.GOOS == "windows" {
+		return ""
+	}
+	if d := os.Getenv("XDG_RUNTIME_DIR"); filepath.IsAbs(d) {
+		return filepath.Join(d, "dromas", "agent.sock")
+	}
+	if d, err := os.UserCacheDir(); err == nil && filepath.IsAbs(d) {
+		return filepath.Join(d, "dromas", "agent.sock")
+	}
+	return ""
+}
+
+// agentSocket reads an agent setting as ssh_config(5) reads IdentityAgent: none
+// for no agent, SSH_AUTH_SOCK or $NAME for the socket an environment variable
+// names, and otherwise a path, relative ones under rel.
+func agentSocket(v, rel string) (string, error) {
+	switch {
+	case v == "none":
+		return "", nil
+	case v == "SSH_AUTH_SOCK":
+		return os.Getenv("SSH_AUTH_SOCK"), nil
+	case strings.HasPrefix(v, "$"):
+		return os.Getenv(v[1:]), nil
+	}
+	p, err := expand(v, rel)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Abs(p)
+}
+
+// resolveIdentityKey reads where the identity's key comes from: the agent, the
+// askpass program, whether a terminal is asked, and AddKeysToAgent, each flag,
+// then environment, then file, then default.
+func (cfg *config) resolveIdentityKey(g *globals, fc *fileConfig, rel string) error {
+	bad := func(key, format string, a ...any) error {
+		return &configError{file: cfg.file, key: key, msg: fmt.Sprintf(format, a...)}
+	}
+	pick := func(flag, env, file string) (v, from, r string) {
+		switch e := os.Getenv(env); {
+		case flag != "":
+			return flag, "flag", "."
+		case e != "":
+			return e, "environment", "."
+		case file != "":
+			return file, "file", rel
+		}
+		return "", "default", "."
+	}
+
+	v, from, r := pick(g.agent, "DROMAS_AGENT", fc.Agent)
+	if v == "" {
+		cfg.agent = defaultAgent()
+	} else {
+		socket, err := agentSocket(v, r)
+		if err != nil {
+			return bad("agent", "agent: %v", err)
+		}
+		cfg.agent = socket
+	}
+	cfg.values["agent"] = setting{omitNone(cfg.agent), from}
+
+	if v, from, r = pick(g.askpass, "DROMAS_ASKPASS", fc.Askpass); v != "" {
+		// A bare name is found on PATH when it runs, as ssh runs SSH_ASKPASS.
+		if strings.ContainsAny(v, `/\`) || strings.HasPrefix(v, "~") {
+			p, err := expand(v, r)
+			if err != nil {
+				return bad("askpass", "askpass: %v", err)
+			}
+			v = p
+		}
+		cfg.askpass = v
+		cfg.values["askpass"] = setting{v, from}
+	}
+
+	cfg.noPrompt, from = false, "default"
+	switch e := os.Getenv("DROMAS_NO_PROMPT"); {
+	case g.noPromptSet:
+		cfg.noPrompt, from = g.noPrompt, "flag"
+	case e != "":
+		b, err := strconv.ParseBool(e)
+		if err != nil {
+			return bad("no-prompt", "$DROMAS_NO_PROMPT is true or false, and %.40q is not", e)
+		}
+		cfg.noPrompt, from = b, "environment"
+	case fc.NoPrompt != nil:
+		cfg.noPrompt, from = *fc.NoPrompt, "file"
+	}
+	cfg.values["no-prompt"] = setting{strconv.FormatBool(cfg.noPrompt), from}
+
+	v, from, _ = pick(g.addKeysToAgent, "DROMAS_ADD_KEYS_TO_AGENT", fc.AddKeysToAgent)
+	switch v {
+	case "", "no":
+		v = "no"
+	case "yes":
+		cfg.addKeys = true
+	default:
+		d, err := parseTime(v)
+		if err != nil || d < time.Second {
+			return bad("add-keys-to-agent", "add-keys-to-agent is no, yes or a time of a second or more, and %.40q is not", v)
+		}
+		cfg.addKeys, cfg.agentLife = true, d
+	}
+	cfg.values["add-keys-to-agent"] = setting{v, from}
+	return nil
+}
+
+// omitNone is a socket as dromas config says it: none where there is no agent.
+func omitNone(socket string) string {
+	if socket == "" {
+		return "none"
+	}
+	return socket
+}
+
+// passphrase has the identity key file's passphrase for client.Options: from the
+// askpass program where one is set, as ssh's SSH_ASKPASS_REQUIRE=force has it,
+// and otherwise at the terminal, after a "waiting" line, unless prompting is
+// off or there is no terminal.
+func (e *cli) passphrase(file string) ([]byte, error) {
+	prompt := fmt.Sprintf("Enter passphrase for %s: ", file)
+	if e.cfg.askpass != "" {
+		return askpass(e.cfg.askpass, prompt)
+	}
+	if e.cfg.noPrompt {
+		return nil, client.ErrNoPassphrase
+	}
+	tty, err := openTerminal()
+	if err != nil {
+		return nil, client.ErrNoPassphrase
+	}
+	defer tty.Close()                    //nolint:errcheck // read only for the passphrase
+	if !term.IsTerminal(int(tty.Fd())) { //nolint:gosec // a file descriptor
+		return nil, client.ErrNoPassphrase
+	}
+	_, _ = fmt.Fprintf(e.stderr, "%s\n", line("waiting", "for", "passphrase", "identity_file", file, "detail",
+		"waiting for the identity key's passphrase at the terminal: its key file has a passphrase, and the mailbox's agent holds no key of it"))
+	pass, err := term.ReadPassword(int(tty.Fd())) //nolint:gosec // a file descriptor
+	_, _ = io.WriteString(tty, "\n")
+	if err != nil {
+		return nil, fmt.Errorf("the passphrase was not read from the terminal: %w", err)
+	}
+	return pass, nil
+}
+
+// openTerminal is the process's controlling terminal, which ssh asks for a
+// passphrase on, apart from stdin and stdout.
+func openTerminal() (*os.File, error) {
+	if runtime.GOOS == "windows" {
+		return os.OpenFile("CONIN$", os.O_RDWR, 0)
+	}
+	return os.OpenFile("/dev/tty", os.O_RDWR, 0)
+}
+
+// askpass runs program with prompt as its one argument, as ssh runs
+// SSH_ASKPASS, and reads the passphrase from its stdout, without its final line
+// break. What it writes to stderr is its own, and is not printed.
+func askpass(program, prompt string) ([]byte, error) {
+	var out bytes.Buffer
+	cmd := exec.Command(program, prompt) //nolint:gosec // the askpass program its owner set
+	cmd.Stdout = &out
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("the askpass program %s gave no passphrase: %w", program, err)
+	}
+	pass := out.Bytes()
+	pass = bytes.TrimSuffix(pass, []byte("\n"))
+	pass = bytes.TrimSuffix(pass, []byte("\r"))
+	return pass, nil
+}
+
+// agentGroup is the agent group and its commands.
+func (e *cli) agentGroup() *cobra.Command {
+	return e.group("agent", "the mailbox's own ssh-agent, which holds its identity's key: start, add",
+		`The identity's key may be kept in an ssh-agent of the mailbox's own, at the
+socket --agent names, apart from the shell's agent, which ssh forwards. Then
+the key file may keep a passphrase, and no command reads it, so a reboot leaves
+the mailbox locked until its owner loads the key again. A command that needs
+the key and finds it nowhere fails as "identity_locked". The agent is stock
+ssh-agent, and dromas agent start and dromas agent add each print the stock
+line they run.`,
+		e.agentStartCmd(), e.agentAddCmd())
+}
+
+func (e *cli) agentStartCmd() *cobra.Command {
+	return command("start", "run ssh-agent at the mailbox's agent socket, until it is stopped",
+		`Run stock ssh-agent in the foreground at --agent's socket, as a service's
+unit runs it: ssh-agent -D -a <socket>. It prints an "agent" line with the line
+it runs first, makes the socket's directory, 0700, where it is missing, and
+removes a socket there that no agent answers on. It refuses a socket an agent
+already answers on. It sets no SSH_AUTH_SOCK: the shell's agent stays the
+shell's.`,
+		nargs(0, 0), func(c *cobra.Command, _ []string) error {
+			socket, err := e.agentSocket()
+			if err != nil {
+				return err
+			}
+			if conn, err := net.DialTimeout("unix", socket, 2*time.Second); err == nil {
+				_ = conn.Close()
+				return fmt.Errorf("an agent already answers at %s", socket)
+			}
+			if err := os.MkdirAll(filepath.Dir(socket), 0o700); err != nil {
+				return err
+			}
+			if _, err := os.Lstat(socket); err == nil {
+				if err := os.Remove(socket); err != nil {
+					return err
+				}
+			}
+			args := []string{"-D", "-a", socket}
+			if err := e.out(line("agent", "socket", socket, "command", shellLine(nil, "ssh-agent", args...))); err != nil {
+				return err
+			}
+			cmd := exec.CommandContext(c.Context(), "ssh-agent", args...)
+			if err := cmd.Run(); err != nil {
+				return fmt.Errorf("ssh-agent ended: %w", err)
+			}
+			return nil
+		})
+}
+
+func (e *cli) agentAddCmd() *cobra.Command {
+	var life string
+	c := command("add [flags]", "load the identity's key into the mailbox's agent, with ssh-add",
+		`Run stock ssh-add on the identity key file, against --agent's socket:
+SSH_AUTH_SOCK=<socket> ssh-add <identity-file>. ssh-add asks for the key's
+passphrase at the terminal, or, with --askpass, runs that program for it
+(SSH_ASKPASS=<program> SSH_ASKPASS_REQUIRE=force). It prints an "agent_add"
+line with the line it runs first, then an "agent_added" line once the agent
+holds the key. --lifetime is ssh-add -t. A mailbox whose identity signs
+what it says, not a working key, is locked whenever the agent lacks the key:
+it neither sends nor receives until then, and the "agent_added" line says so.`,
+		nargs(0, 0), func(c *cobra.Command, _ []string) error {
+			b, err := e.mailbox()
+			if err != nil {
+				return err
+			}
+			socket, err := e.agentSocket()
+			if err != nil {
+				return err
+			}
+			file := b.Path("identity")
+			env := []string{"SSH_AUTH_SOCK=" + socket}
+			if e.cfg.askpass != "" {
+				env = append(env, "SSH_ASKPASS="+e.cfg.askpass, "SSH_ASKPASS_REQUIRE=force")
+			}
+			var args []string
+			if life != "" {
+				d, err := parseTime(life)
+				if err != nil || d < time.Second {
+					return wrong(c, "%s --lifetime takes a time of a second or more", c.CommandPath())
+				}
+				args = append(args, "-t", strconv.FormatInt(int64(d/time.Second), 10))
+			}
+			args = append(args, file)
+			if err := e.out(line("agent_add", "socket", socket, "identity_file", file, "command", shellLine(env, "ssh-add", args...))); err != nil {
+				return err
+			}
+			cmd := exec.CommandContext(c.Context(), "ssh-add", args...)
+			// ssh-add reads a passphrase from the terminal itself, and what it
+			// prints is its own: neither stream is this client's.
+			cmd.Env = append(os.Environ(), env...)
+			if err := cmd.Run(); err != nil {
+				return fmt.Errorf("ssh-add did not load the key: %w; run its line above to see why", err)
+			}
+			st, err := b.Status(c.Context())
+			if err != nil {
+				return err
+			}
+			if st.IdentityKey != client.KeyInAgent {
+				return fmt.Errorf("ssh-add ended, and the agent at %s holds no key of this identity", socket)
+			}
+			return e.out(line("agent_added", "socket", socket, "signer", st.Signer))
+		})
+	c.Flags().StringVar(&life, "lifetime", "", "how long the agent keeps the key, as ssh-add -t: a `time`")
+	return c
+}
+
+// agentSocket is the socket the agent commands use. On Windows, OpenSSH runs one
+// agent for the machine, as a service on a named pipe, and a mailbox's own is
+// not built there.
+func (e *cli) agentSocket() (string, error) {
+	if runtime.GOOS == "windows" {
+		return "", errors.New("a mailbox's own agent is not built for Windows, whose OpenSSH runs one agent for the machine, as a service")
+	}
+	if e.cfg.agent == "" {
+		return "", errors.New("no agent socket is set: --agent names one")
+	}
+	return e.cfg.agent, nil
+}
+
+// shellLine writes a command as a POSIX shell would read it: its environment,
+// its name and its arguments, each quoted where it needs to be.
+func shellLine(env []string, name string, args ...string) string {
+	words := make([]string, 0, len(env)+1+len(args))
+	for _, kv := range env {
+		k, v, _ := strings.Cut(kv, "=")
+		words = append(words, k+"="+shellQuote(v))
+	}
+	words = append(words, shellQuote(name))
+	for _, a := range args {
+		words = append(words, shellQuote(a))
+	}
+	return strings.Join(words, " ")
+}
+
+// shellQuote quotes s for a POSIX shell where it holds anything but the
+// characters a path or a flag is made of.
+func shellQuote(s string) string {
+	if s != "" && strings.Trim(s, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_./:=@+,%") == "" {
+		return s
+	}
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}

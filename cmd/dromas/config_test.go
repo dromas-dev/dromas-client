@@ -41,7 +41,8 @@ func cleanEnv(t *testing.T) string {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
-	for _, v := range []string{"XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "DROMAS_CONFIG", "DROMAS_PROFILE", "DROMAS_SERVER_URL", "DROMAS_CA_FILE"} {
+	for _, v := range []string{"XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "DROMAS_CONFIG", "DROMAS_PROFILE", "DROMAS_SERVER_URL", "DROMAS_CA_FILE",
+		"DROMAS_AGENT", "DROMAS_ASKPASS", "DROMAS_NO_PROMPT", "DROMAS_ADD_KEYS_TO_AGENT", "XDG_RUNTIME_DIR", "XDG_CACHE_HOME"} {
 		t.Setenv(v, "")
 	}
 	return home

@@ -83,6 +83,7 @@ account's holder, puts a mailbox in it.`,
 makes one. A mailbox keeps every revocation that verifies, of an address and of an
 address's certificates, and checks what it sends and receives against them.`,
 			e.makeCmd(), e.publishCmd(), e.keepCmd(), e.askCmd()),
+		e.agentGroup(),
 	)
 	// dromas --version is dromas version, as gh's and git's are. The flag is
 	// declared here so cobra adds none of its own, which would take -v.
@@ -272,6 +273,7 @@ twice in an object among them, is refused, and nothing is sent.`,
 func (e *cli) recvCmd() *cobra.Command {
 	var o recvOptions
 	var drain time.Duration
+	var keepIdentity bool
 	var program string
 	c := command("recv [flags] [-- <argument>...]", "receive, verify and ack every message: one line of JSON each",
 		fmt.Sprintf(`Receive, verify and ack every message: a "message" line for each, built from the
@@ -326,7 +328,7 @@ may run twice: it should take the "id" as the message's name.`, formatTime(clien
 			}
 			return o.check(c, program, args)
 		}), func(c *cobra.Command, args []string) error {
-			e.opt.DrainTime = drain
+			e.opt.DrainTime, e.opt.KeepIdentity = drain, keepIdentity
 			b, err := e.mailbox()
 			if err != nil {
 				return err
@@ -344,6 +346,7 @@ may run twice: it should take the "id" as the message's name.`, formatTime(clien
 	c.Flags().StringVar(&program, "exec", "", "run this `program` for each message, with its line on stdin, and the arguments after -- as its own")
 	c.Flags().DurationVar(&o.execTimeout, "exec-timeout", 5*time.Minute, "kill --exec's program when one run takes this long")
 	c.Flags().DurationVar(&drain, "drain-time", client.DefaultDrainTime, "how long one drain runs before it stops for the next recv")
+	c.Flags().BoolVar(&keepIdentity, "keep-identity", false, "keep the identity's key, once a passphrase unlocks it, for the whole run, so --wait and --follow renew without asking again")
 	// As an IMAP client fetches a message's ENVELOPE apart from its body (RFC
 	// 9051 §6.4.5), as email clients list headers before they open a message.
 	c.Flags().BoolVar(&o.headers, "headers", false, "print each message's checked fields and its body's size, without its body or subject")

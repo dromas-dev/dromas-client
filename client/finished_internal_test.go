@@ -87,14 +87,15 @@ func TestEverySignerTheMailboxHandsOutAsksItsFinished(t *testing.T) {
 		if by, _, err := b.currentSigner(); by != nil || !errors.As(err, &gone) || !gone.Own {
 			t.Errorf("under a certificate %v: a signer from a finished mailbox: %v", working, err)
 		}
-		// Every method but PublicKey signs, and is tried above.
+		// Every method but PublicKey and Forget, which lets go of the key, signs,
+		// and is tried above.
 		for _, typ := range []reflect.Type{reflect.TypeOf(b.identity), reflect.TypeFor[signer]()} {
 			for i := range typ.NumMethod() {
 				m := typ.Method(i).Name
 				if typ.Kind() == reflect.Pointer {
 					m = typ.Elem().Name() + "." + m
 				}
-				if typ.Method(i).Name != "PublicKey" && tried[m] == nil {
+				if n := typ.Method(i).Name; n != "PublicKey" && n != "Forget" && tried[m] == nil {
 					t.Errorf("%s is not tried on a finished mailbox", m)
 				}
 			}

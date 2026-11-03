@@ -182,8 +182,11 @@ func failure(err error) []any {
 	var ae *client.APIError
 	var re *client.RefusedError
 	var fe *client.FormatError
+	var le *client.IdentityLockedError
 	switch {
 	case errors.As(err, &ae):
+	case errors.As(err, &le):
+		kv = append(kv, "code", le.Code(), "identity_file", le.File, "agent", omitNone(le.Agent))
 	case errors.As(err, &fe):
 		kv = append(kv, "code", fe.Code(), "format", fe.Format, "client_format", fe.Client)
 	case errors.As(err, &re) && re.Code != "":

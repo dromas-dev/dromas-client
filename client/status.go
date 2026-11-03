@@ -17,6 +17,14 @@ const (
 	SignerCertificate = "certificate"
 )
 
+// The values of [Status.IdentityKey]: where the identity's private key is.
+const (
+	KeyInAgent    = "agent"      // the mailbox's agent holds it
+	KeyFile       = "file"       // its key file, with no passphrase
+	KeyPassphrase = "passphrase" // its key file, under a passphrase, and no agent holds it
+	KeyNone       = "none"       // no key file, and no agent holds it
+)
+
 // Status is what a mailbox can say of itself from its own files, with no call to
 // the server: what a wrapper reads to learn that the mailbox needs a look.
 type Status struct {
@@ -26,6 +34,11 @@ type Status struct {
 	// published last is under a certificate, whose working key signs, from
 	// then on.
 	Signer string `json:"signer"`
+	// IdentityKey is where the identity's private key is: [KeyInAgent],
+	// [KeyFile], [KeyPassphrase] or [KeyNone]. Agent is the agent's socket,
+	// where one is set.
+	IdentityKey string `json:"identity_key"`
+	Agent       string `json:"agent,omitempty"`
 	// Format is the mailbox's format (client/doc.go), this client's: a
 	// mailbox in another is refused, never read ([FormatError]).
 	Format int `json:"format"`
@@ -174,6 +187,14 @@ func (b *Mailbox) status() (*Status, error) {
 	s.Signer = SignerIdentity
 	if certified {
 		s.Signer = SignerCertificate
+	}
+	s.IdentityKey, s.Agent = b.identityKey(), b.unlock.agent
+	if !s.Revoked && (s.IdentityKey == KeyPassphrase || s.IdentityKey == KeyNone) {
+		what := "renews nothing, so senders are refused once its prekey expires,"
+		if !certified {
+			what = "signs with its identity, so it neither sends nor receives"
+		}
+		s.Attention = append(s.Attention, fmt.Sprintf("the identity's key is locked (%s): this mailbox %s until the key is unlocked. dromas agent add loads it into the mailbox's agent; a key file with a passphrase is also unlocked at a terminal, or by --askpass", s.IdentityKey, what))
 	}
 	switch _, cert, werr := b.currentSigner(); {
 	case werr != nil && (err != nil || perr != nil || s.Revoked):
