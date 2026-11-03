@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # scripts/check.sh: the checks a change must pass, one definition for a laptop
-# and for CI (.github/workflows/ci.yml runs `full` and `vuln`).
+# and for CI (.github/workflows/ci.yml runs `full`, `norace` and `vuln`).
 #
 #   scripts/check.sh         quick: gofmt, vet and the tests -short keeps, while working
 #   scripts/check.sh full    CI's test job: gofmt, vet, every test, the skip check, the race test
+#   scripts/check.sh norace  full without the race test: CI's BSD jobs, but for the daily run
 #   scripts/check.sh push    full, then golangci-lint and govulncheck: before a push
 #   scripts/check.sh vuln    govulncheck alone, at the version pinned here
 #
@@ -90,10 +91,14 @@ alltests() {
   return "$status"
 }
 
-full() {
+norace() {
   fmt
   go vet ./...
   alltests
+}
+
+full() {
+  norace
   # A Mailbox shared by goroutines, and every test of a held list (hold_test.go),
   # whose request runs beside the mailbox's other commands, under the race
   # detector where Go has one (go.dev/doc/articles/race_detector,
@@ -120,11 +125,12 @@ case ${1:-quick} in
     go test -tags "$tags" -short $pkgs
     ;;
   full) full ;;
+  norace) norace ;;
   push)
     full
     golangci-lint run ./...
     go run "$govulncheck" ./...
     ;;
   vuln) go run "$govulncheck" ./... ;;
-  *) sed -n '5,8p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2 ;;
+  *) sed -n '5,9p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2 ;;
 esac
