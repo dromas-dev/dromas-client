@@ -19,10 +19,13 @@ import (
 )
 
 // UseDefaultClient gives b the default client's transport (defaultTransport), over
-// dial in place of its dialer.
+// dial in place of its dialer. dial is a network of the test's own, which no proxy
+// the environment names can reach, so the transport takes none: net/http dials a
+// proxy with DialContext, not dial, and a request through one would leave the test.
 func UseDefaultClient(b *Mailbox, dial func(ctx context.Context, network, addr string) (net.Conn, error)) {
 	t := defaultTransport(&b.holding)
 	t.DialTLSContext = dial
+	t.Proxy = nil
 	b.http = &http.Client{Transport: newTransport(t), CheckRedirect: followNone}
 	b.stall = true
 }
