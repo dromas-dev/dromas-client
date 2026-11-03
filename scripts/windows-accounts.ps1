@@ -1,6 +1,7 @@
 # scripts/windows-accounts.ps1: what CI's windows-accounts job runs its tests with,
 # on a runner it may change at will (never a machine you keep, which it would leave
-# with two new users, Guest enabled and two new volumes). Needs an elevated shell.
+# with two new users, Guest enabled, two new volumes and a wider logon right). Needs
+# an elevated shell.
 #
 # Two plain users, dromas-plain and dromas-other, members of Users alone, and Guest.
 # A folder every account can use, with the Go caches in it. A FAT32 and an exFAT
@@ -29,6 +30,16 @@ foreach ($name in 'dromas-plain', 'dromas-other') {
 $guest = Get-LocalUser | Where-Object { $_.SID.Value -like '*-501' }
 Set-LocalUser -InputObject $guest -Password $secure
 Enable-LocalUser -InputObject $guest
+
+# A scheduled task needs its account to hold the right to log on as a batch job,
+# which on this image only the Administrators and service groups do; without it the
+# task never starts and says nothing. Everyone holds it here (secedit, the
+# documented way to change a local security policy).
+secedit /export /cfg "$root\rights.inf" /areas USER_RIGHTS | Out-Null
+if ($LASTEXITCODE -ne 0) { throw 'secedit /export' }
+(Get-Content "$root\rights.inf") -replace '^SeBatchLogonRight = (.*)$', 'SeBatchLogonRight = $1,*S-1-1-0' | Set-Content -Encoding Unicode "$root\rights.inf"
+secedit /configure /db "$root\rights.sdb" /cfg "$root\rights.inf" /areas USER_RIGHTS | Out-Null
+if ($LASTEXITCODE -ne 0) { throw 'secedit /configure' }
 
 $volumes = @()
 foreach ($volume in @(@{ Fs = 'fat32'; Letter = 'X' }, @{ Fs = 'exfat'; Letter = 'Y' })) {

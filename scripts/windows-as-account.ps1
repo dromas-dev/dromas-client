@@ -23,35 +23,44 @@ $lines += "echo status=%errorlevel%> `"$done`""
 $lines | Set-Content -Encoding ascii -Path $cmd
 
 $action = New-ScheduledTaskAction -Execute 'cmd.exe' -Argument "/c `"$cmd`""
+$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit 0
 $service = @{ 'system' = 'NT AUTHORITY\SYSTEM'; 'network-service' = 'NT AUTHORITY\NETWORK SERVICE'; 'local-service' = 'NT AUTHORITY\LOCAL SERVICE' }[$Account]
 if ($service) {
   $principal = New-ScheduledTaskPrincipal -UserId $service -LogonType ServiceAccount
-  Register-ScheduledTask -TaskName $task -Action $action -Principal $principal | Out-Null
+  Register-ScheduledTask -TaskName $task -Action $action -Settings $settings -Principal $principal | Out-Null
 } else {
   $user = if ($Account -eq 'guest') { (Get-LocalUser | Where-Object { $_.SID.Value -like '*-501' }).Name } else { "dromas-$Account" }
-  Register-ScheduledTask -TaskName $task -Action $action -User $user -Password $env:DROMAS_ACCOUNTS_PASSWORD -RunLevel Limited | Out-Null
+  Register-ScheduledTask -TaskName $task -Action $action -Settings $settings -User $user -Password $env:DROMAS_ACCOUNTS_PASSWORD -RunLevel Limited | Out-Null
 }
+New-Item -ItemType File -Force -Path $out | Out-Null
 Start-ScheduledTask -TaskName $task
 
-# 0x41303: not yet run. 0x41301: running. Any other result with no status written is
-# a task that never ran its command, as a logon refused.
+# What the task has written so far, as it writes it.
+$reader = [IO.FileStream]::new($out, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete)
+$stdout = [Console]::OpenStandardOutput()
 $status = 1
-$deadline = (Get-Date).AddMinutes(30)
-while ((Get-Date) -lt $deadline) {
-  if (Test-Path $done) {
+$start = Get-Date
+while ($true) {
+  $finished = Test-Path $done
+  $reader.CopyTo($stdout)
+  $stdout.Flush()
+  if ($finished) {
     $status = [int]((Get-Content $done) -replace '[^0-9]', '')
     break
   }
+  # 0x41303: not yet run, which a logon refused leaves too. 0x41301: running.
   $result = (Get-ScheduledTaskInfo -TaskName $task).LastTaskResult
-  if ((Get-ScheduledTask -TaskName $task).State -eq 'Ready' -and $result -notin 0x41303, 0x41301) {
-    if (-not (Test-Path $done)) {
-      Write-Output ("::error::the task as {0} ended with 0x{1:x} and no status" -f $Account, $result)
-      break
-    }
+  $elapsed = (Get-Date) - $start
+  if ($result -eq 0x41303 -and $elapsed.TotalMinutes -gt 2) {
+    Write-Output "::error::the task as $Account never started"
+    break
+  }
+  if ($elapsed.TotalMinutes -gt 30) {
+    Write-Output "::error::as $Account, scripts/check.sh $Mode did not finish"
+    break
   }
   Start-Sleep -Seconds 5
 }
+$reader.Close()
 Unregister-ScheduledTask -TaskName $task -Confirm:$false
-if (Test-Path $out) { [Console]::Out.Write([IO.File]::ReadAllText($out)) }
-if (-not (Test-Path $done)) { Write-Output "::error::as $Account, scripts/check.sh $Mode did not finish" }
 exit $status
