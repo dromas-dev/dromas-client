@@ -230,7 +230,11 @@ func newMailbox(dir string, opt Options) (*Mailbox, error) {
 		return nil, fmt.Errorf("this client makes no identity key of type %q: %s", b.identityType, strings.Join(protocol.IdentityTypes(), " or "))
 	}
 	if b.http == nil {
-		b.http, b.stall = &http.Client{Transport: defaultTransport(&b.holding)}, true
+		t := defaultTransport(&b.holding)
+		if dir != "" {
+			t.TLSClientConfig.ClientSessionCache = newTicketCache(t.TLSClientConfig.ClientSessionCache, b.path(ticketFile), b.base)
+		}
+		b.http, b.stall = &http.Client{Transport: t}, true
 	} else {
 		c := *b.http
 		b.http = &c

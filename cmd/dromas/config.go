@@ -45,7 +45,7 @@ func (g *globals) add(c *cobra.Command) {
 	f.StringVar(&g.baseDir, "base-dir", "", "the `directory` of the mailbox's state, and the default of each path below")
 	f.StringVar(&g.mailDir, "mail-dir", "", "the `directory` of inbox/, held/, refused/ and sent/")
 	f.StringVar(&g.identityFile, "identity-file", "", "the identity key `file`: <base-dir>/identity")
-	f.StringVar(&g.rotatingKeysDir, "rotating-keys-dir", "", "the `directory` of prekeys/ and work/, never to be backed up: <base-dir>/keys")
+	f.StringVar(&g.rotatingKeysDir, "rotating-keys-dir", "", "the `directory` of prekeys/, work/ and tls-ticket, never to be backed up: <base-dir>/keys")
 	f.StringVar(&g.inbox, "inbox-dir", "", "the `directory` of inbox/, apart from the rest of the mail: <mail-dir>/inbox")
 	f.StringVar(&g.server, "server", "", "the server's `URL`: $DROMAS_SERVER_URL, or "+client.DefaultBase)
 	f.StringVar(&g.prekeyLifetime, "prekey-lifetime", "", "how long each new prekey is valid for: a `time`, as dromas prekey lifetime --help says")

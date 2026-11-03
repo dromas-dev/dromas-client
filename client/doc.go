@@ -10,13 +10,14 @@
 // Its files, in the stock tools' own file formats where a stock tool reads the
 // file (an OpenSSH key, age key files), each under the place its [Layout] names:
 // base-dir for what has no other, mail-dir for inbox/, held/, refused/ and sent/,
-// rotating-keys-dir for work/ and prekeys/, inbox-dir for inbox/ alone, and
+// rotating-keys-dir for work/, prekeys/ and tls-ticket, inbox-dir for inbox/ alone, and
 // identity-file for the identity. The base directory is never split:
 //
 //	identity, identity.pub     the identity key, OpenSSH format: Ed25519 unless the mailbox was made on another type; back it up. It signs certificates and revocations, and what the mailbox says until it has published a statement under a certificate (init --offline, cert switch; client/signer.go)
 //	identity.doc, address      the identity document and its SHA-384, the address
 //	work/<serial>              working keys, each with its certificate (.pub, -cert.pub): they sign what the mailbox says; never backed up, since a restored mailbox makes new ones
 //	prekeys/<serial>.agekey    age keys, each statement signed for one, when it was signed and when its server took it, kept in state; never backed up
+//	tls-ticket                 the last TLS 1.3 session ticket of the mailbox's server, in crypto/tls's encoding, with that server's URL, so a new process resumes TLS: a read or a write of it that fails costs a full handshake and nothing else (ticket.go); never backed up, since a restored mailbox needs none
 //	outbox/, outbox/failed/    envelopes awaiting a receipt, sealed afresh at every post and never kept sealed; ones that can never be delivered
 //	inbox/, refused/        accepted messages; refused messages, never delivered, as served, each of the server's strings in base64 that is not of its form (keepRefused): why each was refused, and what the checks established when they judged it, are in state
 //	held/                      accepted messages from senders this mailbox has not allowed, as inbox/ keeps it: allow moves a sender's to inbox/, block deletes it

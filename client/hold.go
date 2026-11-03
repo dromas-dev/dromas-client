@@ -22,7 +22,8 @@ import (
 // fail and recover apart:
 //
 //   - The connection. The default client keeps one, resumes TLS when it
-//     makes another (a session cache), and sends no keep-alive on it:
+//     makes another (a session cache, which a new process reads back:
+//     ticketCache), and sends no keep-alive on it:
 //     every probe across many held connections is traffic, and the answer
 //     that ends each hold is traffic enough for most networks. A connection
 //     that drops before its hold ends is a network that forgets a silent
@@ -182,8 +183,9 @@ func (h *holding) dialer() *net.Dialer {
 }
 
 // defaultTransport is the default client's: net/http's own, a TLS session
-// cache so that a new connection resumes (RFC 8446 §2.2; no early data),
-// HTTP/2's health check, and a dialer that sends keep-alive only as h says.
+// cache so that a new connection resumes (RFC 8446 §2.2; no early data; a
+// mailbox with a directory wraps it in a ticketCache), HTTP/2's health check,
+// and a dialer that sends keep-alive only as h says.
 func defaultTransport(h *holding) *http.Transport {
 	t := http.DefaultTransport.(*http.Transport).Clone()
 	t.TLSClientConfig = &tls.Config{ClientSessionCache: tls.NewLRUClientSessionCache(0)}

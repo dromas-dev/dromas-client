@@ -153,6 +153,8 @@ func TestALayoutWhosePartsOverlapIsRefused(t *testing.T) {
 		"identity is the document":  {IdentityFile: filepath.Join(base, "identity.doc")},
 		"identity is the state":     {IdentityFile: filepath.Join(base, "state")},
 		"identity is allowed":       {IdentityFile: filepath.Join(base, "allowed")},
+		"identity is the ticket":    {IdentityFile: filepath.Join(base, "keys", "tls-ticket")},
+		"inbox is the ticket":       {Inbox: filepath.Join(base, "keys", "tls-ticket")},
 		"mail inside outbox":        {Mail: filepath.Join(base, "outbox", "m")},
 		"keys inside outbox":        {RotatingKeys: filepath.Join(base, "outbox", "k")},
 		"keys are partial":          {RotatingKeys: filepath.Join(base, "partial")},
