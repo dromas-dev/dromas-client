@@ -336,7 +336,7 @@ func (b *Mailbox) keptMessages(dir string) ([]keptMessage, error) {
 // HeldMessages returns the messages held/ keeps, by sender, the sender with the oldest
 // first. It reads only held/, and calls no server.
 func (b *Mailbox) HeldMessages(ctx context.Context) ([]UnknownSender, error) {
-	return reading(ctx, b, b.heldMessages)
+	return reading(ctx, b, there(b, b.heldMessages))
 }
 
 // heldMessages is HeldMessages, read under the reading or command that holds the mailbox.

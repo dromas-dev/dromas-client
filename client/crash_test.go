@@ -642,6 +642,40 @@ func TestARestoreKilledAtEachStepAdoptsItsServersACL(t *testing.T) {
 	}
 }
 
+// A restore killed between its new state file and its folders, and between its
+// folders and the record of them: the next command finishes, and only then
+// does a missing folder stop one.
+func TestARestoreKilledBeforeTheRecordOfItsFoldersFinishes(t *testing.T) {
+	t.Parallel()
+	for _, step := range client.Steps("folders") {
+		t.Run(step, func(t *testing.T) {
+			ctx := context.Background()
+			e := newEnv(t)
+			a, b := e.mailbox(), e.mailbox()
+			identityAlone(t, b.Dir())
+			e.clock.Add(2 * time.Second)
+			crashIn(t, e, b.Dir(), "rekey", step, protocol.Address{})
+			x, err := client.Open(b.Dir(), e.opts())
+			if err != nil {
+				t.Fatal(err)
+			}
+			// Part of what the crash left, or none of it: the next command makes it.
+			if err := os.RemoveAll(x.Path("sent")); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := x.Rekey(ctx); err != nil {
+				t.Fatalf("the renewal after a crash at %s: %v", step, err)
+			}
+			landAll(t, x)
+			whole(t, e, x, a)
+			defer moveAside(t, x.Path("sent"))()
+			if _, err := x.Receive(ctx); err == nil || !strings.Contains(err.Error(), x.Path("sent")) {
+				t.Fatalf("recv with sent/ moved aside after a crash at %s: %v", step, err)
+			}
+		})
+	}
+}
+
 // A drain killed at each step of a delivery: the message is in the inbox
 // once, and leaves the server.
 func TestADrainKilledAtEachStepOfADeliveryDeliversOnce(t *testing.T) {

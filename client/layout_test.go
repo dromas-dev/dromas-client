@@ -213,6 +213,11 @@ func TestAPublishedPrekeyMissingFromItsDirectoryStopsRecv(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	for _, f := range []string{"prekeys", "work"} {
+		if err := os.MkdirAll(moved.Path(f), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
 	// Due to renew, where a recv would publish a new prekey and go on.
 	e.clock.Add(25 * time.Hour)
 	n := numberOf(t, b)
