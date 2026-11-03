@@ -192,8 +192,7 @@ func (b *Mailbox) receive(ctx context.Context) (*Result, error) {
 			// A server that answers the drain the same after the renewal it
 			// took was not mended by it: the next such renewal waits
 			// renewRetry, as one that failed does, so a server that answers so
-			// at every list gets one an hour, never one at every Receive
-			// (#328).
+			// at every list never gets one at every Receive (#328).
 			if err != nil && b.mendable(err) {
 				if herr := b.holdRenewal(fmt.Errorf("it was taken, and the drain after it was refused as the one before: %w", err)); herr != nil {
 					err = errors.Join(err, herr)
