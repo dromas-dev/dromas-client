@@ -154,6 +154,36 @@ func checkKeyFile(path string) error {
 	return nil
 }
 
+// checkPrivateFile refuses a private file of the mailbox's that anyone but its
+// owner, SYSTEM and the Administrators can reach, or another user owns
+// (readAccess; judgeFiles). The refusal gives the icacls line that leaves it those
+// three alone, by SID, which every shell and language reads alike.
+func checkPrivateFile(path string) error {
+	a, err := readAccess(path)
+	if err != nil {
+		return err
+	}
+	self, err := processUser()
+	if err != nil {
+		return err
+	}
+	if len(a.others) > 0 {
+		fix := fmt.Sprintf(`icacls "%s" /inheritance:r /grant:r *%s:F *S-1-5-18:F *S-1-5-32-544:F`, path, self)
+		sep := " /remove"
+		for _, e := range a.others {
+			if e.sid != nil {
+				fix += sep + " *" + e.sid.String()
+				sep = ""
+			}
+		}
+		return fmt.Errorf("the mailbox's file %s is accessible by %s, and it is private as a key is. Run: %s", path, a.others[0].trustee(), fix)
+	}
+	if a.foreignOwner {
+		return fmt.Errorf(`the mailbox's file %s is owned by %s, who can read and change it. If you made it, run: icacls "%s" /setowner *%s. Otherwise delete it`, path, accountName(a.owner), path, self)
+	}
+	return nil
+}
+
 // CheckConfigFile refuses a config file others can write (readAccess), and one
 // another user owns, who can give themselves the write.
 func CheckConfigFile(path string) error {

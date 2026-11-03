@@ -166,6 +166,29 @@ func TestAConfigFileAnotherUserOwnsIsRefused(t *testing.T) {
 	}
 }
 
+// A mailbox's private file another user owns is refused, whatever its mode says:
+// they can read and change it. Root's is not, as a config file's is not.
+func TestAPrivateFileAnotherUserOwnsIsRefused(t *testing.T) {
+	t.Parallel()
+	file := filepath.Join(t.TempDir(), "state")
+	if err := os.WriteFile(file, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	me := os.Getuid()
+	if me == 0 { // a file owned by neither root nor the user the test says it is
+		if err := os.Chown(file, 1, 1); err != nil {
+			t.Fatal(err)
+		}
+		me = 1
+	}
+	if err := client.CheckPrivateFileAs(file, me); err != nil {
+		t.Errorf("its own user's: %v", err)
+	}
+	if err := client.CheckPrivateFileAs(file, me+1); err == nil || !strings.Contains(err.Error(), "owned by another user") {
+		t.Errorf("another user's: %v", err)
+	}
+}
+
 // A mail directory that cannot be read says so: it never reads as an empty one.
 func TestAFolderThatCannotBeReadIsNotEmpty(t *testing.T) {
 	t.Parallel()

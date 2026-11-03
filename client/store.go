@@ -195,8 +195,13 @@ var failWrite func() error
 // while it waits, a flock on the mailbox's directory, and every reading takes the
 // gate and lets go of it around its own lock: readings wait behind a waiting
 // writer, and those under way finish, as SQLite's PENDING lock has them
-// (#344). The file is opened as bbolt opens it, never made (openWhole).
+// (#344). The file is opened as bbolt opens it, never made (openWhole), and only
+// once the mailbox's private files are judged (judgeFiles), the one place every
+// open comes through.
 func (b *Mailbox) openState(ctx context.Context, readOnly bool) (*bolt.DB, error) {
+	if err := b.judgeFiles(); err != nil {
+		return nil, err
+	}
 	deadline := time.Now().Add(lockPatience)
 	told := false
 	waited := func() error {

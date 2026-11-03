@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"unsafe"
 
@@ -141,6 +142,9 @@ func TestAnAccessListIsJudgedEntryByEntry(t *testing.T) {
 			if err := client.CheckKeyFile(file); (err == nil) != c.key {
 				t.Errorf("as a key: %v", err)
 			}
+			if err := client.CheckPrivateFile(file); (err == nil) != c.key {
+				t.Errorf("as a mailbox's private file: %v", err)
+			}
 			if err := client.CheckConfigFile(file); (err == nil) != c.config {
 				t.Errorf("as a config: %v", err)
 			}
@@ -165,8 +169,54 @@ func TestAFileAnotherUserOwnsIsRefused(t *testing.T) {
 	if err := client.CheckKeyFile(file); err == nil || !strings.Contains(err.Error(), "owned by") {
 		t.Errorf("as a key: %v", err)
 	}
+	if err := client.CheckPrivateFile(file); err == nil || !strings.Contains(err.Error(), "owned by") {
+		t.Errorf("as a mailbox's private file: %v", err)
+	}
 	if err := client.CheckConfigFile(file); err == nil || !strings.Contains(err.Error(), "owned by") {
 		t.Errorf("as a config: %v", err)
+	}
+}
+
+// openFile gives the local Users read.
+func openFile(t *testing.T, path string) {
+	t.Helper()
+	setList(t, path, "(A;;FR;;;BU)")
+}
+
+// runFix runs the line a refusal gives, as a person's cmd.exe would.
+func runFix(t *testing.T, line string) {
+	t.Helper()
+	cmd := exec.Command("cmd")
+	cmd.SysProcAttr = &syscall.SysProcAttr{CmdLine: "cmd /c " + line}
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("%s: %v: %s", line, err, out)
+	}
+}
+
+// fixWord is what a refusal of an open file names.
+const fixWord = "icacls"
+
+// A state file planted in a directory that gives others access, and the lists
+// planted beside it, keep the list they inherit there, so init refuses them.
+func TestAFilePlantedInAWideDirectoryIsRefusedByInit(t *testing.T) {
+	t.Parallel()
+	for _, f := range client.PrivateFiles() {
+		t.Run(f, func(t *testing.T) {
+			t.Parallel()
+			e := newEnv(t)
+			dir := t.TempDir()
+			widen(t, dir)
+			planted := filepath.Join(dir, f)
+			if err := os.WriteFile(planted, nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := client.Init(t.Context(), dir, e.opts()); err == nil || !strings.Contains(err.Error(), planted) || !strings.Contains(err.Error(), fixWord) {
+				t.Fatalf("init over a planted %s: %v", f, err)
+			}
+			if exists(filepath.Join(dir, "identity")) {
+				t.Fatal("init went on to make the identity")
+			}
+		})
 	}
 }
 

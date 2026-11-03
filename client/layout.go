@@ -88,6 +88,40 @@ type layoutPart struct {
 // address, over the file it took the key from.
 var baseFiles = []string{"identity.doc", "address", "state", "gate", "partial", "allowed", "blocked", "aliases"}
 
+// publicFiles are the baseFiles that hold nothing private, so nothing judges who
+// can reach them: the identity document and the address, which every sender reads,
+// and which loadIdentity writes again from the key. identity.pub, beside the
+// identity, is public too. Every other file of baseFiles is judged (judgeFiles).
+var publicFiles = []string{"identity.doc", "address"}
+
+// fileRefused is a file of the mailbox judged (judgeFiles): the refusal is the
+// file's, whichever command met it.
+type fileRefused struct{ error }
+
+func (e *fileRefused) Unwrap() error { return e.error }
+
+// judgeFiles refuses a mailbox with a private file of the base directory that
+// others can reach or another user owns (checkPrivateFile), as a private key is
+// refused: state, which holds the pass, gate, partial and the lists. A file that
+// is not there is not judged. It costs a stat or an access-list read per file,
+// and openState asks it before anything opens the state file or the gate, so a
+// file planted before init and one left open by another system's tool are
+// refused before bbolt or a lock opens them.
+func (b *Mailbox) judgeFiles() error {
+	if b.dir == "" {
+		return nil
+	}
+	for _, f := range baseFiles {
+		if slices.Contains(publicFiles, f) {
+			continue
+		}
+		if err := checkPrivateFile(b.path(f)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return &fileRefused{err}
+		}
+	}
+	return nil
+}
+
 func layoutParts(dir string, l Layout) []layoutPart {
 	base := []string{"base-dir"}
 	keys := []string{"base-dir", "rotating-keys-dir"}
