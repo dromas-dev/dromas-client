@@ -83,6 +83,7 @@ account's holder, puts a mailbox in it.`,
 makes one. A mailbox keeps every revocation that verifies, of an address and of an
 address's certificates, and checks what it sends and receives against them.`,
 			e.makeCmd(), e.publishCmd(), e.keepCmd(), e.askCmd()),
+		e.agentGroup(),
 	)
 	// dromas --version is dromas version, as gh's and git's are. The flag is
 	// declared here so cobra adds none of its own, which would take -v.

@@ -7,11 +7,13 @@ import (
 	"errors"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"testing"
 	"time"
 
 	"golang.org/x/crypto/ssh"
 
+	"github.com/dromas-dev/dromas-client/client/internal/sign"
 	"github.com/dromas-dev/dromas-client/internal/fakeserver"
 	"github.com/dromas-dev/dromas-client/protocol"
 )
@@ -87,14 +89,15 @@ func TestEverySignerTheMailboxHandsOutAsksItsFinished(t *testing.T) {
 		if by, _, err := b.currentSigner(); by != nil || !errors.As(err, &gone) || !gone.Own {
 			t.Errorf("under a certificate %v: a signer from a finished mailbox: %v", working, err)
 		}
-		// Every method but PublicKey signs, and is tried above.
+		// Every method but those that sign nothing (sign.NotSigning) signs, and is
+		// tried above.
 		for _, typ := range []reflect.Type{reflect.TypeOf(b.identity), reflect.TypeFor[signer]()} {
 			for i := range typ.NumMethod() {
 				m := typ.Method(i).Name
 				if typ.Kind() == reflect.Pointer {
 					m = typ.Elem().Name() + "." + m
 				}
-				if typ.Method(i).Name != "PublicKey" && tried[m] == nil {
+				if !slices.Contains(sign.NotSigning, typ.Method(i).Name) && tried[m] == nil {
 					t.Errorf("%s is not tried on a finished mailbox", m)
 				}
 			}

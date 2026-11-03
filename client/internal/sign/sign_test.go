@@ -100,7 +100,13 @@ func signers(t *testing.T, finished Finished) map[string]func() error {
 	if err != nil {
 		t.Fatal(err)
 	}
-	id := NewIdentity(key, finished)
+	// The key is had only for a mailbox that is not finished.
+	id := NewIdentity(key.PublicKey(), func() (ssh.Signer, func(), error) {
+		if err := finished(); err != nil {
+			t.Errorf("the key was had for a finished mailbox: %v", err)
+		}
+		return key, nil, nil
+	}, finished)
 	work := NewWork(key, finished)
 	pid, err := protocol.IdentityOf(key.PublicKey())
 	if err != nil {
@@ -142,7 +148,7 @@ func TestEverySignatureAsksTheMailbox(t *testing.T) {
 	for _, typ := range []reflect.Type{reflect.TypeFor[*Identity](), reflect.TypeFor[*Work]()} {
 		for i := range typ.NumMethod() {
 			m := typ.Elem().Name() + "." + typ.Method(i).Name
-			if typ.Method(i).Name != "PublicKey" && tried[m] == nil {
+			if !slices.Contains(NotSigning, typ.Method(i).Name) && tried[m] == nil {
 				t.Errorf("%s is not tried", m)
 			}
 		}

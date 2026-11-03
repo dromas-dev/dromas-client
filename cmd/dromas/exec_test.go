@@ -25,6 +25,12 @@ func TestMain(m *testing.M) {
 	if len(os.Args) > 2 && os.Args[1] == callbackWord {
 		os.Exit(callbackMain(os.Args[2], os.Args[3], os.Args[4:]))
 	}
+	// Run as an askpass program, as ssh-add and the client run one, with the
+	// prompt as its one argument: it prints the passphrase the test set.
+	if pass, ok := os.LookupEnv(askpassEnv); ok && len(os.Args) == 2 && strings.HasPrefix(os.Args[1], "Enter passphrase") {
+		fmt.Println(pass)
+		os.Exit(0)
+	}
 	os.Exit(m.Run())
 }
 

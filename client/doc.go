@@ -13,7 +13,7 @@
 // rotating-keys-dir for work/, prekeys/ and tls-ticket, inbox-dir for inbox/ alone, and
 // identity-file for the identity. The base directory is never split:
 //
-//	identity, identity.pub     the identity key, OpenSSH format: Ed25519 unless the mailbox was made on another type; back it up. It signs certificates and revocations, and what the mailbox says until it has published a statement under a certificate (init --offline, cert switch; client/signer.go)
+//	identity, identity.pub     the identity key, OpenSSH format: Ed25519 unless the mailbox was made on another type; back it up. identity may be under a passphrase, or absent with its key in the mailbox's agent (client/identitykey.go). It signs certificates and revocations, and what the mailbox says until it has published a statement under a certificate (init --offline, cert switch; client/signer.go)
 //	identity.doc, address      the identity document and its SHA-384, the address
 //	work/<serial>              working keys, each with its certificate (.pub, -cert.pub): they sign what the mailbox says; never backed up, since a restored mailbox makes new ones
 //	prekeys/<serial>.agekey    age keys, each statement signed for one, when it was signed and when its server took it, kept in state; never backed up; one that no statement in a new state file names is adopted, and goes after the first renewal the server confirms (adoptKeys)

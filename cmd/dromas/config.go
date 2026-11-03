@@ -37,6 +37,10 @@ type globals struct {
 	config, profile                                        string
 	baseDir, mailDir, identityFile, rotatingKeysDir, inbox string
 	server, caFile, prekeyLifetime                         string
+	agent, askpass, addKeysToAgent                         string
+	noPrompt                                               bool
+	// noPromptSet is whether --no-prompt was on the command line.
+	noPromptSet bool
 }
 
 func (g *globals) add(c *cobra.Command) {
@@ -51,6 +55,10 @@ func (g *globals) add(c *cobra.Command) {
 	f.StringVar(&g.server, "server", "", "the server's `URL`: $DROMAS_SERVER_URL, or "+client.DefaultBase)
 	f.StringVar(&g.caFile, "ca-file", "", "trust only the certificates in this PEM `file` for the server's TLS certificate, in place of the system's CAs: $DROMAS_CA_FILE")
 	f.StringVar(&g.prekeyLifetime, "prekey-lifetime", "", "how long each new prekey is valid for: a `time`, as dromas prekey lifetime --help says")
+	f.StringVar(&g.agent, "agent", "", "the `socket` of the ssh-agent that holds the identity's key, read as ssh_config's IdentityAgent (a path, $VAR, SSH_AUTH_SOCK or none): $DROMAS_AGENT, or "+agentDefaultWords)
+	f.StringVar(&g.askpass, "askpass", "", "a `program` that prints the identity key's passphrase, as ssh's SSH_ASKPASS: $DROMAS_ASKPASS")
+	f.BoolVar(&g.noPrompt, "no-prompt", false, "never ask for the identity key's passphrase at a terminal: $DROMAS_NO_PROMPT")
+	f.StringVar(&g.addKeysToAgent, "add-keys-to-agent", "", "once a passphrase unlocks the identity's key, add it to the agent: no, yes, or the `time` it stays, as ssh_config's AddKeysToAgent: $DROMAS_ADD_KEYS_TO_AGENT")
 }
 
 // fileConfig is what a config file may say. A key it does not name is an error.
@@ -63,6 +71,10 @@ type fileConfig struct {
 	Server          string `toml:"server"`
 	CAFile          string `toml:"ca-file"`
 	PrekeyLifetime  string `toml:"prekey-lifetime"`
+	Agent           string `toml:"agent"`
+	Askpass         string `toml:"askpass"`
+	NoPrompt        *bool  `toml:"no-prompt"`
+	AddKeysToAgent  string `toml:"add-keys-to-agent"`
 	Policy          struct {
 		Unknown string `toml:"unknown"`
 		Server  string `toml:"server"`
@@ -96,7 +108,14 @@ type config struct {
 	server        string
 	rootCAs       *x509.CertPool
 	lifetime      time.Duration
-	policy        client.Policy
+	// agent is the identity's agent's socket, or empty; askpass the program
+	// that prints its key's passphrase; noPrompt that no terminal is asked;
+	// addKeys and agentLife ssh_config's AddKeysToAgent.
+	agent, askpass string
+	noPrompt       bool
+	addKeys        bool
+	agentLife      time.Duration
+	policy         client.Policy
 	// flagged is each table's settings, by the command that takes them.
 	flagged map[string]map[string]string
 	values  map[string]setting
@@ -419,6 +438,10 @@ func (cfg *config) resolve(g *globals, fc *fileConfig, rel string, noMailbox boo
 		}
 		cfg.lifetime = d
 		cfg.values["prekey-lifetime"] = setting{formatTime(d), from}
+	}
+
+	if err := cfg.resolveIdentityKey(g, fc, rel); err != nil {
+		return err
 	}
 
 	cfg.policy = client.Policy{Unknown: fc.Policy.Unknown, Server: fc.Policy.Server}

@@ -144,7 +144,11 @@ func (e *cli) mailbox() (*client.Mailbox, error) {
 // command line is known to be one that runs.
 func (e *cli) environment(c *cobra.Command) error {
 	// A record is published from anywhere: it needs a server, and no mailbox.
-	none := c.Name() == "publish" && c.Flags().Changed("record")
+	none := c.Name() == "publish" && c.Flags().Changed("record") ||
+		c.Name() == "start" && c.Parent().Name() == "agent"
+	if f := c.Flag("no-prompt"); f != nil {
+		e.flags.noPromptSet = f.Changed
+	}
 	cfg, err := loadConfig(c, &e.flags, c.Name() == "init" && c.Parent() == c.Root(), none)
 	if err != nil {
 		return err
@@ -155,6 +159,11 @@ func (e *cli) environment(c *cobra.Command) error {
 	e.cfg, e.dir = cfg, cfg.dir
 	e.opt.Base, e.opt.Layout, e.opt.ConfigFile, e.opt.RootCAs = cfg.server, cfg.layout, cfg.file, cfg.rootCAs
 	e.opt.Policy, e.opt.PrekeyLifetime = cfg.policy, cfg.lifetime
+	e.opt.Agent, e.opt.Passphrase = cfg.agent, e.passphrase
+	e.opt.AddToAgent, e.opt.AgentLifetime = cfg.addKeys, cfg.agentLife
+	// A passphrase given once serves the whole process: recv --wait or --follow
+	// renews with it for as long as it runs.
+	e.opt.KeepIdentity = true
 	return nil
 }
 

@@ -119,6 +119,26 @@ type Options struct {
 	// meets of its version, for the caller to say once its command is done
 	// ([Versions]). Otherwise each Mailbox keeps its own.
 	Versions *Versions
+	// Agent is the socket of an ssh-agent that may hold the identity's private
+	// key; empty for none. A signature takes the agent's key that matches the
+	// identity first, and the key file only where the agent holds none
+	// ([IdentityLockedError]).
+	Agent string
+	// Passphrase, if not nil, is asked for the passphrase of an identity key
+	// file that has one, when a signature needs the key and Agent holds none: it
+	// returns [ErrNoPassphrase] where it has none to give. With none asked, a
+	// key file with a passphrase is an [IdentityLockedError].
+	Passphrase func(file string) ([]byte, error)
+	// KeepIdentity keeps the identity's private key, once a passphrase unlocks it
+	// from its key file, for every later command of this Mailbox, as a resident
+	// recv needs. A key an agent holds is had from the agent at each command.
+	// Without KeepIdentity, each command that signs with the identity has its key
+	// again, and lets go of it when it ends.
+	KeepIdentity bool
+	// AddToAgent has a key file that a passphrase unlocked added to Agent, as
+	// ssh_config's AddKeysToAgent does, for AgentLifetime if that is not zero.
+	AddToAgent    bool
+	AgentLifetime time.Duration
 }
 
 // Mailbox is one mailbox: its files and the server it talks to. It is
@@ -140,6 +160,9 @@ type Mailbox struct {
 	// identity is the identity key, which signs only through sign.
 	identity *sign.Identity
 	id       *protocol.Identity
+	// unlock is where the identity's private key comes from (Options.Agent,
+	// Options.Passphrase, Options.KeepIdentity, Options.AddToAgent).
+	unlock unlocking
 	// workingKey has Init register a mailbox it makes or restores under a
 	// certificate (Options.WorkingKey).
 	workingKey bool
@@ -229,7 +252,7 @@ func newMailbox(dir string, opt Options) (*Mailbox, error) {
 	if d := opt.PrekeyLifetime; d != 0 && (d < MinPrekeyLifetime || d > protocol.PrekeyLifetime || d%time.Second != 0) {
 		return nil, fmt.Errorf("%v is no prekey lifetime: %s", d, lifetimeRule)
 	}
-	b := &Mailbox{dir: dir, layout: opt.Layout.resolved(dir), configFile: opt.ConfigFile, policySet: opt.Policy, prekeyLife: opt.PrekeyLifetime, base: strings.TrimRight(opt.Base, "/"), http: opt.HTTPClient, now: opt.Now, identityType: opt.IdentityType, workingKey: opt.WorkingKey, waiting: opt.Waiting, slot: make(chan struct{}, 1)}
+	b := &Mailbox{dir: dir, layout: opt.Layout.resolved(dir), configFile: opt.ConfigFile, policySet: opt.Policy, prekeyLife: opt.PrekeyLifetime, base: strings.TrimRight(opt.Base, "/"), http: opt.HTTPClient, now: opt.Now, identityType: opt.IdentityType, workingKey: opt.WorkingKey, waiting: opt.Waiting, slot: make(chan struct{}, 1), unlock: unlocking{agent: opt.Agent, passphrase: opt.Passphrase, keep: opt.KeepIdentity, add: opt.AddToAgent, lifetime: opt.AgentLifetime}}
 	if b.base == "" {
 		b.base = DefaultBase
 	}
@@ -502,7 +525,8 @@ func (b *Mailbox) init(ctx context.Context) (*Mailbox, error) {
 	if err := CheckLayout(b.dir, b.layout); err != nil {
 		return nil, err
 	}
-	fresh := !exists(b.path("identity"))
+	// A mailbox with identity.pub and no key file has its key in an agent.
+	fresh := !exists(b.path("identity")) && !exists(b.path("identity.pub"))
 	if fresh {
 		// A state file bound to an address is that identity's: a new key at another
 		// path would be refused by it, and left behind.
@@ -824,36 +848,22 @@ func (b *Mailbox) writeIdentityPub(pub ssh.PublicKey) error {
 	return writeFile(b.path("identity.pub"), ssh.MarshalAuthorizedKey(pub))
 }
 
-// loadIdentity reads the identity key, and writes identity.doc and address
-// from it, so all three always agree.
+// loadIdentity reads the identity's public key (identityPublicKey), and writes
+// identity.doc and address from it, so all three always agree. The private key
+// is had only when a signature needs it (unlockIdentity).
 func (b *Mailbox) loadIdentity() error {
-	pemBytes, err := os.ReadFile(b.path("identity"))
+	pub, err := b.identityPublicKey()
 	if err != nil {
-		return fmt.Errorf("no mailbox here: %w", err)
-	}
-	if err := checkKeyFile(b.path("identity")); err != nil {
 		return err
 	}
-	raw, err := ssh.ParseRawPrivateKey(pemBytes)
-	var missing *ssh.PassphraseMissingError
-	if errors.As(err, &missing) {
-		return errors.New("the identity key has a passphrase, which this client does not support yet")
-	}
-	if err != nil {
-		return fmt.Errorf("the identity key: %w", err)
-	}
-	signer, err := ssh.NewSignerFromKey(raw)
-	if err != nil {
-		return fmt.Errorf("the identity key: %w", err)
-	}
-	id, err := protocol.IdentityOf(signer.PublicKey())
+	id, err := protocol.IdentityOf(pub)
 	if errors.Is(err, protocol.ErrIdentityType) {
-		return fmt.Errorf("the identity key is of the type %s, and this client runs a mailbox on %s", signer.PublicKey().Type(), strings.Join(protocol.IdentityTypes(), " or "))
+		return fmt.Errorf("the identity key is of the type %s, and this client runs a mailbox on %s", pub.Type(), strings.Join(protocol.IdentityTypes(), " or "))
 	}
 	if err != nil {
 		return err
 	}
-	b.identity, b.id = sign.NewIdentity(signer, b.finished), id
+	b.identity, b.id = sign.NewIdentity(pub, b.unlockIdentity, b.finished), id
 	// Beside a state file the address is whose that state is, so no command runs
 	// on it, or rewrites it, under another identity. It is read here, and the state
 	// file only under its lock, which a running command holds (stateIsOurs).
