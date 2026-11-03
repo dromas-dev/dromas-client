@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -139,8 +140,21 @@ func NewInMemoryHTTP2(t testing.TB, now func() time.Time) *Server {
 	return s
 }
 
-// Client is the client that reaches a server NewInMemory made.
+// NewTLS is New over TLS, on httptest's certificate: a process of its own
+// reaches it by trusting Certificate, as Client does.
+func NewTLS(t testing.TB, now func() time.Time) *Server {
+	s, h := newServer(t, now)
+	srv := httptest.NewTLSServer(h)
+	t.Cleanup(srv.Close)
+	s.URL, s.srv = srv.URL, srv
+	return s
+}
+
+// Client is the client that reaches a server NewInMemory or NewTLS made.
 func (s *Server) Client() *http.Client { return s.srv.Client() }
+
+// Certificate is the certificate of a server NewTLS made.
+func (s *Server) Certificate() *x509.Certificate { return s.srv.Certificate() }
 
 // newServer is a server on the clock now, and the handler that serves it.
 func newServer(t testing.TB, now func() time.Time) (*Server, http.Handler) {
