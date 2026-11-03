@@ -7,12 +7,13 @@ import (
 	"os"
 )
 
-// ReadCAFile reads the CAs of [Options.RootCAs] from a file of PEM certificates,
-// as a CA bundle holds them: text between the blocks is skipped, and a
-// certificate need not be a CA's, so a server's own self-signed certificate is
-// one. It refuses a file others can write or another user owns, as a config file
-// is ([CheckConfigFile]), since a certificate put there would be trusted; a PEM
-// block that is not one certificate; and a file with none.
+// ReadCAFile reads the certificates of [Options.RootCAs] from a file of PEM
+// certificates, as a CA bundle holds them. Text between the PEM blocks is
+// skipped. A certificate in the file need not be a CA's, so a server's own
+// self-signed certificate works. ReadCAFile refuses a file that others can write
+// or that another user owns (on Unix, root may own it), by [CheckConfigFile]'s
+// rule, because a certificate put there would be trusted. It also refuses a PEM block
+// that is not a certificate, and a file with no certificate.
 func ReadCAFile(path string) (*x509.CertPool, error) {
 	if err := CheckConfigFile(path); err != nil {
 		return nil, err

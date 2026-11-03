@@ -88,7 +88,7 @@ identity-file = "~/.local/share/dromas/default/identity"   # default <base-dir>/
 rotating-keys-dir = "~/.local/state/dromas/default/keys"   # default <base-dir>/keys: prekeys/, work/, tls-ticket
 # inbox-dir = "/some/agent/inbox"                          # default <mail-dir>/inbox
 # server = "https://dromas.dev"                            # https, or http only on this machine
-# ca-file = "/etc/dromas/ca.pem"                            # default the system's CAs: trust only this file's certificates
+# ca-file = "/etc/dromas/ca.pem"                            # trust only this file's certificates; default the system's CAs
 ```
 
 `inbox-dir` gives an agent its inbox and not `held/` or `refused/`. A relative path is under the config file's directory. A wrong config stops every command with exit status 2 and a `config_error` line. Each part's files are listed at the top of `client/doc.go`, and `dromas status` says what it holds. `base-dir` on a network filesystem is refused on Linux and macOS, which can tell: the mailbox's lock is a flock there. The client creates directories its owner's alone and leaves one that exists as it is, and refuses a private key file others can reach, as ssh does: a Kubernetes or Compose secret needs mode `0400`. It refuses `state`, `gate`, `partial`, `allowed`, `blocked` and `aliases` the same way, or where another user owns one, and the refusal gives the line that puts the file right, so a list you write yourself needs mode `0600`. It writes no `.gitignore`, and warns when a private key is under a `.git`, so make sure git ignores it.

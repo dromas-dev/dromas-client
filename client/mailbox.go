@@ -66,13 +66,14 @@ type Options struct {
 	// those bounds is added. The mailbox uses a copy of it that follows no
 	// redirect ([followNone]).
 	HTTPClient *http.Client
-	// RootCAs, if not nil, is the only set of CAs the server's TLS certificate
-	// may chain to, in place of the system's: a server behind a private CA is
-	// reached, and a TLS-inspecting proxy whose CA the system trusts is
-	// refused, before any pass is sent ([ReadCAFile] reads one from a file). A
-	// TLS session resumed from a ticket is held to it too, by crypto/tls. It
-	// sets the default HTTP client's: beside HTTPClient it is refused, since
-	// that client's transport says its own.
+	// RootCAs, if not nil, is the only set of certificates the server's TLS
+	// certificate may chain to, in place of the system's CAs. So the client
+	// reaches a server behind a private CA, and refuses a TLS-inspecting proxy
+	// whose CA the system trusts before any pass is sent. [ReadCAFile] reads
+	// a set from a file. crypto/tls holds a TLS session resumed from a ticket
+	// to the same set. RootCAs sets the default HTTP client's CAs only, so
+	// Open and Init return an error when RootCAs and HTTPClient are both set:
+	// the transport of a client given here sets its own CAs.
 	RootCAs *x509.CertPool
 	// Now is the clock; time.Now if nil.
 	Now func() time.Time
