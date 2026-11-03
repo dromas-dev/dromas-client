@@ -82,6 +82,18 @@ func (k *Identity) signer() (ssh.Signer, error) {
 	return key, nil
 }
 
+// Borrowed reports whether the private key held is an agent's, which Unlock
+// gave with a function that lets go of it.
+func (k *Identity) Borrowed() bool {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	return k.release != nil
+}
+
+// NotSigning are the methods of the signers that sign nothing: every other
+// method signs, and asks the mailbox first (TestEverySignatureAsksTheMailbox).
+var NotSigning = []string{"PublicKey", "Borrowed", "Forget"}
+
 // Forget lets go of the private key, so the next signature unlocks it again.
 func (k *Identity) Forget() {
 	k.mu.Lock()

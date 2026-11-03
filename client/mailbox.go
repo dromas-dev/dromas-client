@@ -129,9 +129,11 @@ type Options struct {
 	// returns [ErrNoPassphrase] where it has none to give. With none asked, a
 	// key file with a passphrase is an [IdentityLockedError].
 	Passphrase func(file string) ([]byte, error)
-	// KeepIdentity keeps the identity's private key, once had, for every
-	// command of this Mailbox, as a resident recv needs. Otherwise each command
-	// that signs with it has it again, and lets go of it when it ends.
+	// KeepIdentity keeps the identity's private key, once a passphrase unlocks it
+	// from its key file, for every later command of this Mailbox, as a resident
+	// recv needs. A key an agent holds is had from the agent at each command.
+	// Without KeepIdentity, each command that signs with the identity has its key
+	// again, and lets go of it when it ends.
 	KeepIdentity bool
 	// AddToAgent has a key file that a passphrase unlocked added to Agent, as
 	// ssh_config's AddKeysToAgent does, for AgentLifetime if that is not zero.

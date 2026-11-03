@@ -161,6 +161,9 @@ func (e *cli) environment(c *cobra.Command) error {
 	e.opt.Policy, e.opt.PrekeyLifetime = cfg.policy, cfg.lifetime
 	e.opt.Agent, e.opt.Passphrase = cfg.agent, e.passphrase
 	e.opt.AddToAgent, e.opt.AgentLifetime = cfg.addKeys, cfg.agentLife
+	// A passphrase given once serves the whole process: recv --wait or --follow
+	// renews with it for as long as it runs.
+	e.opt.KeepIdentity = true
 	return nil
 }
 

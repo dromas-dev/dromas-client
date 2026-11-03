@@ -125,6 +125,20 @@ func TestAMailboxWhoseKeyIsInItsAgentSignsThroughIt(t *testing.T) {
 	if _, err := os.Stat(from.Path("identity")); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("a key file was written: %v", err)
 	}
+	// Under KeepIdentity too, each command has the key from the agent again: once
+	// the agent drops it, the next command is locked.
+	opt.KeepIdentity = true
+	from = reopen(t, from, opt)
+	if _, err := from.Rekey(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := kr.RemoveAll(); err != nil {
+		t.Fatal(err)
+	}
+	var locked *client.IdentityLockedError
+	if _, err := from.Rekey(t.Context()); !errors.As(err, &locked) {
+		t.Errorf("a renewal after the agent dropped the key: %v", err)
+	}
 }
 
 // Without the agent's key, the same mailbox signs nothing, and says why in its

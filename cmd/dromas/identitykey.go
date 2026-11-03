@@ -148,14 +148,18 @@ func omitNone(socket string) string {
 
 // passphrase has the identity key file's passphrase for client.Options: from the
 // askpass program where one is set, as ssh's SSH_ASKPASS_REQUIRE=force has it,
-// and otherwise at the terminal, after a "waiting" line, unless prompting is
-// off or there is no terminal.
+// and otherwise at the terminal, after a "waiting" line. It asks the terminal
+// only where stdin is one, as a person's shell gives it and a program's call
+// does not, so a model that runs dromas through a tool fails as identity_locked
+// at once rather than waiting on a prompt nobody sees; and never under
+// no-prompt, for a call through a terminal of its own. stdout is not looked
+// at: what a command prints is the same everywhere.
 func (e *cli) passphrase(file string) ([]byte, error) {
 	prompt := fmt.Sprintf("Enter passphrase for %s: ", file)
 	if e.cfg.askpass != "" {
 		return askpass(e.cfg.askpass, prompt)
 	}
-	if e.cfg.noPrompt {
+	if e.cfg.noPrompt || !isTerminal(e.stdin) {
 		return nil, client.ErrNoPassphrase
 	}
 	tty, err := openTerminal()
@@ -174,6 +178,12 @@ func (e *cli) passphrase(file string) ([]byte, error) {
 		return nil, fmt.Errorf("the passphrase was not read from the terminal: %w", err)
 	}
 	return pass, nil
+}
+
+// isTerminal reports whether r is a terminal.
+func isTerminal(r io.Reader) bool {
+	f, ok := r.(*os.File)
+	return ok && term.IsTerminal(int(f.Fd())) //nolint:gosec // a file descriptor
 }
 
 // openTerminal is the process's controlling terminal, which ssh asks for a
@@ -205,12 +215,12 @@ func askpass(program, prompt string) ([]byte, error) {
 func (e *cli) agentGroup() *cobra.Command {
 	return e.group("agent", "the mailbox's own ssh-agent, which holds its identity's key: start, add",
 		`The identity's key may be kept in an ssh-agent of the mailbox's own, at the
-socket --agent names, apart from the shell's agent, which ssh forwards. Then
-the key file may keep a passphrase, and no command reads it, so a reboot leaves
-the mailbox locked until its owner loads the key again. A command that needs
-the key and finds it nowhere fails as "identity_locked". The agent is stock
-ssh-agent, and dromas agent start and dromas agent add each print the stock
-line they run.`,
+socket --agent names, apart from the shell's agent, which ssh forwards. The key
+file can then keep a passphrase. After a reboot the agent holds no key, so the
+mailbox is locked until its owner runs dromas agent add again, or runs a
+command with --askpass or at a terminal. A command that needs the key and has
+it from none of these fails as "identity_locked". The agent is stock ssh-agent,
+and dromas agent start and dromas agent add each print the command they run.`,
 		e.agentStartCmd(), e.agentAddCmd())
 }
 
@@ -254,14 +264,16 @@ shell's.`,
 func (e *cli) agentAddCmd() *cobra.Command {
 	var life string
 	c := command("add [flags]", "load the identity's key into the mailbox's agent, with ssh-add",
-		`Run stock ssh-add on the identity key file, against --agent's socket:
+		`Run stock ssh-add on the identity key file, against the socket --agent names:
 SSH_AUTH_SOCK=<socket> ssh-add <identity-file>. ssh-add asks for the key's
-passphrase at the terminal, or, with --askpass, runs that program for it
-(SSH_ASKPASS=<program> SSH_ASKPASS_REQUIRE=force). It prints an "agent_add"
-line with the line it runs first, then an "agent_added" line once the agent
-holds the key. --lifetime is ssh-add -t. A mailbox whose identity signs
-what it says, not a working key, is locked whenever the agent lacks the key:
-it neither sends nor receives until then, and the "agent_added" line says so.`,
+passphrase at the terminal, or with --askpass runs that program for it
+(SSH_ASKPASS=<program> SSH_ASKPASS_REQUIRE=force). Before ssh-add runs, an
+"agent_add" line gives the command. Once the agent holds the key, an
+"agent_added" line gives the mailbox's signer, as status names it.
+--lifetime is ssh-add -t: when it ends, the agent drops the key. While the
+agent lacks the key, and the key file has a passphrase, a mailbox whose
+identity signs neither sends nor receives, and a mailbox under a certificate
+renews nothing, but in a command run with --askpass or at a terminal.`,
 		nargs(0, 0), func(c *cobra.Command, _ []string) error {
 			b, err := e.mailbox()
 			if err != nil {

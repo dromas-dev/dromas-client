@@ -36,7 +36,7 @@ type IdentityLockedError struct {
 }
 
 func (e *IdentityLockedError) Error() string {
-	return fmt.Sprintf("the identity's key is locked: %s. dromas agent add loads it into the mailbox's agent; a key file with a passphrase is also unlocked at a terminal, or by --askpass", e.Reason)
+	return fmt.Sprintf("the identity's key is locked: %s. dromas agent add loads it into the mailbox's agent; a key file with a passphrase is also unlocked by --askpass, or at a terminal", e.Reason)
 }
 
 // Code is the error's code, IdentityLocked.
@@ -164,10 +164,12 @@ func (b *Mailbox) unlockIdentity() (ssh.Signer, func(), error) {
 	return key, nil, nil
 }
 
-// forgetIdentity lets go of the identity's private key at a command's end,
-// but under Options.KeepIdentity.
+// forgetIdentity lets go of the identity's private key at a command's end. Under
+// Options.KeepIdentity it keeps a key it unlocked from the key file, and lets go
+// of an agent's, which the next command has from the agent again, so an agent
+// started again since serves it.
 func (b *Mailbox) forgetIdentity() {
-	if b.identity != nil && !b.unlock.keep {
+	if b.identity != nil && (!b.unlock.keep || b.identity.Borrowed()) {
 		b.identity.Forget()
 	}
 }

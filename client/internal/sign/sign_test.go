@@ -148,7 +148,7 @@ func TestEverySignatureAsksTheMailbox(t *testing.T) {
 	for _, typ := range []reflect.Type{reflect.TypeFor[*Identity](), reflect.TypeFor[*Work]()} {
 		for i := range typ.NumMethod() {
 			m := typ.Elem().Name() + "." + typ.Method(i).Name
-			if n := typ.Method(i).Name; n != "PublicKey" && n != "Forget" && tried[m] == nil {
+			if !slices.Contains(NotSigning, typ.Method(i).Name) && tried[m] == nil {
 				t.Errorf("%s is not tried", m)
 			}
 		}

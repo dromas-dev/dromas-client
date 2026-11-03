@@ -83,8 +83,6 @@ type fileConfig struct {
 		Wait      string `toml:"wait"`
 		DrainTime string `toml:"drain-time"`
 		Headers   *bool  `toml:"headers"`
-		// KeepIdentity is recv --keep-identity.
-		KeepIdentity *bool `toml:"keep-identity"`
 	} `toml:"recv"`
 	Inbox struct {
 		List struct {
@@ -486,9 +484,6 @@ func (cfg *config) resolve(g *globals, fc *fileConfig, rel string, noMailbox boo
 	headers("recv", fc.Recv.Headers)
 	headers("inbox list", fc.Inbox.List.Headers)
 	headers("inbox show", fc.Inbox.Show.Headers)
-	if v := fc.Recv.KeepIdentity; v != nil {
-		table("recv", "keep-identity", fmt.Sprint(*v))
-	}
 	return nil
 }
 
