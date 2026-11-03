@@ -157,6 +157,45 @@ func TestPassRoundTrip(t *testing.T) {
 // for this server, not run out, and the working key's signature must verify.
 // It is the same for an identity of either type, since the identity's own
 // signature is not what it checks.
+// CarriesKey answers for the key a pass names, whatever its date, and a
+// signature that is not one names no key.
+func TestAPassCarriesTheKeyItsSignatureNames(t *testing.T) {
+	now := time.Date(2026, 10, 12, 21, 30, 15, 0, time.UTC)
+	m, cert, signer := passMailbox(t, now)
+	a := m.id.Address()
+	header, notAfter, err := NewPass(signer, a, "dromas.dev", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pass, err := ParsePass(header)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !pass.CarriesKey(sha256.Sum256(cert.Marshal())) {
+		t.Error("a pass under a certificate does not carry that certificate")
+	}
+	if pass.CarriesKey(sha256.Sum256(m.identity.PublicKey().Marshal())) {
+		t.Error("a pass under a certificate carries the identity")
+	}
+	byIdentity, _, err := NewPass(m.identity, a, "dromas.dev", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pass, err = ParsePass(byIdentity); err != nil {
+		t.Fatal(err)
+	}
+	if !pass.CarriesKey(sha256.Sum256(m.identity.PublicKey().Marshal())) {
+		t.Error("the identity's pass does not carry the identity")
+	}
+	notOne, err := ParsePass(PassScheme + ` address="` + a.String() + `", not_after="` + notAfter.Format(TimeLayout) + `", signature="AAAA"`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if notOne.CarriesKey(sha256.Sum256(cert.Marshal())) || notOne.CarriesKey(sha256.Sum256(m.identity.PublicKey().Marshal())) {
+		t.Error("a signature that is not one carries a key")
+	}
+}
+
 func TestPassVerifyUnder(t *testing.T) {
 	now := time.Date(2026, 10, 12, 21, 30, 15, 0, time.UTC)
 	ed, edCert, edSigner := passMailbox(t, now)
