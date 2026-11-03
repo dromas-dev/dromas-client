@@ -83,6 +83,12 @@ func (b *Mailbox) hold(ctx context.Context) (func() error, error) {
 		_ = release() // the error is the directories'
 		return nil, err
 	}
+	// After the directories: adoption reads prekeys/ once, for good, so a folder
+	// on a volume not mounted is refused first and marks nothing.
+	if err := b.adoptKeys(); err != nil {
+		_ = release() // the error is the adoption's
+		return nil, err
+	}
 	return release, nil
 }
 
