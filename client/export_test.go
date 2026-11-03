@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -141,6 +142,21 @@ func SetRequestTimeout(t *testing.T, d time.Duration) {
 	old := requestTimeout
 	requestTimeout = d
 	t.Cleanup(func() { requestTimeout = old })
+}
+
+// Trust has a mailbox's default client trust pool alone: a test's TLS server.
+func Trust(b *Mailbox, pool *x509.CertPool) {
+	(*b.http.Transport.(*transport).current()).(*http.Transport).TLSClientConfig.RootCAs = pool
+}
+
+// ticketCache is the ticket cache of a mailbox's transport, or nil.
+func (t *transport) ticketCache() *ticketCache {
+	rt, ok := (*t.current()).(*http.Transport)
+	if !ok || rt.TLSClientConfig == nil {
+		return nil
+	}
+	c, _ := rt.TLSClientConfig.ClientSessionCache.(*ticketCache)
+	return c
 }
 
 // Bounded has a mailbox whose client it was given bound its calls as the

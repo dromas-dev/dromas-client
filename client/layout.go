@@ -24,8 +24,8 @@ type Layout struct {
 	// IdentityFile is the identity key, with <file>.pub beside it:
 	// <dir>/identity if empty. Only Init writes it, so it may be read-only.
 	IdentityFile string
-	// RotatingKeys holds prekeys/ and work/, which are never backed up:
-	// <dir>/keys if empty.
+	// RotatingKeys holds prekeys/, work/ and tls-ticket, which are never backed
+	// up: <dir>/keys if empty.
 	RotatingKeys string
 	// Inbox is inbox/, apart from the rest of the mail: <Mail>/inbox if empty.
 	Inbox string
@@ -62,7 +62,7 @@ func (b *Mailbox) path(elem ...string) string {
 			return filepath.Join(append([]string{b.layout.IdentityFile}, elem[1:]...)...)
 		case "identity.pub":
 			return b.layout.IdentityFile + ".pub"
-		case "prekeys", "work":
+		case "prekeys", "work", ticketFile:
 			root = b.layout.RotatingKeys
 		case "inbox":
 			root, elem = b.layout.Inbox, elem[1:]
