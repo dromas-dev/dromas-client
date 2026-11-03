@@ -1590,7 +1590,7 @@ Nothing is final until version 1 is declared stable. From that declaration on:
   - with a `Deprecation` on every answer to a version that the server deems deprecated;
   - with a `Sunset` on every answer to a version that the server will stop accepting;
   - with `410 version_retired` when the server has stopped accepting that version.
-- **Features outside version 1.0.** Every feature outside version 1.0 is a capability that the server lists in the server's document (Section 11.18). A client uses such a feature only where the server lists the capability. `latest_version` enables no feature.
+- **Features outside version 1.0.** Every feature that a server offers outside version 1.0 is a capability that the server lists in the server's document (Section 11.18). A client uses such a feature of a server only where that server lists the capability. A check that a client makes at a party other than the client's server, named in the client's own configuration, is not a feature of a server, and needs no capability. `latest_version` enables no feature.
 - **`dromas-revoke-v1` stays valid permanently.** A revocation signed in advance therefore keeps working.
 - **A new identity key type is an addition inside v1.** The identity document has one form for every type (Section 4.1), so a type defined later needs no new tag. A new identity key type is optional. A mailbox declares such a type once its client verifies the type (Section 7).
 - **A new prekey type is an addition inside v1 in the same way (Section 6).**
@@ -1743,7 +1743,7 @@ Dromas protects a message's content from everyone but the message's recipient. D
 
 - **A server can withhold a revocation from a peer that has never seen the revocation.** The server answers that it keeps no revocation, and nothing tells the peer otherwise. The lookup before every post narrows this risk in time, and no further, because a client keeps every revocation that the client was shown while the client's server answered truly. The client still keeps those revocations after that server stops answering truly. Only a revocation record from the mailbox's owner, handed over out of band, answers a server that hides a revocation record from the server's first answer.
 - **A mailbox checks revocations at its own server alone (Section 12.5).** Asking another server too, such as one running another implementation, would help against a server that withholds a revocation, but only if the revoked mailbox's owner and the reader both use that other server. This version defines no second server.
-- **This protocol sets no bound on how long a revocation can go unseen by a peer whose server hides the revocation.** The usual answer is key transparency: a log of everything a server serves, which clients check. This protocol lacks key transparency.
+- **This protocol sets no bound on how long a revocation can go unseen by a peer whose server hides the revocation.** The usual answer is key transparency: a verifiable map that clients check. This protocol lacks key transparency. Key transparency fits inside version 1 with nothing reserved: a client checks a verifiable map of revocations that the client's own configuration names, and a server cannot remove that check by listing no capability (Section 14). The map's proof of absence bounds the time a revocation goes unseen only if the revocation reached that map and a party other than the map's operator compares the map's signed heads.
 
 ### 15.7. Clocks
 
