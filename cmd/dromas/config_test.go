@@ -41,7 +41,7 @@ func cleanEnv(t *testing.T) string {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
-	for _, v := range []string{"XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "DROMAS_CONFIG", "DROMAS_PROFILE", "DROMAS_SERVER_URL"} {
+	for _, v := range []string{"XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "DROMAS_CONFIG", "DROMAS_PROFILE", "DROMAS_SERVER_URL", "DROMAS_CA_FILE"} {
 		t.Setenv(v, "")
 	}
 	return home
@@ -496,7 +496,8 @@ func TestInitWritesItsFlagsToTheFileItMakes(t *testing.T) {
 	cleanEnv(t)
 	srv := fakeserver.New(t, time.Now)
 	inbox := filepath.Join(t.TempDir(), "agent-inbox")
-	if err := do(t.Context(), "init", []string{"--profile", "bot", "--server", srv.URL, "--inbox-dir", inbox, "--prekey-lifetime", "2d"}, nil, io.Discard, io.Discard); err != nil {
+	ca := writeCA(t, filepath.Join(t.TempDir(), "ca.pem"), someCert(t))
+	if err := do(t.Context(), "init", []string{"--profile", "bot", "--server", srv.URL, "--inbox-dir", inbox, "--prekey-lifetime", "2d", "--ca-file", ca}, nil, io.Discard, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	var out bytes.Buffer
@@ -509,7 +510,7 @@ func TestInitWritesItsFlagsToTheFileItMakes(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	for key, want := range map[string]string{"server": srv.URL, "inbox-dir": inbox, "prekey-lifetime": "2d"} {
+	for key, want := range map[string]string{"server": srv.URL, "inbox-dir": inbox, "prekey-lifetime": "2d", "ca-file": ca} {
 		if v := got.Values[key]; v.Value != want || v.From != "file" {
 			t.Errorf("%s: %+v", key, v)
 		}

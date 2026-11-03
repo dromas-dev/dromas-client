@@ -8,6 +8,7 @@ import (
 	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
@@ -65,6 +66,15 @@ type Options struct {
 	// those bounds is added. The mailbox uses a copy of it that follows no
 	// redirect ([followNone]).
 	HTTPClient *http.Client
+	// RootCAs, if not nil, is the only set of certificates the server's TLS
+	// certificate may chain to, in place of the system's CAs. So the client
+	// reaches a server behind a private CA, and refuses a TLS-inspecting proxy
+	// whose CA the system trusts before any pass is sent. [ReadCAFile] reads
+	// a set from a file. crypto/tls holds a TLS session resumed from a ticket
+	// to the same set. RootCAs sets the default HTTP client's CAs only, so
+	// Open and Init return an error when RootCAs and HTTPClient are both set:
+	// the transport of a client given here sets its own CAs.
+	RootCAs *x509.CertPool
 	// Now is the clock; time.Now if nil.
 	Now func() time.Time
 	// IdentityType is the type of identity key Init makes for a new mailbox:
@@ -226,11 +236,15 @@ func newMailbox(dir string, opt Options) (*Mailbox, error) {
 	if err := checkServerURL(b.base); err != nil {
 		return nil, err
 	}
+	if opt.RootCAs != nil && opt.HTTPClient != nil {
+		return nil, errors.New("RootCAs sets the default HTTP client's CAs, and an HTTPClient given says its own: set the CAs in its transport")
+	}
 	if b.identityType != "" && !slices.Contains(protocol.IdentityTypes(), b.identityType) {
 		return nil, fmt.Errorf("this client makes no identity key of type %q: %s", b.identityType, strings.Join(protocol.IdentityTypes(), " or "))
 	}
 	if b.http == nil {
 		t := defaultTransport(&b.holding)
+		t.TLSClientConfig.RootCAs = opt.RootCAs
 		if dir != "" {
 			t.TLSClientConfig.ClientSessionCache = newTicketCache(t.TLSClientConfig.ClientSessionCache, b.path(ticketFile), b.base)
 		}
