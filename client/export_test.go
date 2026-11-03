@@ -37,6 +37,18 @@ func HealthCheck() (after, wait time.Duration) { return healthCheckAfter, health
 // CheckKeyFile is checkKeyFile, for a test of what it refuses.
 func CheckKeyFile(path string) error { return checkKeyFile(path) }
 
+// CheckPrivateFile is checkPrivateFile, for a test of what it refuses.
+func CheckPrivateFile(path string) error { return checkPrivateFile(path) }
+
+// PrivateFiles are the base directory's files judged at every open, read from
+// baseFiles and publicFiles.
+func PrivateFiles() []string {
+	return slices.DeleteFunc(slices.Clone(baseFiles), func(f string) bool { return slices.Contains(publicFiles, f) })
+}
+
+// PublicFiles are the base directory's files no open judges.
+func PublicFiles() []string { return publicFiles }
+
 // NewKeyTemp is newKeyTemp.
 var NewKeyTemp = newKeyTemp
 

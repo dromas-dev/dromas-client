@@ -393,6 +393,11 @@ func (b *Mailbox) Link() string { return b.base + protocol.LinkPath + b.Address(
 // default port is the same server's.
 func (b *Mailbox) Destination(s string) (protocol.Address, error) {
 	if aliasGrammar.MatchString(s) {
+		// No command holds the mailbox here, so no open of the state file judged
+		// the aliases file first.
+		if err := b.judgeFiles(); err != nil {
+			return protocol.Address{}, err
+		}
 		return b.alias(s)
 	}
 	if !strings.Contains(s, "://") {

@@ -23,6 +23,24 @@ func checkKeyFile(path string) error {
 	return nil
 }
 
+// checkPrivateFile refuses a private file of the mailbox's that others can reach
+// or another user owns (judgeFiles).
+func checkPrivateFile(path string) error { return checkPrivateFileAs(path, os.Getuid()) }
+
+func checkPrivateFileAs(path string, me int) error {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	if m := fi.Mode().Perm(); m&0o077 != 0 {
+		return fmt.Errorf("the mailbox's file %s is accessible by others (mode %04o), and it is private as a key is. Run: chmod 600 %q", path, m, path)
+	}
+	if st, ok := fi.Sys().(*syscall.Stat_t); ok && st.Uid != 0 && int64(st.Uid) != int64(me) {
+		return fmt.Errorf("the mailbox's file %s is owned by another user (uid %d), who can read and change it: chown it to yourself if you made it, and otherwise delete it", path, st.Uid)
+	}
+	return nil
+}
+
 // CheckConfigFile refuses a config file others can write, as ssh_config(5)
 // does: whoever can write it says where the mailbox's keys are and which
 // server it calls. Its owner can, whatever its mode says, so one who is neither

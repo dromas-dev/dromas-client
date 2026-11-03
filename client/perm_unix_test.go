@@ -5,6 +5,7 @@ package client_test
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"testing"
 )
 
@@ -32,3 +33,22 @@ func widen(t *testing.T, dir string) {
 		t.Fatal(err)
 	}
 }
+
+// openFile gives others read.
+func openFile(t *testing.T, path string) {
+	t.Helper()
+	if err := os.Chmod(path, 0o644); err != nil { //nolint:gosec // open on purpose
+		t.Fatal(err)
+	}
+}
+
+// runFix runs the line a refusal gives, as a person's shell would.
+func runFix(t *testing.T, line string) {
+	t.Helper()
+	if out, err := exec.Command("sh", "-c", line).CombinedOutput(); err != nil { //nolint:gosec // the client's own words, of the test's own file
+		t.Fatalf("%s: %v: %s", line, err, out)
+	}
+}
+
+// fixWord is what a refusal of an open file names.
+const fixWord = "chmod"
