@@ -359,7 +359,8 @@ address-form = %s"d"   ; the one form this version defines
 An address is shared as the link `https://<server>/to/<address>`.
 
 - A server MUST serve a page at that link for exactly an `address` (Section 4.2), and `404` for any other path. The page consists of fixed text, the address, and the server's own link to the address. The page never contains text that a mailbox supplied. The server sends the page with `Referrer-Policy: no-referrer` and `X-Robots-Tag: noindex`. The server ignores a query on the link.
-- A client given a link MUST read the address from the link's path, MUST NOT request the page, and MUST refuse a link whose server name (Section 8) is not the name of the client's server.
+- A client given a link MUST read the address from the link's path, and MUST NOT request the page.
+- A client MUST refuse a link whose scheme or server name (Section 8) is not that of the client's server URL, a link with user information, and an `https` link with a port of 80.
 
 ## 5. Signers
 
@@ -453,7 +454,7 @@ bech32-char      = "0" / %x32-39 / %x61 / %x63-68 / %x6A-6E / %x70-7A
 ```
 
 - **Rank:** the rank of the prekey statement's signer (Section 5). The rank is `0` when the identity signs. The rank is the certificate serial when a working key signs under a certificate.
-  - A verifier reads the rank of the signer from the signature (Section 5).
+  - A verifier reads the rank of the signer from the signature's signing key (Sections 3.2, 5).
   - A verifier MUST refuse a prekey statement whose rank differs from the rank of that signer. Such a prekey statement is invalid.
 - **Serial:** the prekey serial, a serial (Section 2.2). Under one signer, each prekey statement's prekey serial is higher than the previous one's.
 - **Key:** an age recipient. The recipient's Bech32 human-readable part, before the last `1`, names the key's type (BIP 173). The key is written as age writes a recipient: of any length, with a valid checksum, and with the data in whole bytes.
@@ -505,7 +506,7 @@ server-port    = %x31-39 *4DIGIT   ; no leading zero, at most 65535,
   - The server name's host is either a name of DNS labels (RFC 1123 §2.1), including an IPv4 address, or an IPv6 address in brackets.
   - Anything else that RFC 3986's `host` allows is not a server name: IPvFuture, a zone, percent-encoding, or any other character.
   - For example, `https://dromas.dev:443` and `https://dromas.dev` both have the server name `dromas.dev`. `http://127.0.0.1:80` and `http://127.0.0.1` both have the server name `127.0.0.1`. `http://127.0.0.1:8080` has the server name `127.0.0.1:8080`.
-- **A server MUST write the `Host` of a request the same way, and drop a port of 443 and a port of 80 alike, so that checking a pass never depends on the scheme of the request.**
+- **A server MUST write the `Host` of a request the same way, and drop a port of 443 and a port of 80 alike, so that checking a pass never depends on the scheme of the request.** The server reads the pass's server name from the request's `Host`, written that way.
 - **A client writes the pass as the value of one `Authorization` line, in the form `pass-authorization`.** In that value, the signature is the base64 of the armoured signature. A request with two `Authorization` lines carries no pass.
 
   ```abnf
