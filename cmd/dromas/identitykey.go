@@ -253,7 +253,7 @@ shell's.`,
 			if err := e.out(line("agent", "socket", socket, "command", shellLine(nil, "ssh-agent", args...))); err != nil {
 				return err
 			}
-			cmd := exec.CommandContext(c.Context(), "ssh-agent", args...)
+			cmd := exec.CommandContext(c.Context(), "ssh-agent", args...) //nolint:gosec // stock ssh-agent at the socket its owner set
 			if err := cmd.Run(); err != nil {
 				return fmt.Errorf("ssh-agent ended: %w", err)
 			}
@@ -300,7 +300,7 @@ renews nothing, but in a command run with --askpass or at a terminal.`,
 			if err := e.out(line("agent_add", "socket", socket, "identity_file", file, "command", shellLine(env, "ssh-add", args...))); err != nil {
 				return err
 			}
-			cmd := exec.CommandContext(c.Context(), "ssh-add", args...)
+			cmd := exec.CommandContext(c.Context(), "ssh-add", args...) //nolint:gosec // stock ssh-add on the mailbox's own key file
 			// ssh-add reads a passphrase from the terminal itself, and what it
 			// prints is its own: neither stream is this client's.
 			cmd.Env = append(os.Environ(), env...)

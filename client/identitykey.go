@@ -56,7 +56,7 @@ type unlocking struct {
 // agent, from identity.pub.
 func (b *Mailbox) identityPublicKey() (ssh.PublicKey, error) {
 	file := b.path("identity")
-	pemBytes, err := os.ReadFile(file)
+	pemBytes, err := os.ReadFile(file) //nolint:gosec // the mailbox's own identity key
 	if errors.Is(err, fs.ErrNotExist) {
 		if pub, perr := readPublicKey(b.path("identity.pub")); perr == nil {
 			return pub, nil
