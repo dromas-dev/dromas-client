@@ -343,15 +343,20 @@ func CheckServerURL(s string) error { return checkServerURL(s) }
 // §11.1), and no server is there.
 func checkServerURL(s string) error {
 	u, err := url.Parse(s)
-	if err == nil && u.Scheme == "https" {
-		if port, err := strconv.ParseUint(u.Port(), 10, 16); err == nil && port == 80 {
-			return fmt.Errorf("%.80q is not a server this client calls: https is never on port 80", s)
-		}
+	if err == nil && httpsOnPort80(u) {
+		return fmt.Errorf("%.80q is not a server this client calls: https is never on port 80", s)
 	}
 	if err == nil && u.Host != "" && (u.Scheme == "https" || u.Scheme == "http" && onThisMachine(u.Hostname())) {
 		return nil
 	}
 	return fmt.Errorf("%.80q is not a server this client calls: one is https, or http only to this machine, by its address (127.0.0.0/8, ::1)", s)
+}
+
+// httpsOnPort80 reports whether u is https on port 80, whose server name would
+// drop the port (PROTOCOL.md §8, §11.1).
+func httpsOnPort80(u *url.URL) bool {
+	port, err := strconv.ParseUint(u.Port(), 10, 16)
+	return u.Scheme == "https" && err == nil && port == 80
 }
 
 // onThisMachine reports whether host is this machine's loopback, written as
@@ -401,8 +406,9 @@ func (b *Mailbox) Destination(s string) (protocol.Address, error) {
 	return protocol.Address{}, refuse("not an address, a link to one, or an alias: %s", s)
 }
 
-// ownLink reports whether a link is an http or https URL whose server name is
-// this mailbox's server's.
+// ownLink reports whether a link is this mailbox's server's: its server name is
+// the server's, its scheme is the base URL's, it has no user information, and
+// it is no form checkServerURL refuses for its port (https on port 80).
 func (b *Mailbox) ownLink(link string) bool {
 	own, err := b.serverName()
 	if err != nil {
@@ -413,7 +419,11 @@ func (b *Mailbox) ownLink(link string) bool {
 		return false
 	}
 	u, err := url.Parse(link)
-	return err == nil && (u.Scheme == "https" || u.Scheme == "http")
+	if err != nil || u.User != nil || httpsOnPort80(u) {
+		return false
+	}
+	base, err := url.Parse(b.base)
+	return err == nil && u.Scheme == base.Scheme
 }
 
 // Identity returns the mailbox's identity.
