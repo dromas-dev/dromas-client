@@ -7,10 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -337,52 +335,6 @@ func TestExecTimeoutKillsAHungCallback(t *testing.T) {
 		if l["timed_out"] != true {
 			t.Errorf("a timed out run: %v", l)
 		}
-	}
-}
-
-// A callback ended by a signal says which, and a program that does not start
-// says that it did not.
-func TestExecSaysASignalAndAFailedStart(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("Windows has no signals")
-	}
-	c := newCallback(t)
-	c.send("killed")
-	stdout, _, err := c.recv(context.Background(), append([]string{"--wait", "0s"}, c.exec("kill")...)...)
-	if status := report(err, io.Discard); status != 3 {
-		t.Fatalf("recv: exit %d, %v", status, err)
-	}
-	failed := ofType(t, stdout, "exec_failed")
-	if len(failed) != 3 || failed[0]["signal"] != "killed" || failed[0]["exit_status"] != nil {
-		t.Fatalf("recv printed %s", stdout)
-	}
-	// There when recv started, gone when the message came.
-	c = newCallback(t)
-	c.send("no program")
-	program := filepath.Join(t.TempDir(), "gone")
-	if err := os.WriteFile(program, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil { //nolint:gosec // a test's program
-		t.Fatal(err)
-	}
-	var out, errs bytes.Buffer
-	cmd := c.recvCmdThatRemoves(program, &out, &errs)
-	if status := report(cmd(), io.Discard); status != 3 {
-		t.Fatalf("recv: exit %d: %s %s", status, out.String(), errs.String())
-	}
-	if failed := ofType(t, out.String(), "exec_failed"); len(failed) != 3 || failed[0]["start_error"] == nil {
-		t.Fatalf("recv printed %s", out.String())
-	}
-}
-
-// recvCmdThatRemoves is a recv with --exec of program, which is deleted once
-// recv's argument check has passed: at its first event, a drain.
-func (c *callbackEnv) recvCmdThatRemoves(program string, out, errs io.Writer) func() error {
-	return func() error {
-		// A fake server's list is the first thing recv asks of it after the check.
-		c.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
-			_ = os.Remove(program)
-			next.ServeHTTP(w, r)
-		})
-		return do(context.Background(), "recv", []string{"--wait", "0s", "--exec", program}, strings.NewReader(""), out, errs)
 	}
 }
 

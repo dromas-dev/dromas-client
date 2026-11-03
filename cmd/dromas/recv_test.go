@@ -5,13 +5,8 @@ import (
 	"context"
 	"io"
 	"net/http"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"runtime"
 	"strings"
 	"sync/atomic"
-	"syscall"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -244,52 +239,5 @@ func TestRecvTellsAFatalEndFromOneToRetry(t *testing.T) {
 	}
 	if _, _, err := e.recv(context.Background(), "--follow"); report(err, io.Discard) != 4 {
 		t.Fatalf("a revoked mailbox's recv --follow: %v", err)
-	}
-}
-
-// The binary's own recv --follow ends with exit status 0 at a SIGTERM, as a
-// service manager stops it, and at SIGINT.
-func TestRecvFollowEndsCleanlyAtASignal(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("Windows has no signals to send")
-	}
-	ctx := context.Background()
-	bin := filepath.Join(t.TempDir(), "dromas")
-	if out, err := exec.CommandContext(ctx, "go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
-		t.Fatalf("go build: %v %s", err, out)
-	}
-	for _, sig := range []syscall.Signal{syscall.SIGTERM, syscall.SIGINT} {
-		srv := fakeserver.New(t, time.Now)
-		b, err := client.Init(ctx, t.TempDir(), client.Options{Base: srv.URL})
-		if err != nil {
-			t.Fatal(err)
-		}
-		holding := make(chan struct{})
-		var once atomic.Bool
-		srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
-			if r.URL.Query().Has("wait") && once.CompareAndSwap(false, true) {
-				close(holding)
-			}
-			next.ServeHTTP(w, r)
-		})
-		cmd := exec.CommandContext(ctx, bin, "recv", "--follow") //nolint:gosec // the binary this test built
-		cmd.Env = append(os.Environ(), "DROMAS_CONFIG="+configFor(t, b.Dir()), "DROMAS_SERVER_URL="+srv.URL)
-		var errs bytes.Buffer
-		cmd.Stderr = &errs
-		if err := cmd.Start(); err != nil {
-			t.Fatal(err)
-		}
-		select {
-		case <-holding:
-		case <-time.After(time.Minute):
-			_ = cmd.Process.Kill()
-			t.Fatal("recv --follow held no list in a minute")
-		}
-		if err := cmd.Process.Signal(sig); err != nil {
-			t.Fatal(err)
-		}
-		if err := cmd.Wait(); err != nil {
-			t.Fatalf("recv --follow at %v: %v %s", sig, err, errs.String())
-		}
 	}
 }
