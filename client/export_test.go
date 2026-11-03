@@ -520,3 +520,13 @@ func ForgetAdoption(t *testing.T, b *Mailbox) {
 		t.Fatal(err)
 	}
 }
+
+// Statements is the serial of every statement b's state file records.
+func Statements(t *testing.T, b *Mailbox) []uint64 {
+	t.Helper()
+	ns, err := b.prekeys()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ns
+}

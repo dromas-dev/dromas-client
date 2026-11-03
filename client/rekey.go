@@ -46,7 +46,31 @@ import (
 // (PROTOCOL.md §12.4): no certificate of its own is in doubt there. A prekey with an error is one the server took, and a fault
 // of this mailbox after that.
 func (b *Mailbox) Rekey(ctx context.Context) (*protocol.Prekey, error) {
-	return locked(ctx, b, func() (*protocol.Prekey, error) { return b.rekeyAdopting(ctx) })
+	return locked(ctx, b, func() (*protocol.Prekey, error) {
+		p, err := b.rekeyAdopting(ctx)
+		if p != nil {
+			err = errors.Join(err, b.forgetLost())
+		}
+		return p, err
+	})
+}
+
+// forgetLost deletes the record of every prekey whose key file is missing
+// (lostPrekeys), once [Mailbox.Rekey] has a new prekey taken: Rekey is the
+// owner's deliberate recovery, so its records do not stop every later drain, and
+// recv refuses and acks what was sealed to those keys. A renewal not taken
+// forgets nothing, and recv goes on stopping.
+func (b *Mailbox) forgetLost() error {
+	lost, err := b.lostPrekeys()
+	if err != nil {
+		return err
+	}
+	for _, n := range lost {
+		if err := b.removePrekey(n); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // rekeyAdopting is rekey, after which a restore adopts the ACL its server
@@ -910,11 +934,32 @@ func (b *Mailbox) dropRetired(at taken) error {
 
 // removePrekey deletes a prekey's key and what the state file keeps of it, its
 // statement or its adoption, and the working key made with it, if a renewal the
-// server never took left one: the files first, then the record, so a crash in
-// between leaves a record of a key gone, which the next prune deletes again.
-// A crash never leaves a key no record names by this path. A state file lost
-// does, and the next one adopts it (adoptKeys).
+// server never took left one: a transaction marks a statement's record as going,
+// the files go, and a transaction deletes the record. So a crash in between
+// leaves a marked record, which the next prune finishes (finishGoing), and which
+// recv does not read as a key lost (prekeyKept); or an adoption of a key gone,
+// which the next prune deletes again. A crash never leaves a key no record names
+// by this path. A state file lost does, and the next one adopts it (adoptKeys).
 func (b *Mailbox) removePrekey(n uint64) error {
+	if err := b.update(func(s store) error {
+		raw := s.get(bucketPrekeys, serialKey(n))
+		if raw == nil {
+			return nil
+		}
+		var rec prekeyRecord
+		if err := protocol.Unmarshal(raw, &rec); err != nil {
+			return fmt.Errorf("the mailbox's state file keeps no statement of prekey %d it can read: %w", n, err)
+		}
+		rec.Going = true
+		raw, err := json.Marshal(rec)
+		if err != nil {
+			return err
+		}
+		return s.put(bucketPrekeys, serialKey(n), raw)
+	}); err != nil {
+		return err
+	}
+	step("prekey marked going")
 	if err := removeIfExists(b.path("prekeys", strconv.FormatUint(n, 10)+".agekey")); err != nil {
 		return err
 	}
@@ -923,12 +968,34 @@ func (b *Mailbox) removePrekey(n uint64) error {
 			return err
 		}
 	}
+	step("prekey files removed")
 	return b.update(func(s store) error {
 		if err := s.del(bucketAdopted, serialKey(n)); err != nil {
 			return err
 		}
 		return s.del(bucketPrekeys, serialKey(n))
 	})
+}
+
+// finishGoing finishes each removal a crash left: a record marked going, whose
+// deletion a confirmed reading already decided.
+func (b *Mailbox) finishGoing() error {
+	signed, err := b.prekeys()
+	if err != nil {
+		return err
+	}
+	for _, n := range signed {
+		rec, err := b.prekeyOf(n)
+		if err != nil {
+			continue
+		}
+		if rec != nil && rec.Going {
+			if err := b.removePrekey(n); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // prune deletes every retired prekey, and every key a renewal passed over,
@@ -941,8 +1008,14 @@ func (b *Mailbox) removePrekey(n uint64) error {
 // drain's list taken, and a renewal taken, each run it, by the date of the
 // pass that call carried: a clock far ahead is stopped at that pass, and one
 // that moves while the call is in flight deletes nothing by where it went.
-// It first deletes each adopted key whose time has come by at (adoptedKey.ends).
+// It first finishes a removal a crash left, then deletes each adopted key whose
+// time has come by at (adoptedKey.ends).
 func (b *Mailbox) prune(at taken) error {
+	if !at.None() {
+		if err := b.finishGoing(); err != nil {
+			return err
+		}
+	}
 	adopted, err := b.adopted()
 	if err != nil {
 		return err

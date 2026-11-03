@@ -970,18 +970,45 @@ func (b *Mailbox) keepETag(list *protocol.MessageList, tag string) error {
 	})
 }
 
-// prekeyKept refuses a mailbox whose state file records a prekey it published that
-// is not in its rotating keys' directory: rotating-keys-dir now names another
-// place, or the keys are lost. Receive stops there, ahead of the renewal it would
-// otherwise make, which would hide it while the mail sealed to the missing keys
-// was refused. [Mailbox.Rekey] is the deliberate recovery.
+// prekeyKept refuses a mailbox whose state file records a prekey whose key is not
+// in its rotating keys' directory, with no mark that the mailbox deleted it
+// (removePrekey): rotating-keys-dir now names another place, or the keys are lost.
+// Receive stops there, ahead of the renewal it would otherwise make, which would
+// hide it while the messages sealed to the missing key were refused and acked.
+// [Mailbox.Rekey] is the deliberate recovery. A statement the mailbox never saw
+// published stops it too, because a mailbox cannot know a statement was never
+// published: the answer to its upload may be what was lost, and senders may have
+// sealed to it.
 func (b *Mailbox) prekeyKept() error {
-	serial, err := b.publishedSerial()
-	if err != nil || serial == 0 {
+	lost, err := b.lostPrekeys()
+	if err != nil || len(lost) == 0 {
 		return err
 	}
-	if name := b.path("prekeys", strconv.FormatUint(serial, 10)+".agekey"); !exists(name) {
-		return refuse("this mailbox's state file records prekey %d, which is not at %s: put rotating-keys-dir right, or run dromas prekey renew to publish a new prekey, and mail sealed to the missing one is lost", serial, name)
+	var missing []string
+	for _, n := range lost {
+		missing = append(missing, fmt.Sprintf("prekey %d, which is not at %s", n, b.path("prekeys", strconv.FormatUint(n, 10)+".agekey")))
 	}
-	return nil
+	return refuse("this mailbox's state file records %s: put rotating-keys-dir right, or run dromas prekey renew, which publishes a new prekey and forgets each one missing, after which recv refuses and acks every message sealed to it, and those messages are lost", strings.Join(missing, ", and "))
+}
+
+// lostPrekeys is the serial of every prekey the state file records with no mark
+// that it is going, whose key file is not there, lowest first.
+func (b *Mailbox) lostPrekeys() (lost []uint64, err error) {
+	err = b.view(func(s store) error {
+		return s.each(bucketPrekeys, func(k, raw []byte) error {
+			n, err := keySerial(k)
+			if err != nil {
+				return err
+			}
+			var rec prekeyRecord
+			if err := protocol.Unmarshal(raw, &rec); err != nil {
+				return fmt.Errorf("the mailbox's state file keeps no statement of prekey %d it can read: %w", n, err)
+			}
+			if !rec.Going && !exists(b.path("prekeys", strconv.FormatUint(n, 10)+".agekey")) {
+				lost = append(lost, n)
+			}
+			return nil
+		})
+	})
+	return lost, err
 }
