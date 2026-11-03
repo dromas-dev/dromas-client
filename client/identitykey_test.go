@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -142,7 +143,8 @@ func TestAMailboxWhoseKeyIsInItsAgentSignsThroughIt(t *testing.T) {
 }
 
 // Without the agent's key, the same mailbox signs nothing, and says why in its
-// own code, identity_locked; status says the key is nowhere.
+// own code, identity_locked; status says the key is nowhere, and needs a look
+// only once a renewal is due.
 func TestAMailboxWithNoKeyItCanHaveIsLocked(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
@@ -172,9 +174,17 @@ func TestAMailboxWithNoKeyItCanHaveIsLocked(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if st.IdentityKey != client.KeyNone || st.PrekeySerial != before.PrekeySerial || len(st.Attention) == 0 {
+		if st.IdentityKey != client.KeyNone || st.PrekeySerial != before.PrekeySerial || len(st.Attention) != 0 {
 			t.Errorf("%s: status after a locked renewal: %+v", name, st)
 		}
+	}
+	e.clock.Add(25 * time.Hour)
+	st, err := reopen(t, b, e.opts()).Status(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(st.Attention) != 1 || !strings.Contains(st.Attention[0], "due for renewal") {
+		t.Errorf("status of a locked mailbox due for renewal: %q", st.Attention)
 	}
 }
 
