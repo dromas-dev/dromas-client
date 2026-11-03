@@ -45,6 +45,12 @@ case $(uname -s) in
   # are held to sha256sum on every other runner.
   OpenBSD | NetBSD | DragonFly) allowed+=(-e 'sha256sum is not installed') ;;
 esac
+case $(uname -s) in
+  # /dev/shm, which TestAllowingASenderCrossesFilesystems writes to, is Linux's
+  # second filesystem, and that test is held there alone.
+  Linux) ;;
+  *) allowed+=(-e 'no second filesystem to write to at /dev/shm') ;;
+esac
 
 pkgs=$(go list ./...)
 if [ -n "$nosh" ]; then

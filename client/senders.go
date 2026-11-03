@@ -390,6 +390,7 @@ func (b *Mailbox) allow(a protocol.Address) ([]Delivery, error) {
 	if _, err := b.addTo("allowed", a); err != nil {
 		return nil, err
 	}
+	step("sender allowed")
 	ms, err := b.keptMessages("held")
 	if err != nil {
 		return nil, err
@@ -409,9 +410,11 @@ func (b *Mailbox) allow(a protocol.Address) ([]Delivery, error) {
 		if err := writeFile(b.path("inbox", m.ID+".json"), raw); err != nil {
 			return moved, err
 		}
+		step("held message written")
 		if err := os.Remove(b.path("held", m.ID+".json")); err != nil {
 			return moved, err
 		}
+		step("held message removed")
 		moved = append(moved, Delivery{ID: m.ID, Envelope: m.Env, Line: m.Line})
 	}
 	if len(moved) == 0 {

@@ -151,8 +151,11 @@ type NotMade struct {
 	// RenewedAbove is the serial of the statement of this mailbox's own its
 	// server took since that read, which a server takes only above the one it
 	// held, and zero, and not written, while it has taken none (recordTaken).
-	// A renewal takes the address back, never the identity, so the
-	// recommendation stands (#599).
+	// A renewal takes the address back, never the identity, so Words goes on
+	// recommending revoking the address while this record is kept (#599). The
+	// mailbox's next read of itself that serves its own deletes this record,
+	// whether or not the address is revoked (noteServed), and every renewal
+	// makes that read.
 	RenewedAbove uint64 `json:"renewed_above,omitempty"`
 }
 

@@ -181,6 +181,11 @@ func Open(dir string, opt Options) (*Mailbox, error) {
 	if err != nil {
 		return nil, err
 	}
+	if opt.Layout == (Layout{}) {
+		if err := CheckLayout(dir, opt.Layout); err != nil {
+			return nil, err
+		}
+	}
 	if err := b.loadIdentity(); err != nil {
 		return nil, err
 	}
@@ -194,8 +199,8 @@ func Open(dir string, opt Options) (*Mailbox, error) {
 // follows no redirect (followNone).
 func newMailbox(dir string, opt Options) (*Mailbox, error) {
 	// No directory is a mailbox that keeps nothing ([Publish], [Revoke]). The
-	// default layout's parts are apart but for a link made inside it, which Init
-	// and the command line check for, so only its base directory is read.
+	// default layout's parts are apart but for a link made inside it, which Open
+	// and Init check for, so only its base directory is read here.
 	switch {
 	case dir == "":
 	case opt.Layout == (Layout{}):
@@ -759,9 +764,9 @@ func (b *Mailbox) loadIdentity() error {
 
 // prekeyRecord is a prekey statement this mailbox signed, as the prekeys bucket
 // keeps it by its serial: the statement, its signature, and when it was
-// signed, which is what the mailbox times its renewals and the early deletion of
-// its retired prekeys by ([Mailbox.made]; PROTOCOL.md §12.4), in one value, so the
-// three are never out of line (#192); and once its server took it as this
+// signed, which is what the mailbox times its renewals by ([Mailbox.made];
+// PROTOCOL.md §12.4), in one value, so the three are never out of line (#192);
+// and once its server took it as this
 // mailbox's newest, the reading it took it at, by the pass that upload carried
 // (recordTaken), or nothing where the mailbox learnt of the take from a read of
 // itself (noteServed). Its key is prekeys/<serial>.agekey.

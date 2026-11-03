@@ -165,7 +165,10 @@ as its server takes one, and the working key signs: for good, since its
 server and its correspondents then take no statement its identity signs. Run
 with an identity file and nothing else of the mailbox, init restores that
 mailbox, under a certificate where its server serves a statement under one or
---offline asks. A profile with no config file gets one, each path in full.`,
+--offline asks. A sender that saw this address under a certificate refuses one
+its identity signs: where the server has forgotten a mailbox that was under
+certificates, run dromas cert switch <address> next. A profile with no config
+file gets one, each path in full.`,
 		checked(nargs(0, 0), func(c *cobra.Command, _ []string) error {
 			if idType != "" && !slices.Contains(protocol.IdentityTypes(), idType) {
 				return wrong(c, "%s makes an identity of the key type %s, and %q is not one", c.CommandPath(), strings.Join(protocol.IdentityTypes(), " or "), idType)

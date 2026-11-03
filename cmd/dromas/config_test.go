@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/dromas-dev/dromas-client/client"
@@ -219,6 +220,26 @@ func TestAConfigThatIsWrongIsFatal(t *testing.T) {
 	}
 	if es, _ := os.ReadDir(root); len(es) != 0 {
 		t.Errorf("a config that is wrong made %v", es)
+	}
+}
+
+// A fault of the disk on a part of a mailbox says nothing of the config: the
+// command fails with exit status 1 and an error line, and no config_error.
+func TestAFaultOfTheDiskIsNoConfigError(t *testing.T) {
+	cleanEnv(t)
+	checkLayout = func(string, client.Layout) error {
+		return &client.LayoutFault{Part: "held/", Path: "held", Err: syscall.ESTALE}
+	}
+	t.Cleanup(func() { checkLayout = client.CheckLayout })
+	root := t.TempDir()
+	file := writeConfig(t, "base-dir = "+tomlString(filepath.Join(root, "b"))+"\nmail-dir = "+tomlString(filepath.Join(root, "m"))+"\n")
+	var stderr bytes.Buffer
+	err := do(t.Context(), "status", []string{"--config", file}, nil, io.Discard, &stderr)
+	if !errors.Is(err, syscall.ESTALE) {
+		t.Fatalf("%#v", err)
+	}
+	if got := report(err, &stderr); got != 1 || strings.Contains(stderr.String(), "config_error") || !strings.Contains(stderr.String(), `"type":"error"`) {
+		t.Errorf("exit %d, %s", got, stderr.String())
 	}
 }
 

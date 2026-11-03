@@ -6,8 +6,10 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
+	"syscall"
 )
 
 // Layout says where the parts of a mailbox are that need not be under its
@@ -110,19 +112,36 @@ func layoutParts(dir string, l Layout) []layoutPart {
 	return parts
 }
 
+// LayoutFault is a fault of the disk that [CheckLayout] met while it read where
+// a part of a mailbox is, such as EIO or ESTALE. The fault says nothing of the
+// layout, which may be right.
+type LayoutFault struct {
+	Part, Path string
+	Err        error
+}
+
+func (f *LayoutFault) Error() string { return fmt.Sprintf("%s, %s: %v", f.Part, f.Path, f.Err) }
+
+// Unwrap gives the fault.
+func (f *LayoutFault) Unwrap() error { return f.Err }
+
 // CheckLayout refuses a layout whose parts overlap, whose directory is a file
 // or file a directory, or whose base directory is on a network filesystem, as
 // far as the system says. Places are compared where they really are, through
 // symlinks, and by [os.SameFile] once they exist, so neither a link nor a
-// filesystem that ignores case hides an overlap.
+// filesystem that ignores case hides an overlap. A fault of the disk is a
+// [LayoutFault], and no refusal.
 func CheckLayout(dir string, l Layout) error {
 	parts := layoutParts(dir, l.resolved(dir))
 	seen := places{}
 	for i := range parts {
 		p := &parts[i]
 		where, err := realPath(p.path)
-		if err != nil {
+		if err != nil && pathIsWrong(err) {
 			return fmt.Errorf("%s, %s: %w", p.name, p.path, err)
+		}
+		if err != nil {
+			return &LayoutFault{Part: p.name, Path: p.path, Err: err}
 		}
 		p.path = where
 		if fi := seen.stat(where); fi != nil && fi.IsDir() == p.file {
@@ -190,9 +209,40 @@ func (c places) inside(a, b string) bool {
 	}
 }
 
+// wrongPath are the errors a system gives of a path, whatever its disk does: the
+// path goes through a file, loops, is too long, or is no name a file can have.
+var wrongPath = []syscall.Errno{syscall.ENOTDIR, syscall.ELOOP, syscall.ENAMETOOLONG, syscall.EINVAL}
+
+// wrongPathOnWindows is wrongPath's other half, by their numbers, which mean
+// other things elsewhere: ERROR_INVALID_NAME, ERROR_BAD_PATHNAME,
+// ERROR_FILENAME_EXCED_RANGE and ERROR_DIRECTORY.
+var wrongPathOnWindows = []syscall.Errno{123, 161, 206, 267}
+
+// pathIsWrong reports whether err, from reading where a path is, is about the
+// path or this user's right to read along it: a config that names another path
+// answers either. Any other answer from the system is a fault of the disk.
+func pathIsWrong(err error) bool {
+	var errno syscall.Errno
+	if !errors.As(err, &errno) {
+		return true // links that loop: filepath.EvalSymlinks's own error
+	}
+	return errors.Is(err, fs.ErrPermission) || slices.Contains(wrongPath, errno) ||
+		runtime.GOOS == "windows" && slices.Contains(wrongPathOnWindows, errno)
+}
+
+// failPath is asked before each read of where a path is, and a read it fails
+// fails with its error: nil but in a test, which cannot make a disk fail
+// (SetPathFault).
+var failPath func() error
+
 // realPath is path made absolute, with the symlinks of as much of it as
 // exists followed.
 func realPath(path string) (string, error) {
+	if failPath != nil {
+		if err := failPath(); err != nil {
+			return "", err
+		}
+	}
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return "", err

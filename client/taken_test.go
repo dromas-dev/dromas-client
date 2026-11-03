@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/dromas-dev/dromas-client/client"
+	"github.com/dromas-dev/dromas-client/internal/forge"
 	"github.com/dromas-dev/dromas-client/protocol"
 )
 
@@ -196,6 +197,95 @@ func TestDropRetiredDeletesByNoReadingLaterThanTheLists(t *testing.T) {
 		if !kept {
 			t.Errorf("Receive's first reading %v ahead deleted a key retired 5 minutes before, which the list's reading keeps", ahead)
 		}
+	}
+}
+
+// A drain deletes by the date of its first list, which it read before anything
+// else: a later page's pass, dated by a clock that moved on, deletes nothing. The
+// next drain's first list carries the later date, and that one deletes the key.
+func TestADrainDeletesByTheDateOfItsFirstList(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	e := newEnv(t)
+	off := -9 * time.Minute // the mailbox's clock, apart from the server's
+	b, err := client.Init(ctx, t.TempDir(), e.skewed(&off))
+	if err != nil {
+		t.Fatal(err)
+	}
+	landAll(t, b)
+	a := e.mailbox()
+	retired := numberOf(t, b)
+	e.clock.Add(2 * time.Second)
+	if _, err := b.Rekey(ctx); err != nil {
+		t.Fatal(err)
+	}
+	send(t, a, b, "one")
+	send(t, a, b, "two")
+	e.srv.SetPage(1)
+	list := "/v1/" + b.Address().String() + "/messages"
+	var moved atomic.Bool
+	e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
+		next.ServeHTTP(w, r)
+		if r.Method == http.MethodGet && r.URL.Path == list && moved.CompareAndSwap(false, true) {
+			e.clock.Add(2 * time.Hour)
+		}
+	})
+	if res := receive(t, b); len(res.Delivered) != 2 {
+		t.Fatalf("the drain over two pages: %+v", res)
+	}
+	if !exists(prekeyFile(b, retired, ".agekey")) {
+		t.Error("the date of the last page's pass deleted a retired prekey that the first list's date keeps")
+	}
+	receive(t, b)
+	if exists(prekeyFile(b, retired, ".agekey")) {
+		t.Error("the next drain's first list, two hours after the renewal, left the retired prekey")
+	}
+}
+
+// A drain mended part way deletes by the first list of the drain after the renewal,
+// which is the drain that emptied the mailbox, and never by the date of the drain
+// the server refused. That list is two hours after the server took the newest
+// retired prekey, so the prekey older than it goes. It is under an hour after the
+// server took the renewal, so the newest retired prekey stays.
+func TestADrainMendedPartWayDeletesByTheListOfTheDrainAfterIt(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	e := newEnv(t)
+	off := -9 * time.Minute // the mailbox's clock, apart from the server's
+	b, err := client.Init(ctx, t.TempDir(), e.skewed(&off))
+	if err != nil {
+		t.Fatal(err)
+	}
+	landAll(t, b)
+	a := e.mailbox()
+	oldest := numberOf(t, b)
+	e.clock.Add(2 * time.Second)
+	if _, err := b.Rekey(ctx); err != nil {
+		t.Fatal(err)
+	}
+	newest := numberOf(t, b)
+	send(t, a, b, "one")
+	send(t, a, b, "two")
+	e.srv.SetPage(1)
+	list := "/v1/" + b.Address().String() + "/messages"
+	var refused atomic.Bool
+	e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
+		if r.Method == http.MethodGet && r.URL.Path == list && r.URL.Query().Get("cursor") != "" && refused.CompareAndSwap(false, true) {
+			e.clock.Add(2 * time.Hour)
+			forge.Refuse(w, protocol.CodeNoSuchMailbox)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+	res := receive(t, b)
+	if !refused.Load() || res.Renewed == nil || len(res.Delivered) != 2 {
+		t.Fatalf("the drain mended part way: %+v", res)
+	}
+	if exists(prekeyFile(b, oldest, ".agekey")) {
+		t.Error("the date of the refused drain kept a prekey the drain after the renewal deletes")
+	}
+	if !exists(prekeyFile(b, newest, ".agekey")) {
+		t.Error("the newest retired prekey went within an hour of the renewal that retired it")
 	}
 }
 

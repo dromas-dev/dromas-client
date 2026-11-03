@@ -6,12 +6,16 @@ import (
 	"path/filepath"
 )
 
+// filesystemAt is filesystemOf, but in a test of a network filesystem, which a
+// test cannot mount.
+var filesystemAt = filesystemOf
+
 // networkFilesystem is the name of the network filesystem the directory is
 // on, or of the nearest of its parents that exists, or "" where it is on none
 // or the system cannot say.
 func networkFilesystem(dir string) string {
 	for p := dir; ; p = filepath.Dir(p) {
-		name, err := filesystemOf(p)
+		name, err := filesystemAt(p)
 		if err == nil {
 			return name
 		}

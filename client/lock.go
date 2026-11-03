@@ -112,7 +112,7 @@ func (b *Mailbox) makeState() error {
 		return err
 	}
 	if err := os.Link(tmp.Name(), b.path("state")); err != nil && !errors.Is(err, fs.ErrExist) {
-		return err
+		return fmt.Errorf("the state file is made by a hard link, which base-dir's volume must keep: %w", err)
 	}
 	// The name it was made under goes before the directory is synced, so a
 	// cut after leaves no second link to the live file.

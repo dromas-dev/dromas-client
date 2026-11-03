@@ -94,19 +94,26 @@ func TestAConfigFileOthersCanWriteIsRefused(t *testing.T) {
 
 // inbox-dir on another filesystem than the rest of the mail: allowing a sender
 // moves its held mail there, where a rename cannot. Where this machine has no second
-// filesystem to write to, there is nothing to try.
+// filesystem to write to, there is nothing to try, and the test skips: every system
+// but Linux has none here, so scripts/check.sh's skip check fails a skip on Linux.
 func TestAllowingASenderCrossesFilesystems(t *testing.T) {
 	t.Parallel()
 	const other = "/dev/shm"
 	root := t.TempDir()
-	here, err1 := os.Stat(root)
-	there, err2 := os.Stat(other)
-	if err1 != nil || err2 != nil || here.Sys().(*syscall.Stat_t).Dev == there.Sys().(*syscall.Stat_t).Dev {
-		return
+	here, err := os.Stat(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	there, err := os.Stat(other)
+	if err != nil {
+		t.Skipf("no second filesystem to write to at %s: %v", other, err)
+	}
+	if here.Sys().(*syscall.Stat_t).Dev == there.Sys().(*syscall.Stat_t).Dev {
+		t.Skipf("no second filesystem to write to at %s: it is the temporary directory's", other)
 	}
 	inbox, err := os.MkdirTemp(other, "dromas-test-")
 	if err != nil {
-		return
+		t.Skipf("no second filesystem to write to at %s: %v", other, err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(inbox) })
 	e := newEnv(t)

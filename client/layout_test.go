@@ -2,10 +2,13 @@ package client_test
 
 import (
 	"bytes"
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -332,6 +335,84 @@ func TestTwoNamesOfOnePlaceAreOne(t *testing.T) {
 	}
 	if err := client.CheckLayout(base, client.Layout{IdentityFile: link}); err == nil {
 		t.Error("the address's other name was taken as the identity")
+	}
+}
+
+// A fault of the disk says nothing of a layout, so CheckLayout gives it as a
+// LayoutFault, which names the part it met the fault on. It runs alone, since
+// it sets where every read of a path goes.
+func TestAFaultOfTheDiskIsNoWrongLayout(t *testing.T) {
+	for _, fault := range []error{syscall.EIO, syscall.ESTALE, syscall.ETIMEDOUT, syscall.ENOTCONN} {
+		client.SetPathFault(t, func() error { return &fs.PathError{Op: "lstat", Path: "held", Err: fault} })
+		err := client.CheckLayout(t.TempDir(), client.Layout{})
+		var f *client.LayoutFault
+		if !errors.As(err, &f) || !errors.Is(err, fault) || f.Part == "" {
+			t.Errorf("%v: %#v", fault, err)
+		}
+	}
+}
+
+// A path that is itself wrong is a wrong layout whatever the disk does, and so is
+// one its user may not read along: neither is a fault of the disk. Some of these
+// are places that can be on some systems, so only that it is no fault is held.
+func TestAPathThatIsWrongIsNoFaultOfTheDisk(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	base := filepath.Join(root, "base")
+	file := filepath.Join(root, "a-file")
+	if err := os.WriteFile(file, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	shut := filepath.Join(root, "shut")
+	if err := os.Mkdir(shut, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(shut, 0o700) }) //nolint:gosec // back to what a temporary directory's removal needs
+	paths := map[string]string{
+		"through a file":         filepath.Join(file, "mail"),
+		"a name too long":        filepath.Join(root, strings.Repeat("n", 300)),
+		"a NUL":                  filepath.Join(root, "a\x00b"),
+		"a name Windows refuses": filepath.Join(root, "a<b"),
+		"a directory it may not": filepath.Join(shut, "mail"),
+	}
+	loop := filepath.Join(root, "loop")
+	if os.Symlink(loop+"-too", loop) == nil && os.Symlink(loop, loop+"-too") == nil { // Windows may not let this user make one
+		paths["links that loop"] = loop
+	}
+	for name, path := range paths {
+		var f *client.LayoutFault
+		if err := client.CheckLayout(base, client.Layout{Mail: path}); errors.As(err, &f) {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+}
+
+// Open holds the default layout's parts apart as it holds any layout's: a link
+// inside the base directory makes the mail and the rotating keys one place, and
+// Open refuses that before it reads the identity. A link to a place of its own
+// is the owner's to make, and Open takes it.
+func TestOpenRefusesADefaultLayoutWhosePartsALinkMakesOne(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	base := e.mailbox().Dir()
+	mail := filepath.Join(base, "mail")
+	if err := os.RemoveAll(mail); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(base, "keys"), mail); err != nil {
+		t.Skipf("this user may not make a symlink, as on Windows: %v", err)
+	}
+	if _, err := client.Open(base, e.opts()); err == nil || !strings.Contains(err.Error(), "mail-dir and rotating-keys-dir are one place") {
+		t.Errorf("mail is keys by a link: %v", err)
+	}
+	if err := os.Remove(mail); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(t.TempDir(), mail); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Open(base, e.opts()); err != nil {
+		t.Errorf("mail elsewhere by a link: %v", err)
 	}
 }
 

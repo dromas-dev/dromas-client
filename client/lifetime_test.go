@@ -16,9 +16,9 @@ import (
 // A mailbox's prekeys are valid for protocol.PrekeyLifetime, or for the shorter
 // lifetime its owner sets, down to client.MinPrekeyLifetime (PROTOCOL.md
 // §12.4). Each client
-// records when it signed a prekey, and the mailbox times its renewals and the
-// early deletion of its retired prekeys by that record, never by the
-// statement's not_after, which times a retired prekey's latest deletion.
+// records when it signed a prekey, and the mailbox times its renewals by that
+// record, never by the statement's not_after, which times a retired prekey's
+// latest deletion.
 
 // lifetimeOf sets b's prekey lifetime.
 func lifetimeOf(t *testing.T, b *client.Mailbox, d time.Duration) {
@@ -144,6 +144,38 @@ func TestALowerLifetimeHoldsFromTheNextReceive(t *testing.T) {
 	lifetimeOf(t, b, protocol.PrekeyLifetime)
 	if res := receive(t, b); res.Renewed != nil {
 		t.Fatal("a higher lifetime renewed at once")
+	}
+}
+
+// A lifetime raised while a short prekey is in use changes nothing of when that
+// prekey is renewed: at RenewAt of the lifetime it was made for, since it ends by
+// that one. The renewal is made for the raised lifetime.
+func TestARaisedLifetimeRenewsAShortPrekeyByItsOwnLifetime(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	e := newEnv(t)
+	off := -9 * time.Minute // the mailbox's clock, apart from the server's
+	o := e.skewed(&off)
+	b, err := client.Init(ctx, t.TempDir(), o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lifetimeOf(t, b, client.MinPrekeyLifetime)
+	if _, err := b.Rekey(ctx); err != nil {
+		t.Fatal(err)
+	}
+	lifetimeOf(t, b, protocol.PrekeyLifetime)
+	e.clock.Add(client.RenewAt(client.MinPrekeyLifetime))
+	if res := receive(t, b); res.Renewed != nil {
+		t.Fatalf("renewed a prekey RenewAt old, which it is to be older than: %+v", res.Renewed)
+	}
+	e.clock.Add(time.Second)
+	res := receive(t, b)
+	if res.Renewed == nil {
+		t.Fatal("a short prekey past RenewAt of its own lifetime was not renewed")
+	}
+	if want := o.Now().Add(protocol.PrekeyLifetime); !res.Renewed.NotAfter.Equal(want) {
+		t.Errorf("the renewal ends at %v, want %v", res.Renewed.NotAfter, want)
 	}
 }
 
@@ -343,5 +375,24 @@ func TestALowerLifetimeHoldsOverAWaitingRenewal(t *testing.T) {
 				t.Errorf("%s published a prekey made for %v after the lifetime was set to %v", via, life, client.MinPrekeyLifetime)
 			}
 		})
+	}
+}
+
+// One Receive drains for at most RecvWithin of the prekey in use where that is
+// shorter than the mailbox's bound, so a long drain leaves the next Receive time
+// to renew.
+func TestADrainOfAShortPrekeyLeavesTimeToRenew(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	b := e.mailbox()
+	if got := client.DrainBound(b); got != client.DefaultDrainTime {
+		t.Fatalf("at the default lifetime: %v", got)
+	}
+	lifetimeOf(t, b, client.MinPrekeyLifetime)
+	if _, err := b.Rekey(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := client.DrainBound(b), client.RecvWithin(client.MinPrekeyLifetime); got != want {
+		t.Fatalf("at the shortest lifetime: %v, want %v", got, want)
 	}
 }

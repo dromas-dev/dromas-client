@@ -13,15 +13,21 @@ func filesystemOf(dir string) (string, error) {
 	if err := syscall.Statfs(dir, &s); err != nil {
 		return "", err
 	}
-	b := make([]byte, 0, len(s.Fstypename))
-	for _, c := range s.Fstypename {
+	return networkFilesystemNamed(s.Fstypename), nil
+}
+
+// networkFilesystemNamed is the name in a statfs(2) f_fstypename where it names a
+// network filesystem, and "" otherwise.
+func networkFilesystemNamed(fstypename [16]int8) string {
+	b := make([]byte, 0, len(fstypename))
+	for _, c := range fstypename {
 		if c == 0 {
 			break
 		}
 		b = append(b, byte(c)) //nolint:gosec // an ASCII name
 	}
 	if name := string(b); darwinNetworkFilesystems[name] {
-		return name, nil
+		return name
 	}
-	return "", nil
+	return ""
 }
