@@ -197,8 +197,8 @@ func (b *Mailbox) replyWaits(peer protocol.Address, aclErr error) error {
 // again as a new ciphertext, which the server stores and counts again and
 // its reader drops by its msg_id (PROTOCOL.md §12.2). It tries every entry;
 // one that fails never stops the others, and the error names each that
-// failed. The server is asked about each recipient once, as a send asks
-// ([Mailbox.SendWith]).
+// failed. The server is asked about the recipient before each post, as a
+// send asks ([Mailbox.SendWith]).
 func (b *Mailbox) Flush(ctx context.Context) ([]*Sent, error) {
 	return lockedFinished(ctx, b, func() ([]*Sent, error) { return b.flush(ctx) })
 }
@@ -228,7 +228,8 @@ func (b *Mailbox) flush(ctx context.Context) ([]*Sent, error) {
 	}
 	var sent []*Sent
 	var errs []error
-	// The recipients this flush has asked the server about: one lookup each.
+	// The recipients the server has answered about in this flush. Each post
+	// reads its recipient's mailbox whatever is marked here (resolve).
 	asked := newLookups()
 	for _, n := range names {
 		stem := strings.TrimSuffix(n, ".P")
