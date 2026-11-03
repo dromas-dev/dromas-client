@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -131,6 +132,45 @@ func TestAdmitsTakesTheIdentityAndACertificateAboveTheRevocation(t *testing.T) {
 		if err := Admits(c.held, c.signer); !errors.Is(err, c.want) || (c.want == nil && err != nil) {
 			t.Errorf("%s: %v, want %v", c.name, err, c.want)
 		}
+	}
+}
+
+// A certificate's own signature is part of a signature's one form: Dearmor
+// refuses one with r not minimal, before anything asks whose certificate it is.
+func TestACertificatesOwnSignatureIsInItsOneForm(t *testing.T) {
+	t.Parallel()
+	b := p256Mailbox(t)
+	cert, err := NewCertificate(b.id, b.identity, b.work.PublicKey(), 3, time.Date(2026, 10, 31, 12, 0, 0, 0, time.UTC), testLifetime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signer, err := cert.Signer(b.work)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sig, err := Sign(signer, []byte("a statement\n"), "dromas-test-v1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	blob, err := Dearmor(sig)
+	if err != nil {
+		t.Fatalf("a certificate's own signature in its one form: %v", err)
+	}
+	c := cert.PublicKey().(*ssh.Certificate)
+	rs := wireReader(c.Signature.Blob)
+	r, okR := rs.string()
+	s, okS := rs.string()
+	if !okR || !okS {
+		t.Fatal("no r and s in the certificate's signature")
+	}
+	wide := *c
+	wide.Signature = &ssh.Signature{Format: c.Signature.Format, Blob: appendWireString(appendWireString(nil, append([]byte{0}, r...)), s)}
+	armored := Armor(rewrap(t, blob, wide.Marshal()))
+	if len(armored) > MaxSignature {
+		t.Fatalf("%d bytes is over the bound, which would refuse it for its length", len(armored))
+	}
+	if _, err := Dearmor(armored); err == nil || !strings.Contains(err.Error(), "one form") {
+		t.Errorf("r with a zero byte before it: %v", err)
 	}
 }
 

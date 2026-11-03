@@ -6,9 +6,11 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"errors"
+	"io"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/dromas-dev/dromas-client/sshsig"
 	"golang.org/x/crypto/ssh"
@@ -91,6 +93,59 @@ func TestRevokedCertificatesAreBuiltInOneForm(t *testing.T) {
 		if _, err := NewRevokedCertificates(a, through); !errors.Is(err, ErrRevokedCertificates) {
 			t.Errorf("through %d: built: %v", through, err)
 		}
+	}
+}
+
+// shortSigner signs as its identity does, again until r and s take at most width
+// bytes as an SSH signature's blob writes them, s the lower of s and n − s.
+type shortSigner struct {
+	ssh.Signer
+	width int
+}
+
+func (s shortSigner) Sign(rand io.Reader, data []byte) (*ssh.Signature, error) {
+	for {
+		sig, err := s.Signer.Sign(rand, data)
+		if err != nil {
+			return nil, err
+		}
+		if low := lowS(sig); len(low.Blob) <= s.width {
+			return low, nil
+		}
+	}
+}
+
+// A working key's signature is no revocation of its identity's certificates, by
+// a check of its own: the signature here is within the bound, in the one form and
+// good by VerifySigned, so only verifying under the identity's bare key refuses
+// it. The bound leaves room for one only under a P-256 identity whose certificate's
+// own r and s are short, at 70 bytes of blob, so the identity signs it until they are.
+func TestAWorkingKeysSignatureWithinTheBoundRevokesNoCertificates(t *testing.T) {
+	t.Parallel()
+	b := p256Mailbox(t)
+	now := time.Date(2026, 10, 13, 12, 0, 0, 0, time.UTC)
+	r, err := NewRevokedCertificates(b.id.Address(), 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cert, err := NewCertificate(b.id, shortSigner{b.identity, 70}, b.work.PublicKey(), 3, now, testLifetime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signer, err := cert.Signer(b.work)
+	if err != nil {
+		t.Fatal(err)
+	}
+	namespace := RevokedCertsNamespace(b.id.Address())
+	sig, err := Sign(signer, r.Statement(), namespace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := VerifySigned(b.id, r.Statement(), sig, namespace, now); err != nil {
+		t.Fatalf("the signature is to be good by every rule but whose it is: %v", err)
+	}
+	if got, err := VerifyRevokedCertificates(b.id.Address(), b.id.Document(), r.Statement(), sig); !errors.Is(err, ErrRevokedCertificates) {
+		t.Errorf("a working key's signature, taken as a revocation of its certificates: %+v, %v", got, err)
 	}
 }
 
