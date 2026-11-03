@@ -60,7 +60,7 @@ These rules apply to every page and every comment. They come before "The README 
   - "No 'was', 'since' or 'once' of this project's past" bans telling history. "Once" meaning "after" is fine.
   - Don't coin a substitute to avoid a banned word. Use the plain word the rule still allows.
 - **A rule is still exact.** Plain words keep every condition: "only", "at most", "before" and "whenever" stay where they are. A shorter sentence that drops a condition is a change to the protocol.
-- **Read a changed page as a stranger before it merges.** Give the changed section, and nothing else, to a fresh session with no project context, and have it restate each rule. Any difference from the intended meaning marks a sentence that reads two ways.
+- **Read a changed rule as a stranger before it merges.** Give the changed rules, and nothing else, to a fresh session with no project context, and have it restate each rule. Any difference from the intended meaning marks a sentence that reads two ways. A page rewritten whole is read whole.
 
 ### How a design is chosen
 
