@@ -1606,6 +1606,20 @@ What version 1 fixes, and how each fixed part can grow inside version 1:
 
 ## 15. Security considerations
 
+| Property | Against whom | Holds while | Rests on |
+|---|---|---|---|
+| Confidentiality of a message's content | a party that holds the ciphertext, the server included, and that party with a quantum computer later (Section 15.10) | the prekey that the message is sealed to has not leaked (Section 15.5) | IND-CCA of the `mlkem768x25519` stanza of [age] (Section 9.4), which is HPKE [RFC 9180] with the MLKEM768-X25519 KEM [draft-ietf-hpke-pq-03], the X-Wing construction [X-Wing] [draft-irtf-cfrg-concrete-hybrid-kems] Section 4.2 |
+| Confidentiality against a substituted prekey | an active attacker, the server included | the address reached the sender intact (Section 15.1), the mailbox's signing keys are not stolen (Section 15.5), and no quantum computer can forge a signature (Section 15.10). A hostile server can still serve a stale prekey (Section 15.2) | EUF-CMA of the signer's key type under SSHSIG (Sections 3.2, 5, 6); second-preimage resistance of SHA-384 (Section 4.2) |
+| Forward secrecy | a party that steals the mailbox's keys later | from the deletion of every prekey that the message could be encrypted to, which Section 15.3 bounds. A server that accepts no pass from the mailbox holds that deletion back (Section 15.3) | a client's real deletion of retired prekeys (Sections 12.1, 12.4, 15.3); the first row |
+| Sender authentication | any party without the signer's private key, the server and the recipient included | the signer's private key is not stolen (Section 15.5), and no quantum computer can forge a signature (Section 15.10). A revocation ends a stolen key only at a reader that has seen the revocation (Section 15.6) | EUF-CMA of Ed25519 [BCJZ] and of ECDSA P-256 under SSHSIG (Sections 3.1, 3.2); collision resistance of SHA-512 (Section 3.2); second-preimage resistance of SHA-384 (Section 4.2); sign-then-encrypt [ADR] |
+| Recipient binding (no surreptitious forwarding) | a recipient that forwards a signed message to a third mailbox as a message from the sender | sender authentication holds | the namespace and `to`, both inside the signature (Sections 9.2, 15.4; Section 12.3, checks 5 and 6) [Davis] [ADR] |
+| Key-compromise impersonation resistance | a party that holds the mailbox's stolen prekey | sender authentication holds | the signature, by a key apart from the prekey (Section 15.4) [ADR] |
+| Replay and duplicates | the server | the mailbox runs in one place, with the mailbox's replay set (Section 15.9) | checks 6, 8 and 9 (Section 12.3), with `sent_at` and `msg_id` inside the signature |
+| Post-compromise security | a party that stole a prekey | not provided (Section 15.3) | — |
+| Delivery, and proof of delivery | the server | not provided (Sections 15.2, 15.9) | — |
+| Deniability | a recipient | not provided (Section 15.4) | — |
+| Metadata | the server, and the party that terminates TLS for the server | not provided (Sections 15.1, 15.2, 15.8) | — |
+
 ### 15.1. Threat model
 
 Dromas protects a message's content from everyone but the message's recipient. Dromas protects the sender's identity from forgery by anyone, the server included. Dromas does not hide from the server who writes to whom.
@@ -1674,8 +1688,8 @@ Dromas protects a message's content from everyone but the message's recipient. D
 
 ### 15.4. Sender authentication
 
-- **Each message carries the sender's signature inside the encryption.** The signature is by the sender's identity, or by a working key that the identity certified, and the recipient verifies the signature. The signature resists key-compromise impersonation, so a leaked prekey lets nobody forge a sender to the prekey's mailbox.
-- **The signature is bound to the recipient by the namespace and by the envelope's `to`.** So a recipient cannot forward a signed message to a third mailbox as a message from the sender. That forwarding is the known flaw of signing before encrypting.
+- **Each message carries the sender's signature inside the encryption.** The signature is by the sender's identity, or by a working key that the identity certified, and the recipient verifies the signature. The signature resists key-compromise impersonation, so a leaked prekey lets nobody forge a sender to the prekey's mailbox [ADR].
+- **The signature is bound to the recipient by the namespace and by the envelope's `to`.** So a recipient cannot forward a signed message to a third mailbox as a message from the sender. That forwarding is the known flaw of signing before encrypting [Davis]. The sender's signature names the recipient, the encrypted plaintext names the sender, and the reader refuses a name that does not match, the three changes of [ADR] Section 7.
 - **The signature is not deniable toward a recipient.** A recipient can show anyone what a sender signed. That is both an audit trail for programs that act on messages and a privacy cost. The server keeps no message signature, and can prove nothing about who sent what.
 - **A message that a mailbox cannot decrypt has no sender at all.** The server keeps no sender (Section 13). So a mailbox restored without its prekeys cannot learn whom to ask to send the message again.
 - **A reader decrypts before it verifies.** Until the signature is checked, the reader handles bytes that nobody vouched for: first age's, then the envelope's. By design, age accepts files from anyone, and a reader acks a refused message whatever the reason for the refusal, so neither the server nor the sender learns which check failed. Each part of the plaintext has one place, and nothing is searched for (Section 9.2).
@@ -1767,7 +1781,7 @@ Dromas protects a message's content from everyone but the message's recipient. D
 
 ### 15.10. Post-quantum
 
-- **Content is protected against harvest-now-decrypt-later, because every prekey is post-quantum.**
+- **Content is protected against harvest-now-decrypt-later, because every prekey is post-quantum.** Against a quantum computer, that protection rests on ML-KEM-768 and SHA3-256 [X-Wing].
 - **Signatures are classical: Ed25519 or P-256.** A forgery needs a quantum computer at signing time. The transferable audit trail stays valid until such a computer exists. A post-quantum signature key would be added as an identity key type inside v1 (Section 14). A mailbox that moves to such a key gets a new address.
 - **Future content, not only authenticity, rests on the classical signature until a mailbox uses a post-quantum signature type.** An active adversary with a quantum computer signs prekey statements in the mailbox's name, and senders encrypt to those prekey statements.
 - **The TLS connections are separate.** Each TLS connection is protected as its endpoints negotiate.
@@ -1780,14 +1794,19 @@ Dromas protects a message's content from everyone but the message's recipient. D
 
 - **[age]** C2SP, "age", v1.1.0, https://c2sp.org/age@v1.1.0, read 2026-11-02
 - **[draft-ietf-hpke-pq-03]** Barnes, Connolly, "Post-Quantum and Post-Quantum/Traditional Hybrid Algorithms for HPKE", draft-ietf-hpke-pq-03: the MLKEM768-X25519 KEM that [age] names
+- **[draft-irtf-cfrg-concrete-hybrid-kems]** "Concrete Hybrid PQ/T Key Encapsulation Mechanisms", draft-irtf-cfrg-concrete-hybrid-kems-04
 - **[draft-ietf-sshm-cert-01]** Miller, "SSH Certificate Format", draft-ietf-sshm-cert-01
 - **[PROTOCOL.sshsig]** OpenSSH 10.6p1, `PROTOCOL.sshsig`
+- **[ADR]** J. H. An, Y. Dodis, T. Rabin, "On the Security of Joint Signature and Encryption", EUROCRYPT 2002, LNCS 2332, https://cims.nyu.edu/~dodis/ps/signcrypt.pdf
 - **[AEP-158]**, **[AEP-193]** API Enhancement Proposals: pagination; errors
+- **[BCJZ]** J. Brendel, C. Cremers, D. Jackson, M. Zhao, "The Provable Security of Ed25519: Theory and Practice", IEEE S&P 2021, https://dennis-jackson.uk/assets/pdfs/ed25519.pdf
 - **[BIP 173]** Bech32
+- **[Davis]** D. Davis, "Defective Sign & Encrypt in S/MIME, PKCS#7, MOSS, PEM, PGP, and XML", USENIX Annual Technical Conference 2001, https://www.usenix.org/legacy/publications/library/proceedings/usenix01/full_papers/davis/davis.pdf
 - **[FIPS 180-4]**, **[FIPS 186-5]**
 - **[RFC 2119]**, **[RFC 8174]** BCP 14
-- **[RFC 3339]** timestamps · **[RFC 3986]** URIs · **[RFC 4151]** the `tag` URI scheme · **[RFC 4251]**, **[RFC 4253]** SSH · **[RFC 4648]** base64 and base64url · **[RFC 5234]** ABNF · **[RFC 5656]** ECDSA in SSH · **[RFC 6648]** deprecating the `X-` prefix · **[RFC 7405]** case-sensitive strings in ABNF · **[RFC 7457]** TLS attacks · **[RFC 7493]** I-JSON · **[RFC 7519]** JSON Web Token · **[RFC 8032]** EdDSA · **[RFC 8259]** JSON · **[RFC 8555]** ACME · **[RFC 8594]** the `Sunset` header field · **[RFC 8709]** Ed25519 in SSH · **[RFC 9110]** HTTP semantics · **[RFC 9457]** problem details · **[RFC 9562]** UUIDs · **[RFC 9651]** Structured Field Values · **[RFC 9745]** the `Deprecation` header field
+- **[RFC 3339]** timestamps · **[RFC 3986]** URIs · **[RFC 4151]** the `tag` URI scheme · **[RFC 4251]**, **[RFC 4253]** SSH · **[RFC 4648]** base64 and base64url · **[RFC 5234]** ABNF · **[RFC 5656]** ECDSA in SSH · **[RFC 6648]** deprecating the `X-` prefix · **[RFC 7405]** case-sensitive strings in ABNF · **[RFC 7457]** TLS attacks · **[RFC 7493]** I-JSON · **[RFC 7519]** JSON Web Token · **[RFC 8032]** EdDSA · **[RFC 8259]** JSON · **[RFC 8555]** ACME · **[RFC 8594]** the `Sunset` header field · **[RFC 8709]** Ed25519 in SSH · **[RFC 9110]** HTTP semantics · **[RFC 9180]** HPKE · **[RFC 9457]** problem details · **[RFC 9562]** UUIDs · **[RFC 9651]** Structured Field Values · **[RFC 9745]** the `Deprecation` header field
 - **[SemVer]** Semantic Versioning 2.0.0, https://semver.org/spec/v2.0.0.html
+- **[X-Wing]** M. Barbosa, D. Connolly, J. D. Duarte, A. Kaiser, P. Schwabe, K. Varner, B. Westerbaan, "X-Wing: The Hybrid KEM You've Been Looking For", IACR Communications in Cryptology 1(1), 2024, https://doi.org/10.62056/a3qj89n4e
 
 ## Appendix A. Where `ssh-keygen` differs (informative)
 
