@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"syscall"
 	"testing"
@@ -437,17 +436,12 @@ func TestATemplatesStringsReadBack(t *testing.T) {
 // A config file others can write stops every command: whoever can write it says
 // where the keys are and which server is called.
 func TestAConfigFileOthersCanWriteStopsTheCommand(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		return // no modes: the access list's reading is client's
-	}
 	cleanEnv(t)
 	root := t.TempDir()
 	file := writeConfig(t, "base-dir = "+tomlString(filepath.Join(root, "b"))+"\nmail-dir = "+tomlString(filepath.Join(root, "m"))+"\n")
-	if err := os.Chmod(file, 0o666); err != nil { //nolint:gosec // open on purpose
-		t.Fatal(err)
-	}
+	openToWriters(t, file)
 	var bad *configError
-	if err := do(t.Context(), "config", []string{"--config", file}, nil, io.Discard, io.Discard); !errors.As(err, &bad) || !strings.Contains(err.Error(), "writable by others") {
+	if err := do(t.Context(), "config", []string{"--config", file}, nil, io.Discard, io.Discard); !errors.As(err, &bad) || !strings.Contains(err.Error(), "writable by ") {
 		t.Errorf("%v", err)
 	}
 }
