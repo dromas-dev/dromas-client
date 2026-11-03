@@ -1294,7 +1294,7 @@ A server lists at most 64 deprecations, 64 sunsets and 64 capabilities. A client
 
 ### 12.2. Sending
 
-**A sender looks up the recipient before every post, whether the message is new or has waited (Section 11.8).** Before the sender seals anything, the sender checks the lookup's answer:
+**A sender looks up the recipient before every post, whether the message is new or has waited (Section 11.8).** Before the sender seals anything, the sender MUST check the lookup's answer:
 
 - **Identity:** the pinned identity or, at first contact, the served identity.
   - The served identity document MUST hash to the address and meet Section 4.1, checked as a server checks an identity document at registration.
@@ -1337,7 +1337,7 @@ A client drains every page of its list (Section 11.11) and fetches the message o
 - **A fetch that resumes a cut fetch by range (Section 11.12) is checked as a whole.** The client checks the bytes kept and the range together against the listed `size` and the message id (check 8), as for a body read whole.
 - **A `206` is malformed if the `Content-Range` is not the range asked for, or is not of the listed size.**
 
-**The checks, in this order.** Each check but check 9 names the code it refuses with. A client accepts a message only if the message clears every check.
+**The checks, in this order.** Each check but check 9 names the code it refuses with. A client MUST NOT accept a message that does not clear every check.
 
 1. **Check 1, decryption.** The reader decrypts the file, trying every retained prekey (`undecryptable`). A reader MAY refuse a file without exactly one native stanza as `undecryptable`, before any key agreement. No server accepts such a file as a send (Section 11.10, step 7).
 2. **Check 2, layout.** The plaintext has the layout of Section 9.2: the envelope on line 1, then a signature block from line 2 to the first END line, followed by LF (`bad_message`).
@@ -1375,7 +1375,7 @@ A client drains every page of its list (Section 11.11) and fetches the message o
    - A prune that drops nothing leaves the replay floor unchanged.
 9. **Check 9, duplicate.** `(from, msg_id)` is not in the replay set. A match means the message is a copy of a message already delivered. The reader acks the copy and does not deliver the copy again.
 
-**A reader never asks the server who a sender is.** The message carries the proof of who its sender is, and check 7's lookup reads only revocations. The reader pins the sender's identity only after the sender's signature verifies.
+**A reader never asks the server who a sender is.** The message carries the proof of who its sender is, and check 7's lookup reads only revocations. The reader MUST NOT pin the sender's identity before the sender's signature verifies.
 
 **The verdict.**
 
@@ -1385,7 +1385,7 @@ A client drains every page of its list (Section 11.11) and fetches the message o
   - deliver the message.
 
   A client acks each message after the client has kept a verdict on that message. The verdict is accepted (delivered or held) or refused. Until the client acks the message, the message stays on the server, and a later drain can serve the message again. So delivery is at least once.
-- **A client acks a refused message and does not deliver the message.** The ack deletes the message from the server. A refusal MUST NOT block the message's sender (Section 15.4). A refusal for a time is a verdict like any other, so the client does not leave the message on the server to wait for a clock to catch up.
+- **A client MUST ack a refused message and MUST NOT deliver the message.** The ack deletes the message from the server. A refusal MUST NOT block the message's sender (Section 15.4). A refusal for a time is a verdict like any other, so the client does not leave the message on the server to wait for a clock to catch up.
 - **A refusal is a code from a closed set, with the client's own words.** The codes are `undecryptable`, `bad_message`, `bad_envelope`, `bad_identity`, `unsupported_key_type`, `bad_signature`, `reattributed`, `revoked`, `certificate_revoked`, `stale`, `future`, `replay` and `bad_id`. In a refusal, a client MUST NOT show:
   - a value, member or key from the envelope, or from the identity document that the envelope carries;
   - any of a server's words (Section 11.3).
@@ -1465,7 +1465,7 @@ A client drains every page of its list (Section 11.11) and fetches the message o
 
 ### 12.5. Revocation at a client
 
-- **A client accepts "revoked" only with a revocation that verifies.** A `410 revoked`, a `403 sender_revoked` or a `401 certificate_revoked` is a server's word.
+- **A client MUST NOT accept "revoked" without a revocation that verifies.** A `410 revoked`, a `403 sender_revoked` or a `401 certificate_revoked` is a server's word.
 
   | Answer | The client |
   |---|---|
