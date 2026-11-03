@@ -600,8 +600,15 @@ func TestAdopt(t *testing.T) {
 	if err := do(ctx, "account adopt", nil, strings.NewReader(key+"\n"), &out, &errs); err != nil || out.String() != `{"type":"account","account":"acme"}`+"\n" || srv.Account(b.Address()) != "acme" {
 		t.Fatalf("adopt: %v %q %q", err, out.String(), errs.String())
 	}
+	out.Reset()
+	if err := do(ctx, "account adopt", nil, strings.NewReader(key), &out, &errs); err != nil || !strings.Contains(out.String(), "acme") {
+		t.Fatalf("a join sent again, its key spent: %v %q", err, out.String())
+	}
+	if err := do(ctx, "account leave", nil, nil, &out, &errs); err != nil {
+		t.Fatal(err)
+	}
 	if err := do(ctx, "account adopt", nil, strings.NewReader(key), &out, &errs); codeOf(err) != protocol.CodeAdoptKeyRefused || strings.Contains(err.Error(), key) {
-		t.Fatalf("a spent key: %v", err)
+		t.Fatalf("a spent key, from a mailbox out of its account: %v", err)
 	}
 	for _, args := range [][]string{{key}, {"--leave"}, {key, key}} {
 		var wrong *usageError
