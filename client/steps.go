@@ -17,6 +17,7 @@ var steps = map[string][]string{
 	"partial":    {"partial kept", "partial dropped"},
 	"folders":    {"folders to make", "folders made"},
 	"keys":       {"keys adopted"},
+	"removal":    {"prekey marked going", "prekey files removed"},
 	"allow":      {"sender allowed", "held message written", "held message removed"},
 }
 

@@ -708,6 +708,48 @@ func TestAnAdoptionKilledLeavesTheMailboxWhole(t *testing.T) {
 	}
 }
 
+// A drain killed at each step of deleting a retired prekey: the next command does
+// not read the marked record as a key lost, and the next prune, here a renewal's,
+// finishes the deletion.
+func TestARemovalKilledAtEachStepFinishesAtTheNextPrune(t *testing.T) {
+	t.Parallel()
+	for _, step := range client.Steps("removal") {
+		t.Run(step, func(t *testing.T) {
+			e := newEnv(t)
+			a, b := e.mailbox(), e.mailbox()
+			old := numberOf(t, b)
+			e.clock.Add(2 * time.Second)
+			if _, err := b.Rekey(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			e.clock.Add(2 * time.Hour)
+			crash(t, e, b, "receive", step, protocol.Address{})
+			if !slices.Contains(client.Statements(t, b), old) {
+				t.Fatalf("the crash at %s left no record of prekey %d", step, old)
+			}
+			x, err := client.Open(b.Dir(), e.opts())
+			if err != nil {
+				t.Fatal(err)
+			}
+			st, err := x.Status(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if slices.ContainsFunc(st.Attention, func(s string) bool { return strings.Contains(s, "is not at") }) {
+				t.Fatalf("status after a crash at %s reads the key as lost: %q", step, st.Attention)
+			}
+			e.clock.Add(2 * time.Second)
+			if _, err := x.Rekey(t.Context()); err != nil {
+				t.Fatalf("the renewal after a crash at %s: %v", step, err)
+			}
+			if exists(prekeyFile(b, old, ".agekey")) || slices.Contains(client.Statements(t, x), old) {
+				t.Fatalf("the prune after a crash at %s left prekey %d", step, old)
+			}
+			whole(t, e, x, a)
+		})
+	}
+}
+
 // A drain killed at each step of a delivery: the message is in the inbox
 // once, and leaves the server.
 func TestADrainKilledAtEachStepOfADeliveryDeliversOnce(t *testing.T) {

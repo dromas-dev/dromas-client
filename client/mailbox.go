@@ -861,6 +861,9 @@ type prekeyRecord struct {
 	Signature protocol.Bytes `json:"signature"`
 	Made      string         `json:"made"`
 	Taken     string         `json:"taken,omitempty"`
+	// Going is set once the mailbox has decided to delete the key, before any
+	// of its files goes (removePrekey), so a key pruned is told from a key lost.
+	Going bool `json:"going,omitempty"`
 }
 
 // recordTakenAt writes at, the reading the server took statement n at, into
