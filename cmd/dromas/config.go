@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -35,7 +36,7 @@ var profileGrammar = regexp.MustCompile(`\A[A-Za-z0-9_-]+\z`)
 type globals struct {
 	config, profile                                        string
 	baseDir, mailDir, identityFile, rotatingKeysDir, inbox string
-	server, prekeyLifetime                                 string
+	server, caFile, prekeyLifetime                         string
 }
 
 func (g *globals) add(c *cobra.Command) {
@@ -48,6 +49,7 @@ func (g *globals) add(c *cobra.Command) {
 	f.StringVar(&g.rotatingKeysDir, "rotating-keys-dir", "", "the `directory` of prekeys/, work/ and tls-ticket, never to be backed up: <base-dir>/keys")
 	f.StringVar(&g.inbox, "inbox-dir", "", "the `directory` of inbox/, apart from the rest of the mail: <mail-dir>/inbox")
 	f.StringVar(&g.server, "server", "", "the server's `URL`: $DROMAS_SERVER_URL, or "+client.DefaultBase)
+	f.StringVar(&g.caFile, "ca-file", "", "trust only the CAs in this PEM `file` for the server's TLS certificate, in place of the system's: $DROMAS_CA_FILE")
 	f.StringVar(&g.prekeyLifetime, "prekey-lifetime", "", "how long each new prekey is valid for: a `time`, as dromas prekey lifetime --help says")
 }
 
@@ -59,6 +61,7 @@ type fileConfig struct {
 	RotatingKeysDir string `toml:"rotating-keys-dir"`
 	InboxDir        string `toml:"inbox-dir"`
 	Server          string `toml:"server"`
+	CAFile          string `toml:"ca-file"`
 	PrekeyLifetime  string `toml:"prekey-lifetime"`
 	Policy          struct {
 		Unknown string `toml:"unknown"`
@@ -91,6 +94,7 @@ type config struct {
 	dir           string
 	layout        client.Layout
 	server        string
+	rootCAs       *x509.CertPool
 	lifetime      time.Duration
 	policy        client.Policy
 	// flagged is each table's settings, by the command that takes them.
@@ -377,6 +381,28 @@ func (cfg *config) resolve(g *globals, fc *fileConfig, rel string, noMailbox boo
 	cfg.server = server
 	cfg.values["server"] = setting{server, from}
 
+	caFile, from, caRel := g.caFile, "flag", "."
+	switch env := os.Getenv("DROMAS_CA_FILE"); {
+	case caFile != "":
+	case env != "":
+		caFile, from = env, "environment"
+	case fc.CAFile != "":
+		caFile, from, caRel = fc.CAFile, "file", rel
+	}
+	if caFile != "" {
+		p, err := expand(caFile, caRel)
+		if err == nil {
+			p, err = filepath.Abs(p)
+		}
+		if err == nil {
+			cfg.rootCAs, err = client.ReadCAFile(p)
+		}
+		if err != nil {
+			return bad("ca-file", "ca-file: %v", err)
+		}
+		cfg.values["ca-file"] = setting{p, from}
+	}
+
 	lifetime, from := g.prekeyLifetime, "flag"
 	if lifetime == "" {
 		lifetime, from = fc.PrekeyLifetime, "file"
@@ -516,6 +542,9 @@ func templateFor(profile string, g *globals) string {
 	}
 	setting("inbox-dir", abs(g.inbox), join(mail, "inbox"))
 	setting("server", g.server, client.DefaultBase)
+	if g.caFile != "" {
+		fmt.Fprintf(&b, "ca-file = %s\n", tomlString(abs(g.caFile)))
+	}
 	setting("prekey-lifetime", g.prekeyLifetime, formatTime(protocol.PrekeyLifetime))
 	b.WriteString("\n# [policy]\n")
 	fmt.Fprintf(&b, "# unknown = %s\n# server = %s\n", tomlString(client.LandHeld), tomlString(client.AdmitAll))
