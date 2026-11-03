@@ -381,6 +381,19 @@ func (p *Pass) Verify(id *Identity, server string, now time.Time) (*Signer, erro
 	return signer, nil
 }
 
+// CarriesKey reports whether the pass names, as its signing key, the key known
+// by the SHA-256 of its wire bytes, sum. It checks no signature and no date, so
+// a caller can tell a pass by another key before it counts or verifies
+// anything. A signature that is not one names no key.
+func (p *Pass) CarriesKey(sum [sha256.Size]byte) bool {
+	blob, err := Dearmor(p.signature)
+	if err != nil {
+		return false
+	}
+	key, err := signingKey(blob)
+	return err == nil && sha256.Sum256(key.Marshal()) == sum
+}
+
 // VerifyUnder checks the pass against the signing key a caller has on record
 // for the mailbox, known by the SHA-256 of its wire bytes, sum: the identity's
 // key, or the certificate of the mailbox's current statement. The pass
