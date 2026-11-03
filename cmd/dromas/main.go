@@ -23,6 +23,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"syscall"
 
 	"github.com/dromas-dev/dromas-client/client"
 	"github.com/dromas-dev/dromas-client/protocol"
@@ -67,7 +68,9 @@ though the mailbox's ACL was not sent ("acl_not_sent"); from prekey renew, its
 server served a prekey the mailbox did not make ("prekey_not_made"); from any
 command that called a server, the server stops taking this client's version
 from a date ("sunset"), or deems it deprecated from a date that has passed
-("deprecated"); from status, its "attention" list is not empty. Once a day, a
+("deprecated"); from status, its "attention" list is not empty. 4, recv met a refusal no wait
+mends, and its "error" line says "fatal": a process started again meets it
+again. Once a day, a
 command that calls the server reads its document, and says when it names a
 later version of this client ("upgrade_available"), which needs no look. recv prints
 a "refused" line for each message it refused, keeping it in refused/, a
@@ -93,9 +96,9 @@ func main() {
 	// net/http logs some of what a server sends after its answer through the
 	// standard logger, raw (#297): stderr has only this client's lines.
 	log.SetOutput(io.Discard)
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
-	// The first interrupt ends the command's waits and calls; a second, with
-	// the handler gone, ends the process (#330).
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	// The first interrupt or SIGTERM ends the command's waits and calls; a
+	// second, with the handler gone, ends the process (#330).
 	go func() { <-ctx.Done(); stop() }()
 	err := run(ctx, os.Args[1:], os.Stdin, os.Stdout, os.Stderr)
 	stop()
