@@ -58,7 +58,7 @@ This document specifies the formats, the meaning of each HTTP operation, and the
 - **`testdata/vectors/` contains the conformance vectors (Section 16).**
 - **`PRECEDENTS.md` sets each design decision beside the published standards and deployed systems that make the same decision.**
 
-A reviewer of the cryptography needs Sections 2.2, 3 to 6, 8 to 10, 12.3 and 15. The other sections give the sender key types (Section 7), the HTTP API (Section 11), a client's other behaviour (the rest of Section 12), what a server stores (Section 13) and compatibility (Section 14).
+A reviewer of the cryptography needs Sections 2.2, 3 to 6, 8 to 10, 12.1, 12.3, 12.4 and 15. The other sections give the sender key types (Section 7), the HTTP API (Section 11), a client's other behaviour (the rest of Section 12), what a server stores (Section 13) and compatibility (Section 14).
 
 ## 2. Conventions
 
@@ -215,7 +215,7 @@ Where this document uses a term below as a defined term, the term has the sense 
 | SSH public key text | `<key type> <base64 of the wire key>` | RFC 4253 §6.6, RFC 8709, RFC 5656 |
 | OpenSSH certificate | the certificate of a working key, with the certificate's own signature | draft-ietf-sshm-cert-01 |
 | SHA-384 | the address | FIPS 180-4 |
-| SHA-256 | a message id; a send's `statement` (Section 11.10) | FIPS 180-4 |
+| SHA-256 | a message id; the hash of a prekey statement that a send names (Section 11.10) | FIPS 180-4 |
 | UUID | an envelope's `msg_id` | RFC 9562 |
 
 Every keyed hash in this protocol is HMAC or HKDF, inside age. The protocol applies plain SHA-384 and SHA-256 only to public inputs: the identity document, a prekey statement and the ciphertext.
@@ -318,7 +318,7 @@ dromas-v1
 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI<43 characters>
 ```
 
-A key of a type this section defines MUST be in that type's one encoding, and MUST meet that type's key checks. A reader that does not verify a key type defined later refuses that type as `unsupported_key_type`, not as malformed. The key's one encoding is the wire key that OpenSSH writes back after reading the key. Parsed as the type that line 2 names and written again, the key gives the same bytes. So one key has one document, and one address.
+A key of a type this section defines MUST be in that type's one encoding, and MUST meet that type's key checks. A reader that does not verify a key type that a later version defines refuses that type as `unsupported_key_type`, not as malformed. The key's one encoding is the wire key that OpenSSH writes back after reading the key. Parsed as the type that line 2 names and written again, the key gives the same bytes. So one key has one document, and one address.
 
 | Key type | Document | What fixes its one encoding | Key checks | Working key |
 |---|---|---|---|---|
@@ -853,7 +853,7 @@ A server chooses which refusal it answers first, except where this specification
 
    | Call | Answers before any pass |
    |---|---|
-   | A call with a mailbox's own pass | `404 no_such_mailbox` for an unknown mailbox; `410 revoked` for a revoked mailbox; `401 certificate_revoked` where the call accepts a pass by the current certificate, the identity has revoked that certificate, and the pass does not name the identity's key |
+   | A call with a mailbox's own pass, other than a registration (Section 11.7) | `404 no_such_mailbox` for an unknown mailbox; `410 revoked` for a revoked mailbox; `401 certificate_revoked` where the call accepts a pass by the current certificate, the identity has revoked that certificate, and the pass does not name the identity's key |
    | A send, about its sender | `403 unknown_sender`, `403 sender_revoked`, `401 certificate_revoked` |
    | A lookup | `404 no_such_mailbox`, or `410 revoked` with the address's revocation record |
    | Looking up revocations | `404 not_revoked`, or `200` with the revocation record |
@@ -1620,7 +1620,7 @@ This table gives each security property, the party that the property holds again
 | Confidentiality of a message's content | a party that holds the ciphertext, the server included, and that party with a quantum computer later (Section 15.10) | the prekey that the message is sealed to has not leaked (Section 15.5) | IND-CCA of age's `mlkem768x25519` stanza (Section 9.4), which is HPKE [RFC 9180] with the MLKEM768-X25519 KEM [draft-ietf-hpke-pq-03], the X-Wing construction [X-Wing] |
 | Confidentiality against a substituted prekey | an active attacker, the server included | the address reached the sender intact (Section 15.1), the mailbox's signing keys are not stolen (Section 15.5), and no quantum computer can forge a signature (Section 15.10). A hostile server can still serve a stale prekey (Section 15.2) | EUF-CMA of the signer's key type under SSHSIG (Sections 3.2, 5, 6); second-preimage resistance of SHA-384 (Section 4.2) |
 | Forward secrecy | a party that steals the mailbox's keys later | from the deletion of every prekey that the message could be encrypted to, which Section 15.3 bounds. A server that accepts no pass from the mailbox holds that deletion back (Section 15.3) | a client's real deletion of retired prekeys (Sections 12.1, 12.4, 15.3); the first row |
-| Sender authentication | any party without the signer's private key, the server and the recipient included | the signer's private key is not stolen (Section 15.5), and no quantum computer can forge a signature (Section 15.10). A revocation ends a stolen key only at a reader that has seen the revocation (Section 15.6) | EUF-CMA of Ed25519 [BCJZ] and of ECDSA P-256 under SSHSIG (Sections 3.1, 3.2); collision resistance of SHA-512 (Section 3.2); second-preimage resistance of SHA-384 (Section 4.2); sign-then-encrypt [ADR] |
+| Sender authentication | any party without the signer's private key, the server and the recipient included | the sender's signing keys are not stolen (Section 15.5), and no quantum computer can forge a signature (Section 15.10). A revocation ends a stolen key only at a reader that has seen the revocation (Section 15.6) | EUF-CMA of Ed25519 [BCJZ] and of ECDSA P-256, under SSHSIG and in a certificate's own signature (Sections 3.1, 3.2, 5.2); collision resistance of SHA-512 (Section 3.2); second-preimage resistance of SHA-384 (Section 4.2); sign-then-encrypt [ADR] |
 | Recipient binding (no surreptitious forwarding) | a recipient that forwards a signed message to a third mailbox as a message from the sender | sender authentication holds | the namespace and `to`, both inside the signature (Sections 9.2, 15.4; Section 12.3, checks 5 and 6) [Davis] [ADR] |
 | Key-compromise impersonation resistance | a party that holds the mailbox's stolen prekey | sender authentication holds | the signature, by a key apart from the prekey (Section 15.4) [ADR] |
 | Replay and duplicates | the server | the mailbox runs in one place, with the mailbox's replay set (Section 15.9) | checks 6, 8 and 9 (Section 12.3), with `sent_at` and `msg_id` inside the signature |
