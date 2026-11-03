@@ -672,8 +672,43 @@ var lifetimeRule = fmt.Sprintf("one is a whole number of seconds from %d (%d hou
 const retiredGrace = time.Hour
 
 // renewRetry is how long Receive waits to try a failed renewal again, so a
-// refused one (a rate limit, a server that is down) is not tried every poll.
-const renewRetry = time.Hour
+// refused one (a rate limit, a server that is down) is not tried every poll:
+// renewTime for the lifetime of the prekey in use, since a prekey under a day
+// has less left at renewAt than an hour.
+func (b *Mailbox) renewRetry() time.Duration {
+	if own, ok := b.ownLifetime(); ok {
+		return renewTime(own)
+	}
+	return time.Hour
+}
+
+// drainBound is how long one Receive drains: the mailbox's bound, or
+// RecvWithin for the lifetime of the prekey in use where that is shorter, so a
+// long drain leaves the next Receive time to renew. A fetch cut there goes on at
+// the next Receive.
+func (b *Mailbox) drainBound() time.Duration {
+	if own, ok := b.ownLifetime(); ok {
+		return min(b.drainTime, RecvWithin(own))
+	}
+	return b.drainTime
+}
+
+// ownLifetime is what the prekey this mailbox published last was made for.
+func (b *Mailbox) ownLifetime() (time.Duration, bool) {
+	n, err := b.current()
+	if err != nil {
+		return 0, false
+	}
+	made, err := b.made(n)
+	if err != nil {
+		return 0, false
+	}
+	p, err := b.prekeyStatement(n)
+	if err != nil {
+		return 0, false
+	}
+	return p.NotAfter.Sub(made), true
+}
 
 // current returns the serial of the prekey this mailbox published last.
 func (b *Mailbox) current() (uint64, error) {
@@ -744,8 +779,9 @@ func (b *Mailbox) renewNow(ctx context.Context) (*protocol.Prekey, error) {
 		return nil, fmt.Errorf("the mailbox's state file keeps a failed renewal it cannot read: %w", err)
 	}
 	if at, err := protocol.ParseTime(last.At); err == nil {
-		if since := b.now().Sub(at); since >= 0 && since < renewRetry {
-			return nil, fmt.Errorf("the renewal at %s did not go through, and recv tries it again from %s: %s", last.At, at.Add(renewRetry).Format(protocol.TimeLayout), last.Error)
+		retry := b.renewRetry()
+		if since := b.now().Sub(at); since >= 0 && since < retry {
+			return nil, fmt.Errorf("the renewal at %s did not go through, and recv tries it again from %s: %s", last.At, at.Add(retry).Format(protocol.TimeLayout), last.Error)
 		}
 	}
 	// The renewal recv makes is followed by a read of the ACL its server

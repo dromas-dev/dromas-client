@@ -457,3 +457,6 @@ func (b *Mailbox) SetPrekeyLifetime(_ context.Context, d time.Duration) error {
 	b.prekeyLife = d
 	return nil
 }
+
+// DrainBound is how long b's next Receive drains.
+func DrainBound(b *Mailbox) time.Duration { return b.drainBound() }

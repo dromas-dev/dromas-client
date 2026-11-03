@@ -764,9 +764,9 @@ func (b *Mailbox) loadIdentity() error {
 
 // prekeyRecord is a prekey statement this mailbox signed, as the prekeys bucket
 // keeps it by its serial: the statement, its signature, and when it was
-// signed, which is what the mailbox times its renewals and the early deletion of
-// its retired prekeys by ([Mailbox.made]; PROTOCOL.md §12.4), in one value, so the
-// three are never out of line (#192); and once its server took it as this
+// signed, which is what the mailbox times its renewals by ([Mailbox.made];
+// PROTOCOL.md §12.4), in one value, so the three are never out of line (#192);
+// and once its server took it as this
 // mailbox's newest, the reading it took it at, by the pass that upload carried
 // (recordTaken), or nothing where the mailbox learnt of the take from a read of
 // itself (noteServed). Its key is prekeys/<serial>.agekey.

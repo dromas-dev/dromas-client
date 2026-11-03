@@ -175,7 +175,7 @@ func (b *Mailbox) receive(ctx context.Context) (*Result, error) {
 	// landed and acked is said, whatever stopped it (#332). The two drains
 	// share one bound in time, and nothing else is under it.
 	res := &Result{}
-	drainCtx, stop := context.WithTimeoutCause(ctx, b.drainTime, errDrainTime)
+	drainCtx, stop := context.WithTimeoutCause(ctx, b.drainBound(), errDrainTime)
 	defer stop()
 	err := b.drain(drainCtx, asked, res)
 	// A drain refused for what a renewal mends renews, and drains again, once:

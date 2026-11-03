@@ -454,6 +454,70 @@ func TestARenewalWhoseReadAgainEndsSendsNoRegistration(t *testing.T) {
 // nothing is served and nothing was published, so it registers. The same in
 // the remedy, on a restored mailbox whose server does not answer its read.
 // Control: the restore at a server that still serves the mailbox.
+// A failed renewal of a prekey made for under a day is tried again within the
+// room that prekey has left, not an hour on, when the prekey would have ended.
+func TestAFailedRenewalOfAShortPrekeyIsTriedAgainWithinItsRoom(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	b := e.mailbox()
+	lifetimeOf(t, b, client.MinPrekeyLifetime)
+	if _, err := b.Rekey(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	var puts atomic.Int32
+	e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
+		if r.Method == http.MethodPut && strings.HasSuffix(r.URL.Path, "/prekey") {
+			puts.Add(1)
+			http.Error(w, "down", http.StatusServiceUnavailable)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+	e.clock.Add(client.MinPrekeyLifetime - 14*time.Minute)
+	if res := receive(t, b); res.RenewErr == nil || puts.Load() != 1 {
+		t.Fatalf("a failed renewal: %v, %d tries", res.RenewErr, puts.Load())
+	}
+	e.clock.Add(5*time.Minute - time.Second)
+	if res := receive(t, b); res.RenewErr == nil || puts.Load() != 1 {
+		t.Fatalf("within the wait: %v, %d tries", res.RenewErr, puts.Load())
+	}
+	e.clock.Add(time.Second)
+	if res := receive(t, b); res.RenewErr == nil || puts.Load() != 2 {
+		t.Fatalf("not tried again after the wait: %v, %d tries", res.RenewErr, puts.Load())
+	}
+}
+
+// A mailbox that was under certificates, restored by its identity at a server
+// that forgot it, is refused by a sender that saw a certificate of it, and
+// dromas cert switch recovers it.
+func TestARestoreAtAServerThatForgotItIsRecoveredByMovingToACertificate(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	e := newEnv(t)
+	a, b := e.mailbox(), e.mailbox()
+	e.clock.Add(time.Minute)
+	if _, err := b.RenewUnderCertificate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	send(t, a, b, "seen under a certificate")
+	receive(t, b)
+	e.srv.Forget(b.Address())
+	r := restoreWith(t, e, b, e.clock.Now)
+	e.clock.Add(time.Minute)
+	if _, err := r.Rekey(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.Send(ctx, b.Address(), "refused"); err == nil || !strings.Contains(err.Error(), "rollback") {
+		t.Fatalf("a send to a statement below the certificate the sender saw: %v", err)
+	}
+	if _, err := r.RenewUnderCertificate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.Send(ctx, b.Address(), "taken"); err != nil {
+		t.Fatalf("a send after the move to a certificate: %v", err)
+	}
+}
+
 func TestARestoredMailboxRegistersWhereItsServerForgotIt(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
