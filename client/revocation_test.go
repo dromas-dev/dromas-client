@@ -702,3 +702,116 @@ func TestRevokeTakesOnlyARecordThatVerifies(t *testing.T) {
 func protocolPut(e *env, a protocol.Address, rec *protocol.Revocations) (*http.Response, error) {
 	return client.PutRevocations(context.Background(), e.opts(), a, rec)
 }
+
+// What the reader keeps comes before any lookup (PROTOCOL.md §12.3, check 7): a
+// message whose signer a kept revocation covers is refused and acked with no
+// read of its sender, whatever the server would answer, and a kept revocation
+// that does not cover the signer leaves a failed lookup holding the message.
+func TestAKeptRevocationRefusesAMessageWithNoLookup(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		name    string
+		code    string
+		through func(n uint64) uint64
+		address bool
+		holds   bool
+	}{
+		{name: "the certificates through the signer's", code: client.RefusedCertificate, through: func(n uint64) uint64 { return n }},
+		{name: "the address", code: client.RefusedRevoked, address: true},
+		{name: "the certificates through the one below the signer's", through: func(n uint64) uint64 { return n - 1 }, holds: true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			e := newWorkEnv(t)
+			a, b := e.mailbox(), e.mailbox()
+			n := numberOf(t, a)
+			send(t, a, b, "signed under the certificate in use")
+			var rec *protocol.Revocations
+			if c.address {
+				var err error
+				if rec, err = a.Revocation(t.Context()); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				rec = certsRecord(t, a.Dir(), c.through(n))
+			}
+			if _, _, err := b.KeepRevocation(t.Context(), rec); err != nil {
+				t.Fatal(err)
+			}
+			lookup := watch(e, func(w http.ResponseWriter, r *http.Request) bool {
+				if x, ok := forge.ReadOf(r); ok && x == a.Address() {
+					http.Error(w, "down", http.StatusServiceUnavailable)
+					return true
+				}
+				return false
+			})
+			res, err := b.Receive(context.Background())
+			read := lookup.count(http.MethodGet, "/v1/"+a.Address().String())
+			if c.holds {
+				if err == nil || len(res.Refused) != 0 || len(res.Delivered) != 0 || e.srv.Count(b.Address()) != 1 || read != 1 {
+					t.Fatalf("no answer about a signer nothing kept covers: %v, %+v, %d left on the server, %d reads", err, res, e.srv.Count(b.Address()), read)
+				}
+				return
+			}
+			if err != nil || len(res.Refused) != 1 || res.Refused[0].Code != c.code || e.srv.Count(b.Address()) != 0 || read != 0 {
+				t.Fatalf("a kept revocation against the message: %v, %+v, %d left on the server, %d reads", err, res, e.srv.Count(b.Address()), read)
+			}
+		})
+	}
+}
+
+// A record handed over keeps each part that verifies, whichever part, and says
+// which failed and what it kept, as a served record keeps what verifies
+// (PROTOCOL.md §12.5); and no publish sends a record with a bad part.
+func TestARecordHandedOverKeepsEachPartThatVerifies(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	e := newWorkEnv(t)
+	c := e.mailbox()
+
+	d := e.mailbox()
+	rev, err := d.Revocation(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	certs, err := protocol.NewRevokedCertificates(d.Address(), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byWorker, err := protocol.SignRevokedCertificates(worker(t, d), certs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	goodAddress := &protocol.Revocations{Identity: rev.Identity, Revocation: rev.Revocation, RevokedCertificates: certs.Statement(), RevokedCertificatesSignature: byWorker}
+	_, held, err := c.KeepRevocation(ctx, goodAddress)
+	if err == nil || held == nil || !held.Revoked || !keptRevocation(c, d.Address()) || keptList(c, d.Address()) {
+		t.Fatalf("a good revocation of the address beside a bad revocation of certificates: %+v, %v", held, err)
+	}
+	if !strings.Contains(err.Error(), "revocation of certificates does not verify") || !strings.Contains(err.Error(), "keeps its revocation of the address") {
+		t.Fatalf("what it said: %v", err)
+	}
+
+	f := e.mailbox()
+	goodCerts := certsRecord(t, f.Dir(), 7)
+	goodCerts.Revocation = rev.Revocation // the other mailbox's, so it does not verify here
+	_, held, err = c.KeepRevocation(ctx, goodCerts)
+	if err == nil || held == nil || held.Revoked || held.Certificates == nil || held.Certificates.Through != 7 || keptRevocation(c, f.Address()) || !keptList(c, f.Address()) {
+		t.Fatalf("a good revocation of certificates beside a bad revocation of the address: %+v, %v", held, err)
+	}
+	if !strings.Contains(err.Error(), "revocation of the address does not verify") || !strings.Contains(err.Error(), "keeps its revocation of certificates") {
+		t.Fatalf("what it said: %v", err)
+	}
+
+	op := watch(e, nil)
+	for name, bad := range map[string]*protocol.Revocations{"the first": goodAddress, "the second": goodCerts} {
+		if _, err := c.Publish(ctx, bad); err == nil {
+			t.Fatalf("%s was published", name)
+		}
+		if _, err := client.Publish(ctx, e.opts(), bad); err == nil {
+			t.Fatalf("%s was published with no mailbox", name)
+		}
+	}
+	if n := op.count(http.MethodPut, "/revocations"); n != 0 {
+		t.Fatalf("%d records with a bad part reached the server", n)
+	}
+}

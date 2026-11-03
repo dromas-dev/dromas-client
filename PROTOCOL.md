@@ -145,7 +145,7 @@ Where this document uses a term below as a defined term, the term has the sense 
 - **Revocation of the address:** the revocation statement that revokes an address (Section 10.1).
 - **Revocation of certificates:** the revocation statement that revokes certificates through its **revocation serial**, the `through` value (Section 10.2): every certificate of the statement's address whose certificate serial is at or below the revocation serial.
 - **Revocation record:** the JSON object that contains an identity's revocations (Section 10.3).
-- **No revocation shown:** an answer that shows no revocation that a client can verify (Section 12.3, check 7).
+- **No revocation shown:** an answer that shows no revocation that a client can verify (Section 12.5).
 
 **Operations**
 
@@ -192,13 +192,13 @@ Where this document uses a term below as a defined term, the term has the sense 
 - **Replay set:** the record that a client keeps of each message that the client accepted (Section 12.3, check 8).
 - **Replay floor:** the cutoff to which a mailbox's replay set has been pruned (Section 12.3, check 8).
 - **Deletion time:** the time by which a client deletes a retired prekey (Section 12.4).
-- **Confirmed time:** of a renewal, the date of the pass that the client sent with the upload that the server accepted for the renewal (Section 12.4).
+- **Confirmed time:** the date of a pass that the client's server accepted (Section 12.4). A renewal's confirmed time is the date of the pass on the upload that the server accepted for the renewal.
 - **The remedy:** the steps of Section 12.6, for a stolen working key.
 
 **Time**
 
 - **Skew allowance:** one hour, which the maker of a time-limited object leaves for clocks that differ (Section 3.4).
-- **Message margin:** the time that a client leaves before a certificate ends, for what the client signed under that certificate to be read.
+- **Message margin:** the time that a client leaves before a certificate ends, for what the client signed under that certificate to be read. The message margin is at least the TTL.
 
 ## 3. Primitives
 
@@ -206,12 +206,12 @@ Where this document uses a term below as a defined term, the term has the sense 
 
 | Name | Role | Specification |
 |---|---|---|
-| age v1 | encryption to a prekey: `mlkem768x25519`, the hybrid ML-KEM-768 + X25519 recipient | C2SP age |
+| age v1 | encryption to a prekey: `mlkem768x25519`, the hybrid ML-KEM-768 + X25519 recipient | C2SP age v1.1.0, read 2026-11-02, whose KEM is MLKEM768-X25519 from draft-ietf-hpke-pq-03 |
 | Ed25519 | the identity key of type `ssh-ed25519`; the working key of an identity of either type of Section 4.1 | RFC 8032 |
 | ECDSA P-256 | the identity key of type `ecdsa-sha2-nistp256` | FIPS 186-5, RFC 5656 |
-| SSHSIG | every signature: the signer's signature over SHA-512 of the message, in a namespace | OpenSSH `PROTOCOL.sshsig` |
+| SSHSIG | every signature: the signer's signature over SHA-512 of the message, in a namespace | OpenSSH 10.6p1 `PROTOCOL.sshsig` |
 | SSH public key text | `<key type> <base64 of the wire key>` | RFC 4253 §6.6, RFC 8709, RFC 5656 |
-| OpenSSH certificate | the certificate of a working key | draft-ietf-sshm-cert |
+| OpenSSH certificate | the certificate of a working key | draft-ietf-sshm-cert-01 |
 | SHA-384 | the address | FIPS 180-4 |
 | SHA-256 | a message id | FIPS 180-4 |
 | UUID | an envelope's `msg_id` | RFC 9562 |
@@ -661,7 +661,7 @@ A sender pads every message so that the message's ciphertext is a whole number o
 
 ### 9.4. Encryption
 
-The sender encrypts the plaintext to the recipient's prekey with age (C2SP age), in the binary format, not armoured. As a shell command: `{ cat P P.sig; padding; } | age -r <recipient> > m.age`. The age file has one `mlkem768x25519` stanza. A sender adds no other native stanza.
+The sender encrypts the plaintext to the recipient's prekey with age (C2SP age), in the binary format, not armoured. As a shell command: `{ cat P P.sig; padding; } | age -r <recipient> > m.age`. The age file has one `mlkem768x25519` stanza. A sender adds no other stanza, apart from a stanza that a server ignores (Section 11.10, step 7).
 
 ## 10. Revocation
 
@@ -801,7 +801,7 @@ This table gives each code's meaning, and how a client acts on the code:
 | 400 | `prekey_not_new` | a prekey equal to the current prekey, or to a retired prekey the server keeps (Section 11.9) |
 | 400 | `prekey_time` | at the server's clock, a certificate that has not yet begun or has ended, or a prekey statement that has ended or ends more than 8 days and an hour ahead. The cause is nearly always the client's clock |
 | 400 | `certificate_too_long` | a certificate that runs longer than the server's maximum (Section 11.7, step 6); `max_certificate_lifetime` gives the maximum |
-| 400 | `wrong_recipient_type` | a send's age file that does not have exactly one native stanza of the current prekey's type (Section 11.10, step 7) |
+| 400 | `wrong_recipient_type` | a send's age file that does not have exactly one native stanza of the current prekey's type, or that has anything beside that stanza and the grease stanzas that the server ignores (Section 11.10, step 7) |
 | 400 | `bad_revocation` | a revocation whose signature is not the identity's signature over the revocation's revocation statement (Section 11.15) |
 | 401 | `unauthorized`, `pass_expired`, `certificate_not_current`, `certificate_revoked` | the server refuses the pass; Section 8's table gives when the server answers each code. On `certificate_not_current`, `certificate_serial` names the certificate concerned (Section 8) |
 | 403 | `unknown_sender` | the mailbox that a send's pass names is not registered |
@@ -864,7 +864,7 @@ A server chooses what it limits and by how much. No limit's value is part of the
   - a revocation the server already keeps (Section 11.15);
   - a send of a ciphertext that the recipient stores (Section 11.10, step 6).
 
-  Only the budgets that bound any call may defer such a request with a `429`: the IP address's `requests` and `misses`, and the mailbox's `calls`.
+  Only the budgets that bound any call may defer such a request with a `429`. These budgets count calls, never what a call would make new, because the server can spend them before the server can tell that the request changes nothing. Examples are the IP address's `requests`, `misses` and `sends_before_pass`, and the mailbox's `calls`.
 
 **Who a call is counted against.** Here, an **IP address** is the IPv4 address or the IPv6 /64 that a call comes from. No caller is exempt.
 
@@ -922,7 +922,12 @@ This table gives the answer to each call in each state:
 - **There is no `DELETE` of a mailbox.** A mailbox leaves a server in one of two ways: the mailbox's identity revokes the address permanently, or the mailbox stops renewing and is forgotten. To stop accepting messages for a while, a mailbox sets its ACL (Section 11.14).
 - **Forgotten.** Section 13 gives the date until which a server keeps a mailbox. A mailbox that has stopped renewing is forgotten once that date has passed. The mailbox is then unknown. The mailbox comes back by registering anew, without its ACL or its account. The server still keeps the revocations that the mailbox's identity made.
 - **There is no pending state.** A registration carries a pass that is minutes old, so a mailbox is active from its first call.
-- **A repeated request.** A request that the server has applied, sent again byte for byte, gets `200` and the same result. A different request that conflicts with the applied request gets `409 conflict`. A send of a ciphertext that the recipient already stores is answered as Section 11.10, step 6, says.
+- **A repeated request.** The server answers three kinds of repeat from the server's current record:
+  - an identical retry (Section 2.3) gets `200`, as Sections 11.7 and 11.9 say;
+  - a revocation that the server already keeps gets the answer that Section 11.15 gives;
+  - a send of a ciphertext that the recipient already stores gets the answer that Section 11.10, step 6, gives.
+
+  The server answers any other request as the section of that request's call says, even when the request is a copy of one that the server has applied.
 
 ### 11.7. Register
 
@@ -1038,7 +1043,7 @@ The server checks the steps below. Only step 9 stores anything. The server spend
    | `B`'s current prekey is past its `not_after`, or the current signer is one `B`'s identity has revoked | `409 prekey_expired` |
    | The sender's identity key is of an optional type (Section 4.1) that `B` did not declare (Section 7) | `403 sender_key_type` |
    | `statement` is not the hash of `B`'s current statement | `409 stale_prekey` |
-   | The age file does not have **exactly one native stanza** (`mlkem768x25519`) of the current prekey's type | `wrong_recipient_type` |
+   | The age file does not have **exactly one native stanza** (`mlkem768x25519`) of the current prekey's type, or has anything beside that stanza and the grease stanzas that the server ignores | `wrong_recipient_type` |
 
    The server ignores a stanza whose type matches `^[!-~]{1,8}-grease$` and that has at most 4 arguments, as age has a reader ignore a stanza that the reader does not recognise. Only the message cap bounds the body of such a stanza. The server cannot check which key the file is sealed to.
 8. **Quotas, counted only for sends that carried their sender's pass:**
@@ -1083,7 +1088,7 @@ The server checks the steps below. Only step 9 stores anything. The server spend
   | the only parameters are `cursor` and `wait`, each at most once | `400 bad_request`, naming the parameter |
   | `cursor` has the form above, and the server can read it as a cursor it makes | `400 bad_request`, naming `cursor` |
   | `wait` is delay-seconds, digits alone | `400 bad_request`, naming `wait` |
-  | a list does not carry both `cursor` and `wait` | `400 bad_request`, naming it |
+  | a list does not carry both `cursor` and `wait` | `400 bad_request`, naming either one |
 
 - **A first page MAY be a long poll:**
   - A list without a cursor MAY carry `wait`, a number of seconds.
@@ -1137,7 +1142,7 @@ A mailbox's ACL says from which senders the mailbox's server accepts messages to
 
   - `allow` is REQUIRED. In `allow`, `["*"]` matches everyone and `[]` matches nobody. A document without `allow` → `400 bad_request`.
   - `deny` may be left out, which is the same as an empty `deny`.
-  - An ACL with more entries than the server accepts, in both lists together → `413 too_large`. A server MUST NOT accept more than 10,000 entries, and MAY accept fewer.
+  - An ACL with more entries than the server accepts, in both lists together → `413 too_large`. The server counts entries as sent, before a repeated entry is read as one entry. A server MUST NOT accept more than 10,000 entries, and MAY accept fewer.
   - The answer is `200` with the ACL as stored, and no `ETag`. The answer lists `*` first, then each address once, in ascending order of the addresses' 48 bytes (not of their text: base64url's alphabet is not in ASCII order, so the two orders differ).
 - **Get the ACL: `GET /v1/<B>/acl`.** The call carries the mailbox's pass. The server answers the ACL as stored, in that order, with the ACL's `ETag`. That `ETag` is a strong validator that changes whenever the lists change. For a mailbox with no ACL, the server answers `{"allow":["*"],"deny":[]}`, also with a tag. There is no `DELETE` of the ACL.
 - **A client MUST treat as malformed an ACL answer with more than 10,000 entries in both lists together.**
@@ -1151,24 +1156,23 @@ A mailbox's ACL says from which senders the mailbox's server accepts messages to
 
 The two calls in this section accept no pass (Section 8).
 
-- **Publish a revocation: `PUT /v1/<A>/revocations`.** The call's body is a revocation record (Section 10.3). The server verifies the revocation record as a client does. The server keeps permanently each revocation that verifies, whether or not a mailbox is at the address.
+- **Publish a revocation: `PUT /v1/<A>/revocations`.** The call's body is a revocation record (Section 10.3). The server verifies the revocation record as a client does. The server keeps permanently each revocation that verifies, whether or not a mailbox is at the address. This section gives the exceptions.
   - **The server answers a revocation it already keeps from its stored revocations.** That answer comes ahead of every other refusal of this call, and ahead of every count except the budgets that bound any call (Section 11.5). Two kinds of body count as a revocation the server already keeps:
     - any body for an address the server keeps revoked;
     - a body that carries only a revocation of certificates, through a revocation serial no higher than the one the server keeps.
 
   | The body carries | Answer |
   |---|---|
-  | a revocation of the address | `201 {}`. A mailbox at the address is revoked permanently. The server deletes the mailbox's messages and everything else that the server holds of the mailbox |
+  | a revocation of the address that verifies | `201 {}`. A mailbox at the address is revoked permanently. The server deletes the mailbox's messages and everything else that the server holds of the mailbox |
   | a revocation of certificates, through a revocation serial no lower than the one kept, if one is kept | `200 {}` |
   | a revocation of certificates through a lower revocation serial than the one kept | `409 conflict` (RFC 9110 §9.3.4), with `through` naming the revocation serial kept |
   | anything, for an address already revoked | `410 revoked`, with the address's revocation record |
   | an identity document that does not hash to the address | `400 identity_mismatch` |
-  | a signature that does not verify | `400 bad_revocation` |
+  | a revocation of the address that does not verify, or a revocation of certificates that does not verify with no revocation of the address beside it | `400 bad_revocation` |
 
-  **A body that carries both revocations:**
-  - a revocation of certificates through a revocation serial no higher than the one kept changes nothing, whether or not that revocation verifies;
-  - the server keeps the revocation of the address if that revocation verifies (`201`);
-  - if any other part does not verify, the server refuses the whole body and keeps nothing in it.
+  **A body that carries a revocation of the address:**
+  - The server keeps a revocation of the address that verifies, and answers `201`, whatever is beside that revocation.
+  - The server answers a revocation of the address that does not verify with `400 bad_revocation`. The server keeps nothing in that body, even a revocation of certificates that verifies.
 
   **A revocation of the address is counted against no mailbox.** The server counts the revocation against the caller's IP address. For an address that the server keeps nothing of, the server MAY also count the revocation as a registration (`registrations`).
 
@@ -1340,20 +1344,15 @@ A client drains every page of its list (Section 11.11) and fetches the message o
    | 5 | `sent_at` is not before the mailbox's replay floor (check 8) | `stale` |
    | 5 | `sent_at` is no more than the skew allowance ahead of this mailbox's clock | `future` |
 
-7. **Check 7, revocation.** The mailbox keeps no revocation of the sender's address (Section 12.5), and no revocation of the sender's certificates that covers the signer (Section 5.1).
-   - The reader looks up the sender's mailbox (Section 11.8) once for each sender in a drain, after that sender's signature has verified. The reader verifies each revocation the lookup carries, and keeps each one that verifies.
-
-   | What the reader keeps, or the lookup shows | Outcome |
-   |---|---|
-   | a revocation of the sender's address | the reader refuses the message as `revoked`, and refuses every later message from that address the same way (Section 10.1) |
-   | a revocation of the sender's certificates through a revocation serial at or above the signer's certificate serial | the reader refuses the message as `certificate_revoked` |
-   | the sender's mailbox served with no revocation, `404 no_such_mailbox`, or `410 revoked` with nothing that verifies | "no revocation shown" |
-   | any other result | no answer: the drain stops, and the message stays on the server |
+7. **Check 7, revocation.** The reader follows three steps, in this order:
+   1. **What the reader keeps comes first, with no lookup.** A kept revocation of the sender's address (Section 12.5) refuses the message as `revoked`, now and for every later message from that address (Section 10.1). A kept revocation of the sender's certificates that covers the signer (Section 5.1) refuses the message as `certificate_revoked`.
+   2. **Otherwise the reader looks up the sender's mailbox (Section 11.8),** once for each sender in a drain, after that sender's signature has verified. An answer other than a well-formed `200`, a `404 no_such_mailbox`, or a `410 revoked` with or without a revocation record that verifies is no answer. So the drain stops and the message stays on the server.
+   3. **On an answer, the reader keeps each revocation that verifies, and applies step 1 again.** If nothing refuses the message, the message passes this check. A revocation that does not verify counts as nothing shown, as Section 12.5 says. A later message from that sender in the drain makes no second lookup, and the reader applies step 1 to the later message by what the reader then keeps.
 
 8. **Check 8, replay.** The reader computes the SHA-256 of the ciphertext. That hash is not in the replay set (`replay`).
    - The reader refuses a message whose listed `id` differs from that hash (`bad_id`).
    - The replay set keeps each message's hash, with the message's `sent_at`, `from` and `msg_id`, until `sent_at` + 14 days and an hour.
-   - **A prune that drops a line first raises the mailbox's replay floor to the prune's cutoff.** The raise is in the same write that drops the line, or in an earlier write. The cutoff is the time the prune goes by (Section 12.4), less 14 days and an hour.
+   - **A prune that drops a line first raises the mailbox's replay floor to the prune's cutoff.** The raise is in the same write that drops the line, or in an earlier write. The cutoff is the confirmed time that the prune goes by (Section 12.4), less 14 days and an hour.
    - A prune that drops nothing leaves the replay floor unchanged.
    - A `sent_at` before the replay floor, or less than the TTL above the floor, is `stale`, regardless of the clock's reading.
 9. **Check 9, duplicate.** `(from, msg_id)` is not in the replay set. A match means the message is a copy of a message already delivered. The reader acks the copy and does not deliver the copy again.
@@ -1414,7 +1413,8 @@ A client drains every page of its list (Section 11.11) and fetches the message o
   - A client renews while enough of the prekey's lifetime is left for the clocks of the mailbox's senders and for the renewal's own calls.
   - For a prekey lifetime of a day or more, enough is the skew allowance (Section 3.4) for senders' clocks, and an hour for the calls.
   - For a shorter prekey lifetime, enough is five minutes for senders' clocks, and five minutes for the calls.
-- **A client signs each prekey serial one time only.** If the server did not accept a renewal, the client sends that renewal again exactly as signed. The client signs a new key only at a later prekey serial. The client keeps a key that is passed over, and deletes that key as a retired prekey.
+- **A client signs each prekey serial one time only.** The client signs a new key only at a later prekey serial. The client keeps a key that is passed over, and deletes that key as a retired prekey.
+- **A client passes over a waiting renewal that the client finds the client's server cannot accept.** A client MUST pass over a renewal whose prekey statement has ended at the client's clock. The client sends any other waiting renewal again exactly as signed.
 - **Two answers to a renewal are final for the renewal's prekey statement:** `409 conflict`, and `401 certificate_not_current` under the second pass that Section 8 allows. Such an answer is final because the server keeps a prekey statement no earlier than the renewal's, and accepts only a later one (Section 11.9). After such an answer, the mailbox looks itself up (Section 11.8):
   - If the server serves the mailbox's own prekey statement, the server accepted the renewal and the answer to the renewal was lost.
   - If the server serves any other prekey statement, that prekey statement is one the mailbox did not make. The rules below decide whether the mailbox renews again.
@@ -1423,7 +1423,7 @@ A client drains every page of its list (Section 11.11) and fetches the message o
   - **A client MUST NOT delete a retired prekey if a message that the client's server stores may be sealed to that prekey.**
   - **A client SHOULD delete a retired prekey before the deletion time, when no message that the client's server stores can be sealed to that prekey (Section 15.3).**
   - **A client deletes a working key when the server accepts a renewal under a later certificate.**
-- **A client deletes keys and prunes its replay set by a time that its server has confirmed the client's clock reached (Sections 15.3, 15.7).** The client never deletes keys or prunes the replay set by a reading of the client's clock alone.
+- **A client deletes keys and prunes its replay set by a confirmed time (Sections 2.3, 15.3, 15.7).** The client never deletes keys or prunes the replay set by a reading of the client's clock alone.
 - **A mailbox that its server has forgotten sends its renewal as a registration (Section 11.7).** The mailbox sends that registration at a prekey serial above every prekey statement the mailbox has registered or renewed.
 - **When a mailbox looks itself up (Section 11.8), the mailbox checks the lookup's answer by every rule of Section 5 except a certificate's dates (Section 15.7).**
   - The mailbox stops the renewals it makes on its own when a served prekey statement does not verify, or is earlier than one the mailbox has registered or renewed.
@@ -1434,13 +1434,13 @@ A client drains every page of its list (Section 11.11) and fetches the message o
 
   | The prekey statement is | What is stolen | The mailbox |
   |---|---|---|
-  | signed by its identity, or under a certificate of a working key the mailbox did not make | the mailbox's identity | SHOULD recommend that the owner revoke the address (Section 10.1). A revocation of certificates cannot end the use of the stolen identity, because anyone who has the identity can make a higher certificate as easily (Section 15.5) |
+  | signed by its identity, or under a certificate of a working key the mailbox did not make | the mailbox's identity | SHOULD recommend that the owner revoke the address (Section 10.1), except that a restored mailbox makes this recommendation only as the next bullet says. A revocation of certificates cannot end the use of the stolen identity, because anyone who has the identity can make a higher certificate as easily (Section 15.5) |
   | under a certificate of the mailbox's own working key, where the identity is kept beside the mailbox's other keys | that working key, and the identity kept beside that working key | SHOULD recommend revoking the address |
   | under a certificate of the mailbox's own working key, where the identity is kept elsewhere | that working key | SHOULD recommend the remedy (Section 12.6) |
 
 - **When a mailbox's server serves a prekey statement that the mailbox did not make:**
   - A mailbox that has registered or renewed a prekey statement of its own MUST NOT renew above a prekey statement it did not make, unless its owner asks.
-  - A mailbox that has registered or renewed no prekey statement, restored from its identity alone, is served the lost machine's prekey statement as one the mailbox did not make. The restored mailbox's first renewal gains control of the mailbox.
+  - A mailbox that has registered or renewed no prekey statement, restored from its identity alone, is served the lost machine's prekey statement as one the mailbox did not make. The restored mailbox's first renewal gains control of the mailbox. The restored mailbox cannot tell the lost machine's prekey statement from a thief's. So the restored mailbox tells its owner what the server served, and recommends revoking the address if the owner did not make that prekey statement.
   - A mailbox MUST NOT sign messages under a certificate of its own working key when such a prekey statement shows that working key is stolen. After the remedy runs, or after the address is revoked, readers refuse those messages too. So the outbox waits for the mailbox's next certificate.
   - A mailbox that signs its messages with its identity does not wait on account of such a prekey statement, because no certificate of its own is in doubt.
 - **A mailbox moves to certificates by renewing under a certificate (Section 11.9), and only when its owner asks.** From then on, the mailbox's prekey statements are under certificates (Section 5.3). Everything the mailbox signed with the identity stays valid.
@@ -1512,7 +1512,7 @@ A mailbox whose identity is kept elsewhere signs under certificates. The identit
 
   A prekey never leaves the mailbox. The identity holder has no key that decrypts messages.
 - **Between certificates, the mailbox renews under its current certificate.** Each renewal brings a new prekey at a higher prekey serial.
-- **A reader accepts a message signed under a certificate only while the certificate is valid at the reader's clock (Section 5.2).** A message can wait the TTL before a reader reads the message. So an identity holder gives the mailbox a certificate at least as often as the server's maximum, less the client's message margin (Section 2.3).
+- **A reader accepts a message signed under a certificate only while the certificate is valid at the reader's clock (Section 5.2).** A message can wait the TTL before a reader reads the message. So an identity holder gives the mailbox the next certificate before the current certificate's `valid before`, less the message margin (Section 2.3). For a certificate of the full maximum, that is the server's maximum less the skew allowance and the message margin, counted from when the identity holder made the certificate.
 - **After the certificate has ended, the mailbox's server accepts no pass under that certificate.** Nothing goes on until the identity holder gives the mailbox a certificate of higher rank. While the server keeps the mailbox, the server accepts the renewal under that new certificate (Sections 11.9, 13). After the server has forgotten the mailbox, that renewal registers the mailbox anew (Section 12.4).
 - **Wherever Sections 12.5 and 12.6 have a mailbox renew under a new certificate, this mailbox waits for its identity holder to give it a new certificate.** A certificate that the identity holder gives this mailbox counts as the owner asking (Section 12.4).
 - **A renewal answered `409 conflict` or `401 certificate_not_current` is final for the renewal's prekey statement (Section 12.4).** The mailbox signs no prekey statement at a higher prekey serial to get above the served one, because anyone who has the same working key can sign at any prekey serial. Only a certificate of higher rank gets above the served prekey statement.
@@ -1557,6 +1557,7 @@ A server chooses how it stores things. A server promises a client the following:
 - **An ack deletes the message.** The server keeps nothing of the message (Section 11.10, step 6).
 - **A revocation of the address deletes every message in the mailbox, in the same way as an ack deletes one message.** The server also deletes its record of the mailbox, and keeps the revocation (Section 11.15).
 - **Setting the ACL deletes no message (Section 11.14).**
+- **A server finishes a send in flight well inside the hour that Section 15.3 gives a client.** A send in flight is a send to the prekey statement that a renewal replaced, which passed Section 11.10, step 7, before the server accepted the renewal. The server stores and lists the send's message within that time, or does not store the message.
 - **Logs.** A server MUST NOT log an address or a message id in the clear. Where a server would log one of these values, the server logs a short hash of the value instead. Only someone who already has the value can match that hash. A server MUST NOT log a pass or a request body.
 
 ## 14. Compatibility and versioning
@@ -1629,6 +1630,7 @@ Dromas protects a message's content from everyone but the message's recipient. D
   - replay old messages, which a reader refuses (Section 12.3);
   - serve a sender a stale prekey, but only a prekey that the mailbox's signer signed, only until that prekey's `not_after`, and never to a sender that has seen a later prekey statement;
   - act as a mailbox toward itself;
+  - refuse every pass from a mailbox, which keeps the mailbox's prekeys on the mailbox's disk for as long as the server refuses (Section 15.3);
   - accept messages that a mailbox's ACL refuses, which the mailbox's client still judges, or refuse messages that the ACL admits, which the server could drop anyway;
   - lie once in the ACL that a mailbox adopts when the mailbox is restored without its own lists, so that a verified sender's messages land as allowed, or so that messages the server could drop anyway are dropped;
   - write anything in an error's words, which a client never shows, or in a receipt, an account id or a cursor, which a client checks against the value's form before using the value (Section 11.3);
@@ -1646,13 +1648,13 @@ Dromas protects a message's content from everyone but the message's recipient. D
 ### 15.3. Forward secrecy
 
 - **Every mailbox has forward secrecy, given a client that deletes retired prekeys (Section 12.4).** How often the mailbox renews and deletes sets the bound on that forward secrecy.
-  - A message cannot be recovered from the mailbox's keys once every prekey that the message could be encrypted to is deleted. That time comes, at the latest, at the `not_after` of the prekey statement that the message is sealed to, plus the TTL. That is 15 days after the prekey statement was made (Section 6).
-  - Suppose a client deletes every retired prekey after a drain that empties its mailbox. For that client, that time comes at the first such drain more than an hour after the server accepts the mailbox's next renewal. For example, that time comes this long after the message arrives:
+  - A message cannot be recovered from the mailbox's keys once every prekey that the message could be encrypted to is deleted. That time comes, at the latest, at the first confirmed time (Section 2.3) at or past the `not_after` of the prekey statement that the message is sealed to, plus the TTL. That is 15 days after the prekey statement was made (Section 6), by a time that a server confirmed. A server that refuses every pass keeps the prekeys on the mailbox's disk for as long as the server refuses.
+  - Suppose a client deletes every retired prekey after a drain that empties its mailbox. For that client, that time comes at the first such drain whose list has a confirmed time more than an hour after the confirmed time of the mailbox's next renewal. For example, that time comes this long after the message arrives:
     - about a day, for a mailbox that renews daily and polls between renewals;
     - about two days, for a mailbox whose only drain is a daily one and which renews at the start of that drain;
     - about six hours, for a mailbox that renews every six hours and polls.
-  - The hour is for sends in flight. A server accepts a send only to the current prekey statement (Section 11.10, step 7). So once the server accepts a renewal, the server refuses a send to the prekey that the renewal replaced. A send that the server accepted before the renewal is stored when its request ends, and a list an hour later lists the message.
-  - The bound asks nothing of the server, and keeps no state per peer, because the mailbox renews, drains and deletes on its own.
+  - The hour is for sends in flight. A server accepts a send only to the current prekey statement (Section 11.10, step 7). So once the server accepts a renewal, the server refuses a send to the prekey that the renewal replaced. A send that the server accepted before the renewal is stored and listed within that hour, or is not stored (Section 13).
+  - The bound keeps no state per peer, because the mailbox renews, drains and deletes on its own. The bound needs a server that accepts the mailbox's passes. A client that deletes by this hour relies on the promise of Section 13 on a send in flight, so that no message arrives sealed to a deleted prekey.
 - **A message waiting on the server is exposed until the mailbox fetches it.** A mailbox that stops renewing keeps its ended prekey as the current prekey. The mailbox's last messages stay exposed until the mailbox renews.
 - **A mailbox that no server accepts a pass from keeps its retired prekeys past their deletion time.** The mailbox keeps those prekeys until a server accepts a pass from the mailbox. This is because the mailbox cannot tell whether its clock is far ahead or a server is refusing the mailbox, and by that clock the mailbox deletes no key that a message may wait for.
 - **Forward secrecy depends on real deletion.** A key kept in a backup, a synced folder or a store with version history survives its deletion.
@@ -1691,7 +1693,7 @@ Dromas protects a message's content from everyone but the message's recipient. D
   - A renewal under a new certificate ends the stolen key at the server at once, and at every sender that has seen the new certificate.
   - A revocation of the stolen key's certificate ends the key wherever the revocation is seen (Section 12.6).
   - Messages that the owner sent under a revoked certificate, and that are still unread, are refused along with the thief's messages.
-- **The party that has the identity key chooses how long a certificate runs, up to the server's maximum.** A shorter certificate ends a stolen working key sooner, and needs the identity more often. A reader checks a certificate at the reader's own clock, because nothing vouches for when a signature was made. A message may also wait the TTL before it is read. So a certificate signs messages that every reader accepts for the server's maximum less the client's message margin (Section 2.3).
+- **The party that has the identity key chooses how long a certificate runs, up to the server's maximum.** A shorter certificate ends a stolen working key sooner, and needs the identity more often. A reader checks a certificate at the reader's own clock, because nothing vouches for when a signature was made. A message may also wait the TTL before it is read. So a certificate signs messages that every reader accepts until the certificate's `valid before`, less the message margin (Section 2.3). For a certificate of the full maximum, that is the server's maximum less the skew allowance and the message margin, counted from when the maker made the certificate.
 - **A stolen pass works only for the minutes that the pass has left, and only at the server that the pass names.** A stolen pass:
   - gives the mailbox's metadata and ciphertext;
   - gives control of the mailbox's availability: deleting unacked messages permanently, leaving the mailbox's account, and setting the mailbox's ACL, with which the stolen pass can pause the mailbox until the owner sets the next ACL;
@@ -1729,6 +1731,7 @@ Dromas protects a message's content from everyone but the message's recipient. D
 
 - **The server sees the social graph, times, IP addresses and each message's size to within a padding block.** Padding hides a length, not a pattern of traffic: who writes to whom, when and how often. A sender other than the reference clients may pad differently or not at all, and the server cannot tell.
 - **Once a message is stored, the server keeps no sender beside the message's recipient (Section 13).** The server sees the sender at the send, with the sender's IP address and the time. The server also sees the message while the message is live. A server that turns hostile can record all of this from then on.
+- **A lookup shows anyone who has the address when the mailbox renews.** A prekey serial and a `not_after` read the clock of the prekey statement's maker, and a lookup needs no pass (Section 11.8).
 - **The lookup before a post tells the server that the mailbox is about to be written to.** The post tells the server the same thing a moment later.
 - **A lookup answered with gzip has a length that depends on the mailbox's own bytes.** So the length can help a network observer narrow down whom a sender is about to write to.
 - **Only a lookup's answer is compressed (Section 11.2).** A list, for example, sets values that senders chose beside the mailbox's own values (BREACH, RFC 7457 §2.6).
@@ -1761,9 +1764,10 @@ Dromas protects a message's content from everyone but the message's recipient. D
 
 ## 17. References
 
-- **[age]** C2SP, "age", https://c2sp.org/age
-- **[draft-ietf-sshm-cert]** "OpenSSH certificates", draft-ietf-sshm-cert
-- **[PROTOCOL.sshsig]** OpenSSH, `PROTOCOL.sshsig`
+- **[age]** C2SP, "age", v1.1.0, https://c2sp.org/age@v1.1.0, read 2026-11-02
+- **[draft-ietf-hpke-pq-03]** Barnes, Connolly, "Post-Quantum and Post-Quantum/Traditional Hybrid Algorithms for HPKE", draft-ietf-hpke-pq-03: the MLKEM768-X25519 KEM that [age] names
+- **[draft-ietf-sshm-cert-01]** Miller, "SSH Certificate Format", draft-ietf-sshm-cert-01
+- **[PROTOCOL.sshsig]** OpenSSH 10.6p1, `PROTOCOL.sshsig`
 - **[AEP-158]**, **[AEP-193]** API Enhancement Proposals: pagination; errors
 - **[BIP 173]** Bech32
 - **[FIPS 180-4]**, **[FIPS 186-5]**

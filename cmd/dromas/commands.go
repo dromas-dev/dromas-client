@@ -1317,7 +1317,9 @@ func (e *cli) keepCmd() *cobra.Command {
 		`Take a revocation of another mailbox that someone handed you (a record as
 dromas revocation make prints), check it, and keep it: this mailbox then sends
 that address nothing and takes nothing from it. A record may carry a
-revocation of the mailbox's certificates, which is kept the same way.`,
+revocation of the mailbox's certificates, which is kept the same way. Each part
+that verifies is kept: where another part does not verify, the command says
+what it keeps, names the part that failed, and ends with that failure.`,
 		nargs(1, 1), func(c *cobra.Command, args []string) error {
 			b, err := e.mailbox()
 			if err != nil {
@@ -1328,10 +1330,12 @@ revocation of the mailbox's certificates, which is kept the same way.`,
 				return err
 			}
 			a, held, err := b.KeepRevocation(c.Context(), rec)
-			if err != nil {
-				return err
+			if held != nil {
+				if serr := e.sayHeld(a, held); serr != nil {
+					return serr
+				}
 			}
-			return e.sayHeld(a, held)
+			return err
 		})
 }
 

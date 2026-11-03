@@ -213,18 +213,23 @@ func TestOnlyTheIdentitysHighestRevocationCounts(t *testing.T) {
 
 	// A server serves the first revocation again, which did not cover
 	// certificate 2. B holds the second, and a lower one never replaces a
-	// higher one: what was revoked stays revoked.
-	show(firstList)
-	messageAs(t, e, a, b, second, "under certificate 2, with the lower revocation shown again")
-	if res := receive(t, b); len(res.Delivered) != 0 || len(res.Refused) != 1 || res.Refused[0].Code != client.RefusedCertificate || shown.Load() == 0 {
-		t.Fatalf("a lower revocation replaced the higher one, or was never shown: %+v", res)
+	// higher one: what was revoked stays revoked. The message under the
+	// certificate in use draws the read; the one under certificate 2 asks
+	// nobody, whichever is judged first, and neither read changes its verdict.
+	shownAndJudged := func(what string) {
+		t.Helper()
+		shown.Store(0)
+		messageAs(t, e, a, b, second, "under certificate 2, "+what)
+		send(t, a, b, "under the certificate in use, "+what)
+		if res := receive(t, b); len(res.Delivered) != 1 || len(res.Refused) != 1 || res.Refused[0].Code != client.RefusedCertificate || shown.Load() == 0 {
+			t.Fatalf("%s: %+v", what, res)
+		}
 	}
+	show(firstList)
+	shownAndJudged("with the lower revocation shown again")
 	// And with nothing shown at all, the kept revocation still stands.
 	show(protocol.Revocations{Identity: doc})
-	messageAs(t, e, a, b, second, "under certificate 2, with no revocation shown")
-	if res := receive(t, b); len(res.Delivered) != 0 || len(res.Refused) != 1 || shown.Load() == 0 {
-		t.Fatalf("the kept revocation did not hold once the server stopped showing it: %+v", res)
-	}
+	shownAndJudged("with no revocation shown")
 }
 
 // A mailbox's statements are ordered by certificate first. So whoever took a

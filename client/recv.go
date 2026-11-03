@@ -702,23 +702,25 @@ func (b *Mailbox) judge(ctx context.Context, ct []byte, asked *lookups) (verdict
 	if floor > 0 && env.SentAt.Unix() < floor+int64(protocol.TTL/time.Second) {
 		return refused(protocol.RefusedStale, "sent_at is before this mailbox's replay set reaches back to, since its clock once read later than it does now")
 	}
-	gone, err := b.revoked(from)
+	// Check 7. What the mailbox keeps comes first, and asks nobody. Otherwise
+	// the sender is looked up, once in a drain, and what the mailbox then
+	// keeps decides: a failed lookup holds only a message nothing kept refuses.
+	gone, covered, err := b.keptAgainst(from, signed.Signer)
 	if err != nil {
 		return verdict{}, fmt.Errorf("a fault of this mailbox, so the message stays on the server: %w", err)
 	}
-	if !gone && !asked.answered[from] {
-		if gone, err = b.lookupRevocation(ctx, from, asked); err != nil {
+	if !gone && !covered && !asked.answered[from] {
+		if _, err := b.lookupRevocation(ctx, from, asked); err != nil {
 			return verdict{}, fmt.Errorf("whether its sender is revoked could not be asked, so the message stays on the server: %w", err)
+		}
+		if gone, covered, err = b.keptAgainst(from, signed.Signer); err != nil {
+			return verdict{}, fmt.Errorf("a fault of this mailbox, so the message stays on the server: %w", err)
 		}
 	}
 	if gone {
 		return refused(RefusedRevoked, "its sender's address is revoked, and the revocation verifies: nothing signed for that address is taken, whenever it was signed")
 	}
-	certs, err := b.revokedCerts(from)
-	if err != nil {
-		return verdict{}, err
-	}
-	if protocol.Admits(certs, signed.Signer) != nil {
+	if covered {
 		return refused(RefusedCertificate, "it is signed under a certificate its sender's identity has revoked: nothing signed under it is taken, whenever it was signed")
 	}
 	h := sha256.Sum256(ct)
@@ -744,6 +746,20 @@ func (b *Mailbox) judge(ctx context.Context, ct []byte, asked *lookups) (verdict
 		return verdict{}, err
 	}
 	return verdict{delivery: &Delivery{Envelope: env, Line: line, Plaintext: signed.Line, Signature: signed.Signature, findings: found}, found: found}, nil
+}
+
+// keptAgainst reads what this mailbox keeps against a message from a under
+// signer, with no call: whether it keeps a revocation of the address, and
+// whether it keeps a revocation of a's certificates that covers signer.
+func (b *Mailbox) keptAgainst(a protocol.Address, signer *protocol.Signer) (gone, covered bool, err error) {
+	if gone, err = b.revoked(a); err != nil || gone {
+		return gone, false, err
+	}
+	certs, err := b.revokedCerts(a)
+	if err != nil {
+		return false, false, err
+	}
+	return false, protocol.Admits(certs, signer) != nil, nil
 }
 
 // keptLineOf is the line inbox/ and held/ keep of a delivered envelope, and

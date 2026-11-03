@@ -750,9 +750,7 @@ func TestAskingAtAnyTimeAndARevocationHandedOver(t *testing.T) {
 		t.Fatalf("a lower one handed over again: %+v, %v", held, err)
 	}
 
-	// A record with a part that does not verify is refused whole: a good
-	// revocation beside a revocation of certificates the working key signed
-	// keeps nothing.
+	// A record in which nothing verifies is refused, and keeps nothing.
 	d := e.mailbox()
 	rev, err := d.Revocation(t.Context())
 	if err != nil {
@@ -767,13 +765,13 @@ func TestAskingAtAnyTimeAndARevocationHandedOver(t *testing.T) {
 		t.Fatal(err)
 	}
 	for name, bad := range map[string]*protocol.Revocations{
-		"certificates revoked by a working key":  {Identity: rev.Identity, Revocation: rev.Revocation, RevokedCertificates: certs.Statement(), RevokedCertificatesSignature: byWorker},
 		"certificates revoked with no signature": {Identity: rev.Identity, RevokedCertificates: certs.Statement()},
 		"another mailbox's revocation, and none": {Identity: rev.Identity, Revocation: first.RevokedCertificatesSignature},
+		"two parts, neither of which verifies":   {Identity: rev.Identity, Revocation: first.RevokedCertificatesSignature, RevokedCertificates: certs.Statement(), RevokedCertificatesSignature: byWorker},
 		"nothing but the identity":               {Identity: rev.Identity},
 	} {
-		if _, _, err := c.KeepRevocation(t.Context(), bad); err == nil || keptRevocation(c, d.Address()) || keptList(c, d.Address()) {
-			t.Fatalf("%s was kept: %v", name, err)
+		if _, held, err := c.KeepRevocation(t.Context(), bad); err == nil || held != nil || keptRevocation(c, d.Address()) || keptList(c, d.Address()) {
+			t.Fatalf("%s was kept: %+v, %v", name, held, err)
 		}
 	}
 	if _, held, err := c.KeepRevocation(t.Context(), rev); err != nil || !held.Revoked {
