@@ -189,12 +189,17 @@ func (b *Mailbox) status() (*Status, error) {
 		s.Signer = SignerCertificate
 	}
 	s.IdentityKey, s.Agent = b.identityKey(), b.unlock.agent
-	if !s.Revoked && (s.IdentityKey == KeyPassphrase || s.IdentityKey == KeyNone) {
-		what := "renews nothing, so senders are refused once its prekey expires,"
-		if !certified {
-			what = "signs with its identity, so it neither sends nor receives"
+	// A locked key is an owner's choice, and identity_key says so. It needs a
+	// look only once a renewal is due, which needs the identity's key: from
+	// then, unless the key is unlocked, senders are refused once the prekey
+	// expires. A drain or a send the lock stops fails as identity_locked
+	// itself.
+	if !s.Revoked && (s.IdentityKey == KeyPassphrase || s.IdentityKey == KeyNone) && b.renewDue() {
+		when := "once the prekey expires"
+		if s.PrekeyNotAfter != "" {
+			when = "from " + s.PrekeyNotAfter
 		}
-		s.Attention = append(s.Attention, fmt.Sprintf("the identity's key is locked (%s): this mailbox %s until the key is unlocked. dromas agent add loads it into the mailbox's agent; a key file with a passphrase is also unlocked at a terminal, or by --askpass", s.IdentityKey, what))
+		s.Attention = append(s.Attention, fmt.Sprintf("the prekey is due for renewal, which needs the identity's key, and the key is locked (%s): senders are refused %s unless the key is unlocked and the mailbox renewed before then. dromas agent add loads it into the mailbox's agent; a key file with a passphrase is also unlocked at a terminal, or by --askpass", s.IdentityKey, when))
 	}
 	switch _, cert, werr := b.currentSigner(); {
 	case werr != nil && (err != nil || perr != nil || s.Revoked):

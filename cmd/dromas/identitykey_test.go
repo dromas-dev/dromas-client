@@ -116,6 +116,8 @@ func failed(t *testing.T, err error) map[string]any {
 // A mailbox whose key file has a passphrase signs only once something gives the
 // passphrase: with no terminal, or prompting off, a renewal fails with
 // identity_locked, naming the key file, and an askpass program unlocks it.
+// status says the key file has a passphrase, and needs no look for it while no
+// renewal is due.
 func TestAKeyFileUnderAPassphraseIsLockedUntilAPassphraseIsGiven(t *testing.T) {
 	cleanEnv(t)
 	srv := fakeserver.New(t, time.Now)
@@ -144,8 +146,8 @@ func TestAKeyFileUnderAPassphraseIsLockedUntilAPassphraseIsGiven(t *testing.T) {
 		t.Errorf("a renewal with the passphrase: %v", err)
 	}
 	var out bytes.Buffer
-	if err := do(t.Context(), "status", nil, nil, &out, io.Discard); err == nil {
-		t.Error("status of a locked mailbox needs no look")
+	if err := do(t.Context(), "status", nil, nil, &out, io.Discard); err != nil {
+		t.Errorf("status of a locked mailbox with no renewal due: %v", err)
 	}
 	if !strings.Contains(out.String(), `"identity_key":"passphrase"`) {
 		t.Errorf("status: %s", out.String())

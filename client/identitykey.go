@@ -105,7 +105,10 @@ func readPublicKey(file string) (ssh.PublicKey, error) {
 
 // unlockIdentity has the identity's private key, for sign.Identity at its first
 // signature: the key of it the agent holds, or the key file, unlocked by a
-// passphrase where it has one, and added to the agent then if asked.
+// passphrase where it has one, and added to the agent then if asked. It runs
+// under the command's lock, at the signature that needs the key, so a person at
+// the prompt holds the lock, and another command of the mailbox waits for it
+// as it waits for any command (lockPatience).
 func (b *Mailbox) unlockIdentity() (ssh.Signer, func(), error) {
 	pub, u := b.id.PublicKey(), b.unlock
 	file := b.path("identity")
