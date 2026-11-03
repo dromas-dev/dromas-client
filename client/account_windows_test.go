@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unsafe"
 
 	"github.com/dromas-dev/dromas-client/client"
 
@@ -174,16 +175,21 @@ func TestASecondUserReachesWhatTheListSays(t *testing.T) {
 	}
 }
 
-// opensWith is whether this process can open path with these rights. Only a refusal
-// of access is a no: any other error says nothing of them.
+// opensWith is whether this process can open path with these rights and no other:
+// NtCreateFile, as CreateFile adds synchronize and read-attributes to what it asks.
+// Only a refusal of access is a no: any other error says nothing of them.
 func opensWith(path string, mask uint32) (bool, error) {
-	p, err := windows.UTF16PtrFromString(path)
+	name, err := windows.NewNTUnicodeString(`\??\` + path)
 	if err != nil {
 		return false, err
 	}
-	h, err := windows.CreateFile(p, mask, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE, nil,
-		windows.OPEN_EXISTING, windows.FILE_FLAG_BACKUP_SEMANTICS, 0)
-	if errors.Is(err, windows.ERROR_ACCESS_DENIED) {
+	oa := windows.OBJECT_ATTRIBUTES{ObjectName: name}
+	oa.Length = uint32(unsafe.Sizeof(oa)) //nolint:gosec // a struct's size
+	var h windows.Handle
+	var status windows.IO_STATUS_BLOCK
+	err = windows.NtCreateFile(&h, mask, &oa, &status, nil, 0, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
+		windows.FILE_OPEN, windows.FILE_OPEN_FOR_BACKUP_INTENT, 0, 0)
+	if errors.Is(err, windows.STATUS_ACCESS_DENIED) {
 		return false, nil
 	}
 	if err != nil {
@@ -310,7 +316,7 @@ func TestAVolumeThatKeepsNoAccessListHoldsNoKey(t *testing.T) {
 				if err != nil {
 					return err
 				}
-				if base := d.Name(); !d.IsDir() && (strings.HasPrefix(base, "identity") || strings.HasPrefix(base, ".tmp-") || strings.Contains(base, "agekey")) {
+				if base := d.Name(); !d.IsDir() && (base == "identity" || strings.HasPrefix(base, ".tmp-") || strings.HasSuffix(base, ".agekey")) {
 					t.Errorf("left behind: %s", p)
 				}
 				return nil

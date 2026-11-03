@@ -19,7 +19,7 @@ foreach ($v in Get-ChildItem Env: | Where-Object { $_.Name -match '^(PATH|GO.*|D
 $lines += "set `"DROMAS_TEST_ACCOUNT=$Account`""
 $lines += "cd /d `"$env:GITHUB_WORKSPACE`""
 $lines += "`"C:\Program Files\Git\bin\bash.exe`" scripts/check.sh $Mode > `"$out`" 2>&1"
-$lines += "echo status=%errorlevel%> `"$done`""
+$lines += "> `"$done`" echo status=%errorlevel%"
 $lines | Set-Content -Encoding ascii -Path $cmd
 
 $action = New-ScheduledTaskAction -Execute 'cmd.exe' -Argument "/c `"$cmd`""
@@ -45,7 +45,7 @@ while ($true) {
   $reader.CopyTo($stdout)
   $stdout.Flush()
   if ($finished) {
-    $status = [int]((Get-Content $done) -replace '[^0-9]', '')
+    if ((Get-Content $done) -match '^status=(\d+)') { $status = [int]$Matches[1] }
     break
   }
   # 0x41303: not yet run, which a logon refused leaves too. 0x41301: running.
