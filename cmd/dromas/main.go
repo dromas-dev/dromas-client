@@ -63,7 +63,7 @@ recv, messages were received as printed and the prekey, due for renewal, was not
 renewed ("renewal_failed"), its server served a prekey the mailbox did not make
 ("prekey_not_made"), the mailbox's ACL was not sent to its server
 ("acl_not_sent"), or its server held an ACL the mailbox had not sent, which it
-replaced ("acl_replaced"); from send and outbox flush, the post went ahead
+replaced ("acl_replaced"), or a callback ran out of tries ("exec_gave_up"); from send and outbox flush, the post went ahead
 though the mailbox's ACL was not sent ("acl_not_sent"); from prekey renew, its
 server served a prekey the mailbox did not make ("prekey_not_made"); from any
 command that called a server, the server stops taking this client's version

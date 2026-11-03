@@ -272,7 +272,8 @@ twice in an object among them, is refused, and nothing is sent.`,
 func (e *cli) recvCmd() *cobra.Command {
 	var o recvOptions
 	var drain time.Duration
-	c := command("recv [flags]", "receive, verify and ack every message: one line of JSON each",
+	var program string
+	c := command("recv [flags] [-- <argument>...]", "receive, verify and ack every message: one line of JSON each",
 		fmt.Sprintf(`Receive, verify and ack every message: a "message" line for each, built from the
 verified fields, with this mailbox's name for its sender as "alias" when it
 named one (dromas alias add). It also renews the prekey once a day, so run it at least
@@ -298,17 +299,40 @@ SIGTERM ends --follow with exit status 0. The mailbox's lock stays free
 between drains, so its other commands run meanwhile. A call that may mend is
 made again, each said on stderr ("waiting"). Exit status 4 and "fatal" in the
 "error" line say that no wait mends the refusal: a revocation, no mailbox at
-this address, or a refusal of the client's own. Exit status 1 is any other failure.`, formatTime(client.RecvWithin(protocol.PrekeyLifetime))),
-		checked(nargs(0, 0), func(c *cobra.Command, _ []string) error {
+this address, or a refusal of the client's own. Exit status 1 is any other failure.
+
+With --exec, recv runs a command for each message that lands in inbox/, with
+the message's line on stdin, as recv prints it. It takes --wait or --follow.
+--exec names the program, and the arguments after -- go to it one for one: no
+shell runs, and nothing is split or expanded. The program's stdout and stderr
+are discarded. The commands run one at a time, in delivery order, with the
+mailbox's lock free, so a command may run dromas. Each message is kept in
+inbox/ first, so a command is a notification and never the only copy. A message
+held in held/ runs no command, and neither does one another recv takes, so
+run one recv for each mailbox.
+
+Exit status 0 is done, and 100 is failed for good. Any other exit status, a
+signal, a run longer than --exec-timeout (which kills the process) or a
+program that does not start is tried again, up to %d tries in all, %s apart.
+Each failed try prints an "exec_failed" line, and a message with no try left
+an "exec_gave_up" line, which dromas status then lists under attention, and
+recv goes on to the next message and exits with status 3 at its end. A
+process killed before a command's tries end runs that command again when recv
+--exec next starts, so a command runs at least once for each message and
+may run twice: it should take the "id" as the message's name.`, formatTime(client.RecvWithin(protocol.PrekeyLifetime)), execTries, execDelay),
+		checked(o.takesArguments, func(c *cobra.Command, args []string) error {
 			if drain <= 0 {
 				return wrong(c, "%s --drain-time takes a duration above zero, such as 15m", c.CommandPath())
 			}
-			return nil
-		}), func(c *cobra.Command, _ []string) error {
+			return o.check(c, program, args)
+		}), func(c *cobra.Command, args []string) error {
 			e.opt.DrainTime = drain
 			b, err := e.mailbox()
 			if err != nil {
 				return err
+			}
+			if program != "" {
+				o.exec = append([]string{program}, args...)
 			}
 			if o.follow && !c.Flags().Changed("wait") {
 				o.endless = true
@@ -317,6 +341,8 @@ this address, or a refusal of the client's own. Exit status 1 is any other failu
 		})
 	c.Flags().DurationVar(&o.wait, "wait", 0, "hold the list until a message arrives, for at most this long, however many held requests it takes")
 	c.Flags().BoolVar(&o.follow, "follow", false, "go on after each message, without end or for --wait's duration")
+	c.Flags().StringVar(&program, "exec", "", "run this `program` for each message, with its line on stdin, and the arguments after -- as its own")
+	c.Flags().DurationVar(&o.execTimeout, "exec-timeout", 5*time.Minute, "kill --exec's program when one run takes this long")
 	c.Flags().DurationVar(&drain, "drain-time", client.DefaultDrainTime, "how long one drain runs before it stops for the next recv")
 	// As an IMAP client fetches a message's ENVELOPE apart from its body (RFC
 	// 9051 §6.4.5), as email clients list headers before they open a message.
