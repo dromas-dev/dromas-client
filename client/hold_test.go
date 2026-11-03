@@ -306,7 +306,12 @@ func TestAwaitEndsAtARefusalNoWaitMends(t *testing.T) {
 			forge.Refuse(w, protocol.CodeBadRequest)
 		})
 		var said []error
-		err := b.Await(context.Background(), start.Add(time.Hour), func(_ *client.HoldResult, err error) { said = append(said, err) })
+		err := b.Await(context.Background(), start.Add(time.Hour), func(_ context.Context, ev client.Event) error {
+			if ev.Kind == client.EventRetry {
+				said = append(said, ev.Err)
+			}
+			return nil
+		})
 		var ae *client.APIError
 		if !errors.As(err, &ae) || ae.Problem.Code != protocol.CodeBadRequest || len(said) != 1 {
 			t.Fatalf("Await: %v, having said %v; want the bad_request refusal, after one retry", err, said)

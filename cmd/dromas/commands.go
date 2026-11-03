@@ -545,13 +545,15 @@ func (e *cli) recv(c *cobra.Command, b *client.Mailbox, wait time.Duration, head
 // is said on stderr, and so is a connection that dropped part way, with the
 // wait and keep-alive the mailbox takes from then on.
 func (e *cli) hold(ctx context.Context, b *client.Mailbox, deadline time.Time) error {
-	return b.Await(ctx, deadline, func(h *client.HoldResult, err error) {
-		if err != nil {
-			e.say(line("waiting", append([]any{"for", "server"}, failure(err)...)...))
-			return
+	return b.Await(ctx, deadline, func(_ context.Context, ev client.Event) error {
+		switch ev.Kind {
+		case client.EventRetry:
+			e.say(line("waiting", append([]any{"for", "server"}, failure(ev.Err)...)...))
+		case client.EventConnectionDropped:
+			e.say(line("waiting", "for", "connection", "held", seconds(ev.Hold.After), "wait", seconds(ev.Hold.Wait), "keep_alive", seconds(ev.Hold.KeepAlive),
+				"detail", "the connection dropped while the list was held: the next one keeps alive, and the wait shortens only if that one drops too"))
 		}
-		e.say(line("waiting", "for", "connection", "held", seconds(h.After), "wait", seconds(h.Wait), "keep_alive", seconds(h.KeepAlive),
-			"detail", "the connection dropped while the list was held: the next one keeps alive, and the wait shortens only if that one drops too"))
+		return nil
 	})
 }
 
