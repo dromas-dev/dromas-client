@@ -58,6 +58,8 @@ This document specifies the formats, the meaning of each HTTP operation, and the
 - **`testdata/vectors/` contains the conformance vectors (Section 16).**
 - **`PRECEDENTS.md` sets each design decision beside the published standards and deployed systems that make the same decision.**
 
+A reader reviewing the cryptography needs Sections 2.2, 3, 4, 5, 6, 9, 10, 12.3 and 15. The rest is the API, the server's promises and a client's state.
+
 ## 2. Conventions
 
 ### 2.1. Requirements language
