@@ -92,10 +92,11 @@ func (e *cli) recv(c *cobra.Command, b *client.Mailbox, o recvOptions) error {
 	}
 	r := &recvRun{cli: e, b: b, o: o, stale: true}
 	err := b.Follow(ctx, f, r.handle)
-	switch {
-	case o.follow && ctx.Err() != nil && errors.Is(err, ctx.Err()):
+	if o.follow && ctx.Err() != nil && errors.Is(err, ctx.Err()) {
 		err = nil
-	case err != nil && client.Fatal(err):
+	}
+	switch {
+	case client.Fatal(err):
 		return &fatalEnd{err}
 	case err != nil:
 		return err
