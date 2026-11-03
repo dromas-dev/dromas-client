@@ -71,8 +71,11 @@ jobs:
     # scheduled task, and as a second plain user, who tries what the first
     # one's lists say. Beside them a FAT32 and an exFAT volume, which keep no
     # access list. scripts/windows-accounts.ps1 makes these, on this runner only:
-    # the tests skip without them, by DROMAS_TEST_ACCOUNT.
+    # the tests skip without them, by DROMAS_TEST_ACCOUNT. The daily run or a
+    # hand-run alone, never a pull request's or a release's: it compiles from a cold
+    # cache, and what it holds changes only with the Windows access-list code.
     name: test (windows accounts)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: windows-2025
     timeout-minutes: 40
     env:
