@@ -263,6 +263,7 @@ func TestADeadConnectionOverHTTP2IsClosedByItsHealthCheck(t *testing.T) {
 		if took := time.Since(start); err == nil || ctx.Err() != nil || took > after+wait {
 			t.Errorf("after %v: %v (the context: %v), want it closed by %v", took, err, ctx.Err(), after+wait)
 		}
+		synctest.Wait() // the health check ends a call before it closes the connection
 		select {
 		case <-dead.closed:
 		default:
