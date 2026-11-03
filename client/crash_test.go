@@ -36,8 +36,8 @@ import (
 const crashChild = "DROMAS_TEST_CRASH"
 
 // crashOrder is what the copy runs: the step it dies at, the mailbox's directory,
-// its server's URL, its clock in Unix seconds, the command, and for a send,
-// the address it goes to.
+// its server's URL, its clock in Unix seconds, the command, and for a send or
+// an allow, the address it names.
 type crashOrder struct {
 	Step, Dir, Base, Command, To string
 	Now                          int64
@@ -69,6 +69,14 @@ var crashCommands = map[string]func(ctx context.Context, b *client.Mailbox, o cr
 			return err
 		}
 		_, err = b.Send(ctx, to, "sent by a process killed on its way")
+		return err
+	},
+	"allow": func(ctx context.Context, b *client.Mailbox, o crashOrder) error {
+		to, err := protocol.ParseAddress(o.To)
+		if err != nil {
+			return err
+		}
+		_, err = b.Allow(ctx, to)
 		return err
 	},
 }
@@ -131,19 +139,26 @@ func crashIn(t *testing.T, e *env, dir, command, step string, to protocol.Addres
 // there.
 func inbox(t *testing.T, b *client.Mailbox) []string {
 	t.Helper()
-	names, err := filepath.Glob(filepath.Join(b.Dir(), "mail", "inbox", "*.json"))
+	return folder(t, b, "inbox")
+}
+
+// folder is the body of each message in a folder of a mailbox's mail, as many
+// times as it is there.
+func folder(t *testing.T, b *client.Mailbox, name string) []string {
+	t.Helper()
+	names, err := filepath.Glob(filepath.Join(b.Dir(), "mail", name, "*.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	var bodies []string
-	for _, name := range names {
-		raw, err := os.ReadFile(name)
+	for _, path := range names {
+		raw, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatal(err)
 		}
 		var line struct{ Body string }
 		if err := json.Unmarshal(raw, &line); err != nil {
-			t.Fatalf("%s: %v", name, err)
+			t.Fatalf("%s: %v", path, err)
 		}
 		bodies = append(bodies, line.Body)
 	}
@@ -714,6 +729,42 @@ func TestADrainKilledAtEachStepOfAPartialDeliversOnce(t *testing.T) {
 			noPartial(t, x)
 			e.srv.SetMiddle(nil)
 			whole(t, e, x, a, strings.Repeat(body, 2000))
+		})
+	}
+}
+
+// An allow killed at each of its steps loses nothing: each message from the
+// sender is in held/ or inbox/, or both. The next allow finishes the move: each
+// is in inbox/ once and out of held/, and another sender's message stays held.
+func TestAnAllowKilledAtEachStepFinishesWhenRunAgain(t *testing.T) {
+	t.Parallel()
+	for _, step := range client.Steps("allow") {
+		t.Run(step, func(t *testing.T) {
+			e := newEnv(t)
+			a, other, b := e.heldMailbox(), e.heldMailbox(), e.heldMailbox()
+			send(t, a, b, "first")
+			send(t, a, b, "second")
+			send(t, other, b, "from another sender")
+			if res := receive(t, b); len(res.Held) != 3 {
+				t.Fatalf("the drain before the crash: %+v", res)
+			}
+			crash(t, e, b, "allow", step, a.Address())
+			kept := append(folder(t, b, "held"), folder(t, b, "inbox")...)
+			slices.Sort(kept)
+			if got, want := slices.Compact(kept), []string{"first", "from another sender", "second"}; !slices.Equal(got, want) {
+				t.Fatalf("after the crash, held/ and inbox/ hold %q, want %q", got, want)
+			}
+			x, err := client.Open(b.Dir(), e.opts())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := x.Allow(context.Background(), a.Address()); err != nil {
+				t.Fatalf("the allow after the crash: %v", err)
+			}
+			if got, want := folder(t, x, "held"), []string{"from another sender"}; !slices.Equal(got, want) {
+				t.Fatalf("held/ holds %q, want %q", got, want)
+			}
+			whole(t, e, x, a, "first", "second")
 		})
 	}
 }
