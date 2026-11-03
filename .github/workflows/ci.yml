@@ -73,8 +73,8 @@ jobs:
     # leaves ./sh out there (its header says why). NetBSD and DragonFly in the
     # daily run alone, never a release's, as the Intel Mac: their VMs build
     # the tests at a third and a quarter of the others' speed. The race test in
-    # the daily run alone too: with no Go cache in the VM, its build took FreeBSD
-    # 2 to 4 minutes for seconds of tests, and FreeBSD set the merge gate's time.
+    # the daily run alone too: with no Go cache in the VM, its build takes FreeBSD
+    # minutes, for seconds of tests.
     strategy:
       fail-fast: false
       matrix:
