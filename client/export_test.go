@@ -492,3 +492,31 @@ func (b *Mailbox) SetPrekeyLifetime(_ context.Context, d time.Duration) error {
 
 // DrainBound is how long b's next Receive drains.
 func DrainBound(b *Mailbox) time.Duration { return b.drainBound() }
+
+// AdoptedKeys is the serial of every key b's state file adopted (adoptKeys).
+func AdoptedKeys(t *testing.T, b *Mailbox) []uint64 {
+	t.Helper()
+	keys, err := b.adopted()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ns []uint64
+	for _, k := range keys {
+		ns = append(ns, k.serial)
+	}
+	return ns
+}
+
+// ForgetAdoption leaves b's state file as one that has not yet read prekeys/ for
+// keys it names nowhere.
+func ForgetAdoption(t *testing.T, b *Mailbox) {
+	t.Helper()
+	release, err := b.hold(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release() //nolint:errcheck // a test's
+	if err := b.update(func(s store) error { return s.del(bucketMailbox, keyKeysAdopted) }); err != nil {
+		t.Fatal(err)
+	}
+}

@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/dromas-dev/dromas-client/protocol"
@@ -404,6 +406,15 @@ func (b *Mailbox) nextNumber(st *ownRead, unused bool) (uint64, *protocol.Prekey
 	}
 	if own != nil {
 		known = max(known, own.Through)
+	}
+	// Above every key the state file adopted: a serial may have been signed
+	// once, and makePrekey would take a file at the number as a key never signed.
+	adopted, err := b.adopted()
+	if err != nil {
+		return 0, nil, err
+	}
+	for _, k := range adopted {
+		known = max(known, k.serial)
 	}
 	// A number an earlier attempt took, and that nothing has passed since,
 	// is kept: its statement is the one sent again, and a key made for it
@@ -897,10 +908,12 @@ func (b *Mailbox) dropRetired(at taken) error {
 	return nil
 }
 
-// removePrekey deletes a prekey's key and its statement, and the working key
-// made with it, if a renewal the server never took left one: the files
-// first, then the record, so a crash in between leaves a record of a key
-// gone, which the next prune deletes again, and never a key no record names.
+// removePrekey deletes a prekey's key and what the state file keeps of it, its
+// statement or its adoption, and the working key made with it, if a renewal the
+// server never took left one: the files first, then the record, so a crash in
+// between leaves a record of a key gone, which the next prune deletes again.
+// A crash never leaves a key no record names by this path. A state file lost
+// does, and the next one adopts it (adoptKeys).
 func (b *Mailbox) removePrekey(n uint64) error {
 	if err := removeIfExists(b.path("prekeys", strconv.FormatUint(n, 10)+".agekey")); err != nil {
 		return err
@@ -910,7 +923,12 @@ func (b *Mailbox) removePrekey(n uint64) error {
 			return err
 		}
 	}
-	return b.update(func(s store) error { return s.del(bucketPrekeys, serialKey(n)) })
+	return b.update(func(s store) error {
+		if err := s.del(bucketAdopted, serialKey(n)); err != nil {
+			return err
+		}
+		return s.del(bucketPrekeys, serialKey(n))
+	})
 }
 
 // prune deletes every retired prekey, and every key a renewal passed over,
@@ -923,7 +941,19 @@ func (b *Mailbox) removePrekey(n uint64) error {
 // drain's list taken, and a renewal taken, each run it, by the date of the
 // pass that call carried: a clock far ahead is stopped at that pass, and one
 // that moves while the call is in flight deletes nothing by where it went.
+// It first deletes each adopted key whose time has come by at (adoptedKey.ends).
 func (b *Mailbox) prune(at taken) error {
+	adopted, err := b.adopted()
+	if err != nil {
+		return err
+	}
+	for _, k := range adopted {
+		if !k.ends.IsZero() && !at.At().Before(k.ends) {
+			if err := b.removePrekey(k.serial); err != nil {
+				return err
+			}
+		}
+	}
 	signed, err := b.prekeys()
 	if err != nil || len(signed) == 0 {
 		return err
@@ -947,4 +977,109 @@ func (b *Mailbox) prune(at taken) error {
 		}
 	}
 	return nil
+}
+
+// keyKeysAdopted is the record, in the mailbox's own bucket, that this state file
+// has read prekeys/ for keys it names nowhere.
+const keyKeysAdopted = "keys-adopted"
+
+// adoptKeys adopts each key file in prekeys/ no record of a new state file names,
+// as a retired prekey that prune deletes. A state file lost takes those keys'
+// statements with it, and prekeyIdentities decrypts with every file, so without
+// this an old key would never go. It runs once for a state file, in one
+// transaction, under the mailbox's lock (hold). Adoption keeps the keys in their
+// own bucket, so what reads statements never meets one, and none is taken for the
+// prekey published last, which only a take records. A file whose name is no serial
+// is no key this client made, and it stays where its owner put it.
+func (b *Mailbox) adoptKeys() error {
+	done := false
+	// A read first: every command comes here, and a write transaction syncs the
+	// file even when it changes nothing.
+	if err := b.view(func(s store) error {
+		done = s.get(bucketMailbox, keyKeysAdopted) != nil
+		return nil
+	}); err != nil || done {
+		return err
+	}
+	names, err := matching(b.path("prekeys", "*.agekey"))
+	if err != nil {
+		return err
+	}
+	if err := b.update(func(s store) error {
+		for _, name := range names {
+			n, ok := serialOfKeyFile(name)
+			if !ok || s.get(bucketPrekeys, serialKey(n)) != nil {
+				continue
+			}
+			if err := s.put(bucketAdopted, serialKey(n), []byte{}); err != nil {
+				return err
+			}
+		}
+		return s.put(bucketMailbox, keyKeysAdopted, []byte("1"))
+	}); err != nil {
+		return err
+	}
+	step("keys adopted")
+	return nil
+}
+
+// serialOfKeyFile is the serial a prekey's file name gives, as this client writes
+// one: its decimal digits, within what a serial may be.
+func serialOfKeyFile(name string) (uint64, bool) {
+	digits := strings.TrimSuffix(filepath.Base(name), ".agekey")
+	n, err := strconv.ParseUint(digits, 10, 64)
+	if err != nil || n == 0 || n > protocol.MaxSerial || strconv.FormatUint(n, 10) != digits {
+		return 0, false
+	}
+	return n, true
+}
+
+// adoptedKey is a key the state file adopted.
+type adoptedKey struct {
+	serial uint64
+	// ends is its deletion time: the confirmed time of the first renewal after its
+	// adoption, plus protocol.TTL and retiredGrace, or the zero time until one is
+	// confirmed. A mailbox with a new state file publishes nothing until it renews,
+	// and a server refuses a send to a statement that renewal replaced. So what
+	// was sealed to the key is stored within retiredGrace, and has expired by then.
+	ends time.Time
+}
+
+// adopted is every key the state file adopted, lowest first.
+func (b *Mailbox) adopted() (keys []adoptedKey, err error) {
+	err = b.view(func(s store) error {
+		return s.each(bucketAdopted, func(k, v []byte) error {
+			n, err := keySerial(k)
+			if err != nil {
+				return err
+			}
+			key := adoptedKey{serial: n}
+			if len(v) > 0 {
+				took, err := protocol.ParseTime(string(v))
+				if err != nil {
+					return fmt.Errorf("the mailbox's state file keeps no time for adopted prekey %d it can read: %w", n, err)
+				}
+				key.ends = took.Add(protocol.TTL + retiredGrace)
+			}
+			keys = append(keys, key)
+			return nil
+		})
+	})
+	return keys, err
+}
+
+// recordAdoptedRenewal keeps at, the reading a server took a renewal at, for each
+// adopted key that keeps none, inside recordTaken's transaction: so the first
+// renewal confirmed after adoption times each. A renewal taken with no reading
+// times none, and a later one that has a reading does, which is later and so safe.
+func recordAdoptedRenewal(s store, at taken) error {
+	if at.None() {
+		return nil
+	}
+	return s.each(bucketAdopted, func(k, v []byte) error {
+		if len(v) > 0 {
+			return nil
+		}
+		return s.put(bucketAdopted, string(k), []byte(at.At().UTC().Format(protocol.TimeLayout)))
+	})
 }

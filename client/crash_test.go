@@ -676,6 +676,38 @@ func TestARestoreKilledBeforeTheRecordOfItsFoldersFinishes(t *testing.T) {
 	}
 }
 
+// A new state file killed once it has adopted the keys it found: the next command
+// reads the adoption, and the mailbox is whole, and mail sealed to the adopted key
+// is delivered.
+func TestAnAdoptionKilledLeavesTheMailboxWhole(t *testing.T) {
+	t.Parallel()
+	for _, step := range client.Steps("keys") {
+		t.Run(step, func(t *testing.T) {
+			e := newEnv(t)
+			a, b := e.mailbox(), e.mailbox()
+			send(t, a, b, "sealed to the key the state file named")
+			old := numberOf(t, b)
+			if err := os.Remove(filepath.Join(b.Dir(), "state")); err != nil {
+				t.Fatal(err)
+			}
+			e.clock.Add(2 * time.Second)
+			crashIn(t, e, b.Dir(), "rekey", step, protocol.Address{})
+			x, err := client.Open(b.Dir(), e.opts())
+			if err != nil {
+				t.Fatal(err)
+			}
+			landAll(t, x)
+			if got := client.AdoptedKeys(t, x); !slices.Equal(got, []uint64{old}) {
+				t.Fatalf("adopted %v after a crash, want %d", got, old)
+			}
+			if _, err := x.Rekey(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			whole(t, e, x, a, "sealed to the key the state file named")
+		})
+	}
+}
+
 // A drain killed at each step of a delivery: the message is in the inbox
 // once, and leaves the server.
 func TestADrainKilledAtEachStepOfADeliveryDeliversOnce(t *testing.T) {
