@@ -834,7 +834,7 @@ This table gives each code's meaning, and how a client acts on the code:
 | 413 | `too_large` | a body or ciphertext over its cap, or an ACL with more entries than the server accepts; `limit` gives the cap |
 | 429 | `rate_limited` | the call is past a limit (Section 11.5); the answer carries `subject` and `quota_id`, and `limit` for a number a day |
 | 429 | `fetch_paced` | the server paces the mailbox's fetches, of new messages or of messages fetched before (Section 11.12) |
-| 429 | `mailbox_full` | the mailbox stores as many messages as it may; `count` is the number of messages that the mailbox stores, as the mailbox's list counts them |
+| 429 | `mailbox_full` | the mailbox stores as many messages as it may. The refusal says nothing of how many messages the mailbox stores |
 | 429 | `mailbox_busy` | the mailbox has spent its intake budget for now |
 | 503 | `unavailable` | the server is not ready to answer |
 

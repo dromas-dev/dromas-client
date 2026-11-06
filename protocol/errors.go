@@ -170,9 +170,6 @@ type Problem struct {
 	// only once it knows the value.
 	QuotaID Quota   `json:"quota_id,omitempty"`
 	Subject Subject `json:"subject,omitempty"`
-	// Count is how many messages a full mailbox holds, as its list counts them
-	// (mailbox_full).
-	Count *uint64 `json:"count,omitempty"`
 	// PrekeySerial and CertificateSerial are serials of a prekey and of a
 	// certificate: which ones each code names is PROTOCOL.md §11.3's.
 	PrekeySerial      *uint64 `json:"prekey_serial,omitempty"`

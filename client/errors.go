@@ -190,11 +190,7 @@ func (e *APIError) words() string {
 	case protocol.CodeFetchPaced:
 		return "the server paces the messages the mailbox fetches, new ones and ones fetched before: the rest wait on the server"
 	case protocol.CodeMailboxFull:
-		s := "the recipient's mailbox is full"
-		if p.Count != nil {
-			s += fmt.Sprintf(": it holds %d messages", *p.Count)
-		}
-		return s
+		return "the recipient's mailbox is full"
 	case protocol.CodeMailboxBusy:
 		return "the recipient's mailbox has taken all the new messages it takes for now: dromas outbox flush posts it again"
 	case protocol.CodeUnavailable:
