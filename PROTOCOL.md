@@ -126,7 +126,8 @@ Where this document uses a term below as a defined term, the term has the sense 
 - **Address:** the SHA-384 of the identity document (Section 4.2).
 - **Working key:** a key that the identity certifies to sign in the identity's place (Section 5.2).
 - **Certificate:** the OpenSSH user certificate by which the identity certifies a working key (Section 5.2). A certificate's **certificate serial** is the certificate's serial field.
-- **The server's maximum:** the longest that a certificate the server accepts may run, given as the server's `max_certificate_lifetime` (Section 11.18).
+- **The protocol's maximum:** the longest that any certificate may run, 45 days and the skew allowance (3,891,600 seconds), measured as `valid before` less `valid after` (Section 5.2).
+- **The server's maximum:** the longest that a certificate the server accepts may run, given as the server's `max_certificate_lifetime` (Section 11.18). The server's maximum is at most the protocol's maximum.
 - **Stolen:** of a key or a pass, possessed by a party that the owner did not give the key or pass to (Sections 12.6, 15.5).
 
 **Signers and statements**
@@ -397,7 +398,7 @@ A certificate is an OpenSSH user certificate. A verifier MUST check every row of
 | Serial | the certificate serial, a serial (Section 2.2) |
 | Key id | exactly `dromas-cert-v1` |
 | Principals | exactly one: the mailbox's address |
-| Validity | `valid after` ≤ now < `valid before`, at the verifier's clock, in whole seconds, and each at or before `9999-12-31T23:59:59Z` |
+| Validity | `valid after` ≤ now < `valid before`, at the verifier's clock, in whole seconds; each at or before `9999-12-31T23:59:59Z`; and `valid before` less `valid after` at most the protocol's maximum |
 | Critical options | none. A verifier MUST refuse a certificate with any critical option (draft-ietf-sshm-cert-01 §2.1.1) |
 | Extensions | none. A verifier MUST refuse a certificate with any extension |
 | Reserved | empty |
@@ -405,10 +406,10 @@ A certificate is an OpenSSH user certificate. A verifier MUST check every row of
 | Signed by | the identity key, byte for byte as the key appears in the identity document, with the signature in the one form of the key's type (Section 3.2) |
 
 - **A verifier checks a certificate at the verifier's clock, exactly, and only after the identity's signature on the certificate has verified.** A certificate is valid from its `valid after`, and has ended at its `valid before` (Section 2.2). A verifier refuses a certificate with a date past `9999-12-31T23:59:59Z`, including `ssh-keygen`'s `forever`.
-- **A verifier sets no bound on how long a certificate runs.** A server bounds the length of the certificates it accepts (Section 11.7, step 6). A reader accepts any certificate within the certificate's window.
+- **A verifier refuses a certificate that runs longer than the protocol's maximum.** The protocol's maximum holds at every verifier, whatever any server serves as its own maximum (Section 15.5). A server also refuses a certificate that runs longer than the server's maximum (Section 11.7, step 6).
 - **The certified key is never the identity key (Section 15.5).**
 - **Every certificate MUST certify a new working key, one that no certificate made before it certified.** No verifier can check this rule. The certificate's maker keeps to the rule (Section 15.5).
-- **A maker dates the start of a certificate the skew allowance before the maker makes the certificate (Section 3.4).** The maker makes the certificate run as long as the party that has the identity key chooses, up to the server's maximum (Section 11.18). For example, this `ssh-keygen` command makes a certificate of `$DAYS` days and the skew allowance, with `-U` added for an identity in an agent:
+- **A maker dates the start of a certificate the skew allowance before the maker makes the certificate (Section 3.4).** The maker makes the certificate run as long as the party that has the identity key chooses, up to the server's maximum (Section 11.18), and never longer than the protocol's maximum. For example, this `ssh-keygen` command makes a certificate of `$DAYS` days and the skew allowance, with `-U` added for an identity in an agent:
 
       ssh-keygen -s identity -I dromas-cert-v1 -n "$A" -z "$SERIAL" -V "-1h:+${DAYS}d" -O clear work.pub
 
@@ -467,6 +468,7 @@ bech32-char      = "0" / %x32-39 / %x61 / %x63-68 / %x6A-6E / %x70-7A
   - A client signs a prekey statement to end one prekey lifetime after the client makes the prekey statement (Section 12.4).
   - A server accepts a prekey statement that ends at most 8 days and the skew allowance after the time on the server's own clock. The longest prekey lifetime is 8 days (Section 12.4).
 - **A sender MUST NOT encrypt to a prekey past the prekey's `not_after`.** There is no grace period.
+- **A sender SHOULD refuse a prekey statement whose `not_after` is more than 8 days and the skew allowance after the sender's clock.** No server accepts such a prekey statement, so this bounds how long a prekey statement that a stolen working key signed stays usable (Section 15.5).
 - **A sender MUST keep, for each mailbox, the latest `(c, p)` it has seen on the mailbox's prekey statements.** The sender MUST refuse an earlier prekey statement. The sender compares `(c, p)` as two numbers, whatever the certificate (Section 5.3).
 - **A sender MUST check a prekey statement against every other rule before it checks the key's type.** The sender refuses a prekey statement as `unsupported_prekey_type`, never as one that does not verify, when both of these are true:
   - the prekey statement meets every other rule;
@@ -716,7 +718,7 @@ The identity revokes every certificate it made through a revocation serial, incl
   The address stays in use.
 - **A mailbox MUST NOT sign a message under a certificate that a revocation it keeps covers.**
 - **A mailbox MUST NOT make a certificate that its identity has revoked.** That is, the mailbox's next certificate serial is above the highest revocation serial that the mailbox keeps or that the mailbox's server shows the mailbox (Section 5.2). A revocation of certificates through 2^53 − 1 leaves no certificate to make.
-- **This section does not fix how long a revocation of certificates is kept.** Every certificate that the revocation covers and that a server accepted ends at most the server's maximum (Section 11.18) after the certificate's start.
+- **This section does not fix how long a revocation of certificates is kept.** Every certificate that the revocation covers ends at most the protocol's maximum after the certificate's start (Section 5.2).
 
 ### 10.3. The revocation record
 
@@ -1273,7 +1275,7 @@ A mailbox may belong to one account at its server. The protocol fixes how a mail
 - **`latest_version`:** the latest version the server names, when the server names one.
 - **`deprecations`:** the list of deprecations. Each entry has `below` or `version`, and has `at`, the deprecation's date as a time (Section 2.2).
 - **`sunsets`:** the list of scheduled sunsets, each written the same way. A sunset whose date has passed stays in the list until the server raises the version floor past that sunset.
-- **`max_certificate_lifetime`:** the server's maximum, in seconds (Section 11.7, step 6). The server's maximum is the longest that a certificate the server accepts may run, measured as `valid before` less `valid after`. The server's maximum is more than the TTL and an hour.
+- **`max_certificate_lifetime`:** the server's maximum, in seconds (Section 11.7, step 6). The server's maximum is the longest that a certificate the server accepts may run, measured as `valid before` less `valid after`. The server's maximum is more than the TTL and an hour, and at most the protocol's maximum (Section 5.2). A client makes no certificate longer than the protocol's maximum, whatever `max_certificate_lifetime` says.
 - **`capabilities`:** the list of the capabilities of version 1 that the server serves, each by `name`. A capability name has the form `capability-name`, and is defined in this section. A client ignores a name it does not know. A client uses a capability only if the server lists that capability. This version defines no capability.
 
   ```abnf
@@ -1525,7 +1527,7 @@ A mailbox whose identity is kept elsewhere signs under certificates. The identit
 
 - **The mailbox makes and keeps each working key.** The identity holder certifies only the working key's public half. The steps run in this order:
   1. The mailbox gives the identity holder the public key and the lowest certificate serial that the certificate may have. That lowest serial is one above the highest certificate serial the mailbox knows of for itself (Section 5.2).
-  2. The identity holder sets the certificate serial by Section 5.2, at that lowest serial or above. The identity holder makes the certificate run no longer than the server's maximum (Section 11.18).
+  2. The identity holder sets the certificate serial by Section 5.2, at that lowest serial or above. The identity holder makes the certificate run no longer than the server's maximum (Section 11.18), and never longer than the protocol's maximum (Section 5.2).
   3. The mailbox checks the certificate against each of these:
      - every rule of Section 5.2;
      - a certificate serial no lower than the one the mailbox gave;
@@ -1729,11 +1731,12 @@ Dromas protects a message's content from everyone but the message's recipient. D
 - **A server counts the identity's acts apart from a working key's acts (Section 11.5).** So the holder of a stolen working key cannot stop the identity from revoking that key's certificate, or from renewing under a new certificate.
 - **A stolen working key signs as the mailbox until the key's certificate ends, if a server delivers the messages, or until the certificate is revoked.**
   - A server accepts a prekey statement under a certificate that runs at most the server's maximum (Section 11.18).
-  - A reader accepts any certificate within the certificate's validity window. A certificate that no server accepted signs messages while it lasts. Such a certificate can also register its address at a server that has forgotten the address.
+  - A reader accepts a certificate within the certificate's validity window, and only one that runs at most the protocol's maximum (Section 5.2). So a stolen working key signs for at most 45 days and the skew allowance after its certificate began, whatever a hostile server served the maker as its maximum.
+  - A certificate that no server accepted signs messages while it lasts. Such a certificate can also register its address at a server that has forgotten the address.
   - A renewal under a new certificate ends the stolen key at the server at once, and at every sender that has seen the new certificate.
   - A revocation of the stolen key's certificate ends the key wherever the revocation is seen (Section 12.6).
   - Messages that the owner sent under a revoked certificate, and that are still unread, are refused along with the thief's messages.
-- **The party that has the identity key chooses how long a certificate runs, up to the server's maximum.** A shorter certificate ends a stolen working key sooner, and needs the identity more often. A reader checks a certificate at the reader's own clock, because nothing vouches for when a signature was made. A message may also wait the TTL before it is read. So a certificate signs messages that every reader accepts until the certificate's `valid before`, less the message margin (Section 2.3). For a certificate of the full maximum, that is the server's maximum less the skew allowance and the message margin, counted from when the maker made the certificate.
+- **The party that has the identity key chooses how long a certificate runs, up to the server's maximum and never past the protocol's maximum.** A shorter certificate ends a stolen working key sooner, and needs the identity more often. A reader checks a certificate at the reader's own clock, because nothing vouches for when a signature was made. A message may also wait the TTL before it is read. So a certificate signs messages that every reader accepts until the certificate's `valid before`, less the message margin (Section 2.3). For a certificate of the full maximum, that is the server's maximum less the skew allowance and the message margin, counted from when the maker made the certificate.
 - **A stolen pass works only for the minutes that the pass has left, and only at the server that the pass names.** A stolen pass:
   - gives the mailbox's metadata and ciphertext;
   - gives control of the mailbox's availability: deleting unacked messages permanently, leaving the mailbox's account, and setting the mailbox's ACL, with which the stolen pass can pause the mailbox until the owner sets the next ACL;

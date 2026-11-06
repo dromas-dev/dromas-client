@@ -28,12 +28,12 @@ SA=1791590400
 V_OK=20261009230000Z:20261124000000Z # made at NOW: from an hour back to 45 days after NOW
 V_BEGINS_NOW=20261010000000Z:20261124000000Z # begins at NOW: begun
 V_SHORT=20261009230000Z:20261015000000Z    # ends 5 days after NOW: an 8-day prekey statement outlives it
-V_ENDED=20260801000000Z:20261010000000Z    # ends at NOW
+V_ENDED=20260825230000Z:20261010000000Z    # ends at NOW, 45 days and the hour after it began
 V_NOT_BEGUN=20261010000001Z:20261124000000Z
-V_LONG=20261009230000Z:20261124000001Z     # a second longer than 45 days and the hour: a reader sets no ceiling
-# The last moment a certificate may name, at either end, is 9999-12-31T23:59:59Z (0x3afff4417f seconds).
-V_LAST=20261009230000Z:0x3afff4417f
-V_PAST_LAST=20261009230000Z:0x3afff44180
+V_LONG=20261009230000Z:20261124000001Z     # a second longer than 45 days and the hour, the most any verifier takes
+# The last moment a certificate may name, at either end, is 9999-12-31T23:59:59Z (0x3afff4417f seconds). V_PAST_LAST runs
+# an hour, so the date is all that refuses it.
+V_PAST_LAST=0x3afff43370:0x3afff44180
 V_BEGINS_PAST_LAST=0x3afff44180:0x3afff44181
 V_FOREVER=20261009230000Z:forever
 
@@ -282,13 +282,10 @@ badcert bad-not-begun a a-work $(good "$A" "$SA" "$V_NOT_BEGUN")
 badcert bad-ends-after-the-last-date a a-work $(good "$A" "$SA" "$V_PAST_LAST")
 badcert bad-begins-after-the-last-date a a-work $(good "$A" "$SA" "$V_BEGINS_PAST_LAST")
 badcert bad-forever a a-work $(good "$A" "$SA" "$V_FOREVER")
-# And ones every implementation must take, at the edge of the rule bad-not-begun and bad-ends-after-the-last-date are
-# past, and for longer than a server takes, since a reader sets no ceiling.
+badcert bad-runs-longer-than-the-maximum a a-work $(good "$A" "$SA" "$V_LONG")      # a second longer than 45 days and the hour
+# And one every implementation must take, at the edge of the rule bad-not-begun is past.
 okcert() { badcert "$@"; }
 okcert ok-begins-now a a-work $(good "$A" "$SA" "$V_BEGINS_NOW")
-okcert ok-valid-from-0 a a-work $(good "$A" "$SA" "always:${V_OK#*:}")      # begins at 0, as -V always: writes it
-okcert ok-ends-at-the-last-date a a-work $(good "$A" "$SA" "$V_LAST")
-okcert ok-longer-than-a-server-takes a a-work $(good "$A" "$SA" "$V_LONG")
 
 # A signature has one form, the bytes ssh-keygen -Y sign writes (PROTOCOL.md §3.2): the armor with LF line ends and
 # lines of 70, version 1, sha512, an empty reserved field, no trailing NUL, an ECDSA signature's r and s each the

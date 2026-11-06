@@ -297,7 +297,7 @@ dr_cert(){ # <signature> <identity document> <address> → "<serial> <valid afte
   [ "${x:o:8}" = 00000001 ] || return 1; o=$((o + 8))      # a user certificate
   dr_str && [ "$v" = "$(dr_asc dromas-cert-v1)" ] || return 1      # the key id
   dr_str && [ "$v" = "$(printf %08x ${#3})$(dr_asc "$3")" ] || return 1      # exactly one principal: the address
-  dr_u64 && a=$v && dr_u64 && b=$v && [ "$a" -le 253402300799 ] && [ "$b" -le 253402300799 ] || return 1      # valid after, valid before: each at or before 9999-12-31T23:59:59Z, so forever is refused for its form, never as not begun or not ended
+  dr_u64 && a=$v && dr_u64 && b=$v && [ "$a" -le 253402300799 ] && [ "$b" -le 253402300799 ] && [ $((b - a)) -le 3891600 ] || return 1      # valid after, valid before: each at or before 9999-12-31T23:59:59Z, so forever is refused for its form, never as not begun or not ended, and running at most 45 days and an hour (3891600 seconds), the Go client's protocol.MaxCertificateLifetime
   dr_str && [ -z "$v" ] || return 1      # no critical option: one a verifier does not know is refused, and none is known here
   dr_str && [ -z "$v" ] && dr_str && [ -z "$v" ] || return 1      # no extension, and an empty reserved field
   dr_str && [ "$v" = "$(dr_idkey "$2")" ] && [ "$v" != "0000000b$(dr_asc ssh-ed25519)00000020$k" ] || return 1      # signed by the identity's key, byte for byte, which is never the key certified: SSHSIG signs no signing key, so the identity's own signature on a statement, rank 0, wrapped in a certificate of the identity's key above N, would otherwise rank at that certificate's serial, above the statements under certificates it stands below (PROTOCOL.md §5.2)

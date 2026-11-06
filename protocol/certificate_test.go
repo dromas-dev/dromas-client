@@ -47,8 +47,8 @@ func newCertMailbox(t *testing.T) certMailbox {
 }
 
 // testLifetime is how long a test's certificates run: the reference server's
-// default maximum, 45 days and the hour, which a client asks for. A verifier
-// sets no ceiling, so any lifetime would do.
+// default maximum, 45 days and the hour, which a client asks for, and
+// MaxCertificateLifetime, the most any verifier takes.
 const testLifetime = 45*24*time.Hour + MaxSkew
 
 // rawCert is the certificate NewCertificate would make at now, unsigned, for
@@ -170,10 +170,16 @@ func TestCertificateRules(t *testing.T) {
 		{name: "as ssh-keygen writes it"},
 		{name: "begins this second", change: func(c *ssh.Certificate) { c.ValidAfter = unix }},
 		{name: "ends next second", change: func(c *ssh.Certificate) { c.ValidBefore = unix + 1 }},
-		// A verifier sets no ceiling: a server holds a certificate to its maximum.
-		{name: "runs a century", change: func(c *ssh.Certificate) { c.ValidBefore = unix + 100*365*86400 }},
-		{name: "ends at the last date", change: func(c *ssh.Certificate) { c.ValidBefore = last }},
-		{name: "valid from 1970", change: func(c *ssh.Certificate) { c.ValidAfter = 0 }},
+		// Every verifier holds a certificate to MaxCertificateLifetime.
+		{name: "runs 45 days and an hour", change: func(c *ssh.Certificate) {
+			c.ValidAfter, c.ValidBefore = unix-3600, unix+45*86400
+		}},
+		{name: "runs a second longer", change: func(c *ssh.Certificate) {
+			c.ValidAfter, c.ValidBefore = unix-3600, unix+45*86400+1
+		}, want: ErrCertificate},
+		{name: "runs a century", change: func(c *ssh.Certificate) { c.ValidBefore = unix + 100*365*86400 }, want: ErrCertificate},
+		{name: "ends at the last date, and so runs longer", change: func(c *ssh.Certificate) { c.ValidBefore = last }, want: ErrCertificate},
+		{name: "valid from 1970, and so runs longer", change: func(c *ssh.Certificate) { c.ValidAfter = 0 }, want: ErrCertificate},
 
 		{name: "a host certificate", change: func(c *ssh.Certificate) { c.CertType = ssh.HostCert }, want: ErrCertificate},
 		{name: "another key id", change: func(c *ssh.Certificate) { c.KeyId = "work" }, want: ErrCertificate},
@@ -310,7 +316,7 @@ func TestCertificateAgainstSSHKeygen(t *testing.T) {
 	now := time.Now()
 
 	// ssh-keygen's certificate and signature, checked here.
-	must(nil, "-q", "-s", "identity", "-I", CertificateKeyID, "-n", a, "-z", "7", "-V", "+64d", "-O", "clear", "work.pub")
+	must(nil, "-q", "-s", "identity", "-I", CertificateKeyID, "-n", a, "-z", "7", "-V", "-1h:+45d", "-O", "clear", "work.pub")
 	sig := must(msg, "-Y", "sign", "-n", ns, "-f", "work-cert.pub")
 	signer, err := VerifySigned(id, msg, sig, ns, now)
 	if err != nil {
@@ -331,7 +337,7 @@ func TestCertificateAgainstSSHKeygen(t *testing.T) {
 		t.Fatal(err)
 	}
 	for serial, opts := range map[string][]string{"8": nil, "9": {"-O", "clear", "-O", "force-command=true"}} {
-		must(nil, append(append([]string{"-q", "-s", "identity", "-I", CertificateKeyID, "-n", a, "-z", serial, "-V", "+64d"}, opts...), "work.pub")...)
+		must(nil, append(append([]string{"-q", "-s", "identity", "-I", CertificateKeyID, "-n", a, "-z", serial, "-V", "-1h:+45d"}, opts...), "work.pub")...)
 		sig = must(msg, "-Y", "sign", "-n", ns, "-f", "work-cert.pub")
 		if _, err := VerifySigned(id, msg, sig, ns, now); err == nil {
 			t.Errorf("a certificate made with %q: taken", opts)
