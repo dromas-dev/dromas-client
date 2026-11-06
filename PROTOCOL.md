@@ -1631,7 +1631,7 @@ This table gives each security property, the party that the property holds again
 | Key-compromise impersonation resistance | a party that holds the mailbox's stolen prekey | sender authentication holds | the signature, by a key apart from the prekey (Section 15.4) [ADR] |
 | Replay and duplicates | the server | the mailbox runs in one place, with the mailbox's replay set (Section 15.9) | checks 6, 8 and 9 (Section 12.3), with `sent_at` and `msg_id` inside the signature |
 | Post-compromise security | a party that stole a prekey | not provided (Section 15.3) | none |
-| Delivery, and proof of delivery | the server | not provided (Sections 15.2, 15.9) | none |
+| Delivery, and proof of delivery | the server | not provided (Sections 15.2, 15.9). A sender that keeps its ciphertext learns, on the server's word, whether the recipient's mailbox still holds the message (Section 15.8) | none |
 | Deniability | a recipient | not provided (Section 15.4) | none |
 | Metadata | the server, and the party that terminates TLS for the server | not provided (Sections 15.1, 15.2, 15.8) | none |
 
@@ -1781,6 +1781,12 @@ Dromas protects a message's content from everyone but the message's recipient. D
 - **The server sees the social graph, times, IP addresses and each message's size to within a padding block.** Padding hides a length, not a pattern of traffic: who writes to whom, when and how often. A sender other than the reference clients may pad differently or not at all, and the server cannot tell.
 - **Once a message is stored, the server keeps no sender beside the message's recipient (Section 13).** The server sees the sender at the send, with the sender's IP address and the time. The server also sees the message while the message is live. A server that turns hostile can record all of this from then on.
 - **A lookup shows anyone who has the address when the mailbox renews.** A prekey serial and a `not_after` read the clock of the prekey statement's maker, and a lookup needs no pass (Section 11.8).
+- **A sender that keeps its ciphertext learns, on the server's word, whether the recipient's mailbox still holds the message.** A post of the same ciphertext is answered `200` while the mailbox holds the message unacked (Section 11.10, step 6). Once the message is gone (acked, expired or deleted), the same post is a new message, answered `201`.
+  - The sender knows the message's `expires_at`, so the sender can tell an expiry from an earlier end.
+  - The sender's `calls` bound how often the sender can ask. A post answered `200` spends none of the mailbox's intake budget.
+  - A conforming sender never posts a sealed file twice (Section 12.2), so only a sender that breaks that rule can ask.
+  - The answer is the server's word, and a server can give either answer whatever the recipient did.
+  - Removing the signal would need a record of each acked message, which Section 13 rules out.
 - **The lookup before a post tells the server that the mailbox is about to be written to.** The post tells the server the same thing a moment later.
 - **A lookup answered with gzip has a length that depends on the mailbox's own bytes.** So the length can help a network observer narrow down whom a sender is about to write to.
 - **Only a lookup's answer is compressed (Section 11.2).** A list, for example, sets values that senders chose beside the mailbox's own values (BREACH, RFC 7457 §2.6).
@@ -1795,7 +1801,7 @@ Dromas protects a message's content from everyone but the message's recipient. D
   - The mailbox's ACL answers one sender. Denying that sender refuses the sender's later sends, and the mailbox drains the messages that the sender sent (Section 11.14).
   - An allow list is the full defence for a mailbox that knows its senders. A deny list is not the full defence, because a new identity is cheap.
 - **A reader's drain bounds limit a hostile server's cost to that reader (Section 12.3).** Messages from senders that a server made up fail to decrypt or verify, and leave no pin. A sender that a server made with the server's own keys is a real sender, at an address that nobody gave the reader.
-- **Silent drops are undetectable, because the protocol has no receipt from the recipient.**
+- **Silent drops are undetectable, because the protocol has no receipt from the recipient.** A sender's repeat post (Section 15.8) gets the server's word, which proves no delivery.
 - **A message is sent again as the same envelope (Section 12.2).** A new message would carry a new `msg_id`, and a reader that acts on messages would act twice. A post whose answer is lost costs a send. In that case the server stored the message, and the next post is a new ciphertext that the server stores and counts again. The recipient delivers the message once (Section 12.3, check 9).
 - **A mailbox runs in one place at a time (Section 12.1).** Two copies of a mailbox keep two replay sets and two sets of prekeys, and each copy renews and deletes without the other. So one copy delivers again a message that the other copy delivered, and one copy still has a prekey that the other copy retired. A mailbox restored from its identity alone replaces the mailbox that it restores (Section 12.4).
 - **Losing the identity loses the address.** So the identity is the one key whose loss a backup answers. A restored mailbox makes new working keys and prekeys, and a prekey is never backed up (Section 12.1).
