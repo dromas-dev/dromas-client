@@ -3,7 +3,9 @@ package client
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
+	"unicode"
 	"unicode/utf16"
 )
 
@@ -42,7 +44,7 @@ func TestEscapeUnseenEscapesWhatNobodySees(t *testing.T) {
 		check(x[0]-1, escaped(x[0]-1))
 		check(x[1]+1, escaped(x[1]+1))
 	}
-	for _, r := range []rune{0x85, 0x2028, 0x2029} {
+	for _, r := range []rune{0x85, 0x2028, 0x2029, 0xFFF9, 0xFFFA, 0xFFFB} {
 		check(r, true)
 	}
 	// What GitHub's MCP server strips from issue bodies (pkg/sanitize,
@@ -52,7 +54,37 @@ func TestEscapeUnseenEscapesWhatNobodySees(t *testing.T) {
 		0x200B, 0x200C, 0x00AD, 0xFEFF, 0x180E, 0x2060, 0x2064, 0xFE00, 0xFE0F, 0xE0100, 0xE01EF} {
 		check(r, true)
 	}
-	for _, r := range []rune{'a', 'é', 0x2027, 0x1F600, 0xFFF9, 0xE1000, 0x10FFFF} {
+	for _, r := range []rune{'a', 'é', 0x2027, 0x1F600, 0xFFFC, 0xE1000, 0x10FFFF} {
 		check(r, false)
+	}
+}
+
+// No control character of Unicode's general category Cc reaches a line raw.
+// JSON carries U+0000 to U+001F only as escapes, and escapeUnseen escapes the
+// rest, U+007F and the C1 block, which JSON allows raw in a string. The set is
+// Unicode's table, so a control the escape list misses fails here.
+func TestNoControlCharacterReachesALineRaw(t *testing.T) {
+	t.Parallel()
+	n := 0
+	for r := rune(0); r <= unicode.MaxRune; r++ {
+		if !unicode.Is(unicode.Cc, r) {
+			continue
+		}
+		n++
+		raw := string(r)
+		if r < 0x20 {
+			raw = fmt.Sprintf(`\u%04x`, r)
+		}
+		got := escapeUnseen([]byte(`{"body":"a` + raw + `b"}`))
+		if i := strings.IndexFunc(string(got), func(c rune) bool { return unicode.Is(unicode.Cc, c) }); i >= 0 {
+			t.Errorf("U+%04X reaches the line raw: %q", r, got)
+		}
+		var v struct{ Body string }
+		if err := json.Unmarshal(got, &v); err != nil || v.Body != "a"+string(r)+"b" {
+			t.Errorf("U+%04X: the value is %q, %v", r, v.Body, err)
+		}
+	}
+	if n != 65 {
+		t.Fatalf("Unicode's Cc has %d characters, want the 65 of U+0000 to U+001F and U+007F to U+009F", n)
 	}
 }
