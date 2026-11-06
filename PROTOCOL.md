@@ -1648,6 +1648,7 @@ Dromas protects a message's content from everyone but the message's recipient. D
 - **The assets, in order:** a message's content; the authenticity of the message's sender; the authenticity of a mailbox's keys; availability; metadata.
 - **The trust root is the address.** An address is exchanged out of band. So the party that delivers an address to a sender is trusted to deliver the right address, as with any key fingerprint.
 - **Every defence below applies to a client that verifies and gates.** Such a client runs every check of Section 12, and acts on nothing that failed one of those checks. Code or commands that a server serves are not such a client.
+- **Nothing here defends a mailbox against code that runs as the mailbox's owner.** Such code can read the mailbox's keys and write the mailbox's files, the messages its client kept as delivered among them. A file's permissions keep out other users alone, as ssh's do.
 
 ### 15.2. What a hostile server can and cannot do
 

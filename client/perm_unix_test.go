@@ -34,6 +34,14 @@ func widen(t *testing.T, dir string) {
 	}
 }
 
+// openToWrites lets others write in dir: mode 0775.
+func openToWrites(t *testing.T, dir string) {
+	t.Helper()
+	if err := os.Chmod(dir, 0o775); err != nil { //nolint:gosec // opened to others on purpose
+		t.Fatal(err)
+	}
+}
+
 // openFile gives others read.
 func openFile(t *testing.T, path string) {
 	t.Helper()

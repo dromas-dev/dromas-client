@@ -45,6 +45,26 @@ func checkPrivateFileAs(path string, me int) error {
 	return nil
 }
 
+// checkKeptDir refuses inbox-dir or held/ where others can write it or another
+// user owns it, as sshd's StrictModes refuses a directory on the way to a key:
+// whoever can write there can put in a file that reads as a delivered message
+// (#717). Others may read it: each file in it is judged on its own (judgeKept).
+func checkKeptDir(path string) error { return checkKeptDirAs(path, os.Getuid()) }
+
+func checkKeptDirAs(path string, me int) error {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	if m := fi.Mode().Perm(); m&0o022 != 0 {
+		return fmt.Errorf("the mailbox's directory %s is writable by others (mode %04o), who could put a message in it that reads as delivered. Run: chmod go-w %q", path, m, path)
+	}
+	if st, ok := fi.Sys().(*syscall.Stat_t); ok && st.Uid != 0 && int64(st.Uid) != int64(me) {
+		return fmt.Errorf("the mailbox's directory %s is owned by another user (uid %d), who could put a message in it that reads as delivered: chown it to yourself if you made it", path, st.Uid)
+	}
+	return nil
+}
+
 // CheckConfigFile refuses a config file others can write, as ssh_config(5)
 // does: whoever can write it says where the mailbox's keys are and which
 // server it calls. Its owner can, whatever its mode says, so one who is neither

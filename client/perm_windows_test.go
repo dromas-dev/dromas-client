@@ -342,6 +342,9 @@ func openFile(t *testing.T, path string) {
 	setList(t, path, "(A;;FR;;;BU)")
 }
 
+// openToWrites lets the users write in dir, as widen does.
+func openToWrites(t *testing.T, dir string) { t.Helper(); widen(t, dir) }
+
 // runFix runs the line a refusal gives, as a person's cmd.exe would.
 func runFix(t *testing.T, line string) {
 	t.Helper()

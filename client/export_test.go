@@ -49,6 +49,10 @@ func PrivateFiles() []string {
 	return slices.DeleteFunc(slices.Clone(baseFiles), func(f string) bool { return slices.Contains(publicFiles, f) })
 }
 
+// KeptDirs are the directories judged as keeping delivered messages, read from
+// keptDirs.
+func KeptDirs() []string { return slices.Clone(keptDirs) }
+
 // PublicFiles are the base directory's files no open judges.
 func PublicFiles() []string { return publicFiles }
 

@@ -11,6 +11,7 @@ import (
 	"reflect"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -38,9 +39,11 @@ type globals struct {
 	baseDir, mailDir, identityFile, rotatingKeysDir, inbox string
 	server, caFile, prekeyLifetime, certLifetime           string
 	agent, askpass, addKeysToAgent                         string
-	noPrompt                                               bool
-	// noPromptSet is whether --no-prompt was on the command line.
-	noPromptSet bool
+	noPrompt, unsafeInbox, unsafeState                     bool
+	// noPromptSet, unsafeInboxSet and unsafeStateSet are whether --no-prompt,
+	// --unsafe-inbox-permissions and --unsafe-state-permissions were on the
+	// command line.
+	noPromptSet, unsafeInboxSet, unsafeStateSet bool
 }
 
 func (g *globals) add(c *cobra.Command) {
@@ -59,6 +62,8 @@ func (g *globals) add(c *cobra.Command) {
 	f.StringVar(&g.agent, "agent", "", "the `socket` of the ssh-agent that holds the identity's key, read as ssh_config's IdentityAgent (a path, $VAR, SSH_AUTH_SOCK or none): $DROMAS_AGENT, or "+agentDefaultWords)
 	f.StringVar(&g.askpass, "askpass", "", "a `program` that prints the identity key's passphrase, as ssh's SSH_ASKPASS: $DROMAS_ASKPASS")
 	f.BoolVar(&g.noPrompt, "no-prompt", false, "never ask for the identity key's passphrase at a terminal: $DROMAS_NO_PROMPT")
+	f.BoolVar(&g.unsafeInbox, "unsafe-inbox-permissions", false, "read inbox-dir and held/ where others can write them, and the messages they keep where others can reach them, though whoever can write there can put in a message that reads as delivered: $DROMAS_UNSAFE_INBOX_PERMISSIONS")
+	f.BoolVar(&g.unsafeState, "unsafe-state-permissions", false, "open state, gate, partial and the lists where others can reach them or another user owns them; never a private key: $DROMAS_UNSAFE_STATE_PERMISSIONS")
 	f.StringVar(&g.addKeysToAgent, "add-keys-to-agent", "", "once a passphrase unlocks the identity's key, add it to the agent: no, yes, or the `time` it stays, as ssh_config's AddKeysToAgent: $DROMAS_ADD_KEYS_TO_AGENT")
 }
 
@@ -77,6 +82,8 @@ type fileConfig struct {
 	Askpass         string `toml:"askpass"`
 	NoPrompt        *bool  `toml:"no-prompt"`
 	AddKeysToAgent  string `toml:"add-keys-to-agent"`
+	UnsafeInbox     *bool  `toml:"unsafe-inbox-permissions"`
+	UnsafeState     *bool  `toml:"unsafe-state-permissions"`
 	Policy          struct {
 		Unknown string `toml:"unknown"`
 		Server  string `toml:"server"`
@@ -117,8 +124,11 @@ type config struct {
 	agent, askpass string
 	noPrompt       bool
 	addKeys        bool
-	agentLife      time.Duration
-	policy         client.Policy
+	// unsafeInbox and unsafeState are client.Options' UnsafeInboxPermissions and
+	// UnsafeStatePermissions.
+	unsafeInbox, unsafeState bool
+	agentLife                time.Duration
+	policy                   client.Policy
 	// flagged is each table's settings, by the command that takes them.
 	flagged map[string]map[string]string
 	values  map[string]setting
@@ -461,6 +471,32 @@ func (cfg *config) resolve(g *globals, fc *fileConfig, rel string, noMailbox boo
 		}
 		cfg.certLifetime = d
 		cfg.values["certificate-lifetime"] = setting{formatTime(d), from}
+	}
+
+	for _, s := range []struct {
+		key, env  string
+		set, flag bool
+		file      *bool
+		to        *bool
+	}{
+		{"unsafe-inbox-permissions", "DROMAS_UNSAFE_INBOX_PERMISSIONS", g.unsafeInboxSet, g.unsafeInbox, fc.UnsafeInbox, &cfg.unsafeInbox},
+		{"unsafe-state-permissions", "DROMAS_UNSAFE_STATE_PERMISSIONS", g.unsafeStateSet, g.unsafeState, fc.UnsafeState, &cfg.unsafeState},
+	} {
+		v, from := false, "default"
+		switch env := os.Getenv(s.env); {
+		case s.set:
+			v, from = s.flag, "flag"
+		case env != "":
+			b, err := strconv.ParseBool(env)
+			if err != nil {
+				return bad(s.key, "$%s is true or false, and %.40q is not", s.env, env)
+			}
+			v, from = b, "environment"
+		case s.file != nil:
+			v, from = *s.file, "file"
+		}
+		*s.to = v
+		cfg.values[s.key] = setting{strconv.FormatBool(v), from}
 	}
 
 	if err := cfg.resolveIdentityKey(g, fc, rel); err != nil {

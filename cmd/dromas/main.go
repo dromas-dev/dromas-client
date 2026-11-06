@@ -146,8 +146,10 @@ func (e *cli) environment(c *cobra.Command) error {
 	// A record is published from anywhere: it needs a server, and no mailbox.
 	none := c.Name() == "publish" && c.Flags().Changed("record") ||
 		c.Name() == "start" && c.Parent().Name() == "agent"
-	if f := c.Flag("no-prompt"); f != nil {
-		e.flags.noPromptSet = f.Changed
+	for name, set := range map[string]*bool{"no-prompt": &e.flags.noPromptSet, "unsafe-inbox-permissions": &e.flags.unsafeInboxSet, "unsafe-state-permissions": &e.flags.unsafeStateSet} {
+		if f := c.Flag(name); f != nil {
+			*set = f.Changed
+		}
 	}
 	cfg, err := loadConfig(c, &e.flags, c.Name() == "init" && c.Parent() == c.Root(), none)
 	if err != nil {
@@ -161,6 +163,7 @@ func (e *cli) environment(c *cobra.Command) error {
 	e.opt.Policy, e.opt.PrekeyLifetime, e.opt.CertificateLifetime = cfg.policy, cfg.lifetime, cfg.certLifetime
 	e.opt.Agent, e.opt.Passphrase = cfg.agent, e.passphrase
 	e.opt.AddToAgent, e.opt.AgentLifetime = cfg.addKeys, cfg.agentLife
+	e.opt.UnsafeInboxPermissions, e.opt.UnsafeStatePermissions = cfg.unsafeInbox, cfg.unsafeState
 	// A passphrase given once serves the whole process: recv --wait or --follow
 	// renews with it for as long as it runs.
 	e.opt.KeepIdentity = true

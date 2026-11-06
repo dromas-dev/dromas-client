@@ -307,6 +307,9 @@ func (b *Mailbox) keptMessages(dir string) ([]keptMessage, error) {
 		if !hexID.MatchString(id) {
 			continue
 		}
+		if err := b.judgeKept(n); err != nil {
+			return nil, err
+		}
 		data, err := os.ReadFile(n) //nolint:gosec // a file of this mailbox's inbox/ or held/
 		if err != nil {
 			return nil, err
@@ -403,6 +406,9 @@ func (b *Mailbox) allow(a protocol.Address) ([]Delivery, error) {
 		// Written and then removed, since inbox-dir may be on another
 		// filesystem: a crash between leaves it in both, and the next allow
 		// finishes.
+		if err := b.judgeKept(b.path("held", m.ID+".json")); err != nil {
+			return moved, err
+		}
 		raw, err := os.ReadFile(b.path("held", m.ID+".json")) //nolint:gosec // a path inside the mailbox's own directory
 		if err != nil {
 			return moved, err

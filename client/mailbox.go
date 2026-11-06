@@ -145,6 +145,15 @@ type Options struct {
 	// ssh_config's AddKeysToAgent does, for AgentLifetime if that is not zero.
 	AddToAgent    bool
 	AgentLifetime time.Duration
+	// UnsafeInboxPermissions reads inbox-dir and held/ where others can write
+	// them, and each file they keep where others can reach it or another user
+	// owns it, which the mailbox otherwise refuses ([Mailbox.judgeKept]):
+	// whoever can write there can put in a message that reads as delivered.
+	UnsafeInboxPermissions bool
+	// UnsafeStatePermissions opens state, gate, partial and the lists where
+	// others can reach them or another user owns them, which the mailbox
+	// otherwise refuses (judgeFiles). It covers no private key.
+	UnsafeStatePermissions bool
 }
 
 // Mailbox is one mailbox: its files and the server it talks to. It is
@@ -177,6 +186,9 @@ type Mailbox struct {
 	lifetime time.Duration
 	// certLife is Options.CertificateLifetime.
 	certLife time.Duration
+	// unsafeInbox and unsafeState are Options.UnsafeInboxPermissions and
+	// Options.UnsafeStatePermissions.
+	unsafeInbox, unsafeState bool
 	// identityType is the type of key Init makes when the mailbox has none.
 	identityType string
 	// waiting is told when a command waits for the mailbox's lock ([Mailbox.hold]).
@@ -263,7 +275,7 @@ func newMailbox(dir string, opt Options) (*Mailbox, error) {
 	if d := opt.CertificateLifetime; d != 0 && (d <= protocol.TTL+protocol.MaxSkew || d > protocol.MaxCertificateLifetime || d%time.Second != 0) {
 		return nil, fmt.Errorf("%v is no certificate lifetime: %s", d, CertificateLifetimeRule)
 	}
-	b := &Mailbox{dir: dir, layout: opt.Layout.resolved(dir), configFile: opt.ConfigFile, policySet: opt.Policy, prekeyLife: opt.PrekeyLifetime, certLife: opt.CertificateLifetime, base: strings.TrimRight(opt.Base, "/"), http: opt.HTTPClient, now: opt.Now, identityType: opt.IdentityType, workingKey: opt.WorkingKey, waiting: opt.Waiting, slot: make(chan struct{}, 1), unlock: unlocking{agent: opt.Agent, passphrase: opt.Passphrase, keep: opt.KeepIdentity, add: opt.AddToAgent, lifetime: opt.AgentLifetime}}
+	b := &Mailbox{dir: dir, layout: opt.Layout.resolved(dir), configFile: opt.ConfigFile, policySet: opt.Policy, prekeyLife: opt.PrekeyLifetime, certLife: opt.CertificateLifetime, unsafeInbox: opt.UnsafeInboxPermissions, unsafeState: opt.UnsafeStatePermissions, base: strings.TrimRight(opt.Base, "/"), http: opt.HTTPClient, now: opt.Now, identityType: opt.IdentityType, workingKey: opt.WorkingKey, waiting: opt.Waiting, slot: make(chan struct{}, 1), unlock: unlocking{agent: opt.Agent, passphrase: opt.Passphrase, keep: opt.KeepIdentity, add: opt.AddToAgent, lifetime: opt.AgentLifetime}}
 	if b.base == "" {
 		b.base = DefaultBase
 	}
