@@ -718,7 +718,7 @@ The identity revokes every certificate it made through a revocation serial, incl
   The address stays in use.
 - **A mailbox MUST NOT sign a message under a certificate that a revocation it keeps covers.**
 - **A mailbox MUST NOT make a certificate that its identity has revoked.** That is, the mailbox's next certificate serial is above the highest revocation serial that the mailbox keeps or that the mailbox's server shows the mailbox (Section 5.2). A revocation of certificates through 2^53 − 1 leaves no certificate to make.
-- **This section does not fix how long a revocation of certificates is kept.** Every certificate that the revocation covers ends at most the protocol's maximum after the certificate's start (Section 5.2).
+- **A verifier keeps a revocation of certificates for at least the protocol's maximum after the verifier first verified it, and MAY then drop it.** By then every certificate that the revocation covers has ended: a maker starts a certificate the skew allowance before making it, and the certificate runs at most the protocol's maximum (Section 5.2). Only the identity's holder could make a certificate that starts later, and that holder can make certificates anyway. A higher revocation of certificates, which replaces the one kept, is kept for its own time. A revocation of the address has nothing that ends, and is kept permanently (Section 10.1).
 
 ### 10.3. The revocation record
 
@@ -1174,7 +1174,7 @@ A mailbox's ACL says from which senders the mailbox's server accepts messages to
 
 The two calls in this section accept no pass (Section 8).
 
-- **Publish a revocation: `PUT /v1/<A>/revocations`.** The call's body is a revocation record (Section 10.3). The server verifies the revocation record as a client does. The server keeps permanently each revocation that verifies, whether or not a mailbox is at the address. This section gives the exceptions.
+- **Publish a revocation: `PUT /v1/<A>/revocations`.** The call's body is a revocation record (Section 10.3). The server verifies the revocation record as a client does. The server keeps each revocation that verifies, whether or not a mailbox is at the address. It keeps a revocation of the address permanently, and a revocation of certificates for as long as Section 10.2 says. This section gives the exceptions.
   - **The server answers a revocation it already keeps from its stored revocations.** That answer comes ahead of every other refusal of this call, and ahead of every count except the budgets that bound any call (Section 11.5). A `200` comes only when the request's preconditions are true (Section 11.2). Two kinds of body count as a revocation the server already keeps:
     - any body for an address the server keeps revoked;
     - a body that carries only a revocation of certificates, through a revocation serial no higher than the one the server keeps, whether or not that revocation verifies.
@@ -1493,7 +1493,7 @@ A client drains every page of its list (Section 11.11) and fetches the message o
   - whenever its owner says.
 
   A mailbox whose server keeps no mailbox for it looks up its own revocations with `GET …/revocations`.
-- **A mailbox permanently keeps what it has verified about an address, from any source and at any time.** The mailbox checks every send and every read against what it keeps, with no call to anyone. The mailbox checks and keeps a revocation record handed over in the same way as a served one. A mailbox never keeps "no revocation shown".
+- **A mailbox permanently keeps what it has verified about an address, from any source and at any time.** A revocation of certificates is the exception: the mailbox keeps one as Section 10.2 says. The mailbox checks every send and every read against what it keeps, with no call to anyone. The mailbox checks and keeps a revocation record handed over in the same way as a served one. A mailbox never keeps "no revocation shown".
 - **A mailbox that keeps a revocation of its own address is finished, regardless of any server's answer.**
   - The mailbox signs nothing more as that address: no pass, no message, no certificate.
   - The mailbox never posts an outbox entry. The mailbox refuses a drain, a renewal and every call that carries a pass, before asking anything.
@@ -1565,7 +1565,7 @@ A server chooses how it stores things. A server promises a client the following:
   - the mailbox's ACL.
 
   The server serves the current statement and the statement's signature as they were sent. The server stores no private key, no pass, and no record of when the mailbox was last seen.
-- **Per address.** For an address with or without a mailbox, the server stores the identity document and the revocations that the address's identity made (Section 10). The server keeps each one permanently, and serves each one to anyone who looks it up.
+- **Per address.** For an address with or without a mailbox, the server stores the identity document and the revocations that the address's identity made (Section 10). The server keeps a revocation of the address permanently, and a revocation of certificates as Section 10.2 says, each with the identity document, and serves each one to anyone who looks it up. Anyone can make an identity and revoke its address, so what a server keeps of addresses grows without bound, at the rate that Section 11.15 counts revocations.
 - **A server keeps a mailbox until nothing valid for the mailbox is left.** That date is the later of:
   - the latest `not_after` of any prekey statement that the server accepted for the mailbox, plus the TTL;
   - the latest `valid before` of any certificate that the server accepted for the mailbox.
