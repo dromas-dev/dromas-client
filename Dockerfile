@@ -7,6 +7,13 @@
 # The Go stage runs on the builder's own platform and cross-compiles for the
 # target's (docker build --platform linux/amd64,linux/arm64), so no stage
 # runs under emulation: the image it is copied into only copies.
+#
+# The build context holds .git, so go build stamps each binary with the
+# module's version from the repository (Go 1.24: the tag at a tagged commit,
+# a pseudo-version after it), and every request names that version in
+# Dromas-Version (client.Version). Without it a binary names 0.0.0-devel,
+# which any server's version floor refuses. A checkout needs its tags for the
+# pseudo-version to follow the last release (docker-publish.yml).
 FROM --platform=$BUILDPLATFORM golang:1.27.3-trixie@sha256:c65ecfe613b539ac74c62a4c3b2c27e8f8a6076384c8f27e8a3c0f3be17cc385 AS build
 WORKDIR /src
 COPY go.mod go.sum ./
