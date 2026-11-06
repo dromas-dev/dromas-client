@@ -223,7 +223,8 @@ func (e *cli) sendCmd() *cobra.Command {
 from the file, or from stdin, and print the server's id for it and its msg_id.
 It waits in outbox/ until a server takes it (dromas outbox flush posts it
 again), and is then kept in sent/ with the server's receipt. Sending to a mailbox
-allows it.
+allows it, so a message that talks you into a send also lets that address's
+messages past held/: decide a send as you would dromas peer allow.
 
 The body is text, unless --json says it is one JSON value: then an object
 arrives as that object, not as a string. One its reader would refuse, a name
