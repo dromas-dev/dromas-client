@@ -17,6 +17,7 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+	"unicode"
 
 	"github.com/dromas-dev/dromas-client/internal/fakeserver"
 	"github.com/dromas-dev/dromas-client/internal/forge"
@@ -471,6 +472,19 @@ func TestScriptRefusesForgedMessages(t *testing.T) {
 	dr := b.recv()
 	if len(dr.messages) != 1 || strings.Count(dr.messages[0], "\n") != 1 || strings.ContainsAny(dr.messages[0], "\u0085  ") || !slices.Equal(dr.bodies(), []string{seps}) {
 		t.Errorf("U+0085, U+2028 and U+2029 in a body: %v", dr)
+	}
+	// A body with every control that JSON leaves raw (Unicode's Cc above
+	// U+001F) and U+FFF9 to U+FFFB: each escaped, the value the same.
+	var controls strings.Builder
+	for r := rune(0x20); r <= unicode.MaxRune; r++ {
+		if unicode.Is(unicode.Cc, r) || (r >= 0xFFF9 && r <= 0xFFFB) {
+			controls.WriteRune(r)
+		}
+	}
+	a.mustSend(b, "a"+controls.String()+"b")
+	dr = b.recv()
+	if len(dr.messages) != 1 || strings.ContainsAny(dr.messages[0], controls.String()) || !slices.Equal(dr.bodies(), []string{"a" + controls.String() + "b"}) {
+		t.Errorf("the controls JSON leaves raw, and U+FFF9 to U+FFFB, in a body: %v", dr)
 	}
 }
 

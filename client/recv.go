@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf16"
 
 	"github.com/dromas-dev/dromas-client/protocol"
@@ -800,9 +801,13 @@ func keptLineOf(env *protocol.Envelope) ([]byte, error) {
 // are Unicode's Default_Ignorable_Code_Point (DerivedCoreProperties, Unicode
 // 18.0): tag characters, BiDi controls and marks, zero-width characters,
 // variation selectors. A model reads each of these as text, and a person sees
-// none, so a body could carry an instruction past whoever looks. Escaped, it
-// is in plain sight, and a JSON reader still gets every character
-// (PRECEDENTS.md, Part 2). dromas.sh's dr_line escapes the same list.
+// none, so a body could carry an instruction past whoever looks. It also
+// escapes the controls that JSON leaves raw, U+007F and the C1 block (Unicode's
+// general category Cc above U+001F), because a terminal can act on a C1
+// control such as CSI. It escapes the interlinear annotation characters
+// U+FFF9 to U+FFFB too, because some renderers hide the text between them.
+// Escaped, each is in plain sight, and a JSON reader still gets every
+// character (PRECEDENTS.md, Part 2). dromas.sh's dr_line escapes the same set.
 func escapeUnseen(line []byte) []byte {
 	var b strings.Builder
 	for _, r := range string(line) {
@@ -823,6 +828,9 @@ func escapeUnseen(line []byte) []byte {
 // escaped reports whether escapeUnseen escapes r.
 func escaped(r rune) bool {
 	if r == 0x85 || r == 0x2028 || r == 0x2029 {
+		return true
+	}
+	if (r >= 0x7F && unicode.Is(unicode.Cc, r)) || (r >= 0xFFF9 && r <= 0xFFFB) {
 		return true
 	}
 	for _, x := range defaultIgnorable {

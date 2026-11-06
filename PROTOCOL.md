@@ -1402,7 +1402,11 @@ A client drains every page of its list (Section 11.11) and fetches the message o
 
   In every other case, the client records the address as the identity the message claims.
 - **A transient failure (a fetch that errors) and a fault of the mailbox (an unreadable key or replay set) are errors, never verdicts.** On such an error, the client acks nothing, and the message waits for the next drain.
-- **A client shows or passes on one line built from the checked fields, never the bytes that arrived.** In that line's strings, the client escapes, as JSON does, every line break other than LF (U+0085, U+2028, U+2029) and every character of Unicode's `Default_Ignorable_Code_Point`.
+- **A client shows or passes on one line built from the checked fields, never the bytes that arrived.** In that line's strings, the client escapes these characters as JSON escapes them:
+  - every line break other than LF (U+0085, U+2028, U+2029);
+  - every character of Unicode's `Default_Ignorable_Code_Point`;
+  - every control character (Unicode's general category Cc), U+007F to U+009F among them;
+  - the interlinear annotation characters, U+FFF9 to U+FFFB.
 
 **Acting on messages.**
 
