@@ -53,14 +53,16 @@ func TestEveryFileOfAMailboxIsItsOwnersAlone(t *testing.T) {
 }
 
 // A directory the client did not make stays as its maker left it, as ssh(1) leaves
-// ~/.ssh: only a key file is judged. A mailbox made in one, and one restored into
-// one, work, and neither changes it.
+// ~/.ssh: only a key file is judged, and a directory that keeps delivered
+// messages only for others' writes (TestAKeptDirectoryOthersCanWriteIsRefused),
+// so the inbox here is open to others' reads. A mailbox made in one, and one
+// restored into one, work, and neither changes it.
 func TestADirectoryTheClientDidNotMakeIsLeftAsItIs(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
 	made := filepath.Join(t.TempDir(), "made")
 	openToOthers(t, made)
-	openToOthers(t, filepath.Join(made, "mail", "inbox"))
+	openToReaders(t, filepath.Join(made, "mail", "inbox"))
 	a, err := client.Init(t.Context(), made, e.opts())
 	if err != nil {
 		t.Fatal(err)
@@ -107,6 +109,18 @@ func TestADirectoryTheClientDidNotMakeIsLeftAsItIs(t *testing.T) {
 	}
 	if es, _ := os.ReadDir(filepath.Join(made, "mail", "inbox")); files == 0 || len(es) == 0 {
 		t.Errorf("%d files, %d in the inbox: this tried nothing", files, len(es))
+	}
+}
+
+// openToReaders is dir, made where it is not there, opened to others' reads alone.
+func openToReaders(t *testing.T, dir string) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	widenToRead(t, dir)
+	if ownerOnly(dir) == nil {
+		t.Fatalf("%s is its owner's alone, opened to others: no mailbox made in it could fail this test", dir)
 	}
 }
 

@@ -63,13 +63,20 @@ func ownerOnly(path string) error {
 
 // widen opens dir to others as a directory under C:\ is: a protected access
 // list that also gives the local Users, inherited by what is made in it.
-func widen(t *testing.T, dir string) {
+func widen(t *testing.T, dir string) { t.Helper(); widenWith(t, dir, "0x1301bf") }
+
+// widenToRead gives the local Users read of dir alone, inherited by what is made
+// in it.
+func widenToRead(t *testing.T, dir string) { t.Helper(); widenWith(t, dir, "0x1200a9") }
+
+// widenWith is widen, with the local Users given these rights.
+func widenWith(t *testing.T, dir, rights string) {
 	t.Helper()
 	user, err := windows.GetCurrentProcessToken().GetTokenUser()
 	if err != nil {
 		t.Fatal(err)
 	}
-	sd, err := windows.SecurityDescriptorFromString("D:P(A;OICI;FA;;;" + user.User.Sid.String() + ")(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1301bf;;;BU)")
+	sd, err := windows.SecurityDescriptorFromString("D:P(A;OICI;FA;;;" + user.User.Sid.String() + ")(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;" + rights + ";;;BU)")
 	if err != nil {
 		t.Fatal(err)
 	}

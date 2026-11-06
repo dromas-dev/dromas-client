@@ -34,6 +34,9 @@ func widen(t *testing.T, dir string) {
 	}
 }
 
+// widenToRead gives others read of dir alone: mode 0755, as widen does.
+func widenToRead(t *testing.T, dir string) { t.Helper(); widen(t, dir) }
+
 // openToWrites lets others write in dir: mode 0775.
 func openToWrites(t *testing.T, dir string) {
 	t.Helper()
