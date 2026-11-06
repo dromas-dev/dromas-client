@@ -109,11 +109,13 @@ func (c *ticketCache) encode(cs *tls.ClientSessionState) []byte {
 	return raw
 }
 
-// read is the session in the file. A file that others can reach, cannot be read,
-// or holds no ticket of this server URL gives none, and is removed, so a changed
-// URL drops the ticket.
+// read is the session in the file. A file that others can reach, that another
+// user owns (checkPrivateFile), that cannot be read, or that holds no ticket of
+// this server URL gives none, and is removed, so a changed URL drops the ticket.
+// A written ticket authenticates the server it resumes to, so its writer is
+// judged as a private file's is.
 func (c *ticketCache) read() *tls.ClientSessionState {
-	if err := checkKeyFile(c.file); err != nil {
+	if err := checkPrivateFile(c.file); err != nil {
 		c.drop()
 		return nil
 	}

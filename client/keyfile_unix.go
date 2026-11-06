@@ -11,7 +11,10 @@ import (
 const keyFix = "chmod 600 it, or set the mode of the mount it comes from: a Kubernetes volume's defaultMode: 0400, a Compose secret's mode: 0400."
 
 // checkKeyFile refuses a private key file others can reach, as ssh(1) does
-// ("accessible by others"): any mode bit for its group or for everyone.
+// ("accessible by others"): any mode bit for its group or for everyone. It
+// judges the identity, a key its owner may put in place. As OpenSSH's
+// sshkey_perm_ok does, it leaves a key another user owns to that user. The
+// keys and the ticket the client writes are private files (checkPrivateFile).
 func checkKeyFile(path string) error {
 	fi, err := os.Stat(path)
 	if err != nil {
@@ -24,7 +27,8 @@ func checkKeyFile(path string) error {
 }
 
 // checkPrivateFile refuses a private file of the mailbox's that others can reach
-// or another user owns (judgeFiles).
+// or another user owns (judgeFiles), and so each prekey file, working key and
+// TLS ticket the client writes in the rotating keys' directory.
 func checkPrivateFile(path string) error { return checkPrivateFileAs(path, os.Getuid()) }
 
 func checkPrivateFileAs(path string, me int) error {
