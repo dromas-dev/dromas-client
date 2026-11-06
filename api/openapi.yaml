@@ -2133,7 +2133,7 @@ components:
         Past a limit: `rate_limited` (with `subject`, whom it was counted
         against, and `quota_id`, which limit, from a closed set; a limit
         counted by the day also with its `limit`) · `fetch_paced` ·
-        `mailbox_full` (with `count`) · `mailbox_busy`.
+        `mailbox_full` · `mailbox_busy`.
         `PROTOCOL.md` §11.3 and §11.5 have what each means.
       headers:
         Date:
@@ -2659,11 +2659,6 @@ components:
           description: '`rate_limited`: whom the limit counted the call against, the mailbox or the IP address it came from (`PROTOCOL.md` §11.5).'
           type: [string, 'null']
           enum: [mailbox, ip, null]
-        count:
-          description: '`mailbox_full`: how many messages the mailbox holds, as its list counts them.'
-          anyOf:
-            - $ref: '#/components/schemas/Integer'
-            - type: 'null'
         prekey_serial:
           description: '`conflict` on a prekey: the serial a new one must be above.'
           anyOf:
@@ -2725,13 +2720,6 @@ components:
                 enum: [sends, renewals, certificates, certificate_revocations]
           then:
             required: [limit]
-        - if:
-            required: [code]
-            properties:
-              code:
-                const: mailbox_full
-          then:
-            required: [count]
         - if:
             required: [code]
             properties:
