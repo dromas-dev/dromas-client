@@ -31,9 +31,12 @@ jobs:
       id-token: write
       artifact-metadata: write
     steps:
+      # The whole history and its tags: go build stamps the binaries' version
+      # from them (Dockerfile), a pseudo-version above the last release.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0
       - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
           registry: ghcr.io
@@ -58,6 +61,15 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+      # The image names a version, never (devel): a server's version floor
+      # refuses a binary that names 0.0.0-devel (#732).
+      - name: the binaries name a version
+        env:
+          REF: ${{ env.IMAGE }}@${{ steps.push.outputs.digest }}
+        run: |
+          v=$(docker run --rm --platform linux/amd64 --entrypoint dromas "$REF" version | jq -r .version)
+          echo "dromas version: $v"
+          case $v in v0.*) ;; *) echo "::error::the image's dromas names $v, not a module version"; exit 1 ;; esac
       - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-name: ${{ env.IMAGE }}
