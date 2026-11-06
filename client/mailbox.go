@@ -1117,7 +1117,7 @@ func keyType(name string) protocol.KeyType {
 }
 
 func readAgeKeys(name string) ([]age.Identity, error) {
-	if err := checkKeyFile(name); err != nil {
+	if err := checkPrivateFile(name); err != nil {
 		return nil, err
 	}
 	f, err := os.Open(name) //nolint:gosec // a path inside the mailbox's own directory

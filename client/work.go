@@ -83,7 +83,7 @@ func (b *Mailbox) worker(n uint64) (*sign.Work, *protocol.Certificate, error) {
 	if err != nil {
 		return nil, nil, fmt.Errorf("this mailbox holds no working key %d: dromas prekey renew makes one: %w", n, err)
 	}
-	if err := checkKeyFile(stem); err != nil {
+	if err := checkPrivateFile(stem); err != nil {
 		return nil, nil, err
 	}
 	raw, err := ssh.ParseRawPrivateKey(pemBytes)
