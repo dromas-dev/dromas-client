@@ -49,6 +49,9 @@ type accessEntry struct {
 	sid    *windows.SID
 	words  string
 	rights windows.ACCESS_MASK
+	// inheritOnly is an entry that grants nothing on a directory itself, only
+	// on what is made in it.
+	inheritOnly bool
 }
 
 // trustee is who the entry names. An account's name is looked up only for a
@@ -120,7 +123,7 @@ func readAccess(path string) (fileAccess, error) {
 				return a, err
 			}
 			if !ok {
-				a.others = append(a.others, accessEntry{sid: sid, rights: ace.Mask})
+				a.others = append(a.others, accessEntry{sid: sid, rights: ace.Mask, inheritOnly: ace.Header.AceFlags&windows.INHERIT_ONLY_ACE != 0})
 			}
 		default:
 			// A kind whose trustee this client cannot read, or that it does not
@@ -198,6 +201,44 @@ func CheckConfigFile(path string) error {
 	}
 	if a.foreignOwner {
 		return fmt.Errorf("%s is owned by %s: take its ownership (icacls /setowner)", path, accountName(a.owner))
+	}
+	return nil
+}
+
+// checkKeptDir refuses inbox-dir or held/ that anyone but its owner, SYSTEM and
+// the Administrators can write, or another user owns (readAccess): whoever can
+// write there can put in a file that reads as a delivered message (#717).
+// Others may read it: each file in it is judged on its own (judgeKept). The
+// refusal gives the icacls line that leaves it those three alone.
+func checkKeptDir(path string) error {
+	a, err := readAccess(path)
+	if err != nil {
+		return err
+	}
+	self, err := processUser()
+	if err != nil {
+		return err
+	}
+	var writer *accessEntry
+	fix := fmt.Sprintf(`icacls "%s" /inheritance:r /grant:r *%s:(OI)(CI)F *S-1-5-18:(OI)(CI)F *S-1-5-32-544:(OI)(CI)F`, path, self)
+	sep := " /remove"
+	for i, e := range a.others {
+		if e.inheritOnly || e.rights&^readOnlyRights == 0 {
+			continue
+		}
+		if writer == nil {
+			writer = &a.others[i]
+		}
+		if e.sid != nil {
+			fix += sep + " *" + e.sid.String()
+			sep = ""
+		}
+	}
+	if writer != nil {
+		return fmt.Errorf("the mailbox's directory %s is writable by %s, who could put a message in it that reads as delivered. Run: %s", path, writer.trustee(), fix)
+	}
+	if a.foreignOwner {
+		return fmt.Errorf(`the mailbox's directory %s is owned by %s, who could put a message in it that reads as delivered. If you made it, run: icacls "%s" /setowner *%s`, path, accountName(a.owner), path, self)
 	}
 	return nil
 }

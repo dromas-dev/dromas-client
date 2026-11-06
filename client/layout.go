@@ -94,6 +94,12 @@ var baseFiles = []string{"identity.doc", "address", "state", "gate", "partial", 
 // identity, is public too. Every other file of baseFiles is judged (judgeFiles).
 var publicFiles = []string{"identity.doc", "address"}
 
+// keptDirs are the directories, by client/doc.go's names, that keep messages
+// recv passed and that inbox list, inbox show and peer allow print or move as
+// delivered: each is judged at every open (judgeFiles), and each of its files
+// before it is read (judgeKept).
+var keptDirs = []string{"inbox", "held"}
+
 // fileRefused is a file of the mailbox judged (judgeFiles): the refusal is the
 // file's, whichever command met it.
 type fileRefused struct{ error }
@@ -102,22 +108,49 @@ func (e *fileRefused) Unwrap() error { return e.error }
 
 // judgeFiles refuses a mailbox with a private file of the base directory that
 // others can reach or another user owns (checkPrivateFile), as a private key is
-// refused: state, which holds the pass, gate, partial and the lists. A file that
-// is not there is not judged. It costs a stat or an access-list read per file,
-// and openState asks it before anything opens the state file or the gate, so a
-// file planted before init and one left open by another system's tool are
-// refused before bbolt or a lock opens them.
+// refused: state, which holds the pass, gate, partial and the lists. It refuses
+// inbox-dir and held/ where others can write them or another user owns them
+// (checkKeptDir), since whoever can write there can put in a message that reads
+// as delivered (#717). A file or directory that is not there is not judged. It
+// costs a stat or an access-list read for each, and openState asks it before
+// anything opens the state file or the gate, so a file planted before init and
+// one left open by another system's tool are refused before bbolt or a lock
+// opens them. Options.UnsafeStatePermissions leaves the files unjudged, and
+// Options.UnsafeInboxPermissions the directories.
 func (b *Mailbox) judgeFiles() error {
 	if b.dir == "" {
 		return nil
 	}
 	for _, f := range baseFiles {
-		if slices.Contains(publicFiles, f) {
+		if b.unsafeState || slices.Contains(publicFiles, f) {
 			continue
 		}
 		if err := checkPrivateFile(b.path(f)); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return &fileRefused{err}
 		}
+	}
+	for _, d := range keptDirs {
+		if b.unsafeInbox {
+			break
+		}
+		if err := checkKeptDir(b.path(d)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return &fileRefused{err}
+		}
+	}
+	return nil
+}
+
+// judgeKept refuses a file inbox-dir or held/ keeps that others can reach or
+// another user owns (checkPrivateFile), before it is read as a delivered
+// message: recv makes each its owner's alone, so one that is not was put there
+// or opened since (#717). A file that is not there is left to its read.
+// Options.UnsafeInboxPermissions leaves it unjudged.
+func (b *Mailbox) judgeKept(path string) error {
+	if b.unsafeInbox {
+		return nil
+	}
+	if err := checkPrivateFile(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return &fileRefused{err}
 	}
 	return nil
 }

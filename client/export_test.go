@@ -49,6 +49,10 @@ func PrivateFiles() []string {
 	return slices.DeleteFunc(slices.Clone(baseFiles), func(f string) bool { return slices.Contains(publicFiles, f) })
 }
 
+// KeptDirs are the directories judged as keeping delivered messages, read from
+// keptDirs.
+func KeptDirs() []string { return slices.Clone(keptDirs) }
+
 // PublicFiles are the base directory's files no open judges.
 func PublicFiles() []string { return publicFiles }
 
@@ -497,7 +501,9 @@ func (b *Mailbox) SetRecord(t *testing.T, name string, v []byte) {
 // RecordsAt is [Mailbox.Records] of the mailbox in dir, read without opening the mailbox,
 // which would make what a mailbox has: for a test that looks at a directory as a
 // command left it.
-func RecordsAt(dir string) (map[string][]byte, error) { return (&Mailbox{dir: dir}).Records() }
+func RecordsAt(dir string) (map[string][]byte, error) {
+	return (&Mailbox{dir: dir, layout: Layout{}.resolved(dir)}).Records()
+}
 
 // SetPrekeyLifetime is what Options.PrekeyLifetime says, for a mailbox already
 // open.

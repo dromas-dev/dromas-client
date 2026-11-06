@@ -37,6 +37,9 @@ func (b *Mailbox) InboxMessage(ctx context.Context, id string) (Delivery, error)
 // inboxMessage is InboxMessage, read under the reading or command that holds
 // the mailbox, of an id it has checked.
 func (b *Mailbox) inboxMessage(id string) (Delivery, error) {
+	if err := b.judgeKept(b.path("inbox", id+".json")); err != nil {
+		return Delivery{}, err
+	}
 	data, err := os.ReadFile(b.path("inbox", id+".json")) //nolint:gosec // a path inside the mailbox's own directory, named by 64 hex
 	if errors.Is(err, fs.ErrNotExist) {
 		return Delivery{}, fmt.Errorf("inbox/ holds no message %s", id)
