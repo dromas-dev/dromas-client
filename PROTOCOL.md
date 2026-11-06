@@ -1737,6 +1737,12 @@ Dromas protects a message's content from everyone but the message's recipient. D
   - never gives plaintext, signs no message and no prekey statement, and cannot revoke the address.
 
   All of this is within a hostile server's powers (Section 15.2), at the one server that the pass names. So a pass lasts ten minutes, and is kept in a directory that only the owner reads.
+- **A pass is not bound to the request that carries the pass.** A binding of the pass to each request, such as an HTTP message signature (RFC 9421) or a proof of possession (RFC 9449), costs one of these properties:
+  - A signature over a send would cover the recipient and the ciphertext. A hostile server would then keep a signed record of who wrote to whom, which Section 15.2 rules out.
+  - A signature over an ack or an ACL has the same cost, because a message id is the ciphertext's hash and an ACL names the mailbox's peers.
+  - A binding to the TLS connection (RFC 9266) needs the TLS session's exporter where the server checks the pass. The party that terminates TLS can be a process other than the one that checks the pass.
+
+  So the pass is bounded by its ten minutes and its one server, and a stolen pass gives only what a hostile server can do (Section 15.2).
 - **A stolen prekey decrypts every message encrypted to it, until the mailbox renews.** A sender that has seen no later prekey statement can still be served the old statement until the old statement's `not_after`. So a mailbox that renews often MAY set a shorter prekey lifetime (Section 12.4).
 
 ### 15.6. Revocation's limits
@@ -1813,7 +1819,7 @@ Dromas protects a message's content from everyone but the message's recipient. D
 - **[BIP 173]** Bech32
 - **[FIPS 180-4]**, **[FIPS 186-5]**
 - **[RFC 2119]**, **[RFC 8174]** BCP 14
-- **[RFC 3339]** timestamps · **[RFC 3986]** URIs · **[RFC 4151]** the `tag` URI scheme · **[RFC 4251]**, **[RFC 4253]** SSH · **[RFC 4648]** base64 and base64url · **[RFC 5234]** ABNF · **[RFC 5656]** ECDSA in SSH · **[RFC 6648]** deprecating the `X-` prefix · **[RFC 7405]** case-sensitive strings in ABNF · **[RFC 7457]** TLS attacks · **[RFC 7493]** I-JSON · **[RFC 7519]** JSON Web Token · **[RFC 8032]** EdDSA · **[RFC 8259]** JSON · **[RFC 8555]** ACME · **[RFC 8594]** the `Sunset` header field · **[RFC 8709]** Ed25519 in SSH · **[RFC 9110]** HTTP semantics · **[RFC 9180]** HPKE · **[RFC 9457]** problem details · **[RFC 9562]** UUIDs · **[RFC 9651]** Structured Field Values · **[RFC 9745]** the `Deprecation` header field
+- **[RFC 3339]** timestamps · **[RFC 3986]** URIs · **[RFC 4151]** the `tag` URI scheme · **[RFC 4251]**, **[RFC 4253]** SSH · **[RFC 4648]** base64 and base64url · **[RFC 5234]** ABNF · **[RFC 5656]** ECDSA in SSH · **[RFC 6648]** deprecating the `X-` prefix · **[RFC 7405]** case-sensitive strings in ABNF · **[RFC 7457]** TLS attacks · **[RFC 7493]** I-JSON · **[RFC 7519]** JSON Web Token · **[RFC 8032]** EdDSA · **[RFC 8259]** JSON · **[RFC 8555]** ACME · **[RFC 8594]** the `Sunset` header field · **[RFC 8709]** Ed25519 in SSH · **[RFC 9110]** HTTP semantics · **[RFC 9180]** HPKE · **[RFC 9266]** channel bindings for TLS 1.3 · **[RFC 9421]** HTTP message signatures · **[RFC 9449]** DPoP · **[RFC 9457]** problem details · **[RFC 9562]** UUIDs · **[RFC 9651]** Structured Field Values · **[RFC 9745]** the `Deprecation` header field
 - **[SemVer]** Semantic Versioning 2.0.0, https://semver.org/spec/v2.0.0.html
 
 ## Appendix A. Where `ssh-keygen` differs (informative)
