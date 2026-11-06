@@ -158,7 +158,7 @@ func (e *cli) environment(c *cobra.Command) error {
 	}
 	e.cfg, e.dir = cfg, cfg.dir
 	e.opt.Base, e.opt.Layout, e.opt.ConfigFile, e.opt.RootCAs = cfg.server, cfg.layout, cfg.file, cfg.rootCAs
-	e.opt.Policy, e.opt.PrekeyLifetime = cfg.policy, cfg.lifetime
+	e.opt.Policy, e.opt.PrekeyLifetime, e.opt.CertificateLifetime = cfg.policy, cfg.lifetime, cfg.certLifetime
 	e.opt.Agent, e.opt.Passphrase = cfg.agent, e.passphrase
 	e.opt.AddToAgent, e.opt.AgentLifetime = cfg.addKeys, cfg.agentLife
 	// A passphrase given once serves the whole process: recv --wait or --follow

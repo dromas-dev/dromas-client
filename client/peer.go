@@ -121,6 +121,12 @@ func (b *Mailbox) resolve(ctx context.Context, peer protocol.Address, l *lookups
 	if p.Expired(b.now()) {
 		return nil, refuse("%s's prekey has expired: its owner must publish a new one", peer)
 	}
+	// A statement no server takes, ending further ahead than
+	// protocol.MaxPrekeyLifetime, is refused: a stolen working key's statement
+	// lasts no longer than an honest one (PROTOCOL.md §6).
+	if p.NotAfter.After(b.now().Add(protocol.MaxPrekeyLifetime)) {
+		return nil, refuse("%s's prekey ends further ahead than any server takes, 8 days and an hour", peer)
+	}
 	if typeErr {
 		return nil, &RefusedError{Code: RefusedPrekeyType, Reason: fmt.Sprintf("%s's prekey is an age recipient of a type this client cannot encrypt to, so nothing is sent", peer)}
 	}

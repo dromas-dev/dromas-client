@@ -29,6 +29,13 @@ var LastDate = time.Date(9999, 12, 31, 23, 59, 59, 0, time.UTC)
 // lastUnix is LastDate in seconds since 1970, as a certificate names a date.
 const lastUnix uint64 = 253402300799
 
+// MaxCertificateLifetime is the longest a certificate may run, valid before
+// less valid after: 45 days and MaxSkew, the hour a maker dates one back
+// (PROTOCOL.md §5.2). Every verifier refuses a longer one, so a stolen working
+// key signs for at most this long after its certificate began, whatever a
+// server serves as its maximum (§15.5). A server's maximum is at most this.
+const MaxCertificateLifetime = 45*24*time.Hour + MaxSkew
+
 // Every certificate error wraps one of these. ErrCertificate: it is not a
 // certificate of this identity, or it breaks a rule of the format, the limit
 // on how far ahead it may end among them. ErrCertificateTime: it has not begun
@@ -55,9 +62,8 @@ type Certificate struct {
 // at least 1, exactly one principal, the mailbox's address, and no critical
 // option; for a working key of the type its identity's type gives, that passes
 // that type's key checks and is not the identity key; signed by the identity
-// key, byte for byte; both dates at or before LastDate; begun, and not ended.
-// A verifier sets no ceiling on how long one runs: that is a server's, when it
-// takes a statement (PROTOCOL.md §11.7). It is in the one form its makers
+// key, byte for byte; both dates at or before LastDate; running no longer than
+// MaxCertificateLifetime; begun, and not ended. It is in the one form its makers
 // write, NewCertificate and "ssh-keygen -s … -O clear": a nonce of 32 bytes,
 // no critical option, no extension and an empty reserved field, so a
 // signature under it is as long as its identity's type gives
@@ -66,6 +72,9 @@ func CheckCertificate(id *Identity, key ssh.PublicKey, now time.Time) (*Certific
 	cert, err := certificateForm(id, key)
 	if err != nil {
 		return nil, err
+	}
+	if cert.ValidBefore > cert.ValidAfter && cert.ValidBefore-cert.ValidAfter > uint64(MaxCertificateLifetime/time.Second) {
+		return nil, fmt.Errorf("%w: it runs longer than 45 days and an hour", ErrCertificate)
 	}
 	// ssh.CertTimeInfinity, the largest value, is past every bound here.
 	unix := uint64(max(now.Unix(), 0))
@@ -84,8 +93,9 @@ func CheckCertificate(id *Identity, key ssh.PublicKey, now time.Time) (*Certific
 // (PROTOCOL.md §12.4): which serial it stands at, and whether its identity
 // signed it. A certificate's dates bind what is signed under it, never a
 // renewal past it, so a record its server took is never one its mailbox cannot
-// renew past for a date: one made for longer than the rule now allows, or
-// begun earlier than a client dates one, or ended.
+// renew past for a date: one made for longer than the rule now allows
+// (MaxCertificateLifetime among them), or begun earlier than a client dates
+// one, or ended.
 func CheckCertificateRecord(id *Identity, key ssh.PublicKey) (*Certificate, error) {
 	cert, err := certificateForm(id, key)
 	if err != nil {

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 	"net/http"
 	"time"
 
@@ -132,12 +131,18 @@ func noRoom(most time.Duration) error {
 	return refuse("this mailbox's server takes no certificate longer than %d seconds, which leaves none to sign messages under: a message is signed only under a certificate with more than %d days left, and one begins an hour before it is made, so no certificate is made here; the identity, which needs none, signs instead unless the mailbox has published a statement under a certificate", int64(most/time.Second), protocol.TTL/(24*time.Hour))
 }
 
+// CertificateLifetimeRule says which certificate lifetimes a mailbox takes
+// (Options.CertificateLifetime).
+const CertificateLifetimeRule = "a certificate lifetime is more than 7 days and an hour (the 7 days a message may wait, and the hour a certificate begins early) and at most 45 days and an hour, in whole seconds"
+
 // certificateLifetime is how long a certificate this mailbox makes runs: the
-// longest its server takes, max_certificate_lifetime in its document
-// (PROTOCOL.md §11.18), read once a command, and never past
-// protocol.LastDate. A maximum that leaves no room to sign messages, the TTL
-// and the hour a certificate begins before it is made, refuses the
-// certificate (noRoom).
+// least of protocol.MaxCertificateLifetime, which every verifier holds a
+// certificate to (PROTOCOL.md §5.2), the longest its server takes,
+// max_certificate_lifetime in its document (§11.18), read once a command, and
+// the owner's Options.CertificateLifetime, and never past protocol.LastDate.
+// A server that serves more than protocol.MaxCertificateLifetime gets no more.
+// A maximum that leaves no room to sign messages, the TTL and the hour a
+// certificate begins before it is made, refuses the certificate (noRoom).
 func (b *Mailbox) certificateLifetime(ctx context.Context) (time.Duration, error) {
 	if b.lifetime > 0 {
 		return b.lifetime, nil
@@ -146,9 +151,12 @@ func (b *Mailbox) certificateLifetime(ctx context.Context) (time.Duration, error
 	if _, err := b.call(ctx, http.MethodGet, protocol.DocumentPath, nil, nil, &d); err != nil {
 		return 0, fmt.Errorf("this mailbox's server's document could not be read, so no certificate is made: a certificate runs for the longest the server takes, which the document names: %w", err)
 	}
-	life := time.Duration(math.MaxInt64)
-	if d.MaxCertificateLifetime < uint64(math.MaxInt64/int64(time.Second)) {
+	life := protocol.MaxCertificateLifetime
+	if d.MaxCertificateLifetime < uint64(life/time.Second) {
 		life = time.Duration(d.MaxCertificateLifetime) * time.Second //nolint:gosec // bounded above
+	}
+	if b.certLife > 0 {
+		life = min(life, b.certLife)
 	}
 	if life <= protocol.TTL+protocol.MaxSkew {
 		return 0, noRoom(life)

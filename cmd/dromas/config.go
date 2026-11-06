@@ -36,7 +36,7 @@ var profileGrammar = regexp.MustCompile(`\A[A-Za-z0-9_-]+\z`)
 type globals struct {
 	config, profile                                        string
 	baseDir, mailDir, identityFile, rotatingKeysDir, inbox string
-	server, caFile, prekeyLifetime                         string
+	server, caFile, prekeyLifetime, certLifetime           string
 	agent, askpass, addKeysToAgent                         string
 	noPrompt                                               bool
 	// noPromptSet is whether --no-prompt was on the command line.
@@ -55,6 +55,7 @@ func (g *globals) add(c *cobra.Command) {
 	f.StringVar(&g.server, "server", "", "the server's `URL`: $DROMAS_SERVER_URL, or "+client.DefaultBase)
 	f.StringVar(&g.caFile, "ca-file", "", "trust only the certificates in this PEM `file` for the server's TLS certificate, in place of the system's CAs: $DROMAS_CA_FILE")
 	f.StringVar(&g.prekeyLifetime, "prekey-lifetime", "", "how long each new prekey is valid for: a `time`, as dromas prekey lifetime --help says")
+	f.StringVar(&g.certLifetime, "certificate-lifetime", "", "how long each certificate this mailbox makes runs, valid before less valid after: a `time` above 7d1h and at most 45d1h, as in 30d: $DROMAS_CERTIFICATE_LIFETIME, or the longest its server takes")
 	f.StringVar(&g.agent, "agent", "", "the `socket` of the ssh-agent that holds the identity's key, read as ssh_config's IdentityAgent (a path, $VAR, SSH_AUTH_SOCK or none): $DROMAS_AGENT, or "+agentDefaultWords)
 	f.StringVar(&g.askpass, "askpass", "", "a `program` that prints the identity key's passphrase, as ssh's SSH_ASKPASS: $DROMAS_ASKPASS")
 	f.BoolVar(&g.noPrompt, "no-prompt", false, "never ask for the identity key's passphrase at a terminal: $DROMAS_NO_PROMPT")
@@ -71,6 +72,7 @@ type fileConfig struct {
 	Server          string `toml:"server"`
 	CAFile          string `toml:"ca-file"`
 	PrekeyLifetime  string `toml:"prekey-lifetime"`
+	CertLifetime    string `toml:"certificate-lifetime"`
 	Agent           string `toml:"agent"`
 	Askpass         string `toml:"askpass"`
 	NoPrompt        *bool  `toml:"no-prompt"`
@@ -108,6 +110,7 @@ type config struct {
 	server        string
 	rootCAs       *x509.CertPool
 	lifetime      time.Duration
+	certLifetime  time.Duration
 	// agent is the identity's agent's socket, or empty; askpass the program
 	// that prints its key's passphrase; noPrompt that no terminal is asked;
 	// addKeys and agentLife ssh_config's AddKeysToAgent.
@@ -440,6 +443,26 @@ func (cfg *config) resolve(g *globals, fc *fileConfig, rel string, noMailbox boo
 		cfg.values["prekey-lifetime"] = setting{formatTime(d), from}
 	}
 
+	certLife, from := g.certLifetime, "flag"
+	switch env := os.Getenv("DROMAS_CERTIFICATE_LIFETIME"); {
+	case certLife != "":
+	case env != "":
+		certLife, from = env, "environment"
+	default:
+		certLife, from = fc.CertLifetime, "file"
+	}
+	if certLife != "" {
+		d, err := parseTime(certLife)
+		if err != nil {
+			return bad("certificate-lifetime", "certificate-lifetime: %v", err)
+		}
+		if d <= protocol.TTL+protocol.MaxSkew || d > protocol.MaxCertificateLifetime {
+			return bad("certificate-lifetime", "%s, and %.40q is not", client.CertificateLifetimeRule, certLife)
+		}
+		cfg.certLifetime = d
+		cfg.values["certificate-lifetime"] = setting{formatTime(d), from}
+	}
+
 	if err := cfg.resolveIdentityKey(g, fc, rel); err != nil {
 		return err
 	}
@@ -569,6 +592,7 @@ func templateFor(profile string, g *globals) string {
 		fmt.Fprintf(&b, "ca-file = %s\n", tomlString(abs(g.caFile)))
 	}
 	setting("prekey-lifetime", g.prekeyLifetime, formatTime(protocol.PrekeyLifetime))
+	setting("certificate-lifetime", g.certLifetime, formatTime(protocol.MaxCertificateLifetime))
 	b.WriteString("\n# [policy]\n")
 	fmt.Fprintf(&b, "# unknown = %s\n# server = %s\n", tomlString(client.LandHeld), tomlString(client.AdmitAll))
 	b.WriteString("\n# [recv]\n")

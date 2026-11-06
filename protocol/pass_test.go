@@ -509,7 +509,7 @@ func TestPassAgainstSSHKeygen(t *testing.T) {
 		t.Fatal(err)
 	}
 	a := id.Address()
-	must(nil, "-q", "-s", "identity", "-I", CertificateKeyID, "-n", a.String(), "-z", "1", "-V", "+45d1h", "-O", "clear", "work.pub")
+	must(nil, "-q", "-s", "identity", "-I", CertificateKeyID, "-n", a.String(), "-z", "1", "-V", "-1h:+45d", "-O", "clear", "work.pub")
 	// Read after ssh-keygen dates the certificate from its own clock, which
 	// it begins at.
 	now := time.Now()

@@ -320,16 +320,8 @@ func TestVectorCertificates(t *testing.T) {
 		if p, signer, err := VerifyPrekey(a, st, read(t, "cert/"+name+".sig"), now); err != nil || p.Rank != signer.Rank() {
 			t.Errorf("%s: VerifyPrekey: %v", name, err)
 		}
-		// The edges each is at: no ceiling at a reader, and the last date.
-		switch name {
-		case "ok-longer-than-a-server-takes":
-			if cert.Lifetime() != testLifetime+time.Second {
-				t.Errorf("%s runs %s", name, cert.Lifetime())
-			}
-		case "ok-ends-at-the-last-date":
-			if !cert.NotAfter().Equal(LastDate) {
-				t.Errorf("%s ends at %s", name, cert.NotAfter())
-			}
+		if cert.Lifetime() > MaxCertificateLifetime {
+			t.Errorf("%s runs %s", name, cert.Lifetime())
 		}
 	}
 	for _, f := range glob(t, "cert/bad-*.pub") {
@@ -345,6 +337,11 @@ func TestVectorCertificates(t *testing.T) {
 		}
 		want := ErrCertificate
 		switch name {
+		case "bad-runs-longer-than-the-maximum":
+			// A second past the edge every verifier holds it to.
+			if c := key.(*ssh.Certificate); c.ValidBefore-c.ValidAfter != uint64(MaxCertificateLifetime/time.Second)+1 {
+				t.Errorf("%s runs %d seconds", name, c.ValidBefore-c.ValidAfter)
+			}
 		case "bad-ended":
 			want = ErrCertificateEnded
 		case "bad-not-begun":

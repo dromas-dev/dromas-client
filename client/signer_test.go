@@ -192,7 +192,7 @@ func TestTheServerKeepsAMailboxByItsLatestCertificate(t *testing.T) {
 	t.Parallel()
 	e := newWorkEnv(t)
 	// A certificate longer than a prekey and the TTL: its end is the later.
-	long := 200 * 24 * time.Hour
+	long := protocol.MaxCertificateLifetime
 	e.srv.SetPolicy(protocol.ServerDocument{MaxCertificateLifetime: uint64(long / time.Second)})
 	a := e.mailbox()
 	kept := e.srv.KeptUntil(a.Address())
@@ -727,4 +727,66 @@ func passRank(t *testing.T, e *env, a *client.Mailbox, authorization string) uin
 		t.Fatalf("the pass: %v", err)
 	}
 	return by.Rank()
+}
+
+// A certificate runs no longer than protocol.MaxCertificateLifetime, which every
+// verifier holds a certificate to: a server whose document names a longer
+// maximum gets a certificate of that length (#716).
+func TestACertificateRunsNoLongerThanTheProtocolsMaximum(t *testing.T) {
+	t.Parallel()
+	e := newWorkEnv(t)
+	e.srv.SetPolicy(protocol.ServerDocument{MaxCertificateLifetime: protocol.MaxInteger})
+	a := e.mailbox()
+	st, sig := e.srv.Prekey(a.Address())
+	_, by, err := protocol.VerifyPrekey(a.Identity(), st, sig, e.clock.Now())
+	if err != nil || by.Certificate() == nil || by.Certificate().Lifetime() != protocol.MaxCertificateLifetime {
+		t.Fatalf("the statement taken: %v, %+v", err, by)
+	}
+}
+
+// The owner's certificate lifetime shortens each certificate the mailbox makes,
+// and one outside the rule is refused before anything is made.
+func TestTheOwnersCertificateLifetimeShortensACertificate(t *testing.T) {
+	t.Parallel()
+	e := newWorkEnv(t)
+	opt := e.opts()
+	opt.CertificateLifetime = 30 * 24 * time.Hour
+	a, err := client.Init(t.Context(), t.TempDir(), opt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, sig := e.srv.Prekey(a.Address())
+	_, by, err := protocol.VerifyPrekey(a.Identity(), st, sig, e.clock.Now())
+	if err != nil || by.Certificate() == nil || by.Certificate().Lifetime() != opt.CertificateLifetime {
+		t.Fatalf("the statement taken: %v, %+v", err, by)
+	}
+	for _, d := range []time.Duration{protocol.TTL + protocol.MaxSkew, protocol.MaxCertificateLifetime + time.Second, 30*24*time.Hour + time.Millisecond} {
+		opt.CertificateLifetime = d
+		if _, err := client.Open(t.TempDir(), opt); err == nil || !strings.Contains(err.Error(), "no certificate lifetime") {
+			t.Errorf("%v: %v", d, err)
+		}
+	}
+}
+
+// A sender refuses a prekey statement that ends further ahead of its clock
+// than protocol.MaxPrekeyLifetime, which no server takes, so a stolen working
+// key's statement lasts no longer than an honest one. Two clocks: the
+// recipient's statement is honest, made 8 days ahead of its own clock; the
+// sender's clock reads more than an hour behind it.
+func TestASenderRefusesAPrekeyThatEndsFurtherAheadThanAnyServerTakes(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	a, b := e.mailbox(), e.mailbox()
+	opt := e.opts()
+	opt.Now = func() time.Time { return e.clock.Now().Add(-protocol.MaxSkew - time.Minute) }
+	behind, err := client.Open(a.Dir(), opt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := behind.Send(t.Context(), b.Address(), "x"); err == nil || !strings.Contains(err.Error(), "further ahead than any server takes") {
+		t.Fatalf("send: %v", err)
+	}
+	if e.srv.Count(b.Address()) != 0 {
+		t.Fatal("something was sent")
+	}
 }
