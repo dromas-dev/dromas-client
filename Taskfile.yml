@@ -46,6 +46,8 @@ tasks:
         msg: "no hand-run of release.yml has passed on this commit (every build and test a tag runs): gh workflow run release.yml --ref main"
       - sh: '[ -z "{{.NOTES}}" ] || [ -s "{{.NOTES}}" ]'
         msg: NOTES names no file with anything in it
+      - sh: 'grep -qx "DR_VERSION=$(echo "{{.NEXT}}" | sed -E "s/^v([0-9]+\.[0-9]+)\..*/\1/").0 .*" sh/dromas.sh'
+        msg: "sh/dromas.sh's DR_VERSION is not this release's minor at patch 0: a server's version floor at this minor would retire the script"
       - sh: ssh-add -T "$(git config user.signingkey)"
         msg: "the signing key is locked: its holder unlocks it for the release (ssh-add -t 1h <private key>)"
     cmds:
