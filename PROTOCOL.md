@@ -910,8 +910,13 @@ The `subject` column of the table above gives the exceptions. A registration is 
 | `registrations` | `ip` | registrations from an IPv4 address or IPv6 /64, and each call that a server counts as a registration (Section 11.15) |
 | `registrations_range` | `ip` | the same, from an IPv6 /48 |
 | `misses` | `ip` | calls that named no mailbox, or that carried nothing that verified |
+| `misses_range` | `ip` | the same, from an IPv6 /48 |
 | `sends_before_pass` | `ip` | sends, counted before the server reads their pass |
+| `sends_before_pass_range` | `ip` | the same, from an IPv6 /48 |
 | `requests` | `ip` | every request except one that carries a pass the server has already verified, on a call that accepts that pass; registrations, renewals and requests that match no route are counted |
+| `requests_range` | `ip` | the same, from an IPv6 /48 |
+
+A quota counted against `ip` counts an IPv4 address by itself and an IPv6 address by its /64. Each quota ending in `_range` counts the same calls by their IPv6 /48 as well, beside the quota of the row above it; an IPv4 address has no /48 count. A call is refused when either count is spent, and the refusal names the count that sets its `Retry-After`.
 
 A fetch and an ack of a message the mailbox holds spend no `calls`, and Section 11.12 gives a fetch's own budgets. A `HEAD` and a call refused by a false precondition spend `calls` (Section 11.2).
 
