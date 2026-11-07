@@ -236,11 +236,14 @@ const (
 	QuotaCertificates           Quota = "certificates"            // its identity's new certificates, a number a day
 	QuotaCertificateRevocations Quota = "certificate_revocations" // its identity's raises of its revocation of certificates, a number a day
 
-	QuotaRegistrations      Quota = "registrations"       // registrations from an IP address: an IPv4 address or an IPv6 /64
-	QuotaRegistrationsRange Quota = "registrations_range" // registrations from an IPv6 /48
-	QuotaMisses             Quota = "misses"              // calls from an IP address that named no mailbox or carried nothing that verified
-	QuotaSendsBeforePass    Quota = "sends_before_pass"   // sends from an IP address, counted before their pass is read
-	QuotaRequests           Quota = "requests"            // calls from an IP address that carry no pass the server has checked, registrations and renewals among them, and requests no route matches
+	QuotaRegistrations        Quota = "registrations"           // registrations from an IP address: an IPv4 address or an IPv6 /64
+	QuotaRegistrationsRange   Quota = "registrations_range"     // registrations from an IPv6 /48
+	QuotaMisses               Quota = "misses"                  // calls from an IP address that named no mailbox or carried nothing that verified
+	QuotaMissesRange          Quota = "misses_range"            // the same, from an IPv6 /48
+	QuotaSendsBeforePass      Quota = "sends_before_pass"       // sends from an IP address, counted before their pass is read
+	QuotaSendsBeforePassRange Quota = "sends_before_pass_range" // the same, from an IPv6 /48
+	QuotaRequests             Quota = "requests"                // calls from an IP address that carry no pass the server has checked, registrations and renewals among them, and requests no route matches
+	QuotaRequestsRange        Quota = "requests_range"          // the same, from an IPv6 /48
 )
 
 // Subject is whom a rate_limited was counted against (subject).
@@ -263,8 +266,11 @@ var quotas = map[Quota]Subject{
 	QuotaRegistrations:          SubjectIP,
 	QuotaRegistrationsRange:     SubjectIP,
 	QuotaMisses:                 SubjectIP,
+	QuotaMissesRange:            SubjectIP,
 	QuotaSendsBeforePass:        SubjectIP,
+	QuotaSendsBeforePassRange:   SubjectIP,
 	QuotaRequests:               SubjectIP,
+	QuotaRequestsRange:          SubjectIP,
 }
 
 // Known reports whether q is a quota this version knows.
