@@ -554,6 +554,12 @@ None was a flaw in the layout: each was a verifier that read an object different
 
 **The precedent** (read 2026-10-19). Prometheus: "instrument everything", and for a request-serving system, queries, errors and latency (`prometheus/docs`, `docs/practices/instrumentation.md` at `410443d27b`). Let's Encrypt's Boulder serves `client_golang` metrics with the Go and process collectors on a separate listener, none when unset (`cmd/shell.go`, `newStatsRegistry`, at `cf6406dd86`).
 
+## 3. One held list a mailbox, the latest
+
+**Ours** (dromas-server's `LIMITS.md`, the held lists' row): a mailbox has one list held at a time. A later list of the mailbox that asks to wait is held in its place, and the earlier is answered at once with the `304` that §11.11 lets a server answer sooner.
+
+**The precedent** (read 2026-11-06; § Sources). The Telegram Bot API server holds one `getUpdates` long poll a bot, and a later one ends the earlier with `409` "Conflict: terminated by other getUpdates request" (`telegram-bot-api/Client.cpp`, `Client::abort_long_poll`, at `e3e9dd8e5b`). **Where ours differs:** the earlier list is answered `304`, its ordinary answer, not a refusal of its own. A list held is no claim on the mailbox: the drain lets lists in flight at once take turns (§11.11), and the earlier request may be one whose connection a network dropped without a word, whose client's retry is the later one.
+
 ---
 
 # Sources
@@ -574,6 +580,7 @@ For rows marked `review 2026-10-10`, and for Part 3. A row of Part 2 marked `rea
 - [RFC 9457 — Problem Details](https://www.rfc-editor.org/rfc/rfc9457) · [RFC 6750 — Bearer tokens](https://www.rfc-editor.org/rfc/rfc6750)
 - The agent-communication survey of 1c names its systems with the dates it found. That review kept no links for them.
 - Part 3 § 1: [Go 1.27.3, `src/database/sql/driver/driver.go`](https://github.com/golang/go/blob/go1.27.3/src/database/sql/driver/driver.go) · the MongoDB Go driver at `v2.9.2`: [`x/mongo/driver/errors.go`](https://github.com/mongodb/mongo-go-driver/blob/v2.9.2/x/mongo/driver/errors.go), [`x/mongo/driver/operation.go`](https://github.com/mongodb/mongo-go-driver/blob/v2.9.2/x/mongo/driver/operation.go), [`mongo/session.go`](https://github.com/mongodb/mongo-go-driver/blob/v2.9.2/mongo/session.go)
+- Part 3 § 3: [`tdlib/telegram-bot-api`, `telegram-bot-api/Client.cpp` at `e3e9dd8e5b`](https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp) (`Client::abort_long_poll`, `Client::fail_query_conflict`)
 
 # Open in this file
 
