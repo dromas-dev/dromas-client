@@ -186,12 +186,13 @@ func TestAPolicyCoversItsVersions(t *testing.T) {
 // A document is held to its form as it is read: each version a policy's,
 // exactly one of below and version, each date a time, each name of its form,
 // no more than 64 of each list, no sunset earlier than a deprecation of the
-// same versions (RFC 9745 §4), and the server's maximum certificate lifetime,
-// which every document carries, from 1 to MaxInteger seconds.
+// same versions (RFC 9745 §4), the server's maximum certificate lifetime,
+// which every document carries, from 1 to MaxInteger seconds, and the
+// implementation's members, where it names one, each of its text.
 func TestTheServersDocumentBreaksItsFormAsItSays(t *testing.T) {
-	good := `{"min_version":"0.1","latest_version":"0.1.8","deprecations":[{"below":"0.1.5","at":"2027-01-01T00:00:00Z"}],"sunsets":[{"below":"0.1.5","at":"2027-01-01T00:00:00Z"},{"version":"0.1.6","at":"2027-02-01T00:00:00Z"}],"capabilities":[{"name":"long_poll2"}],"max_certificate_lifetime":3891600,"later":1}`
+	good := `{"min_version":"0.1","latest_version":"0.1.8","deprecations":[{"below":"0.1.5","at":"2027-01-01T00:00:00Z"}],"sunsets":[{"below":"0.1.5","at":"2027-01-01T00:00:00Z"},{"version":"0.1.6","at":"2027-02-01T00:00:00Z"}],"capabilities":[{"name":"long_poll2"}],"max_certificate_lifetime":3891600,"server":{"name":"dromas-server","version":"v0.5.1","revision":"c4258bc37344474025fe2c2d6420476eb617450a"},"later":1}`
 	var d ServerDocument
-	if err := Unmarshal([]byte(good), &d); err != nil || d.LatestVersion != "0.1.8" || len(d.Sunsets) != 2 || d.Capabilities[0].Name != "long_poll2" || d.MaxCertificateLifetime != 3891600 {
+	if err := Unmarshal([]byte(good), &d); err != nil || d.LatestVersion != "0.1.8" || len(d.Sunsets) != 2 || d.Capabilities[0].Name != "long_poll2" || d.MaxCertificateLifetime != 3891600 || d.Server == nil || d.Server.Version != "v0.5.1" {
 		t.Fatalf("%+v %v", d, err)
 	}
 	// withMax is a document's text with a maximum it takes, so that the
@@ -218,6 +219,11 @@ func TestTheServersDocumentBreaksItsFormAsItSays(t *testing.T) {
 		`{"capabilities":[{"name":"Long"}]}`:                                        "name",
 		`{"capabilities":[{"name":"_a"}]}`:                                          "name",
 		`{"capabilities":[{"name":"` + strings.Repeat("a", 65) + `"}]}`:             "name",
+		`{"server":{"version":"v1"}}`:                                               "name",
+		`{"server":{"name":"a b","version":"v1"}}`:                                  "name",
+		`{"server":{"name":"a"}}`:                                                   "version",
+		`{"server":{"name":"a","version":"` + strings.Repeat("1", 129) + `"}}`:      "version",
+		`{"server":{"name":"a","version":"v1","revision":"é"}}`:                     "revision",
 		`{"deprecations":[{"version":"1.0","at":"2027-02-01T00:00:00Z"}],"sunsets":[{"version":"1.0","at":"2027-01-31T23:59:59Z"}]}`: "sunsets",
 	} {
 		var d ServerDocument

@@ -2347,6 +2347,24 @@ components:
           maxItems: 64
           items:
             $ref: '#/components/schemas/Capability'
+        server:
+          $ref: '#/components/schemas/Implementation'
+    Implementation:
+      description: The implementation that answers, informational (`PROTOCOL.md` §11.18).
+      type: object
+      required: [name, version]
+      additionalProperties: false
+      properties:
+        name:
+          $ref: '#/components/schemas/ImplementationText'
+        version:
+          $ref: '#/components/schemas/ImplementationText'
+        revision:
+          $ref: '#/components/schemas/ImplementationText'
+    ImplementationText:
+      description: 1 to 128 characters of %x21-7E (`PROTOCOL.md` §11.18).
+      type: string
+      pattern: '^[!-~]{1,128}$'
     Integer:
       description: An integer in digits alone, from 0 to 2^53 − 1 (`PROTOCOL.md` §3.3).
       type: integer

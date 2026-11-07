@@ -239,7 +239,26 @@ type ServerDocument struct {
 	// run, valid-before less valid-after, in seconds (PROTOCOL.md §11.7): from
 	// 1 to MaxInteger.
 	MaxCertificateLifetime uint64 `json:"max_certificate_lifetime"`
+	// Server is the implementation that answers, nil where the server names
+	// none: informational ([Implementation]).
+	Server *Implementation `json:"server,omitempty"`
 }
+
+// Implementation is what a server says of the software that answers
+// (PROTOCOL.md §11.18): its name, its version and the source revision it
+// was built from, for a reader to check against that implementation's
+// releases. It is informational. A client never speaks the protocol
+// otherwise on it, and nothing a client checks rests on it: a server may
+// name anything.
+type Implementation struct {
+	Name     string `json:"name"`
+	Version  string `json:"version"`
+	Revision string `json:"revision,omitempty"` // "" where the build records none
+}
+
+// implementationText is each member of an Implementation: 1 to 128
+// characters of %x21-7E (PROTOCOL.md §11.18).
+var implementationText = regexp.MustCompile(`\A[\x21-\x7e]{1,128}\z`)
 
 // Scheduled is a deprecation or a sunset of versions, and its date: a
 // deprecation, a date from which the server deems them deprecated (RFC
@@ -260,7 +279,8 @@ type Capability struct {
 
 // Check holds d to its form: each version a policy's, each deprecation and
 // sunset with exactly one of below and version and its date a time, each
-// capability's name of its form, and no more than MaxDeprecations,
+// capability's name of its form, the implementation's members of theirs,
+// and no more than MaxDeprecations,
 // MaxSunsets and MaxCapabilities of each; and to RFC 9745 §4's rule, no
 // sunset earlier than a deprecation of the same versions, the same below or
 // the same version, written alike (PROTOCOL.md §11.17). It names the member
@@ -301,6 +321,16 @@ func (d *ServerDocument) Check() error {
 	for _, c := range d.Capabilities {
 		if !capabilityGrammar.MatchString(c.Name) {
 			return &memberError{name: "name", known: true}
+		}
+	}
+	if im := d.Server; im != nil {
+		for name, v := range map[string]string{"name": im.Name, "version": im.Version} {
+			if !implementationText.MatchString(v) {
+				return &memberError{name: name, known: true}
+			}
+		}
+		if im.Revision != "" && !implementationText.MatchString(im.Revision) {
+			return &memberError{name: "revision", known: true}
 		}
 	}
 	return nil

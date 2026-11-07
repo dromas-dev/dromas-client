@@ -1286,6 +1286,11 @@ A mailbox may belong to one account at its server. The protocol fixes how a mail
   ```abnf
   capability-name = %x61-7A *63( %x61-7A / DIGIT / "_" )
   ```
+- **`server`:** the implementation that answers, when the server names one: `name`, `version`, and `revision`, the source revision the implementation was built from, where its build records one. Each is a string of `implementation-text`. The member is informational: it is what the server says it runs, for a reader to check against that implementation's releases. A hostile server can name anything, so nothing a client checks rests on this member (Section 15), and a client MUST NOT change how it speaks the protocol because of it. `min_version`, the deprecations, the sunsets and `capabilities` say that.
+
+  ```abnf
+  implementation-text = 1*128%x21-7E
+  ```
 
 A server lists at most 64 deprecations, 64 sunsets and 64 capabilities. A client reads at most that many of each. A document with more, or with a sunset earlier than a deprecation of the same `below` or `version`, is malformed.
 
