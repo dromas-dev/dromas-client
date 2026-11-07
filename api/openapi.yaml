@@ -2672,7 +2672,7 @@ components:
         quota_id:
           description: '`rate_limited`: which limit, from this closed set (`PROTOCOL.md` §11.5). A limit of a server''s own outside it names none.'
           type: [string, 'null']
-          enum: [polls, pages, calls, sends, renewals, certificates, certificate_revocations, registrations, registrations_range, misses, sends_before_pass, requests, null]
+          enum: [polls, pages, calls, sends, renewals, certificates, certificate_revocations, registrations, registrations_range, misses, misses_range, sends_before_pass, sends_before_pass_range, requests, requests_range, null]
         subject:
           description: '`rate_limited`: whom the limit counted the call against, the mailbox or the IP address it came from (`PROTOCOL.md` §11.5).'
           type: [string, 'null']
@@ -2772,7 +2772,7 @@ components:
             required: [quota_id]
             properties:
               quota_id:
-                enum: [registrations, registrations_range, misses, sends_before_pass, requests]
+                enum: [registrations, registrations_range, misses, misses_range, sends_before_pass, sends_before_pass_range, requests, requests_range]
           then:
             properties:
               subject:

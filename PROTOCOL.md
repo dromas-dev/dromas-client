@@ -910,8 +910,13 @@ The `subject` column of the table above gives the exceptions. A registration is 
 | `registrations` | `ip` | registrations from an IPv4 address or IPv6 /64, and each call that a server counts as a registration (Section 11.15) |
 | `registrations_range` | `ip` | the same, from an IPv6 /48 |
 | `misses` | `ip` | calls that named no mailbox, or that carried nothing that verified |
+| `misses_range` | `ip` | the same, from an IPv6 /48 |
 | `sends_before_pass` | `ip` | sends, counted before the server reads their pass |
+| `sends_before_pass_range` | `ip` | the same, from an IPv6 /48 |
 | `requests` | `ip` | every request except one that carries a pass the server has already verified, on a call that accepts that pass; registrations, renewals and requests that match no route are counted |
+| `requests_range` | `ip` | the same, from an IPv6 /48 |
+
+A quota counted against `ip` counts an IPv4 address by itself and an IPv6 address by its /64. Each quota ending in `_range` counts the same calls by their IPv6 /48 as well, beside the quota of the row above it; an IPv4 address has no /48 count. A call is refused when either count is spent, and the refusal names the count that sets its `Retry-After`.
 
 A fetch and an ack of a message the mailbox holds spend no `calls`, and Section 11.12 gives a fetch's own budgets. A `HEAD` and a call refused by a false precondition spend `calls` (Section 11.2).
 
@@ -1587,7 +1592,7 @@ A server chooses how it stores things. A server promises a client the following:
 - **A revocation of the address deletes every message in the mailbox, in the same way as an ack deletes one message.** The server also deletes its record of the mailbox, and keeps the revocation (Section 11.15).
 - **Setting the ACL deletes no message (Section 11.14).**
 - **A server finishes a send in flight well inside the hour that Section 15.3 gives a client.** A send in flight is a send to the prekey statement that a renewal replaced, which passed Section 11.10, step 7, before the server accepted the renewal. The server stores and lists the send's message within that time, or does not store the message.
-- **Logs.** A server MUST NOT log an address or a message id in the clear. Where a server would log one of these values, the server logs a short hash of the value instead. Only someone who already has the value can match that hash. A server MUST NOT log a pass or a request body.
+- **Logs.** A server MUST NOT log an address or a message id in the clear. Where a server would log one of these values, the server logs a name for the value instead. The server MUST make the name with a keyed pseudorandom function, under a random key that the server keeps only in memory and replaces at least once a day; a key made by one server process ends with that process. Under one key, one value always has one name, so log lines about the same value can be read together. Once the server discards a key, nobody, the server's operator included, can match a name made under it to its value. A server MUST NOT log a pass or a request body.
 
 ## 14. Compatibility and versioning
 
