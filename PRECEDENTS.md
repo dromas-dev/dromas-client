@@ -560,6 +560,12 @@ None was a flaw in the layout: each was a verifier that read an object different
 
 **The precedent** (read 2026-11-06; § Sources). The Telegram Bot API server holds one `getUpdates` long poll a bot, and a later one ends the earlier with `409` "Conflict: terminated by other getUpdates request" (`telegram-bot-api/Client.cpp`, `Client::abort_long_poll`, at `e3e9dd8e5b`). **Where ours differs:** the earlier list is answered `304`, its ordinary answer, not a refusal of its own. A long poll is no claim on the mailbox: the drain lets lists in flight at once take turns (§11.11), and the earlier request may be one whose connection a network dropped without a word, whose client's retry is the later one.
 
+## 4. A log names a value by a keyed function under a key replaced daily
+
+**Ours** (dromas-server's `SECURITY.md`, the log row; §13): a log names an address or a message id by SipHash-2-4 under a random key that dromas-server keeps only in memory and replaces each day.
+
+**The precedent** (read 2026-11-07; § Sources). Linux names each pointer that `%p` prints by SipHash under a random key made at boot: "default is to _not_ leak addresses, so hash before printing" (`lib/vsprintf.c`, `ptr_to_id` and `__ptr_to_hashval`, at `d48723711b`). Plausible names a visitor by a hash under a daily salt, which "is rotated and deleted every 24 hours" (plausible.io, Data policy). **Where ours differs:** the key is replaced on a day of the process's own clock, and a restart replaces the key too, because nothing writes the key down.
+
 ---
 
 # Sources
@@ -581,6 +587,7 @@ For rows marked `review 2026-10-10`, and for Part 3. A row of Part 2 marked `rea
 - The agent-communication survey of 1c names its systems with the dates it found. That review kept no links for them.
 - Part 3 § 1: [Go 1.27.3, `src/database/sql/driver/driver.go`](https://github.com/golang/go/blob/go1.27.3/src/database/sql/driver/driver.go) · the MongoDB Go driver at `v2.9.2`: [`x/mongo/driver/errors.go`](https://github.com/mongodb/mongo-go-driver/blob/v2.9.2/x/mongo/driver/errors.go), [`x/mongo/driver/operation.go`](https://github.com/mongodb/mongo-go-driver/blob/v2.9.2/x/mongo/driver/operation.go), [`mongo/session.go`](https://github.com/mongodb/mongo-go-driver/blob/v2.9.2/mongo/session.go)
 - Part 3 § 3: [`tdlib/telegram-bot-api`, `telegram-bot-api/Client.cpp` at `e3e9dd8e5b`](https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp) (`Client::abort_long_poll`, `Client::fail_query_conflict`)
+- Part 3 § 4: [Linux `lib/vsprintf.c` at `d48723711b`](https://github.com/torvalds/linux/blob/d48723711bae9b8cdc56719c448ba42fef28cbee/lib/vsprintf.c) · [Plausible — Data policy](https://plausible.io/data-policy)
 
 # Open in this file
 

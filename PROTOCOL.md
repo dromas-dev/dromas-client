@@ -1582,7 +1582,7 @@ A server chooses how it stores things. A server promises a client the following:
 - **A revocation of the address deletes every message in the mailbox, in the same way as an ack deletes one message.** The server also deletes its record of the mailbox, and keeps the revocation (Section 11.15).
 - **Setting the ACL deletes no message (Section 11.14).**
 - **A server finishes a send in flight well inside the hour that Section 15.3 gives a client.** A send in flight is a send to the prekey statement that a renewal replaced, which passed Section 11.10, step 7, before the server accepted the renewal. The server stores and lists the send's message within that time, or does not store the message.
-- **Logs.** A server MUST NOT log an address or a message id in the clear. Where a server would log one of these values, the server logs a short hash of the value instead. Only someone who already has the value can match that hash. A server MUST NOT log a pass or a request body.
+- **Logs.** A server MUST NOT log an address or a message id in the clear. Where a server would log one of these values, the server logs a name for the value instead. The server MUST make the name with a keyed pseudorandom function. The key is random, and the server keeps the key only in memory and replaces the key at least once a day. So nobody, the server's operator included, can match a name to the value after the server discards the key. A server MUST NOT log a pass or a request body.
 
 ## 14. Compatibility and versioning
 
