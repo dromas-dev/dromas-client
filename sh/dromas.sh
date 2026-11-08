@@ -782,6 +782,7 @@ dr_matched(){ # → 0 where this mailbox's records match its prekeys/: no key th
     jq -cn --arg m "REFUSED: this mailbox's records do not match its prekeys: $why. Such records cannot tell a message this mailbox delivered under the records it lost from one that waited, so the mailbox receives, sends and renews nothing, and acks nothing, until its owner runs dromas.sh init --restore: from then, every message sent before the pass of its next recv's list, and in the hour after, is refused as stale" '{type:"error", fatal:true, code:"state_not_the_keys", detail:$m}' >&2
     return 4
   fi
+  [ -d "$DR/prekeys" ] || return 0      # a mailbox with no prekeys/ yet has nothing there to count beside
   [ -e "$DR/prekeys/generation" ] && [ "$f" -eq "$g" ] || dr_putline "$DR/prekeys/generation" "$g"
 }
 dr_restore(){ # → init --restore's acknowledgement, under the lock: where this mailbox's records do not match its prekeys/ (dr_matched), the pass it kept dropped, which may be dated before the last message a lost replay set took, then the floor owed (floor-owed), then each key found named in seen-keys, then prekeys/generation's count taken, each on disk in that order; then a restore line of what it found. The next drain raises the floor by its first list's pass, signed after this, before anything is judged (dr_owed). Where they match, it changes nothing
