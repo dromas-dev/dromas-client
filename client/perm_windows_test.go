@@ -343,6 +343,34 @@ func TestAFileAnotherUserOwnsIsRefused(t *testing.T) {
 	}
 }
 
+// A private file and a kept directory, each both open to others and owned by
+// another user, are refused for their owner, who can change the list whatever
+// it says: the icacls line that sets the list is no fix while another user owns
+// it.
+func TestTheOwnerIsJudgedBeforeTheList(t *testing.T) {
+	t.Parallel()
+	if !windows.GetCurrentProcessToken().IsElevated() {
+		return // only an administrator can give a file away
+	}
+	file := filepath.Join(t.TempDir(), "f")
+	if err := os.WriteFile(file, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(t.TempDir(), "d")
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for path, check := range map[string]func(string) error{file: client.CheckPrivateFile, dir: client.CheckKeptDir} {
+		setList(t, path, "(A;;FA;;;BU)")
+		if out, err := exec.Command("icacls", path, "/setowner", "*S-1-5-32-545").CombinedOutput(); err != nil { //nolint:gosec // the test's own file
+			t.Fatalf("%v: %s", err, out)
+		}
+		if err := check(path); err == nil || !strings.Contains(err.Error(), "owned by") || strings.Contains(err.Error(), "/grant") {
+			t.Errorf("%s: %v; want the refusal of its owner, with no line that sets its list", path, err)
+		}
+	}
+}
+
 // openFile gives the local Users read.
 func openFile(t *testing.T, path string) {
 	t.Helper()

@@ -802,6 +802,40 @@ func TestARemovalKilledAtEachStepFinishesAtTheNextPrune(t *testing.T) {
 	}
 }
 
+// A prune with no reading a server took finishes no removal a crash left: a key
+// is deleted only by a reading a server took (prune). The marked prekey stays
+// until a prune by a reading, here a renewal's, finishes its removal.
+func TestAPruneWithNoReadingFinishesNoRemoval(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	a, b := e.mailbox(), e.mailbox()
+	old := numberOf(t, b)
+	e.clock.Add(2 * time.Second)
+	if _, err := b.Rekey(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	e.clock.Add(3 * time.Hour)
+	crash(t, e, b, "receive", "prekey marked going", protocol.Address{})
+	x, err := client.Open(b.Dir(), e.opts())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := x.PruneByNoReading(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if !exists(prekeyFile(b, old, ".agekey")) || !slices.Contains(client.Statements(t, x), old) {
+		t.Fatalf("a prune with no reading finished the removal of prekey %d", old)
+	}
+	e.clock.Add(2 * time.Second)
+	if _, err := x.Rekey(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if exists(prekeyFile(b, old, ".agekey")) || slices.Contains(client.Statements(t, x), old) {
+		t.Fatalf("the prune by a renewal's reading left prekey %d", old)
+	}
+	whole(t, e, x, a)
+}
+
 // A drain killed at each step of a delivery: the message is in the inbox
 // once, and leaves the server.
 func TestADrainKilledAtEachStepOfADeliveryDeliversOnce(t *testing.T) {
