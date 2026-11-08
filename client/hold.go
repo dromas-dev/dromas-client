@@ -246,8 +246,9 @@ func timedOut(err error) bool {
 // Transient reports whether err is a call that failed and that making it
 // again may get past: no answer, a server error, a rate limit or a request
 // timeout. So is a lock another command held for as long as a command waits for
-// it, a renewal held back until renewRetry after one that failed so, and a
-// server's no_such_mailbox whose registration again failed so ([Mailbox.Follow]).
+// it, a renewal held back until renewRetry after one that failed so, a
+// server's no_such_mailbox whose registration again failed so ([Mailbox.Follow]),
+// and a refusal that this machine puts right without its owner ([NotReady]).
 // A refusal no wait mends is not: [Fatal] names those.
 func Transient(err error) bool {
 	var ae *APIError
@@ -257,7 +258,7 @@ func Transient(err error) bool {
 	switch {
 	case err == nil, errors.As(err, &re):
 		return false
-	case errors.Is(err, errLocked), errors.As(err, &nr):
+	case errors.Is(err, errLocked), errors.As(err, &nr), NotReady(err):
 		return true
 	case errors.As(err, &rh):
 		return rh.transient
@@ -419,7 +420,8 @@ const ReceiveEvery = time.Hour
 // a zero until is no deadline, as for a mailbox that waits for messages for as long
 // as it runs. A call that holding again may get past (no answer, a server
 // error, a rate limit) is held again, after its Retry-After where it gives
-// one; a refusal no wait mends ([Fatal]) ends it, as its error. h, when not
+// one, and a refusal this machine puts right ([NotReady]) after ReceiveEvery or
+// at until; a refusal no wait mends ([Fatal]) ends it, as its error. h, when not
 // nil, is handed an [EventRetry] for each held request that failed and an
 // [EventConnectionDropped] for each connection that dropped, and an error from
 // h ends Await as that error. Await returns by until, its waits for a turn to
@@ -447,11 +449,18 @@ func (b *Mailbox) Await(ctx context.Context, until time.Time, h Handler) error {
 			if herr := h(ctx, Event{Kind: EventRetry, Err: err}); herr != nil {
 				return herr
 			}
-			if errors.As(err, &ae) && ae.RetryAfter > 0 {
+			var pause time.Duration
+			switch {
+			case NotReady(err):
+				pause = ReceiveEvery
+			case errors.As(err, &ae):
+				pause = ae.RetryAfter
+			}
+			if pause > 0 {
 				select {
 				case <-ctx.Done():
 					return ctx.Err()
-				case <-time.After(min(ae.RetryAfter, time.Until(until))):
+				case <-time.After(min(pause, time.Until(until))):
 				}
 			}
 			continue

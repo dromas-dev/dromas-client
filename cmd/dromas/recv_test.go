@@ -5,6 +5,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -262,4 +263,50 @@ func TestRecvOfAForgottenMailboxWhoseRegistrationFailsForNowExits1(t *testing.T)
 	if status != 1 || len(line) != 1 || line[0]["type"] != "error" || line[0]["fatal"] != nil || line[0]["code"] != string(protocol.CodeNoSuchMailbox) {
 		t.Fatalf("exit %d, %s; err %v", status, errs.String(), err)
 	}
+}
+
+// recv --follow rides out a folder missing, as on a volume not yet mounted,
+// with an "error" line each hourly try and no "fatal"; a bare recv ends on it
+// with exit status 1 (#775 item 2).
+func TestRecvRidesOutAFolderNotYetMounted(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		srv := fakeserver.NewInMemory(t, time.Now)
+		opt := client.Options{Base: srv.URL, HTTPClient: srv.Client()}
+		b, err := client.Init(ctx, t.TempDir(), opt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		inbox := b.Path("inbox")
+		if err := os.Rename(inbox, inbox+".unmounted"); err != nil {
+			t.Fatal(err)
+		}
+		useMailbox(t, b.Dir())
+		t.Setenv("DROMAS_SERVER_URL", srv.URL)
+		var out, errs bytes.Buffer
+		err = doWith(ctx, opt, "recv", nil, strings.NewReader(""), &out, &errs)
+		var rep bytes.Buffer
+		if st := report(err, &rep); st != 1 || strings.Contains(rep.String(), `"fatal"`) || !strings.Contains(rep.String(), "may not be mounted") {
+			t.Fatalf("a bare recv: exit %d, %s", st, rep.String())
+		}
+		errs.Reset()
+		ended := make(chan error, 1)
+		go func() { ended <- doWith(ctx, opt, "recv", []string{"--follow"}, strings.NewReader(""), &out, &errs) }()
+		time.Sleep(150 * time.Minute)
+		synctest.Wait()
+		cancel()
+		if err := <-ended; err != nil {
+			t.Fatalf("recv --follow, its context ended: %v %s", err, errs.String())
+		}
+		lines := printed(t, errs.String())
+		if len(lines) != 3 {
+			t.Fatalf("%d lines on stderr, want 3: %s", len(lines), errs.String())
+		}
+		for _, l := range lines {
+			if l["type"] != "error" || l["fatal"] != nil || !strings.Contains(l["detail"].(string), inbox) {
+				t.Fatalf("recv --follow said %v", l)
+			}
+		}
+	})
 }

@@ -133,7 +133,8 @@ type FollowOptions struct {
 // a no_such_mailbox among them where the renewal that registers the mailbox
 // again failed so ([Result.RenewErr]), and the loop drains again after the
 // error's Retry-After, or the later of the server's poll interval and its pace,
-// or a minute. Where that lands past Until
+// or a minute, or [ReceiveEvery] after a refusal this machine puts right without
+// its owner ([NotReady]). Where that lands past Until
 // the drain's error ends the loop, as any other drain's error does. Follow returns
 // that error, the handler's, ctx's when ctx ended, and nil for [ErrStop] or at Until.
 func (b *Mailbox) Follow(ctx context.Context, o FollowOptions, h Handler) error {
@@ -211,8 +212,13 @@ func ended(err error) error {
 	return err
 }
 
-// pauseAfter is how long the loop waits before the drain after res and err.
+// pauseAfter is how long the loop waits before the drain after res and err:
+// ReceiveEvery after a refusal this machine puts right ([NotReady]), the
+// longest the loop otherwise goes between drains.
 func pauseAfter(res *Result, err error) time.Duration {
+	if NotReady(err) {
+		return ReceiveEvery
+	}
 	pause := time.Minute
 	if res != nil && res.Again() > 0 {
 		pause = res.Again()

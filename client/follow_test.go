@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -751,5 +752,136 @@ func TestANoSuchMailboxWhoseRegistrationIsRefusedIsFatal(t *testing.T) {
 	})
 	if client.Code(err) != protocol.CodeNoSuchMailbox || !client.Fatal(err) {
 		t.Fatalf("Follow: %v", err)
+	}
+}
+
+// A folder of the mailbox missing, as on a volume not yet mounted, is NotReady:
+// the loop tries again ReceiveEvery after each refusal, and drains once the
+// folder is back. Await, which meets it at a hold, waits until it returns for a
+// Receive (#775 item 2).
+func TestAFolderNotYetMountedIsTriedAgainEveryHour(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		e := newMemEnv(t)
+		a, b := e.mailbox(), e.mailbox()
+		receive(t, b)
+		send(t, a, b, "waits for the mount")
+		inbox := b.Path("inbox")
+		if err := os.Rename(inbox, inbox+".unmounted"); err != nil {
+			t.Fatal(err)
+		}
+		start := time.Now()
+		var at []time.Duration
+		var got []string
+		err := b.Follow(context.Background(), client.FollowOptions{}, func(_ context.Context, ev client.Event) error {
+			switch ev.Kind {
+			case client.EventRetry:
+				if !client.NotReady(ev.Err) || !client.Transient(ev.Err) || client.Fatal(ev.Err) || !strings.Contains(ev.Err.Error(), inbox) {
+					t.Errorf("retried %v; NotReady %v", ev.Err, client.NotReady(ev.Err))
+				}
+				if at = append(at, time.Since(start)); len(at) == 2 {
+					if err := os.Rename(inbox+".unmounted", inbox); err != nil {
+						t.Error(err)
+					}
+				}
+			case client.EventDelivery:
+				got = append(got, bodyOf(t, *ev.Delivery))
+				return client.ErrStop
+			}
+			return nil
+		})
+		if err != nil || !slices.Equal(got, []string{"waits for the mount"}) || time.Since(start) != 2*client.ReceiveEvery {
+			t.Fatalf("Follow: %v, delivering %q after %s", err, got, time.Since(start))
+		}
+		if want := []time.Duration{0, client.ReceiveEvery}; !slices.Equal(at, want) {
+			t.Fatalf("tried at %v, want %v", at, want)
+		}
+		if err := os.Rename(inbox, inbox+".unmounted"); err != nil {
+			t.Fatal(err)
+		}
+		start = time.Now()
+		retries := 0
+		err = b.Await(context.Background(), start.Add(3*client.ReceiveEvery), func(_ context.Context, ev client.Event) error {
+			if ev.Kind == client.EventRetry {
+				retries++
+			}
+			return nil
+		})
+		if err != nil || retries != 1 || time.Since(start) != client.ReceiveEvery {
+			t.Fatalf("Await: %v after %s, having retried %d", err, time.Since(start), retries)
+		}
+	})
+}
+
+// A one-shot drain that meets a folder missing ends with the refusal, which is
+// NotReady and not Fatal.
+func TestAOneShotDrainOfAFolderNotMountedIsNotFatal(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	b := e.mailbox()
+	receive(t, b)
+	keys := filepath.Join(b.Dir(), "keys")
+	if err := os.Rename(keys, keys+".unmounted"); err != nil {
+		t.Fatal(err)
+	}
+	err := b.Follow(context.Background(), oneDrain(false), nil)
+	if err == nil || !client.NotReady(err) || client.Fatal(err) {
+		t.Fatalf("Follow with keys/ not mounted: %v", err)
+	}
+	if err := os.Rename(keys+".unmounted", keys); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Follow(context.Background(), oneDrain(false), nil); err != nil {
+		t.Fatalf("Follow once mounted: %v", err)
+	}
+}
+
+// A clock three hours behind, as at a boot before a time source sets it, is
+// NotReady: for a mailbox whose identity signs, its server refuses the pass as
+// pass_expired and dates its answer later than the clock reads; under a
+// certificate, the certificate has not begun. Either is an EventRetry the loop
+// makes again ReceiveEvery later, and once the clock is right the loop drains.
+// The mailbox's clock and the server's are two clocks (#775 item 2).
+func TestAClockBehindIsTriedAgainEveryHour(t *testing.T) {
+	for _, working := range []bool{false, true} {
+		t.Run(fmt.Sprintf("working key %v", working), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				e := newMemEnv(t)
+				e.working = working
+				b := e.mailbox()
+				receive(t, b)
+				var behind atomic.Bool
+				behind.Store(true)
+				o := e.opts()
+				o.Now = func() time.Time {
+					if behind.Load() {
+						return e.clock.Now().Add(-3 * time.Hour)
+					}
+					return e.clock.Now()
+				}
+				x := mustOpen(t, b.Dir(), o)
+				client.Bounded(x)
+				start := time.Now()
+				var at []time.Duration
+				err := x.Follow(context.Background(), client.FollowOptions{}, func(_ context.Context, ev client.Event) error {
+					switch ev.Kind {
+					case client.EventRetry:
+						if !client.NotReady(ev.Err) || client.Fatal(ev.Err) {
+							t.Errorf("retried %v; NotReady %v", ev.Err, client.NotReady(ev.Err))
+						}
+						if at = append(at, time.Since(start)); len(at) == 2 {
+							behind.Store(false)
+						}
+					case client.EventDrained:
+						if len(at) == 2 {
+							return client.ErrStop
+						}
+					}
+					return nil
+				})
+				if want := []time.Duration{0, client.ReceiveEvery}; err != nil || !slices.Equal(at, want) {
+					t.Fatalf("Follow: %v, having tried at %v; want nil, at %v", err, at, want)
+				}
+			})
+		})
 	}
 }
