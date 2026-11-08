@@ -8,6 +8,7 @@ import (
 	"io"
 	"math"
 	"os"
+	"path/filepath"
 	"regexp"
 	"runtime"
 	"runtime/debug"
@@ -156,7 +157,7 @@ func orNil(s string) any {
 }
 
 func (e *cli) initCmd() *cobra.Command {
-	var idType string
+	var idType, revocationFile string
 	var offline bool
 	c := command("init [flags]", "create this mailbox and register it; prints its link",
 		`Create this mailbox and register it, and print its address and its link,
@@ -169,7 +170,11 @@ mailbox, under a certificate where its server serves a statement under one or
 --offline asks. A sender that saw this address under a certificate refuses one
 its identity signs: where the server has forgotten a mailbox that was under
 certificates, run dromas cert switch <address> next. A profile with no config
-file gets one, each path in full.`,
+file gets one, each path in full. With --revocation-file, init also writes the
+mailbox's revocation record, as dromas revocation make prints it, to a new file
+outside every directory of the mailbox, for the day the mailbox is lost: keep
+it where only you can read it. On a mailbox already registered, init with
+--revocation-file writes the record and changes nothing else.`,
 		checked(nargs(0, 0), func(c *cobra.Command, _ []string) error {
 			if idType != "" && !slices.Contains(protocol.IdentityTypes(), idType) {
 				return wrong(c, "%s makes an identity of the key type %s, and %q is not one", c.CommandPath(), strings.Join(protocol.IdentityTypes(), " or "), idType)
@@ -178,6 +183,19 @@ file gets one, each path in full.`,
 		}), func(c *cobra.Command, _ []string) error {
 			opt := e.opt
 			opt.WorkingKey = offline
+			if revocationFile == "" {
+				revocationFile = os.Getenv("DROMAS_REVOCATION_FILE")
+			}
+			if revocationFile != "" {
+				p, err := expand(revocationFile, ".")
+				if err == nil {
+					p, err = filepath.Abs(p)
+				}
+				if err != nil {
+					return &configError{key: "revocation-file", msg: fmt.Sprintf("revocation-file: %v", err)}
+				}
+				opt.RevocationFile = p
+			}
 			var warning any
 			// A type of PROTOCOL.md §4.1 reaches every mailbox; an optional one only
 			// those whose clients verify it (§7).
@@ -198,6 +216,7 @@ file gets one, each path in full.`,
 			return e.out(line("mailbox", "address", b.Address(), "link", b.Link(), "detail", warning))
 		})
 	c.Flags().BoolVar(&offline, "offline", false, "register the mailbox under a certificate, whose working key signs in place of its identity: for good")
+	c.Flags().StringVar(&revocationFile, "revocation-file", "", "write this mailbox's revocation record, as dromas revocation make prints it, to this new `file`, outside every directory of the mailbox: $DROMAS_REVOCATION_FILE")
 	c.Flags().StringVar(&idType, "identity-type", "", "make the identity a key of this `type`, not ssh-ed25519: "+protocol.IdentityP256+", which every client verifies too")
 	return c
 }

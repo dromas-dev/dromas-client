@@ -88,6 +88,13 @@ type Options struct {
 	// server serves a statement under a certificate renews under a new one
 	// whatever this says.
 	WorkingKey bool
+	// RevocationFile, if not empty, is a new file Init writes the mailbox's
+	// revocation record to, once the mailbox is registered: the line
+	// [Mailbox.Revocation] gives, as dromas revocation make prints it. Before
+	// it makes anything, Init refuses a path inside a directory of the mailbox,
+	// one where something is, and one whose directory is not there
+	// (checkRevocationFile, writeRevocationFile).
+	RevocationFile string
 	// Waiting, if not nil, is told when a command finds the mailbox's lock held
 	// by another command of the mailbox, once, before it waits for it: a mailbox's
 	// commands write its files one at a time.
@@ -181,6 +188,9 @@ type Mailbox struct {
 	// workingKey has Init register a mailbox it makes or restores under a
 	// certificate (Options.WorkingKey).
 	workingKey bool
+	// revocationFile is the new file Init writes the mailbox's revocation
+	// record to (Options.RevocationFile), or empty.
+	revocationFile string
 	// lifetime is how long a certificate this mailbox makes runs, read from its
 	// server's document once a command (certificateLifetime); zero until then.
 	lifetime time.Duration
@@ -275,7 +285,7 @@ func newMailbox(dir string, opt Options) (*Mailbox, error) {
 	if d := opt.CertificateLifetime; d != 0 && (d <= protocol.TTL+protocol.MaxSkew || d > protocol.MaxCertificateLifetime || d%time.Second != 0) {
 		return nil, fmt.Errorf("%v is no certificate lifetime: %s", d, CertificateLifetimeRule)
 	}
-	b := &Mailbox{dir: dir, layout: opt.Layout.resolved(dir), configFile: opt.ConfigFile, policySet: opt.Policy, prekeyLife: opt.PrekeyLifetime, certLife: opt.CertificateLifetime, unsafeInbox: opt.UnsafeInboxPermissions, unsafeState: opt.UnsafeStatePermissions, base: strings.TrimRight(opt.Base, "/"), http: opt.HTTPClient, now: opt.Now, identityType: opt.IdentityType, workingKey: opt.WorkingKey, waiting: opt.Waiting, slot: make(chan struct{}, 1), unlock: unlocking{agent: opt.Agent, passphrase: opt.Passphrase, keep: opt.KeepIdentity, add: opt.AddToAgent, lifetime: opt.AgentLifetime}}
+	b := &Mailbox{dir: dir, layout: opt.Layout.resolved(dir), configFile: opt.ConfigFile, policySet: opt.Policy, prekeyLife: opt.PrekeyLifetime, certLife: opt.CertificateLifetime, unsafeInbox: opt.UnsafeInboxPermissions, unsafeState: opt.UnsafeStatePermissions, base: strings.TrimRight(opt.Base, "/"), http: opt.HTTPClient, now: opt.Now, identityType: opt.IdentityType, workingKey: opt.WorkingKey, revocationFile: opt.RevocationFile, waiting: opt.Waiting, slot: make(chan struct{}, 1), unlock: unlocking{agent: opt.Agent, passphrase: opt.Passphrase, keep: opt.KeepIdentity, add: opt.AddToAgent, lifetime: opt.AgentLifetime}}
 	if b.base == "" {
 		b.base = DefaultBase
 	}
@@ -526,6 +536,11 @@ func Init(ctx context.Context, dir string, opt Options) (*Mailbox, error) {
 	if err != nil {
 		return nil, err
 	}
+	if b.revocationFile != "" {
+		if err := b.checkRevocationFile(); err != nil {
+			return nil, err
+		}
+	}
 	if err := makeDir(dir); err != nil {
 		return nil, err
 	}
@@ -534,6 +549,9 @@ func Init(ctx context.Context, dir string, opt Options) (*Mailbox, error) {
 	// finished.
 	return lockedFinished(ctx, b, func() (*Mailbox, error) {
 		r, err := b.init(ctx)
+		if err == nil && b.ended == nil && b.revocationFile != "" {
+			err = b.writeRevocationFile()
+		}
 		return outcome(b, r, err)
 	})
 }

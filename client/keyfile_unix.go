@@ -92,6 +92,13 @@ func NewPrivateTemp(dir string) (*os.File, error) { return os.CreateTemp(dir, ".
 // newKeyTemp is NewPrivateTemp for a private key.
 func newKeyTemp(dir string) (*os.File, error) { return NewPrivateTemp(dir) }
 
+// newPrivateFile makes name, a new file its owner's alone from its making
+// (mode 0600), and refuses it where anything is there, a link among them
+// (O_EXCL).
+func newPrivateFile(name string) (*os.File, error) {
+	return os.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600) //nolint:gosec // a path the mailbox's owner named
+}
+
 // openPrivate opens name, made its owner's alone where it is not there.
 func openPrivate(name string, flag int) (*os.File, error) {
 	return os.OpenFile(name, flag|os.O_CREATE, 0o600) //nolint:gosec // a file of the mailbox's own
