@@ -27,11 +27,12 @@ import (
 func (e *cli) tree() *cobra.Command {
 	root := e.group("dromas", "", "",
 		e.initCmd(), e.addrCmd(), e.sendCmd(), e.recvCmd(), e.statusCmd(), e.configCmd(), e.versionCmd(),
-		e.group("inbox", "messages recv delivered: list, show",
+		e.group("inbox", "messages recv delivered: list, show, clear-failed",
 			`recv keeps each message it delivers in inbox/, as the "message" line it
 printed, until its file is deleted: deleting it forgets the message. These
-commands print those lines again, and read no server.`,
-			e.inboxListCmd(), e.inboxShowCmd()),
+commands print those lines again, or clear what dromas status says of
+callbacks that gave up, and read no server.`,
+			e.inboxListCmd(), e.inboxShowCmd(), e.inboxClearFailedCmd()),
 		e.group("held", "messages from unknown senders, waiting for allow or block: list",
 			`A message that passed every check, from an unknown sender (one this mailbox has not
 written to, named or allowed), is kept in held/, and recv does not print it.
@@ -376,8 +377,10 @@ Exit status 0 is done, and 100 is failed for good. Any other exit status, a
 signal, a run longer than --exec-timeout (which kills the process) or a
 program that does not start is tried again, up to %d tries in all, %s apart.
 Each failed try prints an "exec_failed" line, and a message with no try left
-an "exec_gave_up" line, which dromas status then lists under attention, and
-recv goes on to the next message and exits with status 3 at its end. A
+an "exec_gave_up" line, which dromas status then lists under attention until
+dromas inbox clear-failed clears it, and recv goes on to the next message and
+exits with status 3 at its end. Nothing runs that message's command again:
+dromas inbox show <id> | <program> hands it to a program by hand. A
 process killed before a command's tries end runs that command again when recv
 --exec next starts, so a command runs at least once for each message and
 may run twice: it should take the "id" as the message's name.`, formatTime(client.RecvWithin(protocol.PrekeyLifetime)), formatTime(client.ReceiveEvery), execTries, execDelay),
@@ -457,6 +460,32 @@ before any file is read.`,
 		})
 	c.Flags().BoolVar(&headers, "headers", false, "print the message's checked fields and its body's size, without its body or subject, as recv --headers does")
 	return c
+}
+
+// inboxClearFailedCmd clears every record of a callback that gave up, and takes
+// no id. A failed unit stays failed, and systemctl is-system-running says
+// "degraded", until systemctl reset-failed, which with no unit resets every one
+// (systemctl(1)): a callback that gave up keeps drawing attention the same way.
+func (e *cli) inboxClearFailedCmd() *cobra.Command {
+	return command("clear-failed", "clear what status says of every callback that gave up",
+		`Clear the record of every message in inbox/ whose recv --exec callback gave
+up, and print a "gave_up_cleared" line with their "count": dromas status lists
+none of them from then on, and asks for no look for them, until a callback
+gives up again. It takes no id, and clears every one that gave up, and none
+whose callback still has tries left; with none, its count is 0. Each message
+stays in inbox/, and nothing runs its callback again: dromas inbox show <id> |
+<program> hands one to a program by hand.`,
+		nargs(0, 0), func(c *cobra.Command, _ []string) error {
+			b, err := e.mailbox()
+			if err != nil {
+				return err
+			}
+			n, err := b.ClearFailed(c.Context())
+			if err != nil {
+				return err
+			}
+			return e.out(line("gave_up_cleared", "count", n))
+		})
 }
 
 // messageLines prints a "message" line for each of ds, or with headers a

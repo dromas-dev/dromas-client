@@ -566,6 +566,78 @@ func TestAMessageWhoseHandlingGaveUpIsListedAndNotTriedAgain(t *testing.T) {
 	}
 }
 
+// A message whose handling gave up stays listed while inbox/ keeps its file, a
+// later owed loop included. ClearFailed clears every record in one call, counts
+// those Status listed, drops the record of one inbox/ no longer keeps, and leaves
+// every file in inbox/; a handling that gives up after it is listed again.
+func TestClearFailedClearsEveryHandlingThatGaveUpUntilTheNext(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	e := newEnv(t)
+	a, b := e.mailbox(), e.mailbox()
+	send(t, a, b, "one")
+	send(t, a, b, "two")
+	send(t, a, b, "three")
+	var gaveUp []string
+	giveUp := func(_ context.Context, ev client.Event) error {
+		if ev.Kind != client.EventDelivery {
+			return nil
+		}
+		gaveUp = append(gaveUp, ev.Delivery.ID)
+		return client.ErrGaveUp
+	}
+	if err := b.Follow(ctx, oneDrain(true), giveUp); err != nil || len(gaveUp) != 3 {
+		t.Fatalf("Follow: %v, gave up on %q", err, gaveUp)
+	}
+	if err := b.Follow(ctx, oneDrain(true), nil); err != nil {
+		t.Fatal(err)
+	}
+	listed := func(ids []string) {
+		t.Helper()
+		st, err := b.Status(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		slices.Sort(ids)
+		got := slices.Sorted(slices.Values(st.GaveUp))
+		said := slices.ContainsFunc(st.Attention, func(s string) bool { return strings.Contains(s, "callback gave up") })
+		if !slices.Equal(got, ids) || said != (len(ids) > 0) {
+			t.Fatalf("status lists %q, says %v, want %q: %q", got, said, ids, st.Attention)
+		}
+	}
+	listed(slices.Clone(gaveUp))
+	// A file deleted, with no owed loop since, leaves its record in the state.
+	gone := gaveUp[2]
+	if err := os.Remove(filepath.Join(b.Dir(), "mail", "inbox", gone+".json")); err != nil {
+		t.Fatal(err)
+	}
+	if _, kept := b.Record(t, "gave-up/"+gone); !kept {
+		t.Fatal("no record left of the message whose file was deleted: the test proves nothing of it")
+	}
+	n, err := b.ClearFailed(ctx)
+	if err != nil || n != 2 {
+		t.Fatalf("ClearFailed: %d, %v, want the 2 status listed", n, err)
+	}
+	for _, id := range gaveUp {
+		if _, kept := b.Record(t, "gave-up/"+id); kept {
+			t.Errorf("ClearFailed left the record of %s", id)
+		}
+	}
+	listed(nil)
+	if ds, err := b.Inbox(ctx); err != nil || len(ds) != 2 {
+		t.Fatalf("inbox/ after ClearFailed: %d messages, %v, want the 2 it kept", len(ds), err)
+	}
+	if n, err := b.ClearFailed(ctx); err != nil || n != 0 {
+		t.Fatalf("ClearFailed with nothing to clear: %d, %v", n, err)
+	}
+	send(t, a, b, "four")
+	gaveUp = nil
+	if err := b.Follow(ctx, oneDrain(true), giveUp); err != nil || len(gaveUp) != 1 {
+		t.Fatalf("Follow: %v, gave up on %q", err, gaveUp)
+	}
+	listed(slices.Clone(gaveUp))
+}
+
 // An owed message inbox/ no longer keeps as recv wrote it is said and cleared,
 // and its handler is not handed anything to read.
 func TestAnOwedMessageGoneFromInboxIsSaidAndCleared(t *testing.T) {

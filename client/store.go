@@ -36,7 +36,7 @@ import (
 //	seen         the replay set, by ciphertext hash; seen-sender by sender and msg_id, and seen-time by sent_at, its two indexes
 //	refused      what this client's checks found of each message it refused, by its id: refused/ keeps the message as served
 //	owed         each message [Mailbox.Follow] kept and whose handling has not ended, by a number that rises in delivery order: its id
-//	gave-up      each message whose handling gave up ([ErrGaveUp]), by its id, while inbox/ keeps it
+//	gave-up      each message whose handling gave up ([ErrGaveUp]), by its id, until [Mailbox.ClearFailed] or a Follow that finds inbox/ no longer keeps it
 //	meta         the mailbox's format, under "format", and the address it belongs to, under "address" (format.go)
 const (
 	bucketMailbox    = "box" // the name stored in every state file, kept as it was

@@ -233,7 +233,7 @@ func (r *recvRun) callback(ctx context.Context, id string, l []byte) error {
 		if permanent || try == execTries {
 			r.gaveUp = true
 			r.print(line("exec_gave_up", "id", id, "tries", try, "detail",
-				"the callback has no try left: inbox/ keeps the message, nothing tries it again, and dromas status lists it"))
+				"the callback has no try left: inbox/ keeps the message, nothing tries it again, and dromas status lists it until dromas inbox clear-failed"))
 			return client.ErrGaveUp
 		}
 		select {
