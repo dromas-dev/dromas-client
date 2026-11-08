@@ -439,9 +439,10 @@ func (e *cli) inboxClearFailedCmd() *cobra.Command {
 		`Clear the record of every message in inbox/ whose recv --exec callback gave
 up, and print a "gave_up_cleared" line with their "count": dromas status lists
 none of them from then on, and asks for no look for them, until a callback
-gives up again. It takes no id, and clears every one. Each message stays in
-inbox/, and nothing runs its callback again: dromas inbox show <id> | <program>
-hands one to a program by hand.`,
+gives up again. It takes no id, and clears every one that gave up, and none
+whose callback still has tries left; with none, its count is 0. Each message
+stays in inbox/, and nothing runs its callback again: dromas inbox show <id> |
+<program> hands one to a program by hand.`,
 		nargs(0, 0), func(c *cobra.Command, _ []string) error {
 			b, err := e.mailbox()
 			if err != nil {
