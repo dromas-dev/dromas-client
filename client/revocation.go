@@ -905,7 +905,7 @@ func (b *Mailbox) proved(ctx context.Context, method, path string, err error) er
 		if !b.usesRevoked() {
 			return fmt.Errorf("%w; it showed no revocation of this mailbox's certificates that verifies and covers the one it uses", err)
 		}
-		return refuse("this mailbox's identity has revoked the certificate it signs under, as its server shows, so it is taken nowhere it is held: dromas recv or dromas prekey renew publishes a new one")
+		return refuseRenews("this mailbox's identity has revoked the certificate it signs under, as its server shows, so it is taken nowhere it is held: dromas recv or dromas prekey renew publishes a new one")
 	}
 	held, lerr := b.revoked(who)
 	switch {

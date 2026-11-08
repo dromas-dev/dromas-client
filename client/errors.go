@@ -21,6 +21,9 @@ type RefusedError struct {
 	// notReady is set on a refusal that this machine puts right without its
 	// owner ([NotReady]).
 	notReady bool
+	// renews is set on a refusal that the mailbox's next renewal puts right
+	// (renewalMends).
+	renews bool
 }
 
 func (e *RefusedError) Error() string { return "REFUSED: " + e.Reason }
@@ -33,6 +36,12 @@ func refuse(format string, args ...any) error {
 // its owner ([NotReady]).
 func refuseNotReady(format string, args ...any) error {
 	return &RefusedError{Reason: fmt.Sprintf(format, args...), notReady: true}
+}
+
+// refuseRenews is refuse, of a refusal that the mailbox's next renewal puts
+// right (renewalMends).
+func refuseRenews(format string, args ...any) error {
+	return &RefusedError{Reason: fmt.Sprintf(format, args...), renews: true}
 }
 
 // NotReady reports whether err is a refusal that this machine puts right

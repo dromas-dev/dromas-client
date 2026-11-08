@@ -243,6 +243,13 @@ func (b *Mailbox) receive(ctx context.Context, owing bool) (*Result, error) {
 		res.Renewed, res.ACLReplaced = renewed, replaced
 		return res, gone
 	}
+	// A drain refused for what a renewal mends (renewalMends), whose renewal
+	// failed in a way a wait may mend, or is held back after one that failed
+	// so, is a call to make again ([Transient]): a later Receive renews again
+	// (#773, #800). Any other error stays as it is, whatever the mailbox holds.
+	if err != nil && Transient(renewErr) && renewalMends(err) {
+		err = &renewalOwed{err}
+	}
 	// A replacement of an ACL that held what no file of the mailbox says, which
 	// a sync made since the last Receive, is reported here (#366).
 	if noted, nerr := b.replacedNote(); nerr != nil && err == nil {
@@ -356,16 +363,41 @@ func (b *Mailbox) mendable(err error) bool {
 	if ownRevoked(err) != nil {
 		return false
 	}
-	if renewalMends(code(err)) {
+	if renewalMends(err) {
 		return true
 	}
 	return b.usesRevoked()
 }
 
-// renewalMends reports whether c is a server's refusal that a renewal mends by
-// registering the mailbox again: the server holds no mailbox at this address
-// (PROTOCOL.md §11.7, §12.4).
-func renewalMends(c protocol.Code) bool { return c == protocol.CodeNoSuchMailbox }
+// renewalMends reports whether err is a refusal that a renewal of the prekey
+// mends, whichever call met it: the server holds no mailbox at this address,
+// which the renewal's registration mends (PROTOCOL.md §11.7, §12.4), or its
+// server shows the certificate this mailbox uses revoked (proved), which a
+// renewal under a new certificate mends. A read about another address that
+// failed is not one, whatever its code (aboutOther). It is the one test of
+// that: Hold and mendable both ask it.
+func renewalMends(err error) bool {
+	var ao *aboutOther
+	var rf *RefusedError
+	switch {
+	case errors.As(err, &ao):
+		return false
+	case errors.As(err, &rf) && rf.renews:
+		return true
+	}
+	return code(err) == protocol.CodeNoSuchMailbox
+}
+
+// renewalOwed is a drain's error that a renewal mends (renewalMends), whose
+// renewal failed in a way a wait may mend, or is held back after one that
+// failed so ([Transient]): a later drain renews again.
+type renewalOwed struct{ err error }
+
+func (e *renewalOwed) Error() string {
+	return e.err.Error() + "; the renewal that mends this failed in a way a wait may mend, and a later recv tries again"
+}
+
+func (e *renewalOwed) Unwrap() error { return e.err }
 
 // A drain is bounded, so that a server which lists messages without end, or
 // serves answers as large as it may, or as slowly as it may, costs one
@@ -950,17 +982,24 @@ func recordSeen(s store, ciphertext []byte, env *protocol.Envelope) error {
 	return s.put(bucketSeenTime, seenTimeKey(env.SentAt.Unix(), h), nil)
 }
 
-// aboutAnother is err, a read about another address that failed, with the API
-// error in it, if any, as its words alone: the server's code there refuses a
-// read of that address, never this mailbox's own calls, so nothing reads it as
-// this mailbox's (mendable). The mailbox's own revocation, which a read about
-// a sender may show, stays as it is (ownRevoked).
+// aboutOther is a read about another address that failed. The server's code
+// in it refuses that read, never this mailbox's own calls, so renewalMends
+// reads no code through it. The rest of the chain is read as any error's: a
+// server error or a rate limit is a call to make again ([Transient]), after
+// its Retry-After, and its line names its status and code (#804).
+type aboutOther struct{ err error }
+
+func (e *aboutOther) Error() string { return e.err.Error() }
+func (e *aboutOther) Unwrap() error { return e.err }
+
+// aboutAnother is err, a read about another address that failed, as an
+// aboutOther. The mailbox's own revocation, which a read about a sender may
+// show, stays as it is (ownRevoked).
 func aboutAnother(err error) error {
-	var api *APIError
-	if !errors.As(err, &api) || ownRevoked(err) != nil {
+	if err == nil || ownRevoked(err) != nil {
 		return err
 	}
-	return errors.New(err.Error())
+	return &aboutOther{err}
 }
 
 // pruneSeen drops the lines past protocol.SeenFor by the reading at, one a

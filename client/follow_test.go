@@ -251,6 +251,12 @@ func TestFatalTellsARefusalNoWaitMendsFromARetry(t *testing.T) {
 	apiError := func(status int, c protocol.Code) error {
 		return &client.APIError{Status: status, Problem: protocol.Problem{Code: c}}
 	}
+	// A pass_expired is a clock behind ([client.NotReady]) only where the
+	// server dates its answer later than this machine's clock reads.
+	now := time.Date(2026, 11, 8, 12, 0, 0, 0, time.UTC)
+	passExpired := func(dated, read time.Time) error {
+		return &client.APIError{Status: http.StatusUnauthorized, Problem: protocol.Problem{Code: protocol.CodePassExpired}, Dated: dated, Read: read}
+	}
 	for _, c := range []struct {
 		name             string
 		err              error
@@ -266,6 +272,11 @@ func TestFatalTellsARefusalNoWaitMendsFromARetry(t *testing.T) {
 		{"a rate limit", apiError(http.StatusTooManyRequests, protocol.CodeRateLimited), false, true},
 		{"the lock", client.ErrLocked, false, true},
 		{"a fault of the disk", errors.New("no space left on device"), false, false},
+		{"pass_expired, dated later than the clock", passExpired(now, now.Add(-time.Second)), false, true},
+		{"pass_expired, dated the clock's second", passExpired(now, now), true, false},
+		{"pass_expired, dated earlier than the clock", passExpired(now, now.Add(time.Hour)), true, false},
+		{"pass_expired, with no Date", passExpired(time.Time{}, now), true, false},
+		{"pass_expired, with no reading of the clock", passExpired(now, time.Time{}), true, false},
 	} {
 		if got := client.Fatal(c.err); got != c.fatal {
 			t.Errorf("Fatal(%s) = %v", c.name, got)
@@ -956,4 +967,355 @@ func TestAClockBehindIsTriedAgainEveryHour(t *testing.T) {
 			})
 		})
 	}
+}
+
+// A hold whose pass its server refuses as certificate_revoked, where the
+// revocation verifies and covers the certificate in use, is Changed: the
+// Receive after renews under a new certificate (renewalMends; #800).
+func TestAHoldWhoseCertificateItsServerShowsRevokedIsChanged(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		e := newMemEnv(t)
+		e.working = true
+		b := e.mailbox()
+		receive(t, b)
+		publish(t, e, certsRecord(t, b.Dir(), numberOf(t, b)))
+		h, err := b.Hold(context.Background(), time.Hour)
+		if err != nil || !h.Changed {
+			t.Fatalf("a hold answered certificate_revoked came to %+v, %v; want changed", h, err)
+		}
+		if res, err := b.Receive(context.Background()); err != nil || res.Renewed == nil {
+			t.Fatalf("the Receive after: %+v, %v; want a renewal", res, err)
+		}
+	})
+}
+
+// A revocation of the certificate in use, published while the loop holds the
+// list, is renewed past by the loop, which goes on delivering.
+func TestACertificateRevokedWhileItsListIsHeldIsRenewedByTheLoop(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		e := newMemEnv(t)
+		e.working = true
+		b := e.mailbox()
+		e.working = false
+		a := e.mailbox()
+		receive(t, b)
+		rec := certsRecord(t, b.Dir(), numberOf(t, b))
+		var published atomic.Bool
+		e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
+			if r.URL.Query().Has("wait") && published.CompareAndSwap(false, true) {
+				if _, err := client.Publish(context.Background(), e.opts(), rec); err != nil {
+					t.Error(err)
+				}
+			}
+			next.ServeHTTP(w, r)
+		})
+		var renewed bool
+		var got []string
+		err := b.Follow(context.Background(), client.FollowOptions{}, func(_ context.Context, ev client.Event) error {
+			switch ev.Kind {
+			case client.EventRenewed:
+				renewed = true
+			case client.EventDrained:
+				if renewed && len(got) == 0 {
+					send(t, a, b, "after the renewal")
+				}
+			case client.EventDelivery:
+				got = append(got, bodyOf(t, *ev.Delivery))
+				return client.ErrStop
+			case client.EventRetry:
+				t.Errorf("retried: %v", ev.Err)
+			}
+			return nil
+		})
+		if err != nil || !published.Load() || !renewed || !slices.Equal(got, []string{"after the renewal"}) {
+			t.Fatalf("Follow: %v; published %v, renewed %v, delivered %q", err, published.Load(), renewed, got)
+		}
+	})
+}
+
+// A drain refused because its server shows the certificate in use revoked,
+// whose renewal under a new certificate fails in a way a wait may mend, is an
+// EventRetry, not Fatal: in the loop that met it, and in a loop started again
+// while the renewal is held back (renewRetry). Once the hour has passed, a
+// drain renews (#800).
+func TestACertificateRevokedWhoseRenewalFailsForNowIsARetry(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	e := newWorkEnv(t)
+	b := e.mailbox()
+	receive(t, b)
+	publish(t, e, certsRecord(t, b.Dir(), numberOf(t, b)))
+	e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
+		if r.Method == http.MethodPut && strings.HasSuffix(r.URL.Path, "/prekey") {
+			forge.Refuse(w, protocol.CodeUnavailable)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+	for _, run := range []string{"the loop that met it", "a loop started again"} {
+		var retried error
+		err := mustOpen(t, b.Dir(), e.opts()).Follow(ctx, client.FollowOptions{}, func(_ context.Context, ev client.Event) error {
+			if ev.Kind == client.EventRetry {
+				retried = ev.Err
+				return client.ErrStop
+			}
+			return nil
+		})
+		if err != nil || retried == nil || !client.Transient(retried) || client.Fatal(retried) {
+			t.Fatalf("%s: %v, retried %v; Transient %v, Fatal %v", run, err, retried, client.Transient(retried), client.Fatal(retried))
+		}
+	}
+	e.srv.SetMiddle(nil)
+	e.clock.Add(61 * time.Minute)
+	if err := mustOpen(t, b.Dir(), e.opts()).Follow(ctx, oneDrain(false), nil); err != nil {
+		t.Fatalf("one drain an hour later: %v", err)
+	}
+}
+
+// The owner's cert revoke-earlier while the loop holds the list, its renewal
+// refused for now: the loop's next hold meets the revocation, and the drain
+// after renews, as RenewAndRevoke says Receive does.
+func TestRevokeEarlierWhileTheLoopHoldsIsRenewedByTheLoop(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		e := newMemEnv(t)
+		e.working = true
+		b := e.mailbox()
+		receive(t, b)
+		var refusing atomic.Bool
+		e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
+			if refusing.Load() && r.Method == http.MethodPut && strings.HasSuffix(r.URL.Path, "/prekey") {
+				forge.Refuse(w, protocol.CodeUnavailable)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Hour)
+		defer cancel()
+		drains, revoked := 0, false
+		err := b.Follow(ctx, client.FollowOptions{}, func(ctx context.Context, ev client.Event) error {
+			switch ev.Kind {
+			case client.EventDrained:
+				drains++
+				if drains == 1 {
+					refusing.Store(true)
+					rem, err := b.RenewAndRevoke(ctx)
+					refusing.Store(false)
+					if err != nil || rem.Revoked == nil || rem.NotRenewed == nil {
+						t.Errorf("cert revoke-earlier, its renewal refused: %+v, %v", rem, err)
+					}
+					revoked = rem.Revoked != nil
+				}
+			case client.EventRenewed:
+				return client.ErrStop
+			}
+			return nil
+		})
+		if err != nil || !revoked || drains < 2 {
+			t.Fatalf("Follow: %v after %d drains; revoked %v", err, drains, revoked)
+		}
+	})
+}
+
+// Under FollowOptions.Owed, a folder of the mailbox missing as the loop
+// begins, as on a volume not yet mounted, is tried again ReceiveEvery after
+// each refusal, as a drain's is, and the loop delivers once the folder is back
+// (#801).
+func TestAnOwedHandoverRidesOutAFolderNotYetMounted(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		e := newMemEnv(t)
+		a, b := e.mailbox(), e.mailbox()
+		receive(t, b)
+		send(t, a, b, "waits for the mount")
+		inbox := b.Path("inbox")
+		if err := os.Rename(inbox, inbox+".unmounted"); err != nil {
+			t.Fatal(err)
+		}
+		start := time.Now()
+		var at []time.Duration
+		var got []string
+		err := b.Follow(context.Background(), client.FollowOptions{Owed: true}, func(_ context.Context, ev client.Event) error {
+			switch ev.Kind {
+			case client.EventRetry:
+				if !client.NotReady(ev.Err) || client.Fatal(ev.Err) {
+					t.Errorf("retried %v; NotReady %v", ev.Err, client.NotReady(ev.Err))
+				}
+				if at = append(at, time.Since(start)); len(at) == 2 {
+					if err := os.Rename(inbox+".unmounted", inbox); err != nil {
+						t.Error(err)
+					}
+				}
+			case client.EventDelivery:
+				got = append(got, bodyOf(t, *ev.Delivery))
+				return client.ErrStop
+			}
+			return nil
+		})
+		if err != nil || !slices.Equal(got, []string{"waits for the mount"}) {
+			t.Fatalf("Follow: %v, delivering %q after %s", err, got, time.Since(start))
+		}
+		if want := []time.Duration{0, client.ReceiveEvery}; !slices.Equal(at, want) {
+			t.Fatalf("tried at %v, want %v", at, want)
+		}
+	})
+}
+
+// Under FollowOptions.Owed, a folder that goes missing while the handler runs
+// leaves the message owed, and the drain's deliveries after it are not handed
+// over: the loop tries again ReceiveEvery after, hands each over once the
+// folder is back, in delivery order, and clears them then (#801).
+func TestAFolderGoneDuringAnOwedHandlingHandsTheMessageOverAgain(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		e := newMemEnv(t)
+		a, b := e.mailbox(), e.mailbox()
+		receive(t, b)
+		send(t, a, b, "one")
+		send(t, a, b, "two")
+		inbox := b.Path("inbox")
+		start := time.Now()
+		var at []time.Duration
+		var got []string
+		err := b.Follow(context.Background(), client.FollowOptions{Owed: true}, func(_ context.Context, ev client.Event) error {
+			switch ev.Kind {
+			case client.EventDelivery:
+				switch got = append(got, bodyOf(t, *ev.Delivery)); len(got) {
+				case 1:
+					if err := os.Rename(inbox, inbox+".unmounted"); err != nil {
+						t.Error(err)
+					}
+				case 3:
+					return client.ErrStop
+				}
+			case client.EventRetry:
+				if !client.NotReady(ev.Err) || client.Fatal(ev.Err) {
+					t.Errorf("retried %v; NotReady %v", ev.Err, client.NotReady(ev.Err))
+				}
+				if at = append(at, time.Since(start)); len(at) == 2 {
+					if err := os.Rename(inbox+".unmounted", inbox); err != nil {
+						t.Error(err)
+					}
+				}
+			}
+			return nil
+		})
+		// The first delivery is handed over again, and the one after it, which
+		// the fault left owed, only once the folder is back, in delivery order.
+		if err != nil || len(got) != 3 || got[0] != got[1] || got[2] == got[0] || !slices.Equal(slices.Sorted(slices.Values(got[1:])), []string{"one", "two"}) {
+			t.Fatalf("Follow: %v, handing over %q after %s", err, got, time.Since(start))
+		}
+		if want := []time.Duration{0, client.ReceiveEvery}; !slices.Equal(at, want) {
+			t.Fatalf("tried at %v, want %v", at, want)
+		}
+		owed := 0
+		if err := b.Follow(context.Background(), client.FollowOptions{Owed: true, Until: time.Now()}, func(_ context.Context, ev client.Event) error {
+			if ev.Kind == client.EventDelivery {
+				owed++
+			}
+			return nil
+		}); err != nil || owed != 0 {
+			t.Fatalf("the loop after: %v, handing over %d", err, owed)
+		}
+	})
+}
+
+// A read of a sender's revocations answered with a wait (a 429 with its
+// Retry-After, or a 503) is a call to make again: the drain's error keeps the
+// server's answer, the loop waits the Retry-After and delivers after it, and
+// nothing renews the reader (#804).
+func TestAWaitAboutASenderIsTheLoopsRetry(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		e := newMemEnv(t)
+		a, b := e.mailbox(), e.mailbox()
+		receive(t, b)
+		send(t, a, b, "after the wait")
+		var refused atomic.Int32
+		e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
+			if x, ok := forge.RevocationsOf(r); ok && x == a.Address() && refused.Add(1) == 1 {
+				c := protocol.CodeRateLimited
+				w.Header().Set("Retry-After", "3600")
+				fakeserver.WriteJSON(w, c.Status(), protocol.Problem{Type: c.TypeURI(), Code: c, Status: int64(c.Status()), QuotaID: protocol.QuotaMisses, Subject: protocol.SubjectIP})
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+		res, err := b.Receive(context.Background())
+		var api *client.APIError
+		if !errors.As(err, &api) || api.Problem.Code != protocol.CodeRateLimited || api.RetryAfter != time.Hour || !client.Transient(err) || client.Fatal(err) {
+			t.Fatalf("Receive: %v; want the 429 with its hour", err)
+		}
+		if res.Renewed != nil || res.RenewErr != nil {
+			t.Fatalf("Receive renewed on a refusal about the sender: %+v", res)
+		}
+		if got := client.PauseAfter(res, err); got != time.Hour {
+			t.Fatalf("the loop would drain again after %v, want the hour", got)
+		}
+		refused.Store(0)
+		start := time.Now()
+		var got []string
+		err = b.Follow(context.Background(), client.FollowOptions{}, func(_ context.Context, ev client.Event) error {
+			switch ev.Kind {
+			case client.EventRenewed:
+				t.Error("renewed on a refusal about the sender")
+			case client.EventDelivery:
+				got = append(got, bodyOf(t, *ev.Delivery))
+				return client.ErrStop
+			}
+			return nil
+		})
+		if err != nil || !slices.Equal(got, []string{"after the wait"}) || time.Since(start) != time.Hour {
+			t.Fatalf("Follow: %v, delivering %q after %s", err, got, time.Since(start))
+		}
+	})
+}
+
+// Under FollowOptions.Owed, a folder that goes missing while the handler runs
+// on a message owed from an earlier loop leaves it owed: the loop tries again
+// ReceiveEvery after, and hands it over again once the folder is back (#801).
+func TestAFolderGoneDuringTheHandoverOfWhatIsOwedHandsItOverAgain(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		e := newMemEnv(t)
+		a, b := e.mailbox(), e.mailbox()
+		receive(t, b)
+		send(t, a, b, "owed")
+		failed := errors.New("the handler failed")
+		if err := b.Follow(context.Background(), client.FollowOptions{Owed: true}, func(_ context.Context, ev client.Event) error {
+			if ev.Kind == client.EventDelivery {
+				return failed
+			}
+			return nil
+		}); !errors.Is(err, failed) {
+			t.Fatalf("the loop that left it owed: %v", err)
+		}
+		inbox := b.Path("inbox")
+		start := time.Now()
+		var at []time.Duration
+		var got []string
+		err := b.Follow(context.Background(), client.FollowOptions{Owed: true}, func(_ context.Context, ev client.Event) error {
+			switch ev.Kind {
+			case client.EventDelivery:
+				if got = append(got, bodyOf(t, *ev.Delivery)); len(got) == 1 {
+					if err := os.Rename(inbox, inbox+".unmounted"); err != nil {
+						t.Error(err)
+					}
+					return nil
+				}
+				return client.ErrStop
+			case client.EventRetry:
+				if !client.NotReady(ev.Err) || client.Fatal(ev.Err) {
+					t.Errorf("retried %v; NotReady %v", ev.Err, client.NotReady(ev.Err))
+				}
+				if at = append(at, time.Since(start)); len(at) == 2 {
+					if err := os.Rename(inbox+".unmounted", inbox); err != nil {
+						t.Error(err)
+					}
+				}
+			}
+			return nil
+		})
+		if err != nil || !slices.Equal(got, []string{"owed", "owed"}) {
+			t.Fatalf("Follow: %v, handing over %q after %s", err, got, time.Since(start))
+		}
+		if want := []time.Duration{0, client.ReceiveEvery}; !slices.Equal(at, want) {
+			t.Fatalf("tried at %v, want %v", at, want)
+		}
+	})
 }
