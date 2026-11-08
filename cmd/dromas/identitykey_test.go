@@ -412,3 +412,60 @@ func TestAWrongPassphraseFromAskpassEndsAgentAddAfterThreeTries(t *testing.T) {
 		t.Errorf("the askpass program ran %d times, not 3: %v", bytes.Count(raw, []byte{'\n'}), err)
 	}
 }
+
+// The terminal's prompt reads a passphrase as readpassphrase(3), which ssh
+// reads one with: an end of input (^D) and an empty line are no passphrase; a
+// ^C at the prompt ends the command's context, as an interrupt by a signal
+// does; and an interrupt by a signal restores the terminal's settings, echo
+// among them, and ends the read at once with the interrupt's error, a read
+// still blocked. A terminal itself is a test by hand, under a pseudo-terminal:
+// go test gives none.
+func TestTheTerminalPromptReadsAsReadpassphrase(t *testing.T) {
+	t.Parallel()
+	for name, c := range map[string]struct {
+		pass []byte
+		err  error
+		want []byte
+		werr error
+	}{
+		"a passphrase":  {pass: []byte("correct horse"), want: []byte("correct horse")},
+		"^D":            {err: io.EOF, werr: client.ErrNoPassphrase},
+		"an empty line": {pass: []byte{}, werr: client.ErrNoPassphrase},
+		"^C":            {err: errInterrupted, werr: context.Canceled},
+	} {
+		ctx, interrupt := context.WithCancel(t.Context())
+		restored := false
+		got, err := askTerminal(ctx, interrupt, func() ([]byte, error) { return c.pass, c.err }, func() error { restored = true; return nil })
+		if !bytes.Equal(got, c.want) || !errors.Is(err, c.werr) || (c.werr == nil && err != nil) {
+			t.Errorf("%s: %q, %v", name, got, err)
+		}
+		if restored || (ctx.Err() != nil) != errors.Is(c.werr, context.Canceled) {
+			t.Errorf("%s: the settings restored by askTerminal: %v; the command's context: %v", name, restored, ctx.Err())
+		}
+		interrupt()
+	}
+
+	ctx, interrupt := context.WithCancel(t.Context())
+	blocked := make(chan struct{})
+	defer close(blocked)
+	restored := make(chan struct{}, 1)
+	done := make(chan error, 1)
+	go func() {
+		_, err := askTerminal(ctx, interrupt, func() ([]byte, error) { <-blocked; return nil, io.EOF }, func() error { restored <- struct{}{}; return nil })
+		done <- err
+	}()
+	interrupt()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("an interrupt at the prompt: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("an interrupt did not end the prompt")
+	}
+	select {
+	case <-restored:
+	default:
+		t.Error("an interrupt left the terminal's settings unrestored")
+	}
+}

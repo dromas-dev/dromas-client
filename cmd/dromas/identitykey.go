@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -149,7 +150,7 @@ func omitNone(socket string) string {
 
 // passphrase has the identity key file's passphrase for client.Options: from the
 // askpass program where one is set, as ssh's SSH_ASKPASS_REQUIRE=force has it,
-// and otherwise at the terminal, after a "waiting" line. It asks the terminal
+// and otherwise at the terminal, after a "waiting" line (askTerminal). It asks the terminal
 // only where stdin is one, as a person's shell gives it and a program's call
 // does not, so a model that runs dromas through a tool fails as identity_locked
 // at once rather than waiting on a prompt nobody sees; and never under
@@ -163,22 +164,121 @@ func (e *cli) passphrase(file string) ([]byte, error) {
 	if !e.mayPrompt() {
 		return nil, client.ErrNoPassphrase
 	}
-	tty, err := openTerminal()
+	in, out, err := openTerminal()
 	if err != nil {
 		return nil, client.ErrNoPassphrase
 	}
-	defer tty.Close()                    //nolint:errcheck // read only for the passphrase
-	if !term.IsTerminal(int(tty.Fd())) { //nolint:gosec // a file descriptor
+	fd := int(in.Fd()) //nolint:gosec // a file descriptor
+	state, err := term.GetState(fd)
+	if err != nil {
+		closeTerminal(in, out)
 		return nil, client.ErrNoPassphrase
 	}
 	_, _ = fmt.Fprintf(e.stderr, "%s\n", line("waiting", "for", "passphrase", "identity_file", file, "detail",
 		"waiting for the identity key's passphrase at the terminal: its key file has a passphrase, and the mailbox's agent holds no key of it"))
-	pass, err := term.ReadPassword(int(tty.Fd())) //nolint:gosec // a file descriptor
-	_, _ = io.WriteString(tty, "\n")
-	if err != nil {
-		return nil, fmt.Errorf("the passphrase was not read from the terminal: %w", err)
+	pass, err := askTerminal(e.ctx, e.interrupt,
+		func() ([]byte, error) { return readPassphrase(in, out, fd, prompt) },
+		func() error {
+			rerr := term.Restore(fd, state)
+			_, _ = io.WriteString(out, "\n")
+			return rerr
+		})
+	// A read an interrupt left blocked keeps the terminal open until the
+	// process ends: on macOS, close(2) of a terminal waits for a read of it.
+	if e.ctx.Err() == nil {
+		closeTerminal(in, out)
 	}
-	return pass, nil
+	return pass, err
+}
+
+// errInterrupted is a ^C at the passphrase's prompt, which a terminal in raw
+// mode passes as a key rather than as an interrupt.
+var errInterrupted = errors.New("interrupted at the passphrase's prompt")
+
+// readPassphrase reads a passphrase at the terminal, in and out, whose
+// descriptor is fd, as ssh's readpassphrase(3) reads one: the prompt goes to
+// the terminal, the line is read with echo off, and the terminal's settings are
+// restored after. term.Terminal reads it, in raw mode, where ^D on an empty
+// line is the end of input and ^C a key, which it reads as errInterrupted.
+func readPassphrase(in io.Reader, out io.Writer, fd int, prompt string) ([]byte, error) {
+	state, err := term.MakeRaw(fd)
+	if err != nil {
+		return nil, err
+	}
+	keys := &keysRead{r: in}
+	t := term.NewTerminal(struct {
+		io.Reader
+		io.Writer
+	}{keys, out}, "")
+	// term.Terminal wraps the prompt at 80 columns unless told the width.
+	if w, h, err := term.GetSize(fd); err == nil && w > 0 && h > 0 {
+		_ = t.SetSize(w, h)
+	}
+	pass, err := t.ReadPassword(prompt)
+	rerr := term.Restore(fd, state)
+	if err != nil {
+		// term.Terminal ends the line itself only on Enter.
+		_, _ = io.WriteString(out, "\n")
+		if keys.interrupted {
+			return nil, errInterrupted
+		}
+		return nil, err
+	}
+	if rerr != nil {
+		return nil, rerr
+	}
+	return []byte(pass), nil
+}
+
+// keysRead is a terminal in raw mode as term.Terminal reads it: it notes a ^C,
+// which term.Terminal reads as the end of input, as ^D.
+type keysRead struct {
+	r           io.Reader
+	interrupted bool
+}
+
+func (k *keysRead) Read(p []byte) (int, error) {
+	n, err := k.r.Read(p)
+	if bytes.IndexByte(p[:n], 3) >= 0 {
+		k.interrupted = true
+	}
+	return n, err
+}
+
+// askTerminal is the terminal's prompt, read reading the line (readPassphrase):
+// an end of input, ^D, or an empty line is no passphrase, as ssh takes one, and
+// a ^C at the prompt is an interrupt, which ends the command's context as one
+// from a signal does. An interrupt from a signal, which ends ctx, restores the
+// terminal's settings, echo among them, and ends the read at once, read left
+// blocked until the process ends with the command.
+func askTerminal(ctx context.Context, interrupt func(), read func() ([]byte, error), restore func() error) ([]byte, error) {
+	type answer struct {
+		pass []byte
+		err  error
+	}
+	got := make(chan answer, 1)
+	go func() {
+		pass, err := read()
+		got <- answer{pass, err}
+	}()
+	select {
+	case a := <-got:
+		switch {
+		case errors.Is(a.err, errInterrupted):
+			interrupt()
+			return nil, ctx.Err()
+		case errors.Is(a.err, io.EOF), a.err == nil && len(a.pass) == 0:
+			return nil, client.ErrNoPassphrase
+		case a.err != nil:
+			return nil, fmt.Errorf("the passphrase was not read from the terminal: %w", a.err)
+		}
+		return a.pass, nil
+	case <-ctx.Done():
+		if err := restore(); err != nil {
+			return nil, fmt.Errorf("the terminal's settings were not restored: %w", errors.Join(ctx.Err(), err))
+		}
+		return nil, ctx.Err()
+	}
 }
 
 // mayPrompt reports whether a passphrase may be asked at the terminal: stdin is
@@ -195,12 +295,29 @@ var isTerminal = func(r io.Reader) bool {
 }
 
 // openTerminal is the process's controlling terminal, which ssh asks for a
-// passphrase on, apart from stdin and stdout.
-func openTerminal() (*os.File, error) {
-	if runtime.GOOS == "windows" {
-		return os.OpenFile("CONIN$", os.O_RDWR, 0)
+// passphrase on, apart from stdin and stdout: what it reads, and where its
+// prompt goes. On Windows they are the console's input and output.
+func openTerminal() (in, out *os.File, err error) {
+	if runtime.GOOS != "windows" {
+		tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
+		return tty, tty, err
 	}
-	return os.OpenFile("/dev/tty", os.O_RDWR, 0)
+	if in, err = os.OpenFile("CONIN$", os.O_RDWR, 0); err != nil {
+		return nil, nil, err
+	}
+	if out, err = os.OpenFile("CONOUT$", os.O_RDWR, 0); err != nil {
+		_ = in.Close()
+		return nil, nil, err
+	}
+	return in, out, nil
+}
+
+// closeTerminal closes what openTerminal opened.
+func closeTerminal(in, out *os.File) {
+	_ = in.Close()
+	if out != in {
+		_ = out.Close()
+	}
 }
 
 // askpass runs program with prompt as its one argument, as ssh runs

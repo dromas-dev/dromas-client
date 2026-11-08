@@ -131,6 +131,9 @@ func (e *usageError) Error() string { return e.msg }
 // cli is what every command shares: where its mailbox is, how to reach its
 // server, and where it reads and writes.
 type cli struct {
+	// ctx is the command's: an interrupt ends it, and so does interrupt.
+	ctx            context.Context
+	interrupt      context.CancelFunc
 	dir            string
 	opt            client.Options
 	flags          globals
@@ -207,7 +210,9 @@ func runWith(ctx context.Context, opt client.Options, args []string, stdin io.Re
 	if opt.Versions == nil {
 		opt.Versions = &client.Versions{}
 	}
-	e := &cli{opt: opt, stdin: stdin, stdout: stdout, stderr: stderr}
+	ctx, interrupt := context.WithCancel(ctx)
+	defer interrupt()
+	e := &cli{ctx: ctx, interrupt: interrupt, opt: opt, stdin: stdin, stdout: stdout, stderr: stderr}
 	root := e.tree()
 	e.flags.add(root)
 	root.PersistentPreRunE = func(c *cobra.Command, _ []string) error {
