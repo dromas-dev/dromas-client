@@ -42,7 +42,7 @@ func cleanEnv(t *testing.T) string {
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 	for _, v := range []string{"XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "DROMAS_CONFIG", "DROMAS_PROFILE", "DROMAS_SERVER_URL", "DROMAS_CA_FILE",
-		"DROMAS_AGENT", "DROMAS_ASKPASS", "DROMAS_NO_PROMPT", "DROMAS_ADD_KEYS_TO_AGENT", "XDG_RUNTIME_DIR", "XDG_CACHE_HOME"} {
+		"DROMAS_AGENT", "DROMAS_ASKPASS", "DROMAS_NO_PROMPT", "DROMAS_ADD_KEYS_TO_AGENT", "DROMAS_REVOCATION_FILE", "XDG_RUNTIME_DIR", "XDG_CACHE_HOME"} {
 		t.Setenv(v, "")
 	}
 	return home
@@ -515,6 +515,37 @@ func TestInitWritesItsFlagsToTheFileItMakes(t *testing.T) {
 		if v := got.Values[key]; v.Value != want || v.From != "file" {
 			t.Errorf("%s: %+v", key, v)
 		}
+	}
+}
+
+// init --revocation-file writes the line dromas revocation make prints to a new
+// file, and $DROMAS_REVOCATION_FILE does where the flag is not given.
+func TestInitWritesTheRevocationRecordWhereItIsTold(t *testing.T) {
+	cleanEnv(t)
+	ctx := t.Context()
+	srv := fakeserver.New(t, time.Now)
+	t.Setenv("DROMAS_SERVER_URL", srv.URL)
+	root := t.TempDir()
+	byFlag, byEnv := filepath.Join(root, "flag.json"), filepath.Join(root, "env.json")
+	t.Setenv("DROMAS_REVOCATION_FILE", byEnv)
+	if err := do(ctx, "init", []string{"--profile", "bot", "--revocation-file", byFlag}, nil, io.Discard, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(byEnv); err == nil {
+		t.Error("init wrote where the variable says, beside the flag")
+	}
+	var made bytes.Buffer
+	if err := do(ctx, "revocation make", []string{"--profile", "bot"}, nil, &made, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := os.ReadFile(byFlag); err != nil || !bytes.Equal(got, made.Bytes()) {
+		t.Errorf("--revocation-file: %q, %v; revocation make prints %q", got, err, made.Bytes())
+	}
+	if err := do(ctx, "init", []string{"--profile", "bot"}, nil, io.Discard, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := os.ReadFile(byEnv); err != nil || !bytes.Equal(got, made.Bytes()) {
+		t.Errorf("$DROMAS_REVOCATION_FILE: %q, %v; revocation make prints %q", got, err, made.Bytes())
 	}
 }
 

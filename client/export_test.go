@@ -68,6 +68,16 @@ func LayoutPartPaths(dir string, l Layout) []string {
 	return out
 }
 
+// RevocationFileDirs is every directory of the mailbox in dir with layout l
+// that Options.RevocationFile may not be in (revocationFileDirs).
+func RevocationFileDirs(dir string, l Layout) []string {
+	var out []string
+	for _, d := range (&Mailbox{dir: dir, layout: l.resolved(dir)}).revocationFileDirs() {
+		out = append(out, d.path)
+	}
+	return out
+}
+
 // Code is the error's code, if err is an [APIError], for a test that knows
 // which call answered.
 func Code(err error) protocol.Code { return code(err) }

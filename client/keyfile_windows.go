@@ -303,6 +303,20 @@ func newKeyTemp(dir string) (*os.File, error) {
 	return f, nil
 }
 
+// newPrivateFile makes name, a new file with a protected access list from its
+// making (createPrivate), and refuses it where anything is there (CREATE_NEW).
+func newPrivateFile(name string) (*os.File, error) {
+	want, err := ownersAlone("")
+	if err != nil {
+		return nil, err
+	}
+	h, err := createPrivate(name, want)
+	if err != nil {
+		return nil, &os.PathError{Op: "create", Path: name, Err: err}
+	}
+	return os.NewFile(uintptr(h), name), nil
+}
+
 // openPrivate opens name, made its owner's alone where it is not there
 // (createPrivate).
 func openPrivate(name string, flag int) (*os.File, error) {
