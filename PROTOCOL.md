@@ -1372,8 +1372,8 @@ A client drains every page of its list (Section 11.11) and fetches the message o
    | 3 | `to` is this mailbox | `reattributed` |
    | 4 | `msg_id` is in its form | `bad_envelope` |
    | 5 | `sent_at` is no older than the TTL | `stale` |
-   | 5 | `sent_at` is neither before the mailbox's replay floor (check 8) nor less than the TTL above that floor, regardless of the clock's reading | `stale` |
-   | 5 | `sent_at` is no more than the skew allowance ahead of this mailbox's clock | `future` |
+   | 6 | `sent_at` is no more than the skew allowance ahead of this mailbox's clock | `future` |
+   | 7 | `sent_at` is neither before the mailbox's replay floor (check 8) nor less than the TTL above that floor, regardless of the clock's reading | `stale` |
 
 7. **Check 7, revocation.** The reader follows three steps, in this order:
    1. **What the reader keeps comes first, with no lookup.** A kept revocation of the sender's address (Section 12.5) refuses the message as `revoked`, now and for every later message from that address (Section 10.1). A kept revocation of the sender's certificates that covers the signer (Section 5.1) refuses the message as `certificate_revoked`.
