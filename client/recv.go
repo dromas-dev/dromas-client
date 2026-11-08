@@ -189,8 +189,9 @@ func (b *Mailbox) receive(ctx context.Context, owing bool) (*Result, error) {
 	if err := b.prekeyKept(); err != nil {
 		return nil, err
 	}
-	// What this command has asked as it went: the renewal's ask for the
-	// mailbox's own revocation, then the drain's about each sender.
+	// What this command's drains have asked about each sender (judge), which
+	// a second drain asks nothing more about. The renewals ask through no
+	// lookups set.
 	asked := newLookups()
 	renewed, renewErr := b.renewIfDue(ctx)
 	// A renewal recv began owes, once it is taken, a read of the ACL the
@@ -768,7 +769,7 @@ func (b *Mailbox) judge(ctx context.Context, ct []byte, asked *lookups) (verdict
 	}
 	if !gone && !covered && !asked.answered[from] {
 		if _, err := b.lookupRevocation(ctx, from, asked); err != nil {
-			return verdict{}, fmt.Errorf("whether its sender is revoked could not be asked, so the message stays on the server: %w", err)
+			return verdict{}, fmt.Errorf("whether its sender is revoked could not be asked, so the message stays on the server: %w", aboutAnother(err))
 		}
 		if gone, covered, err = b.keptAgainst(from, signed.Signer); err != nil {
 			return verdict{}, fmt.Errorf("a fault of this mailbox, so the message stays on the server: %w", err)
@@ -926,6 +927,19 @@ func recordSeen(s store, ciphertext []byte, env *protocol.Envelope) error {
 		return err
 	}
 	return s.put(bucketSeenTime, seenTimeKey(env.SentAt.Unix(), h), nil)
+}
+
+// aboutAnother is err, a read about another address that failed, with the API
+// error in it, if any, as its words alone: the server's code there refuses a
+// read of that address, never this mailbox's own calls, so nothing reads it as
+// this mailbox's (mendable). The mailbox's own revocation, which a read about
+// a sender may show, stays as it is (ownRevoked).
+func aboutAnother(err error) error {
+	var api *APIError
+	if !errors.As(err, &api) || ownRevoked(err) != nil {
+		return err
+	}
+	return errors.New(err.Error())
 }
 
 // pruneSeen drops the lines past protocol.SeenFor by the reading at, one a

@@ -2,6 +2,7 @@ package client_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"os"
@@ -456,6 +457,65 @@ func TestNoAnswerAboutASenderStopsTheDrain(t *testing.T) {
 		if err == nil || len(res.Delivered) != 0 || len(res.Refused) != 0 || e.srv.Count(b.Address()) != 1 {
 			t.Errorf("%s on the read: %v, %+v, %d left on the server", o.name, err, res, e.srv.Count(b.Address()))
 		}
+	}
+	// Nor has a 2xx other than a 200, whatever record it carries: a's own, whose
+	// revocation verifies.
+	rec, err := a.Revocation(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	good, err := json.Marshal(rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, status := range []int{http.StatusCreated, http.StatusNonAuthoritativeInfo} {
+		e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
+			if x, ok := forge.RevocationsOf(r); ok && x == a.Address() {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(status)
+				_, _ = w.Write(good)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+		res, err := b.Receive(context.Background())
+		if err == nil || len(res.Delivered) != 0 || len(res.Refused) != 0 || e.srv.Count(b.Address()) != 1 || keptRevocation(b, a.Address()) {
+			t.Errorf("a %d with a record that verifies: %v, %+v, %d left on the server", status, err, res, e.srv.Count(b.Address()))
+		}
+	}
+	e.srv.SetMiddle(nil)
+	if res := receive(t, b); len(res.Delivered) != 1 {
+		t.Fatalf("once the server answered: %+v", res)
+	}
+}
+
+// A server's code in a failed read of a sender's revocations is about that read,
+// never about the reader's own mailbox: a 404 no_such_mailbox there renews
+// nothing of the reader's, holds no renewal, and the next drain, the server
+// answering, delivers (mendable).
+func TestNoAnswerAboutASenderRenewsNothing(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	a, b := e.mailbox(), e.mailbox()
+	send(t, a, b, "waits for an answer")
+	op := watch(e, func(w http.ResponseWriter, r *http.Request) bool {
+		if x, ok := forge.RevocationsOf(r); ok && x == a.Address() {
+			return answer(w, protocol.CodeNoSuchMailbox)
+		}
+		return false
+	})
+	res, err := b.Receive(context.Background())
+	if err == nil || res.Renewed != nil || res.RenewErr != nil || e.srv.Count(b.Address()) != 1 {
+		t.Fatalf("a 404 no_such_mailbox about the sender: %v, %+v, %d left on the server", err, res, e.srv.Count(b.Address()))
+	}
+	if n := op.count(http.MethodPut, mailboxPath(b)+"/prekey"); n != 0 {
+		t.Fatalf("the reader renewed its own prekey %d times", n)
+	}
+	if n := op.count(http.MethodGet, mailboxPath(a)+"/revocations"); n != 1 {
+		t.Fatalf("%d reads of the sender's revocations, want 1", n)
+	}
+	if has(b, "renew-failed") {
+		t.Fatal("a renewal was held for a refusal about the sender")
 	}
 	e.srv.SetMiddle(nil)
 	if res := receive(t, b); len(res.Delivered) != 1 {

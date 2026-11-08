@@ -726,10 +726,13 @@ for f in revoked/ok-through-4.sig a/revoke.sig a/prekey-1.txt.sig; do PADDED=$(b
 NOPAD=${PADDED%%=*}; p=${PADDED#"$NOPAD"}; c=${NOPAD: -1}; i=${B64%%"$c"*}; LASTBITS=${NOPAD%?}${B64:${#i}+1:1}$p
 [ -n "$p" ] && [ $(( ${#i} % (${#p} == 1 ? 4 : 16) )) -eq 0 ] || { echo "no signature here is base64 with padding and unused bits, which the bad answers need" >&2; exit 1; }
 at record-ok-revocation-signature '{"identity":"%s","revocation_signature":"%s"}' "$ID_A" "$REV"
-at record-ok-null-members '{"identity":null,"revocation_signature":null,"revoked_certificates":null,"revoked_certificates_signature":null}'
+at record-ok-null-members '{"identity":"%s","revocation_signature":"%s","revoked_certificates":null,"revoked_certificates_signature":null}' "$ID_A" "$REV"
 at record-ok-unknown-member '{"identity":"%s","revocation_signature":"%s","later":[1,{"x":true}]}' "$ID_A" "$REV"
-at record-ok-names-in-another-case '{"Identity":"%s","REVOCATION_SIGNATURE":"%s"}' "$ID_A" "$REV" # members it does not know: a record that shows nothing
-at record-ok-empty-object '{}'
+at record-ok-names-in-another-case '{"identity":"%s","revocation_signature":"%s","Revoked_Certificates":"%s","REVOKED_CERTIFICATES_SIGNATURE":"%s"}' "$ID_A" "$REV" "$RC" "$RCS" # members it does not know: no revocation of certificates
+at record-bad-empty-object '{}' # a record holds the identity and at least one of its revocations
+at record-bad-null-members '{"identity":null,"revocation_signature":null,"revoked_certificates":null,"revoked_certificates_signature":null}'
+at record-bad-identity-alone '{"type":"revocation_record","identity":"%s"}' "$ID_A"
+at record-bad-no-identity '{"revocation_signature":"%s"}' "$REV"
 at record-bad-empty ''
 at record-bad-an-array '[]'
 at record-bad-identity-a-number '{"identity":5,"revocation_signature":"%s"}' "$REV"

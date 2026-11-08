@@ -394,8 +394,9 @@ mv(){ printf '%s mv %s\n' "${FUNCNAME[1]}" "$*" >> "$LOG"; command mv "$@"; }
 // what the server holds of its revocations (PROTOCOL.md §12.4, §13). A 2xx
 // there that is no record, not JSON or not an object, stops the renewal with
 // a refusal that says so, as an answer for the mailbox's own read does (#230): the
-// script once exited 1 with no line. A record that holds nothing lets the
-// renewal go on.
+// script once exited 1 with no line. So does a record that holds no identity or
+// no revocation; another address's record, which shows nothing of this one,
+// lets the renewal go on.
 func TestAForgottenMailboxsRenewalRefusesARevocationsAnswerThatIsNoRecord(t *testing.T) {
 	t.Parallel()
 	need(t, append(scriptTools, "curl")...)
@@ -431,9 +432,13 @@ func TestAForgottenMailboxsRenewalRefusesARevocationsAnswerThatIsNoRecord(t *tes
 			t.Errorf("%s: %v", body, err)
 		}
 	}
-	set("{}") // control: a record that holds nothing
+	set("{}") // a record that holds nothing is no record (PROTOCOL.md §10.3)
+	if _, err := bash(t, env, "dr_rekey"); err == nil || !strings.Contains(err.Error(), `"REFUSED: the server's answer for this mailbox's revocations is not one this client reads`) {
+		t.Errorf("a record that holds nothing: %v", err)
+	}
+	set(string(mustRead(t, filepath.Join(vectors, "answer", "record-ok-revocation-signature.json")))) // control: another address's record, which shows nothing of this one
 	if out, err := bash(t, env, "dr_rekey"); err != nil || !strings.HasPrefix(out, `{"type":"prekey",`) {
-		t.Errorf("a record that holds nothing: %v %q", err, out)
+		t.Errorf("another address's record: %v %q", err, out)
 	}
 }
 

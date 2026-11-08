@@ -59,6 +59,23 @@ func (r *Revocations) checkType() error {
 	return nil
 }
 
+// ErrNotARecord is a record that holds no identity, or neither of its two
+// revocations: a revocation record carries the identity and at least one
+// (PROTOCOL.md §10.3).
+var ErrNotARecord = errors.New("not a revocation record: it holds no identity, or neither revocation")
+
+// Check refuses a record that holds no identity, or neither the revocation of
+// the address nor the revocation of its certificates, as ErrNotARecord. A
+// reader holds a server's answer to GET /v1/<address>/revocations to it
+// (PROTOCOL.md §12.3 check 7); whether each revocation verifies is another
+// matter, a record that does not verify counting as nothing shown.
+func (r *Revocations) Check() error {
+	if len(r.Identity) == 0 || len(r.Revocation) == 0 && len(r.RevokedCertificates) == 0 {
+		return ErrNotARecord
+	}
+	return nil
+}
+
 // ErrRevocation is a revocation that does not verify: its document does not
 // hash to the address, or its signature is not the identity's own over the
 // statement.
