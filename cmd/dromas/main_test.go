@@ -309,6 +309,67 @@ func TestRecvWaitRidesOutARateLimit(t *testing.T) {
 	}
 }
 
+// recv --wait waits out a refusal of the read of a sender's revocations that a
+// wait may mend, as it does one of its own list: a rate limit, a server
+// error, or a proxy's 502 with no problem. Its line names the server's status,
+// its code and its wait (#804).
+func TestRecvWaitRidesOutAWaitAboutASender(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		status  int
+		code    protocol.Code
+		quota   protocol.Quota
+		subject protocol.Subject
+		line    string
+	}{
+		{"a rate limit", http.StatusTooManyRequests, protocol.CodeRateLimited, protocol.QuotaMisses, protocol.SubjectIP, `"status":429,"code":"rate_limited","quota_id":"misses","subject":"ip","retry_after":60,`},
+		{"a server error", http.StatusServiceUnavailable, protocol.CodeUnavailable, "", "", `"status":503,"code":"unavailable","retry_after":60,`},
+		{"a proxy's 502", http.StatusBadGateway, "", "", "", `"status":502,`},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				ctx := context.Background()
+				srv := fakeserver.NewInMemory(t, time.Now)
+				opt := client.Options{Base: srv.URL, HTTPClient: srv.Client()}
+				a, err := client.Init(ctx, t.TempDir(), opt)
+				if err != nil {
+					t.Fatal(err)
+				}
+				b, err := client.Init(ctx, t.TempDir(), opt)
+				if err != nil {
+					t.Fatal(err)
+				}
+				allows(t, b, a)
+				if _, err := a.Send(ctx, b.Address(), "after the wait"); err != nil {
+					t.Fatal(err)
+				}
+				var refused atomic.Int32
+				srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
+					if r.Method == http.MethodGet && r.URL.Path == "/v1/"+a.Address().String()+"/revocations" && refused.Add(1) == 1 {
+						w.Header().Set("Retry-After", "60")
+						if c.code == "" {
+							http.Error(w, "bad gateway", c.status)
+							return
+						}
+						fakeserver.WriteJSON(w, c.status, protocol.Problem{Type: c.code.TypeURI(), Code: c.code, Status: int64(c.status), QuotaID: c.quota, Subject: c.subject})
+						return
+					}
+					next.ServeHTTP(w, r)
+				})
+				useMailbox(t, b.Dir())
+				t.Setenv("DROMAS_SERVER_URL", srv.URL)
+				var out, errs bytes.Buffer
+				if err := doWith(ctx, opt, "recv", []string{"--wait", "10m"}, strings.NewReader(""), &out, &errs); err != nil {
+					t.Fatalf("recv --wait: %v %s", err, errs.String())
+				}
+				if refused.Load() < 2 || !strings.Contains(out.String(), `"body":"after the wait"`) || !strings.Contains(errs.String(), c.line) {
+					t.Fatalf("reads of the sender %d, out %q, err %q", refused.Load(), out.String(), errs.String())
+				}
+			})
+		})
+	}
+}
+
 // recv --wait holds the list, and returns with a message the moment it
 // arrives, not at the next poll: one hold, woken by the send.
 func TestRecvWaitIsWokenByAMessage(t *testing.T) {

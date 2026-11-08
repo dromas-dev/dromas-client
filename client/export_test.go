@@ -581,3 +581,6 @@ func (b *Mailbox) Acknowledge(ctx context.Context) (*Restored, error) {
 	defer func() { b.restoring = false }()
 	return lockedFinished(ctx, b, func() (*Restored, error) { return b.restored, nil })
 }
+
+// PauseAfter is how long the loop waits before the drain after res and err.
+func PauseAfter(res *Result, err error) time.Duration { return pauseAfter(res, err) }
