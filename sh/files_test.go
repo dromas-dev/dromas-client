@@ -582,7 +582,7 @@ func TestAddrNeedsAMailbox(t *testing.T) {
 func TestTheScriptRefusesAMailboxOthersCanReach(t *testing.T) {
 	w := newWorld(t)
 	b := w.mailbox()
-	const refusal = "is owned by a user other than this one or root, or others can write a directory in it or read or write a file in it"
+	const refusal = "is owned by a user other than this one or root, or others can write a directory in it or have any permission on a private file in it"
 	for _, c := range []struct {
 		name    string
 		mode    os.FileMode
@@ -593,6 +593,8 @@ func TestTheScriptRefusesAMailboxOthersCanReach(t *testing.T) {
 		{"inbox", 0o703, true},
 		{"identity", 0o640, true},
 		{"identity", 0o602, true},
+		{"identity", 0o610, true},
+		{"identity.pub", 0o644, false},
 	} {
 		f := b.file(c.name)
 		fi, err := os.Stat(f)
