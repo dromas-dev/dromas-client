@@ -796,7 +796,8 @@ type renewFailure struct {
 
 // renewIfDue publishes a new prekey, of the current type, when renewDue
 // says so. The caller holds the lock. A failure is kept, and tried again only
-// renewRetry after it, by whichever process runs then (#10); until then each
+// renewRetry after it, by whichever process runs then (#10), but for one the
+// identity's key was locked for, which the next Receive tries; until then each
 // Receive says why the last one failed, so recv says the mailbox needs a look
 // until a renewal is taken. A failure dated after the clock's reading holds
 // nothing back: the clock has gone back since (#201).
@@ -834,9 +835,12 @@ func (b *Mailbox) renewNow(ctx context.Context) (*protocol.Prekey, error) {
 	p, err := b.rekey(ctx, false)
 	if p == nil && err != nil {
 		// A mailbox that holds its own revocation renews nothing again: there
-		// is nothing to try in an hour.
+		// is nothing to try in an hour. A renewal that failed for want of the
+		// identity's key failed at no server, and the next Receive, which may
+		// have the key, tries it again.
 		var gone *RevokedError
-		if errors.As(err, &gone) {
+		var locked *IdentityLockedError
+		if errors.As(err, &gone) || errors.As(err, &locked) {
 			return nil, err
 		}
 		return nil, errors.Join(err, b.holdRenewal(err))

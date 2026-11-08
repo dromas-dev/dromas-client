@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -467,5 +468,35 @@ func TestTheTerminalPromptReadsAsReadpassphrase(t *testing.T) {
 	case <-restored:
 	default:
 		t.Error("an interrupt left the terminal's settings unrestored")
+	}
+}
+
+// recv's renewal_failed line carries identity_locked where the identity's key
+// was locked for the renewal, at each recv: a renewal the key was locked for is
+// not held to the hour a server's refusal is.
+func TestRecvSaysARenewalTheKeyWasLockedForAtEachRecv(t *testing.T) {
+	ctx := context.Background()
+	// Made 25 hours ago, by a clock the server shares (TestRecvSaysARenewalFailed).
+	var ago atomic.Int64
+	ago.Store(int64(25 * time.Hour))
+	clock := func() time.Time { return time.Now().Add(-time.Duration(ago.Load())) }
+	srv := fakeserver.New(t, clock)
+	b, err := client.Init(ctx, t.TempDir(), client.Options{Base: srv.URL, Now: clock, WorkingKey: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ago.Store(0)
+	encryptIdentity(t, b.Path("identity"), "correct horse")
+	useMailbox(t, b.Dir())
+	t.Setenv("DROMAS_SERVER_URL", srv.URL)
+	for i := range 2 {
+		var out bytes.Buffer
+		var look *needsALook
+		if err := do(ctx, "recv", []string{"--no-prompt"}, nil, &out, io.Discard); !errors.As(err, &look) {
+			t.Fatalf("recv %d: %v", i+1, err)
+		}
+		if ls := printed(t, out.String()); typesOf(ls) != "renewal_failed" || ls[0]["code"] != client.IdentityLocked {
+			t.Errorf("recv %d: %s", i+1, out.String())
+		}
 	}
 }

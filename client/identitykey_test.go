@@ -306,3 +306,31 @@ func TestInitOfAnIdentityInAnAgentWritesNoKey(t *testing.T) {
 		t.Errorf("init wrote a key file: %v", err)
 	}
 }
+
+// A renewal that failed as identity_locked is not held to renewRetry, as one
+// a server refused is: the next Receive tries it again, and says it failed as
+// identity_locked again while the key is locked, and renews once it has the
+// key, a minute later.
+func TestARenewalTheKeyWasLockedForIsTriedAtTheNextReceive(t *testing.T) {
+	t.Parallel()
+	e := newWorkEnv(t)
+	b := e.mailbox()
+	encrypt(t, b, "correct horse")
+	before := numberOf(t, b)
+	e.clock.Add(25 * time.Hour)
+	opt := e.opts()
+	opt.Passphrase = func(string) ([]byte, error) { return nil, client.ErrNoPassphrase }
+	for i := range 2 {
+		res, err := reopen(t, b, opt).Receive(t.Context())
+		var locked *client.IdentityLockedError
+		if err != nil || !errors.As(res.RenewErr, &locked) {
+			t.Fatalf("receive %d with the key locked: %v; its renewal: %v", i+1, err, res.RenewErr)
+		}
+		e.clock.Add(time.Minute)
+	}
+	opt.Passphrase = func(string) ([]byte, error) { return []byte("correct horse"), nil }
+	res, err := reopen(t, b, opt).Receive(t.Context())
+	if err != nil || res.RenewErr != nil || numberOf(t, b) == before {
+		t.Errorf("receive with the key, a minute after a renewal it was locked for: %v; its renewal: %v; serial %d, %d before", err, res.RenewErr, numberOf(t, b), before)
+	}
+}
