@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -1052,43 +1053,68 @@ func (b *Mailbox) prune(at taken) error {
 	return nil
 }
 
-// keyKeysAdopted is the record, in the mailbox's own bucket, that this state file
-// has read prekeys/ for keys it names nowhere.
-const keyKeysAdopted = "keys-adopted"
-
-// adoptKeys adopts each key file in prekeys/ no record of a new state file names,
-// as a retired prekey that prune deletes. A state file lost takes those keys'
-// statements with it, and prekeyIdentities decrypts with every file, so without
-// this an old key would never go. It runs once for a state file, in one
-// transaction, under the mailbox's lock (hold). Adoption keeps the keys in their
-// own bucket, so what reads statements never meets one, and none is taken for the
-// prekey published last, which only a take records. A file whose name is no serial
-// is no key this client made, and it stays where its owner put it.
+// adoptKeys adopts each key file in prekeys/ that the state file names nowhere:
+// no statement's, no adopted key's, and not the renewal under way's, whose key is
+// made before its statement is kept. It adopts each as a retired prekey that
+// prune deletes. A state file lost takes those keys' statements with it, and a
+// rotating-keys-dir that was not mounted when the state file was made comes back
+// with keys it never recorded; prekeyIdentities decrypts with every file, so
+// without this an old key would never go. It runs at every command, under the
+// mailbox's lock (hold), and writes only where it finds such a key. Adoption keeps
+// the keys in their own bucket, so what reads statements never meets one, and none
+// is taken for the prekey published last, which only a take records. A file whose
+// name is no serial is no key this client made, and it stays where its owner put
+// it; one that holds no age key is not adopted until it does.
+//
+// Only an adopted key can open a ciphertext that a replay set this state file
+// does not hold saw delivered, so the same transaction marks the replay floor
+// owed (keyFloorOwed): no drain judges a message before beginFloor sets it,
+// however a process ended in between. A mailbox that adopts nothing, a new one or
+// one restored from its identity alone, owes no floor.
 func (b *Mailbox) adoptKeys() error {
-	done := false
-	// A read first: every command comes here, and a write transaction syncs the
-	// file even when it changes nothing.
-	if err := b.view(func(s store) error {
-		done = s.get(bucketMailbox, keyKeysAdopted) != nil
-		return nil
-	}); err != nil || done {
-		return err
-	}
 	names, err := matching(b.path("prekeys", "*.agekey"))
 	if err != nil {
 		return err
 	}
-	if err := b.update(func(s store) error {
+	var found []uint64
+	// A read first: every command comes here, and a write transaction syncs the
+	// file even when it changes nothing.
+	if err := b.view(func(s store) error {
+		begun, err := decimal(s.get(bucketIntent, "renewal"), "renewal")
+		if err != nil {
+			return err
+		}
+		adopted := map[string]bool{}
+		if err := s.each(bucketAdopted, func(k, _ []byte) error { adopted[string(k)] = true; return nil }); err != nil {
+			return err
+		}
 		for _, name := range names {
 			n, ok := serialOfKeyFile(name)
-			if !ok || s.get(bucketPrekeys, serialKey(n)) != nil {
+			if !ok || n == begun || adopted[serialKey(n)] || s.get(bucketPrekeys, serialKey(n)) != nil {
 				continue
 			}
+			found = append(found, n)
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	// A file that holds no age key opens nothing, and a drain stops at it
+	// (prekeyIdentities): it is adopted once it holds one.
+	found = slices.DeleteFunc(found, func(n uint64) bool {
+		_, err := readAgeKeys(b.path("prekeys", strconv.FormatUint(n, 10)+".agekey"))
+		return err != nil
+	})
+	if len(found) == 0 {
+		return nil
+	}
+	if err := b.update(func(s store) error {
+		for _, n := range found {
 			if err := s.put(bucketAdopted, serialKey(n), []byte{}); err != nil {
 				return err
 			}
 		}
-		return s.put(bucketMailbox, keyKeysAdopted, []byte("1"))
+		return s.put(bucketMailbox, keyFloorOwed, []byte("1"))
 	}); err != nil {
 		return err
 	}

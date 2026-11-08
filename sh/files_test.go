@@ -339,8 +339,8 @@ func TestTheScriptSyncsInItsOrder(t *testing.T) {
 	w := newWorld(t)
 	b := w.mailbox()
 	// calls runs commands with sync and mv logged, and returns each call
-	// fn made, its paths relative to the mailbox.
-	calls := func(fn, commands string) []string {
+	// the functions fns names made, in order, its paths relative to the mailbox.
+	calls := func(fns, commands string) []string {
 		t.Helper()
 		log := filepath.Join(t.TempDir(), "log")
 		b.must("LOG=" + log + `
@@ -353,8 +353,10 @@ mv(){ printf '%s mv %s\n' "${FUNCNAME[1]}" "$*" >> "$LOG"; command mv "$@"; }
 		}
 		var got []string
 		for _, l := range strings.Split(strings.TrimSpace(string(data)), "\n") {
-			if c, ok := strings.CutPrefix(l, fn+" "); ok {
-				got = append(got, strings.ReplaceAll(strings.ReplaceAll(c, b.dir+"/", ""), b.dir, "."))
+			for fn := range strings.FieldsSeq(fns) {
+				if c, ok := strings.CutPrefix(l, fn+" "); ok {
+					got = append(got, strings.ReplaceAll(strings.ReplaceAll(c, b.dir+"/", ""), b.dir, "."))
+				}
 			}
 		}
 		return got
@@ -372,12 +374,19 @@ mv(){ printf '%s mv %s\n' "${FUNCNAME[1]}" "$*" >> "$LOG"; command mv "$@"; }
 	if err := os.WriteFile(b.file("seen"), []byte("aa 100 x y\nbb "+strconv.FormatInt(now, 10)+" x z\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	got = calls("dr_forget", "dr_forget "+strconv.FormatInt(now, 10))
+	got = calls("dr_forget dr_raise", "dr_forget "+strconv.FormatInt(now, 10))
 	if want := []string{"sync seen-floor.new", "mv seen-floor.new seen-floor", "sync .", "sync seen.new", "mv seen.new seen", "sync ."}; !slices.Equal(got, want) {
 		t.Errorf("dr_forget's syncs and moves:\n%q\nwant\n%q", got, want)
 	}
 	if !strings.HasPrefix(b.read("seen"), "bb ") || strings.Count(b.read("seen"), "\n") != 1 || b.read("seen-floor") == "" {
 		t.Errorf("dr_forget left the set %q under the floor %q", b.read("seen"), b.read("seen-floor"))
+	}
+
+	// Keys seen-keys does not name raise the floor first, then are named.
+	b.must(`rm "$DR/seen-keys"`)
+	got = calls("dr_adopt dr_raise dr_covered", "dr_adopt "+strconv.FormatInt(now, 10))
+	if want := []string{"sync seen-floor.new", "mv seen-floor.new seen-floor", "sync .", "sync seen-keys ."}; len(got) < len(want) || !slices.Equal(got[:len(want)], want) || slices.ContainsFunc(got[len(want):], func(c string) bool { return c != "sync seen-keys" }) {
+		t.Errorf("dr_adopt's syncs and moves:\n%q\nwant\n%q, then one sync of seen-keys for each further key", got, want)
 	}
 }
 

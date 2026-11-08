@@ -62,8 +62,10 @@ was wrong ("config_error") and nothing ran. 3, the command did its work and the 
 recv, messages were received as printed and the prekey, due for renewal, was not
 renewed ("renewal_failed"), its server served a prekey the mailbox did not make
 ("prekey_not_made"), the mailbox's ACL was not sent to its server
-("acl_not_sent"), or its server held an ACL the mailbox had not sent, which it
-replaced ("acl_replaced"), or a callback ran out of tries ("exec_gave_up"); from send and outbox flush, the post went ahead
+("acl_not_sent"), its server held an ACL the mailbox had not sent, which it
+replaced ("acl_replaced"), a callback ran out of tries ("exec_gave_up"), or
+messages were refused as sent before the mailbox found prekeys its state did not
+record ("stale_after_restore"); from send and outbox flush, the post went ahead
 though the mailbox's ACL was not sent ("acl_not_sent"); from prekey renew, its
 server served a prekey the mailbox did not make ("prekey_not_made"); from any
 command that called a server, the server stops taking this client's version
@@ -76,7 +78,7 @@ later version of this client ("upgrade_available"), which needs no look. recv pr
 a "refused" line for each message it refused, keeping it in refused/, a
 "held" line for each it held in held/, and a "dropped" line for each from a
 sender this mailbox blocked: none of them changes its exit status, since any
-sender can cause them. A refusal's code is from a closed list, and its words
+sender can cause them, but for refusals "stale_after_restore" counts. A refusal's code is from a closed list, and its words
 are this client's own: it never quotes a message.
 
 To try the whole loop, send anything to dromas.dev's echo mailbox,

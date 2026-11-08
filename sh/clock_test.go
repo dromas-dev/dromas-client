@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dromas-dev/dromas-client/internal/forge"
 	"github.com/dromas-dev/dromas-client/protocol"
 )
 
@@ -214,5 +215,42 @@ func TestScriptKeepsItsReplaySetByItsClock(t *testing.T) {
 	q.must(`rm "$DR/seen-floor"`)
 	if d := q.recv(); !slices.Equal(d.bodies(), []string{"a floor that names no time"}) {
 		t.Errorf("the drain once the floor is gone: %v", d)
+	}
+}
+
+// A mailbox that loses seen and seen-keys, its prekeys kept, finds at its next
+// drain keys its replay set does not cover, and raises its floor to that list's
+// reading plus an hour, less 7 days: a copy the server kept of a message it
+// delivered is refused as stale, a message dated a second below the floor's
+// edge is refused, and one at the edge is delivered (PROTOCOL.md §12.3 check 8).
+// A mailbox the script made covers its own keys, and owes no floor.
+func TestScriptRefusesAReplayAfterItsStateIsLost(t *testing.T) {
+	w := newWorld(t)
+	p, q := w.mailbox(), w.mailbox()
+	l := p.line(q.addr, "00000000-0000-4000-8000-0000000000f6", "pay invoice 8 once", 0)
+	ct := forge.Encrypt(t, w.srv, q.addr, l, p.sign(q.addr, l))
+	id := w.put(q, "", ct)
+	if d := q.recv(); d.rc != 0 || !slices.Equal(d.bodies(), []string{"pay invoice 8 once"}) || q.has("seen-floor") {
+		t.Fatalf("the first delivery: %v", d)
+	}
+	q.must(`rm "$DR/seen" "$DR/seen-keys"`)
+	w.put(q, "", ct) // the server kept its copy
+	if d := q.recv(); len(d.messages) != 0 || d.refused("stale") != 1 || !q.has("refused/"+id+".json") || !q.has("seen-floor") {
+		t.Fatalf("the server's copy after the state was lost: %v", d)
+	}
+	f, err := strconv.ParseInt(strings.TrimSpace(q.read("seen-floor")), 10, 64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	edge := time.Unix(f, 0).Add(protocol.TTL)
+	below := p.line(q.addr, "00000000-0000-4000-8000-0000000000f7", "a second below the edge", time.Since(edge.Add(-time.Second)))
+	w.inject(q, "", below, p.sign(q.addr, below))
+	if d := q.recv(); len(d.messages) != 0 || d.refused("stale") != 1 {
+		t.Errorf("a message a second below the floor's edge: %v", d)
+	}
+	at := p.line(q.addr, "00000000-0000-4000-8000-0000000000f8", "at the edge", time.Since(edge))
+	w.inject(q, "", at, p.sign(q.addr, at))
+	if d := q.recv(); !slices.Equal(d.bodies(), []string{"at the edge"}) {
+		t.Errorf("a message at the floor's edge: %v", d)
 	}
 }

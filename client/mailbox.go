@@ -684,8 +684,8 @@ func (b *Mailbox) publish(ctx context.Context, path string, req any, n uint64) (
 // before it, unless a later one is under way; and pass, which is under the
 // certificate the server now holds this mailbox to, as the pass the mailbox keeps,
 // or with none given, no pass; and n on the record of a statement the mailbox
-// did not make, which its server took n above (NotMade.RenewedAbove). Then the
-// working keys older than n go.
+// did not make, which its server took n above (NotMade.RenewedAbove); and the
+// replay floor an adoption owes (beginFloor). Then the working keys older than n go.
 func (b *Mailbox) recordTaken(n uint64, pass string, at taken) error {
 	var rec []byte
 	if pass != "" {
@@ -699,6 +699,9 @@ func (b *Mailbox) recordTaken(n uint64, pass string, at taken) error {
 			return err
 		}
 		if err := recordAdoptedRenewal(s, at); err != nil {
+			return err
+		}
+		if err := b.beginFloor(s, at); err != nil {
 			return err
 		}
 		if err := b.recordPublished(s, n); err != nil {

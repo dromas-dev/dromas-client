@@ -887,6 +887,68 @@ func TestRecvSaysItReplacedAnACL(t *testing.T) {
 	}
 }
 
+// recv says when it refused messages sent before the mailbox adopted a prekey its
+// state did not record, as a server that kept a delivered message serves it after
+// the state file is lost and the keys kept, in one line
+// after the drain and by its exit status; and status says so while refused/
+// keeps them.
+func TestRecvSaysItRefusedMessagesSentBeforeItAdoptedAKey(t *testing.T) {
+	ctx := context.Background()
+	srv := fakeserver.New(t, time.Now)
+	b, err := client.Init(ctx, t.TempDir(), client.Options{Base: srv.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := client.Init(ctx, t.TempDir(), client.Options{Base: srv.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	allows(t, b, a)
+	sent := forge.Capture(srv, http.MethodPost, "/v1/"+b.Address().String()+"/messages")
+	if _, err := a.Send(ctx, b.Address(), "delivered once"); err != nil {
+		t.Fatal(err)
+	}
+	srv.SetMiddle(nil)
+	useMailbox(t, b.Dir())
+	t.Setenv("DROMAS_SERVER_URL", srv.URL)
+	var out, errs bytes.Buffer
+	if err := do(ctx, "recv", nil, nil, &out, &errs); err != nil || typesOf(printed(t, out.String())) != "message" {
+		t.Fatalf("the first recv: %v, stdout %q, stderr %q", err, out.String(), errs.String())
+	}
+	// The state file lost, the keys kept: the restore's recv renews, and meets
+	// the lost machine's statement, which the next read of itself clears.
+	if err := os.Remove(filepath.Join(b.Dir(), "state")); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range [][]string{{"recv"}, {"prekey", "renew"}} {
+		if err := do(ctx, strings.Join(c, " "), nil, nil, io.Discard, io.Discard); err != nil && !errors.As(err, new(*needsALook)) {
+			t.Fatalf("%v after the state file was lost: %v", c, err)
+		}
+	}
+	id := sha256.Sum256(*sent)
+	srv.Inject(b.Address(), hex.EncodeToString(id[:]), *sent) // the server kept its copy
+	out.Reset()
+	errs.Reset()
+	var look *needsALook
+	if err := do(ctx, "recv", nil, nil, &out, &errs); !errors.As(err, &look) {
+		t.Fatalf("a refusal of a message sent before the adoption must give exit status 3, not %v; stdout %q", err, out.String())
+	}
+	ls := printed(t, out.String())
+	if typesOf(ls) != "refused stale_after_restore" || ls[0]["code"] != protocol.RefusedStale || !strings.Contains(ls[0]["detail"].(string), "sent before this mailbox adopted a prekey") ||
+		ls[1]["count"] != json.Number("1") || ls[1]["detail"] != client.BeforeAdoptionWords(1) || errs.Len() != 0 {
+		t.Fatalf("stdout %q, stderr %q", out.String(), errs.String())
+	}
+	out.Reset()
+	if err := do(ctx, "status", nil, nil, &out, io.Discard); !errors.As(err, &look) || !strings.Contains(out.String(), client.BeforeAdoptionWords(1)) {
+		t.Fatalf("status while refused/ keeps it: %v, %q", err, out.String())
+	}
+	// The next drain refuses nothing, and needs no look.
+	out.Reset()
+	if err := do(ctx, "recv", nil, nil, &out, &errs); err != nil || out.Len() != 0 {
+		t.Fatalf("the recv after: %v, stdout %q", err, out.String())
+	}
+}
+
 // recv says when the prekey was due for renewal and the renewal failed, in a
 // line and by its exit status, and still prints the messages it received.
 func TestRecvSaysARenewalFailed(t *testing.T) {
