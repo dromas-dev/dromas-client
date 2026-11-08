@@ -157,9 +157,6 @@ func TestAKeyFileUnderAPassphraseIsLockedUntilAPassphraseIsGiven(t *testing.T) {
 // dromas agent start removes a stale socket at the agent's path and nothing
 // else: a path that names a file is refused, and the file is left as it was.
 func TestAgentStartRemovesOnlyASocket(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("the mailbox's own agent is not built for Windows (TestAgentStartAndAddRunStockSSHAgent)")
-	}
 	cleanEnv(t)
 	srv := fakeserver.New(t, time.Now)
 	dir := t.TempDir()
@@ -177,7 +174,11 @@ func TestAgentStartRemovesOnlyASocket(t *testing.T) {
 	// there ends, and fails the test, rather than running on.
 	ctx, stop := context.WithTimeout(t.Context(), 10*time.Second)
 	defer stop()
-	if err := do(ctx, "agent start", nil, nil, io.Discard, io.Discard); err == nil || !strings.Contains(err.Error(), "is no socket") {
+	want := "is no socket"
+	if runtime.GOOS == "windows" {
+		want = "not built for Windows" // the mailbox's own agent (TestAgentStartAndAddRunStockSSHAgent)
+	}
+	if err := do(ctx, "agent start", nil, nil, io.Discard, io.Discard); err == nil || !strings.Contains(err.Error(), want) {
 		t.Errorf("agent start at a file's path: %v", err)
 	}
 	if b, err := os.ReadFile(notes); err != nil || string(b) != "kept\n" {
