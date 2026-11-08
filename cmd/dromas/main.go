@@ -95,6 +95,10 @@ The README has the rest, with what this client checks and how to test it:
 const readme = "https://github.com/dromas-dev/dromas-client#readme"
 
 func main() {
+	// Run by ssh-add as agent add's askpass program (countedAskpass).
+	if status, ok := countedAskpassMain(); ok {
+		os.Exit(status)
+	}
 	// net/http logs some of what a server sends after its answer through the
 	// standard logger, raw (#297): stderr has only this client's lines.
 	log.SetOutput(io.Discard)
@@ -127,6 +131,9 @@ func (e *usageError) Error() string { return e.msg }
 // cli is what every command shares: where its mailbox is, how to reach its
 // server, and where it reads and writes.
 type cli struct {
+	// ctx is the command's: an interrupt ends it, and so does interrupt.
+	ctx            context.Context
+	interrupt      context.CancelFunc
 	dir            string
 	opt            client.Options
 	flags          globals
@@ -165,6 +172,9 @@ func (e *cli) environment(c *cobra.Command) error {
 	e.opt.Policy, e.opt.PrekeyLifetime, e.opt.CertificateLifetime = cfg.policy, cfg.lifetime, cfg.certLifetime
 	e.opt.Agent, e.opt.Passphrase = cfg.agent, e.passphrase
 	e.opt.AddToAgent, e.opt.AgentLifetime = cfg.addKeys, cfg.agentLife
+	e.opt.NotAdded = func(err error) {
+		_ = e.out(line("agent_not_added", "socket", cfg.agent, "detail", err.Error()))
+	}
 	e.opt.UnsafeInboxPermissions, e.opt.UnsafeStatePermissions = cfg.unsafeInbox, cfg.unsafeState
 	// A passphrase given once serves the whole process: recv --wait or --follow
 	// renews with it for as long as it runs.
@@ -203,7 +213,9 @@ func runWith(ctx context.Context, opt client.Options, args []string, stdin io.Re
 	if opt.Versions == nil {
 		opt.Versions = &client.Versions{}
 	}
-	e := &cli{opt: opt, stdin: stdin, stdout: stdout, stderr: stderr}
+	ctx, interrupt := context.WithCancel(ctx)
+	defer interrupt()
+	e := &cli{ctx: ctx, interrupt: interrupt, opt: opt, stdin: stdin, stdout: stdout, stderr: stderr}
 	root := e.tree()
 	e.flags.add(root)
 	root.PersistentPreRunE = func(c *cobra.Command, _ []string) error {

@@ -16,6 +16,7 @@ package sign
 import (
 	"bytes"
 	"errors"
+	"io"
 	"sync"
 	"time"
 
@@ -160,6 +161,26 @@ func (k *Identity) Pass(a protocol.Address, server string, now time.Time) (strin
 		return "", time.Time{}, err
 	}
 	return pass(key, k.finished, a, server, now)
+}
+
+// Lent is key, a key an agent holds, for an Unlock to give: a signature the
+// agent does not make fails with failed's error for it. It signs only where an
+// Identity signs with it.
+func Lent(key ssh.Signer, failed func(error) error) ssh.Signer {
+	return &lent{Signer: key, failed: failed}
+}
+
+type lent struct {
+	ssh.Signer
+	failed func(error) error
+}
+
+func (k *lent) Sign(rand io.Reader, data []byte) (*ssh.Signature, error) {
+	sig, err := k.Signer.Sign(rand, data)
+	if err != nil {
+		return nil, k.failed(err)
+	}
+	return sig, nil
 }
 
 // Work is a working key under its certificate: it signs the mailbox's prekey

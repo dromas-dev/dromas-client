@@ -35,8 +35,9 @@ type Status struct {
 	// then on.
 	Signer string `json:"signer"`
 	// IdentityKey is where the identity's private key is: [KeyInAgent],
-	// [KeyFile], [KeyPassphrase] or [KeyNone]. Agent is the agent's socket,
-	// where one is set.
+	// [KeyFile], [KeyPassphrase] or [KeyNone]. A revoked mailbox asks no
+	// agent, so its IdentityKey is its key file's alone. Agent is the agent's
+	// socket, where one is set.
 	IdentityKey string `json:"identity_key"`
 	Agent       string `json:"agent,omitempty"`
 	// Format is the mailbox's format (client/doc.go), this client's: a
@@ -188,7 +189,7 @@ func (b *Mailbox) status() (*Status, error) {
 	if certified {
 		s.Signer = SignerCertificate
 	}
-	s.IdentityKey, s.Agent = b.identityKey(), b.unlock.agent
+	s.IdentityKey, s.Agent = b.identityKey(!s.Revoked), b.unlock.agent
 	// A locked key is an owner's choice, and identity_key says so. It needs a
 	// look only once a renewal is due, which needs the identity's key: from
 	// then, unless the key is unlocked, senders are refused once the prekey

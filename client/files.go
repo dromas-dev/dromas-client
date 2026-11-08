@@ -72,6 +72,16 @@ func exists(name string) bool {
 	return err == nil && fi.Size() > 0
 }
 
+// present reports whether there is anything at name, as Lstat finds it: a
+// link to nothing is there, and so is an empty file.
+func present(name string) (bool, error) {
+	_, err := os.Lstat(name)
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
 // removeIfExists removes name; a file already gone is not an error.
 func removeIfExists(name string) error {
 	if err := os.Remove(name); err != nil && !errors.Is(err, fs.ErrNotExist) {

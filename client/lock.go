@@ -160,13 +160,15 @@ func (b *Mailbox) claim(ctx context.Context) (func(), error) {
 // never a command's half done (#329), and the wait ends with ctx (#330).
 // Where the open finds no state file, every view of f reads none, and opens
 // none that a command makes in the meantime, which would read a second state
-// and wait for that command with no context (#382).
+// and wait for that command with no context (#382). A reading that signs
+// (Revocation) lets go of the identity's key at its end, as locked does.
 func reading[T any](ctx context.Context, b *Mailbox, f func() (T, error)) (v T, err error) {
 	release, err := b.claim(ctx)
 	if err != nil {
 		return v, err
 	}
 	defer release()
+	defer b.forgetIdentity()
 	db, err := b.openState(ctx, true)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):

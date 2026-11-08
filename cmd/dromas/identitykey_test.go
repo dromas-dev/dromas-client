@@ -5,12 +5,14 @@ import (
 	"context"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"io"
 	"net"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -20,8 +22,11 @@ import (
 )
 
 // askpassEnv, set, has the test binary run as an askpass program print its
-// value (TestMain).
-const askpassEnv = "DROMAS_TEST_ASKPASS_PRINTS"
+// value (TestMain), and askpassRunsEnv names a file it notes each run in.
+const (
+	askpassEnv     = "DROMAS_TEST_ASKPASS_PRINTS"
+	askpassRunsEnv = "DROMAS_TEST_ASKPASS_RUNS"
+)
 
 // encryptIdentity puts the identity file at file under passphrase, as
 // ssh-keygen -p does, in the file itself, so that its permissions stay.
@@ -237,7 +242,7 @@ func TestAgentStartAndAddRunStockSSHAgent(t *testing.T) {
 	if err := do(t.Context(), "agent add", []string{"--askpass", exe}, nil, &added, io.Discard); err != nil {
 		t.Fatalf("agent add: %v: %s", err, added.String())
 	}
-	for _, want := range []string{`"command":"SSH_AUTH_SOCK=` + socket + ` SSH_ASKPASS=` + exe + ` SSH_ASKPASS_REQUIRE=force ssh-add `, `"type":"agent_added"`} {
+	for _, want := range []string{`"command":"SSH_AUTH_SOCK=` + socket + ` SSH_ASKPASS=` + exe + ` SSH_ASKPASS_REQUIRE=force DROMAS_ASKPASS=` + exe + ` DROMAS_ASKPASS_TRIES=`, `"type":"agent_added"`} {
 		if !strings.Contains(added.String(), want) {
 			t.Errorf("agent add says no %s: %s", want, added.String())
 		}
@@ -250,5 +255,173 @@ func TestAgentStartAndAddRunStockSSHAgent(t *testing.T) {
 	_ = do(t.Context(), "status", nil, nil, &out, io.Discard) // its exit status is any attention's
 	if !strings.Contains(out.String(), `"identity_key":"agent"`) {
 		t.Errorf("status: %s", out.String())
+	}
+}
+
+// fakeSSHAdd puts first in PATH an ssh-add that records, in the file it
+// returns, what it was run with: SSH_ASKPASS_REQUIRE, SSH_ASKPASS, its
+// arguments and its stdin; and fails, as ssh-add does when it loads no key.
+func fakeSSHAdd(t *testing.T) string {
+	t.Helper()
+	bin := t.TempDir()
+	record := filepath.Join(t.TempDir(), "ran")
+	script := "#!/bin/sh\n{ echo \"SSH_ASKPASS_REQUIRE=${SSH_ASKPASS_REQUIRE-unset}\"; echo \"SSH_ASKPASS=${SSH_ASKPASS-unset}\"; echo \"args=$*\"; cat; } > " + shellQuote(record) + "\nexit 1\n"
+	if err := os.WriteFile(filepath.Join(bin, "ssh-add"), []byte(script), 0o700); err != nil { //nolint:gosec // a program the test runs
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return record
+}
+
+// terminalStdin has isTerminal take stdin as a terminal, for one test: go test
+// gives none.
+func terminalStdin(t *testing.T) {
+	t.Helper()
+	was := isTerminal
+	isTerminal = func(io.Reader) bool { return true }
+	t.Cleanup(func() { isTerminal = was })
+}
+
+// The terminal's prompt reads a passphrase as readpassphrase(3), which ssh
+// reads one with: an end of input (^D) and an empty line are no passphrase; a
+// ^C at the prompt ends the command's context, as an interrupt by a signal
+// does; and an interrupt by a signal restores the terminal's settings, echo
+// among them, and ends the read at once with the interrupt's error, a read
+// still blocked. A terminal itself is a test by hand, under a pseudo-terminal:
+// go test gives none.
+func TestTheTerminalPromptReadsAsReadpassphrase(t *testing.T) {
+	t.Parallel()
+	for name, c := range map[string]struct {
+		pass []byte
+		err  error
+		want []byte
+		werr error
+	}{
+		"a passphrase":  {pass: []byte("correct horse"), want: []byte("correct horse")},
+		"^D":            {err: io.EOF, werr: client.ErrNoPassphrase},
+		"an empty line": {pass: []byte{}, werr: client.ErrNoPassphrase},
+		"^C":            {err: errInterrupted, werr: context.Canceled},
+	} {
+		ctx, interrupt := context.WithCancel(t.Context())
+		restored := false
+		got, err := askTerminal(ctx, interrupt, func() ([]byte, error) { return c.pass, c.err }, func() error { restored = true; return nil })
+		if !bytes.Equal(got, c.want) || !errors.Is(err, c.werr) || (c.werr == nil && err != nil) {
+			t.Errorf("%s: %q, %v", name, got, err)
+		}
+		if restored || (ctx.Err() != nil) != errors.Is(c.werr, context.Canceled) {
+			t.Errorf("%s: the settings restored by askTerminal: %v; the command's context: %v", name, restored, ctx.Err())
+		}
+		interrupt()
+	}
+
+	ctx, interrupt := context.WithCancel(t.Context())
+	blocked := make(chan struct{})
+	defer close(blocked)
+	restored := make(chan struct{}, 1)
+	done := make(chan error, 1)
+	go func() {
+		_, err := askTerminal(ctx, interrupt, func() ([]byte, error) { <-blocked; return nil, io.EOF }, func() error { restored <- struct{}{}; return nil })
+		done <- err
+	}()
+	interrupt()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("an interrupt at the prompt: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("an interrupt did not end the prompt")
+	}
+	select {
+	case <-restored:
+	default:
+		t.Error("an interrupt left the terminal's settings unrestored")
+	}
+}
+
+// recv's renewal_failed line carries identity_locked where the identity's key
+// was locked for the renewal, at each recv: a renewal the key was locked for is
+// not held to the hour a server's refusal is.
+func TestRecvSaysARenewalTheKeyWasLockedForAtEachRecv(t *testing.T) {
+	ctx := context.Background()
+	// Made 25 hours ago, by a clock the server shares (TestRecvSaysARenewalFailed).
+	var ago atomic.Int64
+	ago.Store(int64(25 * time.Hour))
+	clock := func() time.Time { return time.Now().Add(-time.Duration(ago.Load())) }
+	srv := fakeserver.New(t, clock)
+	b, err := client.Init(ctx, t.TempDir(), client.Options{Base: srv.URL, Now: clock, WorkingKey: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ago.Store(0)
+	encryptIdentity(t, b.Path("identity"), "correct horse")
+	useMailbox(t, b.Dir())
+	t.Setenv("DROMAS_SERVER_URL", srv.URL)
+	for i := range 2 {
+		var out bytes.Buffer
+		var look *needsALook
+		if err := do(ctx, "recv", []string{"--no-prompt"}, nil, &out, io.Discard); !errors.As(err, &look) {
+			t.Fatalf("recv %d: %v", i+1, err)
+		}
+		if ls := printed(t, out.String()); typesOf(ls) != "renewal_failed" || ls[0]["code"] != client.IdentityLocked {
+			t.Errorf("recv %d: %s", i+1, out.String())
+		}
+	}
+}
+
+// An askpass program that fails, or prints nothing, gives no passphrase, as
+// ssh reads it: the command fails as identity_locked.
+func TestAnAskpassProgramThatGivesNothingLeavesTheIdentityLocked(t *testing.T) {
+	cleanEnv(t)
+	srv := fakeserver.New(t, time.Now)
+	dir := t.TempDir()
+	t.Setenv("DROMAS_CONFIG", configFor(t, dir))
+	t.Setenv("DROMAS_SERVER_URL", srv.URL)
+	if err := do(t.Context(), "init", nil, nil, io.Discard, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	encryptIdentity(t, filepath.Join(dir, "identity"), "correct horse")
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(askpassEnv, "")
+	if l := failed(t, do(t.Context(), "prekey renew", []string{"--askpass", exe}, nil, io.Discard, io.Discard)); l["code"] != client.IdentityLocked {
+		t.Errorf("an askpass program that prints nothing: %v", l)
+	}
+	if runtime.GOOS == "windows" {
+		return // no false(1)
+	}
+	if l := failed(t, do(t.Context(), "prekey renew", []string{"--askpass", "false"}, nil, io.Discard, io.Discard)); l["code"] != client.IdentityLocked {
+		t.Errorf("an askpass program that fails: %v", l)
+	}
+}
+
+// add-keys-to-agent with no agent at the socket fails nothing, as ssh's
+// AddKeysToAgent: the command signs with the key the passphrase unlocked, and
+// an "agent_not_added" line says the agent did not take it.
+func TestAnAgentNotThereFailsNoCommandThatAddsTheKey(t *testing.T) {
+	cleanEnv(t)
+	srv := fakeserver.New(t, time.Now)
+	dir := t.TempDir()
+	t.Setenv("DROMAS_CONFIG", configFor(t, dir))
+	t.Setenv("DROMAS_SERVER_URL", srv.URL)
+	socket := filepath.Join(shortDir(t), "s")
+	t.Setenv("DROMAS_AGENT", socket)
+	if err := do(t.Context(), "init", nil, nil, io.Discard, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	encryptIdentity(t, filepath.Join(dir, "identity"), "correct horse")
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(askpassEnv, "correct horse")
+	var out bytes.Buffer
+	if err := do(t.Context(), "prekey renew", []string{"--askpass", exe, "--add-keys-to-agent", "yes"}, nil, &out, io.Discard); err != nil {
+		t.Fatalf("a renewal whose agent is not there: %v", err)
+	}
+	if ls := printed(t, out.String()); typesOf(ls) != "agent_not_added prekey" || ls[0]["socket"] != socket {
+		t.Errorf("printed %s", out.String())
 	}
 }
