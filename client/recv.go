@@ -999,7 +999,10 @@ func (b *Mailbox) seenFloor() (floor, began int64, err error) {
 // own bucket, or 0 where it keeps none.
 func floorOf(s store, key string) (int64, error) {
 	n, err := decimal(s.get(bucketMailbox, key), key)
-	return int64(min(n, uint64(math.MaxInt64))), err //nolint:gosec // bounded above
+	if n > math.MaxInt64 {
+		return math.MaxInt64, err
+	}
+	return int64(n), err
 }
 
 // raiseFloor sets the floor to t, unless it is already that high.
