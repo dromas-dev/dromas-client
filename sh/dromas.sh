@@ -202,6 +202,7 @@ dr_prekey(){ # <serial> → prekeys/<serial>.agekey and its statement, signed by
   [ -s "$p.txt.sig" ] && return 0
   dr_finished || { dr_done $?; return 1; }      # the one path to this mailbox's statements: a mailbox that may act as its address no more makes none, init and prekey renew alike
   l=$(dr_lifetime) || return 1
+  dr_covered "$1" || return 1      # recorded before the key is made: a key this mailbox made opens nothing its replay set did not see (dr_adopt)
   [ -s "$p.agekey" ] || { rm -f "$p.agekey"; age-keygen -pq -o "$p.agekey" 2> /dev/null; } || dr_refuse "age-keygen failed: a post-quantum key needs age >= 1.3" || return 1      # an empty key file, as a crash before the sync below leaves one, is no key, and no statement names it, so it is made again, as the Go client does
   k=$(age-keygen -y "$p.agekey" 2> /dev/null) || dr_refuse "age-keygen cannot read $p.agekey, the key this mailbox began prekey $1 with (a post-quantum one needs age >= 1.3)" || return 1      # never a statement with no key in it, which a server refuses at every try
   t=$(dr_now)
@@ -614,7 +615,7 @@ dr_drain(){ # stops at a transient error or a fault of this mailbox, leaving the
   while :; do
     [ $((pages += 1)) -le 100 ] || { dr_out more --arg detail "this run stopped at the most one drain takes: run recv again for the rest, which is still on the server"; return 0; }
     dr_owner GET "/v1/$B/messages${c:+?cursor=$c}" > "$DR/list.json" || { dr_own; return 1; }
-    [ "$pages" -gt 1 ] || { DR_LISTED=$(dr_taken) && dr_forget "$DR_LISTED"; } || return 1      # the replay set pruned by this clock only once the server has taken a pass dated by it, and by that pass's date (dr_taken): a drain that a clock far off would prune is stopped at its pass first. DR_LISTED tells dr_recv the same reading for the keys
+    [ "$pages" -gt 1 ] || { DR_LISTED=$(dr_taken) && dr_adopt "$DR_LISTED" && dr_forget "$DR_LISTED"; } || return 1      # the replay set pruned by this clock only once the server has taken a pass dated by it, and by that pass's date (dr_taken): a drain that a clock far off would prune is stopped at its pass first. DR_LISTED tells dr_recv the same reading for the keys
     dr_shape "$DR/list.json" list && n=$(jq -r '.messages | length' "$DR/list.json") || { dr_err "the server's list of messages is not one this client reads: the messages stay on the server"; return 1; }
     for ((i = 0; i < n; i++)); do
       id=$(jq -r --argjson i "$i" '.messages[$i].id | strings | select(test("\\A[0-9a-f]{64}\\z"))' "$DR/list.json") && dr_hex "$id" || continue      # tested in jq: $(…) drops trailing LFs and every NUL
@@ -656,7 +657,7 @@ dr_judge(){ # <me> <message stem> → 0 only if EVERY check passes, in this orde
   age -d "${ids[@]}" < "$m.age" > "$m.T" 2> /dev/null || { echo "undecryptable: it does not decrypt with this mailbox's prekeys"; return 1; }
   A=$(dr_open "$B" "$m") || { echo "$A"; return 1; }      # the sender, proved by what was decrypted
   f=$(dr_floor 2> /dev/null) || { echo "$DR/seen-floor names no time"; return 3; }
-  [ "$f" -eq 0 ] || [ "$(dr_time "$(jq -r .sent_at "$m.P")")" -ge $((f + 7*86400)) ] || { echo "stale: sent_at is before this mailbox's replay set reaches back to, since its clock once read later than it does now"; return 1; }      # freshness has a floor too: a sent_at before the highest cutoff the replay set was pruned at may be a message whose line went, and so may one up to 7 days above it, a retry of such a message, dated afresh up to 7 days after its first copy (check 9 knows a retry by that copy's line). dr_open checked sent_at's grammar
+  [ "$f" -eq 0 ] || [ "$(dr_time "$(jq -r .sent_at "$m.P")")" -ge $((f + 7*86400)) ] || { echo "stale: sent_at is before this mailbox's replay set reaches back to: it was pruned, or a prekey it did not cover was found since"; return 1; }      # freshness has a floor too: a sent_at before the highest cutoff the replay set was pruned at may be a message whose line went, and so may one up to 7 days above it, a retry of such a message, dated afresh up to 7 days after its first copy (check 9 knows a retry by that copy's line). dr_open checked sent_at's grammar
   if ! grep -qxF -e "$A" "$DR/asked" 2> /dev/null; then      # the server is asked once for each sender in a drain, by a read of its revocations, which the server serves whether or not it holds the sender's mailbox. That it holds none is an answer; no answer is not, and the message then stays where it is
     dr_revocations "$A" >> "$DR/said"; case $? in 0) ;; 1) printf '%s\n' "$A" >> "$DR/asked" ;; 3) echo "what this mailbox keeps of its sender's revocations does not verify, or cannot be written"; return 3 ;; *) echo "whether its sender is revoked could not be asked"; return 4 ;; esac
   fi
@@ -722,12 +723,31 @@ dr_line(){ # <checked envelope> [receipt] → the one line delivered: built from
     ({v: 1, from, to, sent_at, msg_id, body} + ([{subject}, {in_reply_to}, {supersedes}] | map(select(.[] | . != null and . != "")) | add // {})) as $e | ($r[0] | if . then {envelope: $e, receipt: {id, received_at, expires_at}} else $e end) | tojson | gsub("(?<c>[\\x{7F}-\\x{9F}\\x{2028}\\x{2029}\\x{AD}\\x{34F}\\x{61C}\\x{115F}-\\x{1160}\\x{17B4}-\\x{17B5}\\x{180B}-\\x{180F}\\x{200B}-\\x{200F}\\x{202A}-\\x{202E}\\x{2060}-\\x{206F}\\x{3164}\\x{FE00}-\\x{FE0F}\\x{FEFF}\\x{FFA0}\\x{FFF0}-\\x{FFF8}\\x{FFF9}-\\x{FFFB}\\x{1BCA0}-\\x{1BCA3}\\x{1D173}-\\x{1D17A}\\x{E0000}-\\x{E0FFF}])"; .c | explode[0] | dr_esc)' "$1"
 }
 dr_forget(){ # <Unix time, one a server took (dr_taken)> → the replay set without the lines past 14 days and an hour from their sent_at by that reading: a retry, dated afresh, may be posted up to 7 days after a first copy that was delivered, and read up to 7 days after that, and an hour covers a clock that steps back as far as two clocks a server takes are apart. When it drops one, the floor rises to the cutoff first, so a clock that later reads further back still takes no message whose line went (dr_floor)
-  local c=$(($1 - 14*86400 - 3600)) f; [ -e "$DR/seen" ] || return 0
+  local c=$(($1 - 14*86400 - 3600)); [ -e "$DR/seen" ] || return 0
   awk -v c="$c" '$2 >= c' "$DR/seen" > "$DR/seen.new" || return 1
   cmp -s "$DR/seen" "$DR/seen.new" && { rm -f "$DR/seen.new"; return 0; }      # nothing dropped: nothing written
-  f=$(dr_floor) || return 1
-  if [ "$f" -lt "$c" ]; then printf '%s\n' "$c" > "$DR/seen-floor.new" && sync "$DR/seen-floor.new" && mv "$DR/seen-floor.new" "$DR/seen-floor" && sync "$DR" || return 1; fi      # on disk before any line goes
+  dr_raise "$c" || return 1      # on disk before any line goes
   sync "$DR/seen.new" && mv "$DR/seen.new" "$DR/seen" && sync "$DR"      # on disk before it replaces the old one: a crash leaves the old set or the new, never an empty one
+}
+dr_raise(){ # <Unix time> → seen-floor raised to it, on disk, unless it is already that high
+  local f; f=$(dr_floor) || return 1
+  [ "$f" -ge "$1" ] || { printf '%s\n' "$1" > "$DR/seen-floor.new" && sync "$DR/seen-floor.new" && mv "$DR/seen-floor.new" "$DR/seen-floor" && sync "$DR"; }
+}
+dr_covered(){ # <serial> → seen-keys names it, on disk: a prekey this mailbox made, whose messages its replay set saw
+  grep -qxF -e "$1" "$DR/seen-keys" 2> /dev/null && return 0
+  local new=; [ -e "$DR/seen-keys" ] || new=$DR
+  printf '%s\n' "$1" >> "$DR/seen-keys" && sync "$DR/seen-keys" ${new:+"$new"}
+}
+dr_adopt(){ # <Unix time, one a server took (dr_taken)> → where prekeys/ holds a key age reads that seen-keys does not name, as after seen and seen-keys are lost with the keys kept, the floor raised to that reading plus an hour, less 7 days, then each such key named: only such a key opens a ciphertext a replay set this mailbox no longer holds saw delivered, and a server may serve one again. So a message sent before that reading and the hour after, which this clock's check may have taken before, is stale (PROTOCOL.md §12.3 check 8)
+  local k n found=()
+  for k in "$DR"/prekeys/*.agekey; do
+    [ -e "$k" ] || continue
+    n=$(basename "$k" .agekey); [[ $n =~ ^[1-9][0-9]{0,15}$ ]] || continue
+    grep -qxF -e "$n" "$DR/seen-keys" 2> /dev/null || ! age-keygen -y "$k" > /dev/null 2>&1 || found+=("$n")      # a file age cannot read opens nothing, and stops the drain (dr_judge)
+  done
+  [ ${#found[@]} -gt 0 ] || return 0
+  dr_raise $(($1 + 3600 - 7*86400)) || return 1      # the floor first: a crash leaves the floor raised and the keys to name again
+  for n in "${found[@]}"; do dr_covered "$n" || return 1; done
 }
 dr_floor(){ # → the highest cutoff a prune of the replay set has dropped a line at, from seen-floor, or 0 when it has none: a message sent before it, or less than 7 days after it, is stale whatever the clock now reads, since its line, or its first copy's, may be gone, as a Kerberos server that has lost its replay cache refuses until the window has passed (RFC 4120 §3.2.3). A file that names anything else is an error, never the default
   local f; [ -e "$DR/seen-floor" ] || { echo 0; return 0; }

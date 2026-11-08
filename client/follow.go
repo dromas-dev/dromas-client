@@ -41,6 +41,10 @@ const (
 	// EventACLReplaced is an ACL another writer put at the mailbox's server, which
 	// the mailbox replaced.
 	EventACLReplaced
+	// EventStaleAfterRestore is the drain's refusals of messages sent before the
+	// mailbox adopted a prekey its state did not record:
+	// [Result.RefusedBeforeAdoption].
+	EventStaleAfterRestore
 	// EventDrained ends each drain's events, and carries its [Result].
 	EventDrained
 	// EventConnectionDropped is a connection that dropped while the list was
@@ -289,6 +293,9 @@ func (b *Mailbox) handOver(ctx context.Context, owed bool, res *Result, h Handle
 	}
 	if res.ACLReplaced {
 		give(Event{Kind: EventACLReplaced})
+	}
+	if res.RefusedBeforeAdoption() > 0 {
+		give(Event{Kind: EventStaleAfterRestore})
 	}
 	give(Event{Kind: EventDrained})
 	return stopped

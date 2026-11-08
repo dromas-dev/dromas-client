@@ -7,12 +7,14 @@ import (
 	"encoding/hex"
 	"io"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/dromas-dev/dromas-client/client"
+	"github.com/dromas-dev/dromas-client/internal/forge"
 	"github.com/dromas-dev/dromas-client/protocol"
 )
 
@@ -178,5 +180,73 @@ func TestTheSeenFloor(t *testing.T) {
 	r.SetRecord(t, "seen-floor", nil)
 	if res := receive(t, r); len(res.Delivered) != 1 {
 		t.Errorf("the message left on the server: delivered %d once the floor was removed, want 1", len(res.Delivered))
+	}
+}
+
+// A server that kept a message the mailbox delivered serves it again once the
+// state file is lost and the keys kept, which a restore supports: the new state
+// file adopts the keys, and the adoption owes a floor at the first confirmed time
+// after it, so the copy is refused as stale, kept in refused/ with its signer,
+// and said in status while refused/ keeps it. Every sent_at below that confirmed
+// time plus the skew allowance is stale, and one at it is delivered (PROTOCOL.md
+// §12.3 check 8, §15.9).
+func TestARestoreRefusesAMessageItDeliveredBeforeAsStale(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	e := newEnv(t)
+	a, b := e.mailbox(), e.mailbox()
+	sent := forge.Capture(e.srv, http.MethodPost, "/v1/"+b.Address().String()+"/messages")
+	send(t, a, b, "delivered before the state file was lost")
+	e.srv.SetMiddle(nil)
+	if res := receive(t, b); len(res.Delivered) != 1 {
+		t.Fatalf("the first delivery: %+v", res)
+	}
+	x := lostState(t, e, b)
+	e.clock.Add(2 * time.Second)
+	id := sha256.Sum256(*sent)
+	e.srv.Inject(x.Address(), hex.EncodeToString(id[:]), *sent) // the server kept its copy
+	res, err := x.Receive(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	refusedBeforeAdoption(t, x, res, a, 1)
+	if got := inbox(t, x); len(got) != 1 {
+		t.Fatalf("inbox/ holds %q: the copy was delivered again", got)
+	}
+	words := client.BeforeAdoptionWords(1)
+	st, err := x.Status(ctx)
+	if err != nil || !slices.Contains(st.Attention, words) {
+		t.Fatalf("status while refused/ keeps it: %q, %v", st.Attention, err)
+	}
+	if _, err := x.RemoveRefused(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+	if st, err := x.Status(ctx); err != nil || slices.Contains(st.Attention, words) {
+		t.Fatalf("status once refused/ is emptied: %q, %v", st.Attention, err)
+	}
+	// The floor is the first confirmed time after the adoption, the restore's
+	// renewal here, plus the skew allowance, less the TTL.
+	raw, _ := stateOf(x, "seen-began")
+	began, err := strconv.ParseInt(string(raw), 10, 64)
+	if err != nil {
+		t.Fatalf("seen-began %q: %v", raw, err)
+	}
+	if raw, _ := stateOf(x, "seen-floor"); string(raw) != strconv.FormatInt(began+int64((protocol.MaxSkew-protocol.TTL)/time.Second), 10) {
+		t.Fatalf("seen-floor %q, began %d", raw, began)
+	}
+	edge := time.Unix(began, 0).Add(protocol.MaxSkew)
+	e.clock.Add(edge.Add(-time.Second).Sub(e.clock.Now()))
+	send(t, a, x, "a second before the floor's edge")
+	res, err = x.Receive(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Delivered) != 0 || res.RefusedBeforeAdoption() != 1 {
+		t.Fatalf("a message a second below the edge: %+v", res)
+	}
+	e.clock.Add(time.Second)
+	send(t, a, x, "at the floor's edge")
+	if res := receive(t, x); len(res.Delivered) != 1 || len(res.Refused) != 0 {
+		t.Fatalf("a message at the edge: %+v", res)
 	}
 }

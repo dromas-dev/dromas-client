@@ -255,7 +255,9 @@ func PutRevocations(ctx context.Context, opt Options, a protocol.Address, rec *p
 // "renewal" (the number of the renewal under way), "acl-read" (the read of
 // the server's ACL a renewal recv began owes), "adopt-acl" (a restore's
 // adoption of its server's ACL, begun), "renew-failed", "not-made",
-// "acl-another-writer", "acl-replaced", "partial" (the message the
+// "acl-another-writer", "acl-replaced", "floor-owed" (the replay floor an adopted
+// prekey owes, not yet set), "seen-began" (the confirmed time beginFloor last set
+// the floor by), "partial" (the message the
 // partial file is of, and how many of its bytes are synced) and "format"
 // (the mailbox's format, as it is recorded). So a test
 // reads and changes the mailbox's state as it did its files.
@@ -263,7 +265,7 @@ func (b *Mailbox) Records() (map[string][]byte, error) {
 	out := map[string][]byte{}
 	err := b.view(func(s store) error {
 		for _, r := range []struct{ key, name string }{
-			{"serial", "serial"}, {"pass", "pass"}, {"etag", "etag"}, {"seen-floor", "seen-floor"},
+			{"serial", "serial"}, {"pass", "pass"}, {"etag", "etag"}, {"seen-floor", "seen-floor"}, {"floor-owed", "floor-owed"}, {"seen-began", "seen-began"},
 			{"acl", "acl.json"}, {"revoked", "revoked.sig"}, {"revoked-certs", "revoked-certs.json"},
 			{"renew-failed", "renew-failed"}, {"not-made", "not-made"}, {"acl-another-writer", "acl-another-writer"}, {"acl-replaced", "acl-replaced"}, {"partial", "partial"},
 			{"deprecation", "deprecation"}, {"sunset", "sunset"}, {"document-read", "document-read"}, {"latest", "latest"},
@@ -530,20 +532,6 @@ func AdoptedKeys(t *testing.T, b *Mailbox) []uint64 {
 		ns = append(ns, k.serial)
 	}
 	return ns
-}
-
-// ForgetAdoption leaves b's state file as one that has not yet read prekeys/ for
-// keys it names nowhere.
-func ForgetAdoption(t *testing.T, b *Mailbox) {
-	t.Helper()
-	release, err := b.hold(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer release() //nolint:errcheck // a test's
-	if err := b.update(func(s store) error { return s.del(bucketMailbox, keyKeysAdopted) }); err != nil {
-		t.Fatal(err)
-	}
 }
 
 // Statements is the serial of every statement b's state file records.

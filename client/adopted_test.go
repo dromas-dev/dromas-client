@@ -3,6 +3,8 @@ package client_test
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -13,6 +15,7 @@ import (
 	"time"
 
 	"github.com/dromas-dev/dromas-client/client"
+	"github.com/dromas-dev/dromas-client/internal/forge"
 	"github.com/dromas-dev/dromas-client/protocol"
 )
 
@@ -29,6 +32,26 @@ func lostState(t *testing.T, e *env, b *client.Mailbox) *client.Mailbox {
 	}
 	landAll(t, x)
 	return x
+}
+
+// refusedBeforeAdoption holds what r's drain did with the messages that waited
+// at a restore: each refused as stale, as sent before the new state file's
+// replay set began, and kept in refused/ as signed by from, which shows that a
+// key the state file adopted decrypted it.
+func refusedBeforeAdoption(t *testing.T, x *client.Mailbox, res *client.Result, from *client.Mailbox, n int) {
+	t.Helper()
+	if len(res.Delivered) != 0 || len(res.Refused) != n || res.RefusedBeforeAdoption() != n {
+		t.Fatalf("the drain after the restore: %+v, want %d refused as sent before the adoption", res, n)
+	}
+	qs, err := x.RefusedMessages(t.Context())
+	if err != nil || len(qs) != n {
+		t.Fatalf("refused/: %+v, %v", qs, err)
+	}
+	for _, q := range qs {
+		if q.Code != protocol.RefusedStale || !q.BeforeAdoption || q.SignedBy != from.Address().String() {
+			t.Fatalf("refused/ keeps %+v, want stale before the adoption, signed by %s", q, from.Address())
+		}
+	}
 }
 
 // adoptedEnd is an adopted key's deletion time, by the confirmed time of the first
@@ -114,9 +137,10 @@ func TestADrainsListDeletesAnAdoptedKeyPastItsTime(t *testing.T) {
 }
 
 // A message sealed to the key before the state file is lost, and one sealed to it
-// after that and before the renewal, are delivered, and an emptying drain leaves
-// the key: dropRetired reads statements alone.
-func TestAMessageSealedToAnAdoptedKeyIsDelivered(t *testing.T) {
+// after that and before the renewal, decrypt with the key, and are refused as
+// stale with their signer, as sent before the adoption; an emptying
+// drain leaves the key: dropRetired reads statements alone.
+func TestAMessageSealedToAnAdoptedKeyIsRefusedWithItsSigner(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	e := newEnv(t)
@@ -130,9 +154,10 @@ func TestAMessageSealedToAnAdoptedKeyIsDelivered(t *testing.T) {
 		t.Fatal(err)
 	}
 	res, err := x.Receive(ctx)
-	if err != nil || len(res.Delivered) != 2 || len(res.Refused) != 0 {
-		t.Fatalf("recv after the state file was lost: %+v, %v", res, err)
+	if err != nil {
+		t.Fatalf("recv after the state file was lost: %v", err)
 	}
+	refusedBeforeAdoption(t, x, res, a, 2)
 	e.clock.Add(2 * time.Hour)
 	if _, err := x.Receive(ctx); err != nil {
 		t.Fatal(err)
@@ -194,7 +219,8 @@ func TestARenewalNeverConfirmedDeletesNoAdoptedKey(t *testing.T) {
 
 // A clock that jumps past the time after the server took the renewal deletes no
 // adopted key, and the renewal is timed by the reading the server took: the message
-// that waits is delivered once the clock is right.
+// that waits decrypts once the clock is right, refused as sent before the new
+// replay set began, with its signer.
 func TestAClockThatJumpsDuringARenewalDeletesNoAdoptedKey(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -221,13 +247,16 @@ func TestAClockThatJumpsDuringARenewalDeletesNoAdoptedKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res, err := right.Receive(ctx); err != nil || len(res.Delivered) != 1 {
-		t.Fatalf("once the clock is right: %+v, %v", res, err)
+	res, err := right.Receive(ctx)
+	if err != nil {
+		t.Fatalf("once the clock is right: %v", err)
 	}
+	refusedBeforeAdoption(t, right, res, a, 1)
 }
 
 // A clock past the time that no server takes deletes nothing, and the message that
-// waits is delivered once the clock is right.
+// waits decrypts once the clock is right, refused as sent before the new replay
+// set began, with its signer.
 func TestAnUnconfirmedClockDeletesNoAdoptedKey(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -252,9 +281,11 @@ func TestAnUnconfirmedClockDeletesNoAdoptedKey(t *testing.T) {
 		t.Fatal("a clock no server took deleted the key")
 	}
 	off = 0
-	if res, err := fast.Receive(ctx); err != nil || len(res.Delivered) != 1 {
-		t.Fatalf("once the clock is right: %+v, %v", res, err)
+	res, err := fast.Receive(ctx)
+	if err != nil {
+		t.Fatalf("once the clock is right: %v", err)
 	}
+	refusedBeforeAdoption(t, fast, res, a, 1)
 }
 
 // A number by the clock that lands on a file adopted takes no old key for a new
@@ -336,9 +367,9 @@ func TestStatusCountsAnAdoptedKeyPastItsTime(t *testing.T) {
 	}
 }
 
-// A state file that records its folders made and has not yet read prekeys/ refuses
-// a prekeys/ gone missing before it reads anything, so a volume not mounted marks
-// nothing, and the keys are adopted once it returns.
+// A state file that records its folders made refuses a prekeys/ gone missing
+// before adoption reads it, so a volume not mounted marks nothing, and a key it
+// holds that the state file does not record is adopted once it returns.
 func TestAFolderMissingAdoptsNothing(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
@@ -351,7 +382,6 @@ func TestAFolderMissingAdoptsNothing(t *testing.T) {
 	if err := os.WriteFile(prekeyFile(b, orphan, ".agekey"), key, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	client.ForgetAdoption(t, b)
 	back := moveAside(t, b.Path("prekeys"))
 	if _, err := b.Receive(t.Context()); err == nil || !strings.Contains(err.Error(), b.Path("prekeys")) {
 		t.Fatalf("recv with prekeys/ moved aside: %v", err)
@@ -422,4 +452,62 @@ func TestAKeyMadeSinceIsNotAdopted(t *testing.T) {
 	if got := client.AdoptedKeys(t, x); len(got) != 0 {
 		t.Fatalf("adopted %v", got)
 	}
+}
+
+// A rotating-keys-dir not mounted when the state file is lost is made again empty,
+// so the restore adopts nothing and owes no floor; once the volume is back, its
+// keys are adopted at the next command, and that adoption owes the floor: a copy
+// the server kept of a message the lost state delivered, which those keys open,
+// is refused as stale with its signer (PROTOCOL.md §12.3 check 8).
+func TestAKeyOnAVolumeMountedLateOwesTheFloor(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	e := newEnv(t)
+	a, b := e.mailbox(), e.mailbox()
+	sent := forge.Capture(e.srv, http.MethodPost, "/v1/"+b.Address().String()+"/messages")
+	send(t, a, b, "delivered before the state file was lost")
+	e.srv.SetMiddle(nil)
+	if res := receive(t, b); len(res.Delivered) != 1 {
+		t.Fatalf("the first delivery: %+v", res)
+	}
+	keys := b.Path("prekeys")
+	if err := os.Remove(filepath.Join(b.Dir(), "state")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(keys, keys+".unmounted"); err != nil {
+		t.Fatal(err)
+	}
+	x, err := client.Open(b.Dir(), e.opts())
+	if err != nil {
+		t.Fatal(err)
+	}
+	landAll(t, x)
+	e.clock.Add(2 * time.Second)
+	if res, err := x.Receive(ctx); err != nil || res.Renewed == nil {
+		t.Fatalf("the restore with its keys' volume not mounted: %+v, %v", res, err)
+	}
+	if got := client.AdoptedKeys(t, x); len(got) != 0 || has(x, "seen-floor") || has(x, "floor-owed") {
+		t.Fatalf("adopted %v with no key there, and holds a floor", got)
+	}
+	old, err := filepath.Glob(filepath.Join(keys+".unmounted", "*.agekey"))
+	if err != nil || len(old) == 0 {
+		t.Fatalf("the volume's keys: %v, %v", old, err)
+	}
+	for _, name := range old {
+		data, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(keys, filepath.Base(name)), data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	e.clock.Add(2 * time.Second)
+	id := sha256.Sum256(*sent)
+	e.srv.Inject(x.Address(), hex.EncodeToString(id[:]), *sent) // the server kept its copy
+	res, err := x.Receive(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	refusedBeforeAdoption(t, x, res, a, 1)
 }
