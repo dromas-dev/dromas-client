@@ -150,8 +150,11 @@ type Options struct {
 	KeepIdentity bool
 	// AddToAgent has a key file that a passphrase unlocked added to Agent, as
 	// ssh_config's AddKeysToAgent does, for AgentLifetime if that is not zero.
+	// An agent that does not take it fails nothing, as in ssh: NotAdded, if
+	// not nil, is told why, and the command goes on with the key.
 	AddToAgent    bool
 	AgentLifetime time.Duration
+	NotAdded      func(error)
 	// UnsafeInboxPermissions reads inbox-dir and held/ where others can write
 	// them, and each file they keep where others can reach it or another user
 	// owns it, which the mailbox otherwise refuses ([Mailbox.judgeKept]):
@@ -285,7 +288,7 @@ func newMailbox(dir string, opt Options) (*Mailbox, error) {
 	if d := opt.CertificateLifetime; d != 0 && (d <= protocol.TTL+protocol.MaxSkew || d > protocol.MaxCertificateLifetime || d%time.Second != 0) {
 		return nil, fmt.Errorf("%v is no certificate lifetime: %s", d, CertificateLifetimeRule)
 	}
-	b := &Mailbox{dir: dir, layout: opt.Layout.resolved(dir), configFile: opt.ConfigFile, policySet: opt.Policy, prekeyLife: opt.PrekeyLifetime, certLife: opt.CertificateLifetime, unsafeInbox: opt.UnsafeInboxPermissions, unsafeState: opt.UnsafeStatePermissions, base: strings.TrimRight(opt.Base, "/"), http: opt.HTTPClient, now: opt.Now, identityType: opt.IdentityType, workingKey: opt.WorkingKey, revocationFile: opt.RevocationFile, waiting: opt.Waiting, slot: make(chan struct{}, 1), unlock: unlocking{agent: opt.Agent, passphrase: opt.Passphrase, keep: opt.KeepIdentity, add: opt.AddToAgent, lifetime: opt.AgentLifetime}}
+	b := &Mailbox{dir: dir, layout: opt.Layout.resolved(dir), configFile: opt.ConfigFile, policySet: opt.Policy, prekeyLife: opt.PrekeyLifetime, certLife: opt.CertificateLifetime, unsafeInbox: opt.UnsafeInboxPermissions, unsafeState: opt.UnsafeStatePermissions, base: strings.TrimRight(opt.Base, "/"), http: opt.HTTPClient, now: opt.Now, identityType: opt.IdentityType, workingKey: opt.WorkingKey, revocationFile: opt.RevocationFile, waiting: opt.Waiting, slot: make(chan struct{}, 1), unlock: unlocking{agent: opt.Agent, passphrase: opt.Passphrase, keep: opt.KeepIdentity, add: opt.AddToAgent, lifetime: opt.AgentLifetime, notAdded: opt.NotAdded}}
 	if b.base == "" {
 		b.base = DefaultBase
 	}

@@ -7,6 +7,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"io"
 	"io/fs"
 	"path/filepath"
 	"reflect"
@@ -172,5 +173,35 @@ func TestAFinishedMailboxSignsNothing(t *testing.T) {
 			t.Errorf("%s on a finished mailbox: %v", name, err)
 		}
 		finished = nil
+	}
+}
+
+// refuses is a key that signs nothing, as an agent that no longer holds it.
+type refuses struct{ ssh.Signer }
+
+func (refuses) Sign(io.Reader, []byte) (*ssh.Signature, error) {
+	return nil, errors.New("agent: failed to sign challenge")
+}
+
+// A key an agent lends signs as the key does, and a signature the agent does
+// not make fails with the error its Unlock gives for it.
+func TestALentKeyFailsWithItsUnlocksError(t *testing.T) {
+	t.Parallel()
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, err := ssh.NewSignerFromKey(priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	locked := errors.New("locked")
+	failed := func(error) error { return locked }
+	if _, err := Lent(key, failed).Sign(rand.Reader, []byte("x")); err != nil {
+		t.Errorf("a lent key: %v", err)
+	}
+	id := NewIdentity(key.PublicKey(), func() (ssh.Signer, func(), error) { return Lent(refuses{key}, failed), func() {}, nil }, func() error { return nil })
+	if _, err := id.Revocation(protocol.Address{}); !errors.Is(err, locked) {
+		t.Errorf("a lent key its agent does not sign with: %v", err)
 	}
 }

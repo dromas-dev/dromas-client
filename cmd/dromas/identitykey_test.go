@@ -500,3 +500,60 @@ func TestRecvSaysARenewalTheKeyWasLockedForAtEachRecv(t *testing.T) {
 		}
 	}
 }
+
+// An askpass program that fails, or prints nothing, gives no passphrase, as
+// ssh reads it: the command fails as identity_locked.
+func TestAnAskpassProgramThatGivesNothingLeavesTheIdentityLocked(t *testing.T) {
+	cleanEnv(t)
+	srv := fakeserver.New(t, time.Now)
+	dir := t.TempDir()
+	t.Setenv("DROMAS_CONFIG", configFor(t, dir))
+	t.Setenv("DROMAS_SERVER_URL", srv.URL)
+	if err := do(t.Context(), "init", nil, nil, io.Discard, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	encryptIdentity(t, filepath.Join(dir, "identity"), "correct horse")
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(askpassEnv, "")
+	if l := failed(t, do(t.Context(), "prekey renew", []string{"--askpass", exe}, nil, io.Discard, io.Discard)); l["code"] != client.IdentityLocked {
+		t.Errorf("an askpass program that prints nothing: %v", l)
+	}
+	if runtime.GOOS == "windows" {
+		return // no false(1)
+	}
+	if l := failed(t, do(t.Context(), "prekey renew", []string{"--askpass", "false"}, nil, io.Discard, io.Discard)); l["code"] != client.IdentityLocked {
+		t.Errorf("an askpass program that fails: %v", l)
+	}
+}
+
+// add-keys-to-agent with no agent at the socket fails nothing, as ssh's
+// AddKeysToAgent: the command signs with the key the passphrase unlocked, and
+// an "agent_not_added" line says the agent did not take it.
+func TestAnAgentNotThereFailsNoCommandThatAddsTheKey(t *testing.T) {
+	cleanEnv(t)
+	srv := fakeserver.New(t, time.Now)
+	dir := t.TempDir()
+	t.Setenv("DROMAS_CONFIG", configFor(t, dir))
+	t.Setenv("DROMAS_SERVER_URL", srv.URL)
+	socket := filepath.Join(shortDir(t), "s")
+	t.Setenv("DROMAS_AGENT", socket)
+	if err := do(t.Context(), "init", nil, nil, io.Discard, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	encryptIdentity(t, filepath.Join(dir, "identity"), "correct horse")
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(askpassEnv, "correct horse")
+	var out bytes.Buffer
+	if err := do(t.Context(), "prekey renew", []string{"--askpass", exe, "--add-keys-to-agent", "yes"}, nil, &out, io.Discard); err != nil {
+		t.Fatalf("a renewal whose agent is not there: %v", err)
+	}
+	if ls := printed(t, out.String()); typesOf(ls) != "agent_not_added prekey" || ls[0]["socket"] != socket {
+		t.Errorf("printed %s", out.String())
+	}
+}

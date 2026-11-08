@@ -104,6 +104,14 @@ func (b *Mailbox) RemovePrekey(ctx context.Context, n uint64) error {
 	return err
 }
 
+// SetAgentPatience shortens how long each request to the agent may take, for
+// one test.
+func SetAgentPatience(t *testing.T, d time.Duration) {
+	old := agentPatience
+	agentPatience = d
+	t.Cleanup(func() { agentPatience = old })
+}
+
 // SetLockPatience shortens how long a command waits for the mailbox's lock, for
 // one test.
 func SetLockPatience(t *testing.T, d time.Duration) {

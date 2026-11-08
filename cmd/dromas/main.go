@@ -172,6 +172,9 @@ func (e *cli) environment(c *cobra.Command) error {
 	e.opt.Policy, e.opt.PrekeyLifetime, e.opt.CertificateLifetime = cfg.policy, cfg.lifetime, cfg.certLifetime
 	e.opt.Agent, e.opt.Passphrase = cfg.agent, e.passphrase
 	e.opt.AddToAgent, e.opt.AgentLifetime = cfg.addKeys, cfg.agentLife
+	e.opt.NotAdded = func(err error) {
+		_ = e.out(line("agent_not_added", "socket", cfg.agent, "detail", err.Error()))
+	}
 	e.opt.UnsafeInboxPermissions, e.opt.UnsafeStatePermissions = cfg.unsafeInbox, cfg.unsafeState
 	// A passphrase given once serves the whole process: recv --wait or --follow
 	// renews with it for as long as it runs.

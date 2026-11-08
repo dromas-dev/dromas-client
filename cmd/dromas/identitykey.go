@@ -322,17 +322,21 @@ func closeTerminal(in, out *os.File) {
 
 // askpass runs program with prompt as its one argument, as ssh runs
 // SSH_ASKPASS, and reads the passphrase from its stdout, without its final line
-// break. What it writes to stderr is its own, and is not printed.
+// break. What it writes to stderr is its own, and is not printed. A program
+// that fails, or prints nothing, gives no passphrase, as ssh reads it.
 func askpass(program, prompt string) ([]byte, error) {
 	var out bytes.Buffer
 	cmd := exec.Command(program, prompt) //nolint:gosec // the askpass program its owner set
 	cmd.Stdout = &out
 	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("the askpass program %s gave no passphrase: %w", program, err)
+		return nil, fmt.Errorf("%w: the askpass program %s ended with %v", client.ErrNoPassphrase, program, err)
 	}
 	pass := out.Bytes()
 	pass = bytes.TrimSuffix(pass, []byte("\n"))
 	pass = bytes.TrimSuffix(pass, []byte("\r"))
+	if len(pass) == 0 {
+		return nil, fmt.Errorf("%w: the askpass program %s printed none", client.ErrNoPassphrase, program)
+	}
 	return pass, nil
 }
 

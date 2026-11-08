@@ -334,3 +334,140 @@ func TestARenewalTheKeyWasLockedForIsTriedAtTheNextReceive(t *testing.T) {
 		t.Errorf("receive with the key, a minute after a renewal it was locked for: %v; its renewal: %v; serial %d, %d before", err, res.RenewErr, numberOf(t, b), before)
 	}
 }
+
+// serveAgent serves a on a socket of its own, as ssh-agent does, and returns
+// the socket.
+func serveAgent(t *testing.T, a agent.Agent) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "dra")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	socket := filepath.Join(dir, "s")
+	l, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = l.Close() })
+	go func() {
+		for {
+			c, err := l.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				_ = agent.ServeAgent(a, c)
+				_ = c.Close()
+			}()
+		}
+	}()
+	return socket
+}
+
+// signsNot is an agent that lists its keys and, before it signs, runs before:
+// one that drops the key, or one that stops answering.
+type signsNot struct {
+	agent.Agent
+	before func()
+}
+
+func (a signsNot) Sign(key ssh.PublicKey, data []byte) (*ssh.Signature, error) {
+	a.before()
+	return a.Agent.Sign(key, data)
+}
+
+// An agent that lists the identity's key and drops it before it signs, as one
+// whose key's lifetime ends between the two, leaves the identity locked: the
+// signature fails as identity_locked, and nothing is signed.
+func TestAnAgentThatDropsTheKeyBeforeItSignsIsLocked(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	b := e.mailbox()
+	before := numberOf(t, b)
+	kr := agent.NewKeyring()
+	if err := kr.Add(agent.AddedKey{PrivateKey: identityPrivate(t, b)}); err != nil {
+		t.Fatal(err)
+	}
+	encrypt(t, b, "correct horse")
+	opt := e.opts()
+	opt.Agent = serveAgent(t, signsNot{kr, func() { _ = kr.RemoveAll() }})
+	_, err := reopen(t, b, opt).Rekey(t.Context())
+	var locked *client.IdentityLockedError
+	if !errors.As(err, &locked) || locked.Agent != opt.Agent {
+		t.Errorf("a renewal whose agent dropped the key it listed: %v", err)
+	}
+	if numberOf(t, b) != before {
+		t.Errorf("a renewal with the key dropped renewed: %d, %d before", numberOf(t, b), before)
+	}
+}
+
+// An agent that does not answer within its patience, a hardware key's touch
+// long, leaves the identity locked, with words that say the agent did not
+// answer: one that lists nothing, as a stopped ssh-agent, and one that stops
+// answering before it signs.
+func TestAnAgentThatDoesNotAnswerIsLockedPastItsPatience(t *testing.T) {
+	e := newEnv(t)
+	b := e.mailbox()
+	kr := agent.NewKeyring()
+	if err := kr.Add(agent.AddedKey{PrivateKey: identityPrivate(t, b)}); err != nil {
+		t.Fatal(err)
+	}
+	encrypt(t, b, "correct horse")
+	client.SetAgentPatience(t, 200*time.Millisecond)
+	stuck := make(chan struct{})
+	defer close(stuck)
+	silent := serveAgent(t, signsNot{kr, func() { <-stuck }})
+	listsNothing := filepath.Join(filepath.Dir(silent), "q")
+	l, err := net.Listen("unix", listsNothing)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = l.Close() })
+	go func() {
+		for {
+			c, err := l.Accept()
+			if err != nil {
+				return
+			}
+			t.Cleanup(func() { _ = c.Close() }) // accepted, and never answered
+		}
+	}()
+	for name, socket := range map[string]string{"an agent that lists nothing": listsNothing, "an agent that does not sign": silent} {
+		opt := e.opts()
+		opt.Agent = socket
+		done := make(chan error, 1)
+		go func() { _, err := reopen(t, b, opt).Rekey(t.Context()); done <- err }()
+		select {
+		case err := <-done:
+			var locked *client.IdentityLockedError
+			if !errors.As(err, &locked) || !strings.Contains(locked.Reason, "did not answer") {
+				t.Errorf("%s: %v", name, err)
+			}
+		case <-time.After(30 * time.Second):
+			t.Fatalf("%s: a renewal still waits on its agent", name)
+		}
+	}
+}
+
+// Under AddToAgent, an agent that does not take the key a passphrase unlocked
+// fails nothing, as ssh's AddKeysToAgent: the command signs with the key, and
+// NotAdded is told.
+func TestAnAgentThatDoesNotTakeTheKeyFailsNothing(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	b := e.mailbox()
+	before := numberOf(t, b)
+	encrypt(t, b, "correct horse")
+	var told []error
+	opt := e.opts()
+	opt.Agent, opt.AddToAgent = filepath.Join(t.TempDir(), "none"), true
+	opt.Passphrase = func(string) ([]byte, error) { return []byte("correct horse"), nil }
+	opt.NotAdded = func(err error) { told = append(told, err) }
+	if _, err := reopen(t, b, opt).Rekey(t.Context()); err != nil {
+		t.Errorf("a renewal whose agent is not there: %v", err)
+	}
+	if len(told) != 1 || numberOf(t, b) == before {
+		t.Errorf("told %v; serial %d, %d before", told, numberOf(t, b), before)
+	}
+}
