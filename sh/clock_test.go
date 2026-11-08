@@ -254,3 +254,18 @@ func TestScriptRefusesAReplayAfterItsStateIsLost(t *testing.T) {
 		t.Errorf("a message at the floor's edge: %v", d)
 	}
 }
+
+// A sender refuses a prekey statement that ends further ahead of its clock
+// than any server takes, 8 days and an hour, as the Go client does
+// (TestASenderRefusesAPrekeyThatEndsFurtherAheadThanAnyServerTakes): a stolen
+// working key's statement lasts no longer than an honest one (PROTOCOL.md §6).
+// Two clocks: the recipient's statement is honest, made 8 days ahead of its
+// own clock, and the sender's clock reads more than an hour behind it.
+func TestScriptRefusesAPrekeyThatEndsFurtherAheadThanAnyServerTakes(t *testing.T) {
+	w := newWorld(t)
+	p, q := w.mailbox(), w.mailbox()
+	behind := at{p, -protocol.MaxSkew - 10*time.Minute}
+	if r := behind.sh("printf 'to a prekey ending too far ahead' | dr_send " + q.addr.String()); r.rc == 0 || !strings.Contains(r.err, "further ahead than any server takes") || w.posts(q.addr) != 0 {
+		t.Errorf("a send from a clock 70 minutes behind its recipient's: %v, %d posts", r, w.posts(q.addr))
+	}
+}

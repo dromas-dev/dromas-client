@@ -24,9 +24,9 @@
 # programs. And certificates: its own mailbox's identity signs its prekey statements, passes and messages (PROTOCOL.md §5),
 # and it makes no working key. It reads and writes to mailboxes that sign either way. Needs bash >= 4, age >= 1.3 (the first with post-quantum keys, the one prekey type; Ubuntu to 26.04 and Debian 13
 # ship older, and go install filippo.io/age/cmd/...@v1.3.2 is current), OpenSSH >= 9.1 built with OpenSSL (the first to take a
-# certificate's validity and a time to verify at in UTC; without OpenSSL it reads no P-256 key, which every client verifies), curl >= 7.84 (--fail-with-body, and -w with %header),
+# certificate's validity and a time to verify at in UTC; without OpenSSL it reads no P-256 key, which every client verifies), curl >= 8.4.0 (the first whose --max-filesize stops a body of unknown size, which dr_one's fetch relies on),
 # jq >= 1.7.1 (1.7.0 can abort on a number a sender writes, CVE-2023-50246; Ubuntu 24.04's fixed jq prints jq-1.7),
-# iconv, and coreutils (sha256sum, sha384sum, base64, fold, od, sync). Dates go through jq, never date -d, and base64 is never -w0.
+# iconv, find, and coreutils (sha256sum, sha384sum, base64, fold, od, sync). Dates go through jq, never date -d, and base64 is never -w0.
 
 # recipe: setup
 set -o pipefail; umask 077
@@ -169,7 +169,7 @@ dr_keeppass(){ # → the pass in $DR/pass.new, and its server, kept as this mail
 dr_lock(){ # <command> [args] → runs that dr_ command with $DR/lock, the mailbox's lock, held, once the mailbox's directories and identity files are made (dr_dirs, dr_identity), as the Go client's Open makes them: so a mailbox restored from its identity alone runs. Every command that writes the mailbox runs so, from start to end, so one runs at a time and none reads a file another is writing. While another holds it, says so once and waits up to $DR_LOCK_WAIT seconds. If the command dies, the shell's EXIT trap removes it; a kill -9 leaves it behind
   local end=$((SECONDS + DR_LOCK_WAIT)) said= me=$DR outer=${DR_HELD-} trap rc
   [ -s "$DR/identity" ] || { dr_refuse "no mailbox in $DR: run init first"; return 1; }
-  dr_ownmailbox || return 1
+  dr_ownmailbox && dr_ours || return 1
   until mkdir "$me/lock" 2> /dev/null; do
     [ -n "$said" ] || { jq -cn '{type:"waiting", for:"lock", detail:"waiting for this mailbox'"'"'s lock: another command of this mailbox is running, and a mailbox'"'"'s commands write its files one at a time"}' >&2; said=1; }
     [ "$SECONDS" -lt "$end" ] || { dr_refuse "another command of this mailbox held its lock, $me/lock, for as long as a command waits for it. If none is running, one that crashed left it behind: remove it"; return 1; }
@@ -178,6 +178,12 @@ dr_lock(){ # <command> [args] → runs that dr_ command with $DR/lock, the mailb
   trap=$(trap -p EXIT); DR_HELD=$me; trap 'rmdir "$DR_HELD/lock" 2> /dev/null' EXIT
   dr_dirs && dr_identity && "$@"; rc=$?
   rmdir "$me/lock"; DR_HELD=$outer; eval "${trap:-trap - EXIT}"; return $rc      # and the caller's own EXIT trap back
+}
+dr_ours(){ # [uid] → 0 only where $DR is this user's alone, as the Go client holds a mailbox's files and kept directories (checkPrivateFileAs, checkKeptDirAs in client/keyfile_unix.go): $DR and every directory in it owned by this user (or the uid given) or root, and writable by neither group nor others, and every other file in it owned so, with no permission for group or others but on identity.pub and identity.doc, which are public. Whoever can write there could rewrite seen and seen-floor, after which this mailbox takes a replay. One find walk, by -user and -perm, which POSIX defines, where stat -c is GNU's alone. A walk find could not finish is refused too
+  local me=${1:-$UID} bad
+  bad=$(find -H "$DR" \( \( ! -user "$me" ! -user 0 \) -o \( -type d \( -perm -020 -o -perm -002 \) \) -o \( ! -type d ! -name identity.pub ! -name identity.doc \( -perm -040 -o -perm -020 -o -perm -010 -o -perm -004 -o -perm -002 -o -perm -001 \) \) \) -print 2> /dev/null) ||
+    dr_refuse "$DR could not be read whole, to check that it is this user's alone" || return 1
+  [ -z "$bad" ] || dr_refuse "$DR, or a directory or file in it, is owned by a user other than this one or root, or others can write a directory in it or have any permission on a private file in it, and whoever can write there could make this mailbox take a replay: if every file in it is yours, run chmod -R go-rwx on it, and otherwise make a mailbox somewhere else"
 }
 dr_ownmailbox(){ [ ! -e "$DR/state" ] || dr_refuse "$DR holds a state file: it is a mailbox of the Go client, which this script never runs, since the two keep their records apart and would undo each other's: set DR_HOME to a directory of this script's own"; }      # whether $DR is a mailbox of this script's, by the one file only the Go client makes
 dr_held(){ [ "${DR_HELD-}" = "$DR" ]; }      # whether this shell holds this mailbox's lock: a command another command runs works under its caller's
@@ -406,6 +412,7 @@ dr_resolve(){ # <address> [the mailbox dr_lookup read] → prints "<serial> <age
     3) dr_refuse "the revocation of certificates kept for $B does not verify"; return 1 ;;
   esac
   [ "$na" -gt "$(dr_now)" ] || dr_refuse "$B's prekey has expired: its owner must publish a new one" || return 1
+  [ "$na" -le $(($(dr_now) + 8*86400 + 3600)) ] || dr_refuse "$B's prekey ends further ahead than any server takes, 8 days and an hour" || return 1      # a statement no server takes, so a stolen working key's statement lasts no longer than an honest one (PROTOCOL.md §6)
   h=$(sha256sum < "$DR/peer.txt" | cut -c1-64) && dr_hex "$h" || return 1      # the statement's bytes as served, never its signature, which another encoding of an ECDSA signature changes (PROTOCOL.md §11.10)
   dr_meet "$B" "$f" && dr_putline "$d/serial" "$s" && dr_putline "$d/rank" "$c" && dr_put "$DR/peer.txt" "$d/prekey.txt" && dr_put "$DR/peer.sig" "$d/prekey.sig" || return 1      # recorded only after every check passed
   echo "$s $k $c $h"
