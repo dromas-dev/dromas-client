@@ -1,18 +1,31 @@
 package client
 
 import (
+	"bytes"
+	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
 	"io"
 	"io/fs"
+	"math/big"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
+	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
+
+	"golang.org/x/crypto/cryptobyte"
 )
 
 // ticketServer is a TLS server with fixed ticket keys, so two of them with the
@@ -313,5 +326,308 @@ func TestOnlyADefaultClientWithADirectoryKeepsATicket(t *testing.T) {
 	}
 	if given.http.Transport.(*transport).ticketCache() != nil {
 		t.Error("a client given to a mailbox keeps a ticket")
+	}
+}
+
+// ticketClock is a clock a test moves, which connections read as they run.
+type ticketClock struct {
+	mu sync.Mutex
+	t  time.Time
+}
+
+func (c *ticketClock) now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.t
+}
+
+func (c *ticketClock) set(t time.Time) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.t = t
+}
+
+// aCertificate is a self-signed P-256 certificate for 127.0.0.1, with its key.
+func aCertificate(t *testing.T) tls.Certificate {
+	t.Helper()
+	k, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tpl := &x509.Certificate{SerialNumber: big.NewInt(1), NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour),
+		IPAddresses: []net.IP{net.IPv4(127, 0, 0, 1)}}
+	der, err := x509.CreateCertificate(rand.Reader, tpl, tpl, &k.PublicKey, k)
+	if err != nil {
+		t.Fatal(err)
+	}
+	leaf, err := x509.ParseCertificate(der)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: k, Leaf: leaf}
+}
+
+// tlsServer is a TLS server on 127.0.0.1 with cfg, which answers every request
+// with name and counts it.
+func tlsServer(t *testing.T, cfg *tls.Config, name string) (*httptest.Server, *atomic.Int64) {
+	t.Helper()
+	var n atomic.Int64
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		n.Add(1)
+		_, _ = io.WriteString(w, name)
+	}))
+	srv.TLS = cfg
+	srv.StartTLS()
+	t.Cleanup(srv.Close)
+	return srv, &n
+}
+
+// aProcessAt is a new process of a mailbox whose server is base, at clk, its
+// default client trusting pool alone, and its connections dialled to addr where
+// addr is not empty: a party on the network path.
+func aProcessAt(t *testing.T, dir, base string, pool *x509.CertPool, clk *ticketClock, addr string) *Mailbox {
+	t.Helper()
+	b, err := newMailbox(dir, Options{Base: base, Now: clk.now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	Trust(b, pool)
+	if addr != "" {
+		(*b.http.Transport.(*transport).current()).(*http.Transport).DialContext = func(ctx context.Context, network, _ string) (net.Conn, error) {
+			return (&net.Dialer{}).DialContext(ctx, network, addr)
+		}
+	}
+	t.Cleanup(b.http.CloseIdleConnections)
+	return b
+}
+
+// call makes one new connection from b to its server: the answer's body, and
+// whether the connection resumed.
+func call(b *Mailbox) (string, bool, error) {
+	resp, err := b.http.Get(b.base)
+	if err != nil {
+		return "", false, err
+	}
+	body, _ := io.ReadAll(resp.Body) // the ticket comes before the answer
+	_ = resp.Body.Close()
+	b.http.CloseIdleConnections()
+	return string(body), resp.TLS.DidResume, nil
+}
+
+// keptFull is the time of the last full handshake the ticket file in dir keeps,
+// or zero.
+func keptFull(t *testing.T, dir, base string) time.Time {
+	t.Helper()
+	c := newTicketCache(tls.NewLRUClientSessionCache(0), ticketPath(dir), base, time.Now)
+	if c.read() == nil {
+		return time.Time{}
+	}
+	return c.lastFull()
+}
+
+// serverSide is the session a server holding the ticket file's resumption
+// secret resumes: the client's SessionState with its secret, read field by field
+// from crypto/tls's encoding (crypto/tls/ticket.go), as a party who reads the
+// file builds it.
+func serverSide(t *testing.T, file string) *tls.SessionState {
+	t.Helper()
+	raw, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatalf("no ticket kept: %v", err)
+	}
+	s := cryptobyte.String(raw)
+	var ver, suite uint16
+	var typ uint8
+	var created uint64
+	var secret []byte
+	if !s.ReadUint16(&ver) || !s.ReadUint8(&typ) || !s.ReadUint16(&suite) || !s.ReadUint64(&created) || !s.ReadUint8LengthPrefixed((*cryptobyte.String)(&secret)) {
+		t.Fatal("the ticket file is not crypto/tls's encoding")
+	}
+	var b cryptobyte.Builder
+	b.AddUint16(ver)
+	b.AddUint8(1) // a server's
+	b.AddUint16(suite)
+	b.AddUint64(created)
+	b.AddUint8LengthPrefixed(func(b *cryptobyte.Builder) { b.AddBytes(secret) })
+	b.AddUint24(0) // no extra
+	b.AddUint8(0)  // no extended master secret
+	b.AddUint8(0)  // no early data
+	b.AddUint24(0) // no client certificates
+	b.AddUint24(0) // no chains
+	state, err := tls.ParseSessionState(b.BytesOrPanic())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return state
+}
+
+// A party that reads tls-ticket and is on the network path resumes as the
+// mailbox's server, with a certificate the client does not trust, and the
+// client keeps the tickets it issues. The client resumes them only until
+// resumeWithin after the last full handshake: a resumed connection never
+// moves that time, so the bound ends the party's chain of tickets. The
+// controls: with no ticket, the party's certificate is refused, and its chain
+// still resumes just inside the bound.
+func TestTheBoundEndsAChainOfTicketsAnImpostorIssued(t *testing.T) {
+	t.Parallel()
+	honestCert := aCertificate(t)
+	honest, _ := tlsServer(t, &tls.Config{Certificates: []tls.Certificate{honestCert}}, "honest")
+	pool := x509.NewCertPool()
+	pool.AddCert(honestCert.Leaf)
+	t0 := time.Now().Truncate(time.Second)
+	clk := &ticketClock{t: t0}
+	dir := ticketDir(t)
+	if _, resumed, err := call(aProcessAt(t, dir, honest.URL, pool, clk, "")); err != nil || resumed {
+		t.Fatalf("the first call: resumed %v, %v", resumed, err)
+	}
+	if got := keptFull(t, dir, honest.URL); !got.Equal(t0) {
+		t.Fatalf("the full handshake kept %v, want %v", got, t0)
+	}
+
+	stolen := serverSide(t, ticketPath(dir)) // a read: nothing is written
+	impostorCert := aCertificate(t)
+	keys := [][32]byte{{9}}
+	first := &tls.Config{Certificates: []tls.Certificate{impostorCert},
+		UnwrapSession: func([]byte, tls.ConnectionState) (*tls.SessionState, error) { return stolen, nil }}
+	first.SetSessionTicketKeys(keys)
+	impostor, _ := tlsServer(t, first, "impostor")
+	addr := impostor.Listener.Addr().String()
+
+	if _, _, err := call(aProcessAt(t, ticketDir(t), honest.URL, pool, clk, addr)); err == nil {
+		t.Fatal("control: a full handshake took the impostor's certificate")
+	}
+	clk.set(t0.Add(time.Hour))
+	if body, resumed, err := call(aProcessAt(t, dir, honest.URL, pool, clk, addr)); err != nil || !resumed || body != "impostor" {
+		t.Fatalf("control: the read ticket did not resume to the impostor: %q, resumed %v, %v", body, resumed, err)
+	}
+
+	// A second party with only the first one's ticket keys resumes the tickets
+	// it issued, which the client kept, until the bound.
+	second := &tls.Config{Certificates: []tls.Certificate{impostorCert}}
+	second.SetSessionTicketKeys(keys)
+	chain, reached := tlsServer(t, second, "chain")
+	addr = chain.Listener.Addr().String()
+	clk.set(t0.Add(resumeWithin - time.Minute))
+	if body, resumed, err := call(aProcessAt(t, dir, honest.URL, pool, clk, addr)); err != nil || !resumed || body != "chain" {
+		t.Fatalf("control: inside the bound the impostor's ticket did not resume: %q, resumed %v, %v", body, resumed, err)
+	}
+	if got := keptFull(t, dir, honest.URL); !got.Equal(t0) {
+		t.Fatalf("the impostor's resumptions moved the full handshake's time to %v, want %v", got, t0)
+	}
+	clk.set(t0.Add(resumeWithin + time.Second))
+	before := reached.Load()
+	if body, resumed, err := call(aProcessAt(t, dir, honest.URL, pool, clk, addr)); err == nil {
+		t.Errorf("past the bound the impostor's chain of tickets answered: %q, resumed %v", body, resumed)
+	}
+	if reached.Load() != before {
+		t.Error("past the bound a request reached the impostor")
+	}
+}
+
+// A resumed connection does not move the time of the last full handshake, in
+// the process that resumes or in the file: past the bound a session resumes
+// nowhere, and the full handshake that follows moves the time.
+func TestAResumptionDoesNotMoveTheFullHandshakesTime(t *testing.T) {
+	t.Parallel()
+	srv := ticketServer(t, 0)
+	pool := x509.NewCertPool()
+	pool.AddCert(srv.Certificate())
+	t0 := time.Now().Truncate(time.Second)
+	clk := &ticketClock{t: t0}
+	dir := ticketDir(t)
+	b := aProcessAt(t, dir, srv.URL, pool, clk, "")
+	if _, resumed, err := call(b); err != nil || resumed {
+		t.Fatalf("the first call: resumed %v, %v", resumed, err)
+	}
+	clk.set(t0.Add(resumeWithin - time.Hour))
+	if _, resumed, err := call(aProcessAt(t, dir, srv.URL, pool, clk, "")); err != nil || !resumed {
+		t.Fatalf("a new process inside the bound: resumed %v, %v", resumed, err)
+	}
+	if _, resumed, err := call(b); err != nil || !resumed {
+		t.Fatalf("the first process inside the bound: resumed %v, %v", resumed, err)
+	}
+	if got := keptFull(t, dir, srv.URL); !got.Equal(t0) {
+		t.Fatalf("a resumption moved the kept time to %v, want %v", got, t0)
+	}
+	past := t0.Add(resumeWithin + time.Second)
+	clk.set(past)
+	if _, resumed, err := call(b); err != nil || resumed {
+		t.Fatalf("the first process past the bound: resumed %v, %v", resumed, err)
+	}
+	if _, resumed, err := call(aProcessAt(t, dir, srv.URL, pool, clk, "")); err != nil || !resumed {
+		t.Fatalf("a new process after the full handshake: resumed %v, %v", resumed, err)
+	}
+	if got := keptFull(t, dir, srv.URL); !got.Equal(past) {
+		t.Errorf("the full handshake past the bound kept %v, want %v", got, past)
+	}
+}
+
+// A full handshake that does not complete moves no time: a party holding the
+// server's certificate and not its key gets past the certificate's chain, and
+// its CertificateVerify is refused.
+func TestAFullHandshakeThatDoesNotCompleteMovesNoTime(t *testing.T) {
+	t.Parallel()
+	honestCert := aCertificate(t)
+	honest, _ := tlsServer(t, &tls.Config{Certificates: []tls.Certificate{honestCert}}, "honest")
+	pool := x509.NewCertPool()
+	pool.AddCert(honestCert.Leaf)
+	t0 := time.Now().Truncate(time.Second)
+	clk := &ticketClock{t: t0}
+	dir := ticketDir(t)
+	if _, resumed, err := call(aProcessAt(t, dir, honest.URL, pool, clk, "")); err != nil || resumed {
+		t.Fatalf("the first call: resumed %v, %v", resumed, err)
+	}
+	other, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	copied := tls.Certificate{Certificate: honestCert.Certificate, PrivateKey: other}
+	impostor, _ := tlsServer(t, &tls.Config{Certificates: []tls.Certificate{copied}}, "impostor")
+	clk.set(t0.Add(resumeWithin - time.Hour))
+	b := aProcessAt(t, dir, honest.URL, pool, clk, impostor.Listener.Addr().String())
+	if _, _, err := call(b); err == nil || !strings.Contains(err.Error(), "signature") {
+		t.Fatalf("a party without the server's key: %v; want its signature refused", err)
+	}
+	if got := b.http.Transport.(*transport).tickets.lastFull(); !got.Equal(t0) {
+		t.Fatalf("a full handshake that did not complete moved the time to %v, want %v", got, t0)
+	}
+	clk.set(t0.Add(resumeWithin + time.Second))
+	if _, resumed, err := call(aProcessAt(t, dir, honest.URL, pool, clk, "")); err != nil || resumed {
+		t.Errorf("past the bound of the last full handshake that completed: resumed %v, %v", resumed, err)
+	}
+}
+
+// A ticket file that keeps no time of a full handshake gives no session, and the
+// next full handshake writes one.
+func TestATicketThatKeepsNoTimeGivesNoSession(t *testing.T) {
+	t.Parallel()
+	srv := ticketServer(t, 0)
+	pool := x509.NewCertPool()
+	pool.AddCert(srv.Certificate())
+	clk := &ticketClock{t: time.Now().Truncate(time.Second)}
+	dir := ticketDir(t)
+	if _, _, err := call(aProcessAt(t, dir, srv.URL, pool, clk, "")); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(ticketPath(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := tls.ParseSessionState(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state.Extra = slices.DeleteFunc(state.Extra, func(e []byte) bool { return bytes.HasPrefix(e, []byte(extraFull)) })
+	if raw, err = state.Bytes(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(ticketPath(dir), raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, resumed, err := call(aProcessAt(t, dir, srv.URL, pool, clk, "")); err != nil || resumed {
+		t.Fatalf("a ticket that keeps no time: resumed %v, %v", resumed, err)
+	}
+	if _, resumed, err := call(aProcessAt(t, dir, srv.URL, pool, clk, "")); err != nil || !resumed {
+		t.Fatalf("the ticket the full handshake wrote: resumed %v, %v", resumed, err)
 	}
 }

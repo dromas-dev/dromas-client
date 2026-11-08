@@ -43,6 +43,9 @@ func CheckKeyFile(path string) error { return checkKeyFile(path) }
 // CheckPrivateFile is checkPrivateFile, for a test of what it refuses.
 func CheckPrivateFile(path string) error { return checkPrivateFile(path) }
 
+// CheckKeptDir is checkKeptDir, for a test of what it refuses.
+func CheckKeptDir(path string) error { return checkKeptDir(path) }
+
 // PrivateFiles are the base directory's files judged at every open, read from
 // baseFiles and publicFiles.
 func PrivateFiles() []string {
@@ -110,6 +113,13 @@ func SetAgentPatience(t *testing.T, d time.Duration) {
 	old := agentPatience
 	agentPatience = d
 	t.Cleanup(func() { agentPatience = old })
+}
+
+// PruneByNoReading runs prune under the mailbox's lock with no reading, taken's
+// zero value, for a test.
+func (b *Mailbox) PruneByNoReading(ctx context.Context) error {
+	_, err := locked(ctx, b, func() (struct{}, error) { return struct{}{}, b.prune(taken{}) })
+	return err
 }
 
 // SetLockPatience shortens how long a command waits for the mailbox's lock, for

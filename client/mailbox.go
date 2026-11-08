@@ -301,18 +301,22 @@ func newMailbox(dir string, opt Options) (*Mailbox, error) {
 	if b.identityType != "" && !slices.Contains(protocol.IdentityTypes(), b.identityType) {
 		return nil, fmt.Errorf("this client makes no identity key of type %q: %s", b.identityType, strings.Join(protocol.IdentityTypes(), " or "))
 	}
+	var tickets *ticketCache
 	if b.http == nil {
 		t := defaultTransport(&b.holding)
 		t.TLSClientConfig.RootCAs = opt.RootCAs
 		if dir != "" {
-			t.TLSClientConfig.ClientSessionCache = newTicketCache(t.TLSClientConfig.ClientSessionCache, b.path(ticketFile), b.base)
+			tickets = newTicketCache(t.TLSClientConfig.ClientSessionCache, b.path(ticketFile), b.base, func() time.Time { return b.now() })
+			t.TLSClientConfig.ClientSessionCache = tickets
 		}
 		b.http, b.stall = &http.Client{Transport: t}, true
 	} else {
 		c := *b.http
 		b.http = &c
 	}
-	b.http.Transport = newTransport(b.http.Transport)
+	tr := newTransport(b.http.Transport).(*transport)
+	tr.tickets = tickets
+	b.http.Transport = tr
 	b.http.CheckRedirect = followNone
 	if b.now == nil {
 		b.now = time.Now
@@ -338,9 +342,12 @@ func newMailbox(dir string, opt Options) (*Mailbox, error) {
 }
 
 // transport is every mailbox's: it holds each request's URL to checkServerURL,
-// whatever made the request, before anything is sent.
+// whatever made the request, before anything is sent. A default client's with
+// a ticket cache has each request tell the cache of its TLS handshakes
+// (ticketCache.trace).
 type transport struct {
-	next atomic.Pointer[http.RoundTripper]
+	next    atomic.Pointer[http.RoundTripper]
+	tickets *ticketCache
 }
 
 func newRoundTripper(rt http.RoundTripper) *transport {
@@ -352,6 +359,9 @@ func newRoundTripper(rt http.RoundTripper) *transport {
 func (t *transport) RoundTrip(r *http.Request) (*http.Response, error) {
 	if err := checkServerURL(r.URL.Scheme + "://" + r.URL.Host); err != nil {
 		return nil, err
+	}
+	if t.tickets != nil {
+		r = r.WithContext(t.tickets.trace(r.Context()))
 	}
 	return (*t.next.Load()).RoundTrip(r)
 }
