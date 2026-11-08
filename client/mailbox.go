@@ -1183,11 +1183,29 @@ func readAgeKeys(name string) ([]age.Identity, error) {
 	return ids, nil
 }
 
-// prekeyIdentities returns every retained prekey, to decrypt with once
-// oneNative has taken the file (decrypt).
+// prekeyIdentities returns every retained prekey that the state file names (namedKeys),
+// to decrypt with once oneNative has taken the file (decrypt). A file in prekeys/
+// that the state file names nowhere decrypts nothing until a command adopts it
+// (adoptKeys), whose adoption owes the replay floor: such a key may open a message
+// that a replay set now lost saw delivered (PROTOCOL.md §12.3 check 8). A file
+// whose name is no serial is never adopted, and one that appears after the
+// command adopted is adopted by the next command.
 func (b *Mailbox) prekeyIdentities() ([]age.Identity, error) {
 	names, err := matching(b.path("prekeys", "*.agekey"))
 	if err != nil {
+		return nil, err
+	}
+	if err := b.view(func(s store) error {
+		named, err := namedKeys(s)
+		if err != nil {
+			return err
+		}
+		names = slices.DeleteFunc(names, func(name string) bool {
+			n, ok := serialOfKeyFile(name)
+			return !ok || !named(n)
+		})
+		return nil
+	}); err != nil {
 		return nil, err
 	}
 	var all []age.Identity

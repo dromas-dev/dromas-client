@@ -2,10 +2,14 @@ package sh_test
 
 import (
 	"fmt"
+	"net/http"
+	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -252,6 +256,72 @@ func TestScriptRefusesAReplayAfterItsStateIsLost(t *testing.T) {
 	w.inject(q, "", at, p.sign(q.addr, at))
 	if d := q.recv(); !slices.Equal(d.bodies(), []string{"at the edge"}) {
 		t.Errorf("a message at the floor's edge: %v", d)
+	}
+}
+
+// A key file whose name is no serial is never named in seen-keys, so it decrypts
+// nothing: after seen and seen-keys are lost, the copy the server kept of a
+// message the lost set delivered, which only that key opens, is not delivered
+// again, as in the Go client (TestAKeyUnderANameNoSerialDecryptsNothing).
+func TestScriptAKeyUnderANameNoSerialDecryptsNothing(t *testing.T) {
+	w := newWorld(t)
+	p, q := w.mailbox(), w.mailbox()
+	l := p.line(q.addr, "00000000-0000-4000-8000-0000000000f9", "pay invoice 10 once", 0)
+	ct := forge.Encrypt(t, w.srv, q.addr, l, p.sign(q.addr, l))
+	w.put(q, "", ct)
+	if d := q.recv(); d.rc != 0 || !slices.Equal(d.bodies(), []string{"pay invoice 10 once"}) {
+		t.Fatalf("the first delivery: %v", d)
+	}
+	q.must(`rm "$DR/seen" "$DR/seen-keys"; for k in "$DR"/prekeys/*.agekey; do mv "$k" "$DR/prekeys/old-$(basename "$k")"; done`)
+	w.put(q, "", ct) // the server kept its copy
+	if d := q.recv(); len(d.messages) != 0 || q.has("seen-keys") {
+		t.Fatalf("the server's copy after the state was lost, its key renamed: %v", d)
+	}
+	q.must(`dr_rekey`)
+	if d := q.recv(); len(d.messages) != 0 || d.refused("undecryptable") != 1 {
+		t.Errorf("the server's copy once the mailbox renewed: %v", d)
+	}
+}
+
+// A key that appears in prekeys/ during a drain, after dr_adopt named what it
+// found, decrypts nothing in that drain; the next drain names it, raising the
+// floor, as in the Go client (TestAKeyMountedDuringADrainDecryptsNothingUntilAdopted).
+func TestScriptAKeyMountedDuringADrainDecryptsNothingUntilNamed(t *testing.T) {
+	w := newWorld(t)
+	p, q := w.mailbox(), w.mailbox()
+	l := p.line(q.addr, "00000000-0000-4000-8000-0000000000fa", "pay invoice 11 once", 0)
+	ct := forge.Encrypt(t, w.srv, q.addr, l, p.sign(q.addr, l))
+	id := w.put(q, "", ct)
+	if d := q.recv(); d.rc != 0 || !slices.Equal(d.bodies(), []string{"pay invoice 11 once"}) {
+		t.Fatalf("the first delivery: %v", d)
+	}
+	held := filepath.Join(w.work, "unmounted")
+	q.must(`rm "$DR/seen" "$DR/seen-keys"; mkdir ` + held + `; mv "$DR"/prekeys/*.agekey ` + held + `; dr_rekey`)
+	w.put(q, "", ct) // the server kept its copy
+	var mounted atomic.Bool
+	w.srv.SetMiddle(func(rw http.ResponseWriter, r *http.Request, next http.Handler) {
+		// The volume comes back as the message is fetched, after the list.
+		if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/messages/"+id) && mounted.CompareAndSwap(false, true) {
+			keys, _ := filepath.Glob(filepath.Join(held, "*.agekey"))
+			for _, k := range keys {
+				data, err := os.ReadFile(k)
+				if err == nil {
+					err = os.WriteFile(q.file("prekeys/"+filepath.Base(k)), data, 0o600)
+				}
+				if err != nil {
+					t.Error(err)
+				}
+			}
+		}
+		next.ServeHTTP(rw, r)
+	})
+	if d := q.recv(); !mounted.Load() || len(d.messages) != 0 || d.refused("undecryptable") != 1 || q.has("seen-floor") {
+		t.Fatalf("the drain the volume came back in: %v", d)
+	}
+	w.honest()
+	w.put(q, "", ct) // and serves it again
+	if d := q.recv(); len(d.messages) != 0 || d.refused("stale") != 1 || !q.has("seen-floor") {
+		t.Errorf("the next drain: %v", d)
 	}
 }
 

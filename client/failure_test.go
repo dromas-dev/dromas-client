@@ -477,11 +477,19 @@ func TestLocalFaultLeavesTheMessage(t *testing.T) {
 			return func() { b.SetRecord(t, "seen-floor", nil) }
 		}},
 		{"a prekey file unreadable", func(t *testing.T, b *client.Mailbox, _ protocol.Address) func() {
-			k := filepath.Join(b.Dir(), "keys", "prekeys", "9.agekey")
+			k := prekeyFile(b, numberOf(t, b), ".agekey")
+			key, err := os.ReadFile(k)
+			if err != nil {
+				t.Fatal(err)
+			}
 			if err := os.WriteFile(k, []byte("not an age key\n"), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			return func() { _ = os.Remove(k) }
+			return func() {
+				if err := os.WriteFile(k, key, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
 		}},
 	} {
 		t.Run(c.name, func(t *testing.T) {

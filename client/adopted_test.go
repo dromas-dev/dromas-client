@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -508,6 +509,123 @@ func TestAKeyOnAVolumeMountedLateOwesTheFloor(t *testing.T) {
 	res, err := x.Receive(ctx)
 	if err != nil {
 		t.Fatal(err)
+	}
+	refusedBeforeAdoption(t, x, res, a, 1)
+}
+
+// A key file whose name is no serial is never adopted, so it decrypts nothing:
+// with the state file lost, the copy the server kept of a message the lost state
+// delivered, which only that key opens, is refused as undecryptable, never
+// delivered again (PROTOCOL.md §12.3 checks 1 and 8).
+func TestAKeyUnderANameNoSerialDecryptsNothing(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	e := newEnv(t)
+	a, b := e.mailbox(), e.mailbox()
+	sent := forge.Capture(e.srv, http.MethodPost, "/v1/"+b.Address().String()+"/messages")
+	send(t, a, b, "delivered before the state file was lost")
+	e.srv.SetMiddle(nil)
+	if res := receive(t, b); len(res.Delivered) != 1 {
+		t.Fatalf("the first delivery: %+v", res)
+	}
+	keys := b.Path("prekeys")
+	old, err := filepath.Glob(filepath.Join(keys, "*.agekey"))
+	if err != nil || len(old) == 0 {
+		t.Fatalf("keys: %v, %v", old, err)
+	}
+	for _, name := range old {
+		if err := os.Rename(name, filepath.Join(keys, "old-"+filepath.Base(name))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	x := lostState(t, e, b)
+	e.clock.Add(2 * time.Second)
+	id := sha256.Sum256(*sent)
+	e.srv.Inject(x.Address(), hex.EncodeToString(id[:]), *sent) // the server kept its copy
+	res, err := x.Receive(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := client.AdoptedKeys(t, x); len(got) != 0 {
+		t.Fatalf("adopted %v", got)
+	}
+	if len(res.Delivered) != 0 || len(res.Refused) != 1 || res.Refused[0].Code != client.RefusedDecrypt {
+		t.Fatalf("the copy the server kept: %+v, want it refused as undecryptable", res)
+	}
+}
+
+// A key that appears in prekeys/ during a drain, after the command adopted what
+// it found, decrypts nothing in that drain; the next command adopts it, and that
+// adoption owes the floor (PROTOCOL.md §12.3 check 8).
+func TestAKeyMountedDuringADrainDecryptsNothingUntilAdopted(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	e := newEnv(t)
+	a, b := e.mailbox(), e.mailbox()
+	sent := forge.Capture(e.srv, http.MethodPost, "/v1/"+b.Address().String()+"/messages")
+	send(t, a, b, "delivered before the state file was lost")
+	e.srv.SetMiddle(nil)
+	if res := receive(t, b); len(res.Delivered) != 1 {
+		t.Fatalf("the first delivery: %+v", res)
+	}
+	keys := b.Path("prekeys")
+	if err := os.Remove(filepath.Join(b.Dir(), "state")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(keys, keys+".unmounted"); err != nil {
+		t.Fatal(err)
+	}
+	x, err := client.Open(b.Dir(), e.opts())
+	if err != nil {
+		t.Fatal(err)
+	}
+	landAll(t, x)
+	e.clock.Add(2 * time.Second)
+	if res, err := x.Receive(ctx); err != nil || res.Renewed == nil {
+		t.Fatalf("the restore with its keys' volume not mounted: %+v, %v", res, err)
+	}
+	old, err := filepath.Glob(filepath.Join(keys+".unmounted", "*.agekey"))
+	if err != nil || len(old) == 0 {
+		t.Fatalf("the volume's keys: %v, %v", old, err)
+	}
+	e.clock.Add(2 * time.Second)
+	id := sha256.Sum256(*sent)
+	e.srv.Inject(x.Address(), hex.EncodeToString(id[:]), *sent) // the server kept its copy
+	var mounted atomic.Bool
+	e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
+		// The volume comes back as the drain's list is answered.
+		if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/messages") && mounted.CompareAndSwap(false, true) {
+			for _, name := range old {
+				data, err := os.ReadFile(name)
+				if err == nil {
+					err = os.WriteFile(filepath.Join(keys, filepath.Base(name)), data, 0o600)
+				}
+				if err != nil {
+					t.Error(err)
+				}
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
+	res, err := x.Receive(ctx)
+	e.srv.SetMiddle(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !mounted.Load() || len(res.Delivered) != 0 || len(res.Refused) != 1 || res.Refused[0].Code != client.RefusedDecrypt {
+		t.Fatalf("the drain the volume came back in: %+v, want the copy refused as undecryptable", res)
+	}
+	if got := client.AdoptedKeys(t, x); len(got) != 0 {
+		t.Fatalf("adopted %v in the drain the volume came back in", got)
+	}
+	e.srv.Inject(x.Address(), hex.EncodeToString(id[:]), *sent) // and serves it again
+	e.clock.Add(2 * time.Second)
+	res, err = x.Receive(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := client.AdoptedKeys(t, x); len(got) == 0 {
+		t.Fatal("the next command adopted none of the volume's keys")
 	}
 	refusedBeforeAdoption(t, x, res, a, 1)
 }

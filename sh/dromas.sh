@@ -659,7 +659,8 @@ dr_kept(){ # <message stem> <id> → the message as refused/ keeps it: the id th
 }
 dr_judge(){ # <me> <message stem> → 0 only if EVERY check passes, in this order; 2 for a resend of an accepted msg_id; 1 refused, with "<code>: <words>" on stdout, the words this script's own and never the message's; 3 a fault of this mailbox, no verdict; 4 no answer from the server on whether the sender is revoked, no verdict. Who the sender is, is never asked of the server, nor read from its list: the message carries what proves it. The one thing asked is whether a revocation of that sender, or of its certificates, exists, and the answer proves itself
   local B=$1 m=$2 ids=() k h A c f
-  for k in "$DR"/prekeys/*.agekey; do [ -e "$k" ] || continue; age-keygen -y "$k" > /dev/null 2>&1 || { echo "cannot read the prekey key $k"; return 3; }; ids+=(-i "$k"); done      # a key file age cannot read is a fault of this mailbox, which stops the drain: never a message refused for it
+  for k in "$DR"/prekeys/*.agekey; do [ -e "$k" ] || continue; grep -qxF -e "$(basename "$k" .agekey)" "$DR/seen-keys" 2> /dev/null || continue      # only a key seen-keys names: one it does not name opens nothing until dr_adopt has named it and raised the floor, a file whose name is no serial or one that appears during the drain among them
+    age-keygen -y "$k" > /dev/null 2>&1 || { echo "cannot read the prekey key $k"; return 3; }; ids+=(-i "$k"); done      # a key file age cannot read is a fault of this mailbox, which stops the drain: never a message refused for it
   [ ${#ids[@]} -gt 0 ] || { echo "this mailbox has no prekeys"; return 3; }
   age -d "${ids[@]}" < "$m.age" > "$m.T" 2> /dev/null || { echo "undecryptable: it does not decrypt with this mailbox's prekeys"; return 1; }
   A=$(dr_open "$B" "$m") || { echo "$A"; return 1; }      # the sender, proved by what was decrypted

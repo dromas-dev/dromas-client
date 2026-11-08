@@ -655,7 +655,8 @@ type verdict struct {
 // says which failed, in a code and in this client's own words. An error is
 // this mailbox's own fault, not the message's: no verdict.
 //
-//  1. Decryption with every retained prekey, of a file with exactly one
+//  1. Decryption with every retained prekey the state file names
+//     (prekeyIdentities), of a file with exactly one
 //     native recipient stanza, counted before anything is decrypted
 //     (decrypt, oneNative).
 //  2. What came out is an envelope line and then a signature block.
