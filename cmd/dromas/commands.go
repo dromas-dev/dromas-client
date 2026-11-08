@@ -177,8 +177,9 @@ it where only you can read it. On a mailbox already registered, init with
 --revocation-file writes the record and changes nothing else.
 
 A mailbox whose state does not match its prekeys/, as after state is lost or
-put back from an older copy with prekeys/ kept, receives, sends and renews
-nothing, init among them, until init --restore acknowledges it: it adopts the
+put back from an older copy with prekeys/ kept, receives, sends, delivers and
+renews nothing, init and peer allow among them, until init --restore
+acknowledges it: it adopts the
 prekeys the state does not name, and the next drain refuses as stale every
 message sent before the server next takes one of the mailbox's calls, and in
 the hour after (stale_after_restore), since those keys may open a message the

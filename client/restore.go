@@ -175,7 +175,7 @@ func notTheKeys(found int, ahead bool) error {
 	if ahead {
 		why = append(why, "prekeys/generation counts more drains that delivered than the state does, as after the state is put back from a copy older than the mailbox")
 	}
-	return &RefusedError{Code: StateNotTheKeys, Reason: "this mailbox's state does not match its prekeys: " + strings.Join(why, "; and ") + ". Such a state cannot tell a message this mailbox delivered under the state it lost from one that waited, so the mailbox receives, sends and renews nothing, and acks nothing, until its owner runs dromas init --restore: from then, every message sent before its server next takes one of its calls, and in the hour after, is refused as stale (stale_after_restore)"}
+	return &RefusedError{Code: StateNotTheKeys, Reason: "this mailbox's state does not match its prekeys: " + strings.Join(why, "; and ") + ". Such a state cannot tell a message this mailbox delivered under the state it lost from one that waited, so the mailbox receives, sends, delivers and renews nothing, and acks nothing, until its owner runs dromas init --restore: from then, every message sent before its server next takes one of its calls, and in the hour after, is refused as stale (stale_after_restore)"}
 }
 
 // unnamedKeys is each key file in prekeys/ that the state file names nowhere
