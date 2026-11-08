@@ -349,11 +349,16 @@ func (b *Mailbox) mendable(err error) bool {
 	if ownRevoked(err) != nil {
 		return false
 	}
-	if code(err) == protocol.CodeNoSuchMailbox {
+	if renewalMends(code(err)) {
 		return true
 	}
 	return b.usesRevoked()
 }
+
+// renewalMends reports whether c is a server's refusal that a renewal mends by
+// registering the mailbox again: the server holds no mailbox at this address
+// (PROTOCOL.md §11.7, §12.4).
+func renewalMends(c protocol.Code) bool { return c == protocol.CodeNoSuchMailbox }
 
 // A drain is bounded, so that a server which lists messages without end, or
 // serves answers as large as it may, or as slowly as it may, costs one
