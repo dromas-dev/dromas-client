@@ -644,7 +644,9 @@ type verdict struct {
 //     floor the seen-set was pruned at (seenFloor), and at most
 //     protocol.MaxSkew ahead.
 //  7. Revocation: this mailbox holds no revocation of the sender. The server is
-//     asked for one, once for each sender in a drain. A revocation that
+//     asked for one, once for each sender in a drain, by a read of the
+//     sender's revocations (readRevocations), which the server serves whether
+//     or not it holds the sender's mailbox. A revocation that
 //     verifies refuses the message and every later one, whenever they were
 //     signed. A server that says it holds none has answered. No answer is an
 //     error: the message stays on the server for the next drain. The same
@@ -720,8 +722,9 @@ func (b *Mailbox) judge(ctx context.Context, ct []byte, asked *lookups) (verdict
 		return refused(protocol.RefusedStale, "sent_at is before this mailbox's replay set reaches back to, since its clock once read later than it does now")
 	}
 	// Check 7. What the mailbox keeps comes first, and asks nobody. Otherwise
-	// the sender is looked up, once in a drain, and what the mailbox then
-	// keeps decides: a failed lookup holds only a message nothing kept refuses.
+	// the sender's revocations are read, once in a drain, and what the
+	// mailbox then keeps decides: a failed read holds only a message nothing
+	// kept refuses.
 	gone, covered, err := b.keptAgainst(from, signed.Signer)
 	if err != nil {
 		return verdict{}, fmt.Errorf("a fault of this mailbox, so the message stays on the server: %w", err)

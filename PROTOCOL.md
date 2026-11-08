@@ -1376,9 +1376,9 @@ A client drains every page of its list (Section 11.11) and fetches the message o
    | 5 | `sent_at` is no more than the skew allowance ahead of this mailbox's clock | `future` |
 
 7. **Check 7, revocation.** The reader follows three steps, in this order:
-   1. **What the reader keeps comes first, with no lookup.** A kept revocation of the sender's address (Section 12.5) refuses the message as `revoked`, now and for every later message from that address (Section 10.1). A kept revocation of the sender's certificates that covers the signer (Section 5.1) refuses the message as `certificate_revoked`.
-   2. **Otherwise the reader looks up the sender's mailbox (Section 11.8),** once for each sender in a drain, after that sender's signature has verified. An answer other than a well-formed `200`, a `404 no_such_mailbox`, or a `410 revoked` with or without a revocation record that verifies is no answer. So the drain stops and the message stays on the server.
-   3. **On an answer, the reader keeps each revocation that verifies, and applies step 1 again.** If nothing refuses the message, the message passes this check. A revocation that does not verify counts as nothing shown, as Section 12.5 says. A later message from that sender in the drain makes no second lookup, and the reader applies step 1 to the later message by what the reader then keeps.
+   1. **What the reader keeps comes first, with no call.** A kept revocation of the sender's address (Section 12.5) refuses the message as `revoked`, now and for every later message from that address (Section 10.1). A kept revocation of the sender's certificates that covers the signer (Section 5.1) refuses the message as `certificate_revoked`.
+   2. **Otherwise the reader looks up the sender's revocations (Section 11.15),** once for each sender in a drain, after that sender's signature has verified. The server serves them whether or not the server holds a mailbox for the sender. An answer other than a well-formed `200` with a revocation record, a `404 not_revoked`, or a `410 revoked` with a revocation record that verifies is no answer. So the drain stops and the message stays on the server.
+   3. **On an answer, the reader keeps each revocation that verifies, and applies step 1 again.** If nothing refuses the message, the message passes this check. A revocation that does not verify counts as nothing shown, as Section 12.5 says. A later message from that sender in the drain makes no second call, and the reader applies step 1 to the later message by what the reader then keeps.
 
 8. **Check 8, replay.** The reader computes the SHA-256 of the ciphertext. That hash is not in the replay set (`replay`).
    - The reader refuses a message whose listed `id` differs from that hash (`bad_id`).
@@ -1387,7 +1387,7 @@ A client drains every page of its list (Section 11.11) and fetches the message o
    - A prune that drops nothing leaves the replay floor unchanged.
 9. **Check 9, duplicate.** `(from, msg_id)` is not in the replay set. A match means the message is a copy of a message already delivered. The reader acks the copy and does not deliver the copy again.
 
-**A reader never asks the server who a sender is.** The message carries the proof of who its sender is, and check 7's lookup reads only revocations. The reader MUST NOT pin the sender's identity before the sender's signature verifies.
+**A reader never asks the server who a sender is.** The message carries the proof of who its sender is, and check 7 reads only the sender's revocations. The reader MUST NOT pin the sender's identity before the sender's signature verifies.
 
 **The verdict.**
 
@@ -1499,7 +1499,7 @@ A client drains every page of its list (Section 11.11) and fetches the message o
   - If the lookup carries no such revocation, the client signs one more pass, as for any `401` (Section 8).
 - **A mailbox checks for revocations, and publishes its own revocations, only at its own server.** The mailbox checks:
   - for the recipient's revocations, by the lookup before every post;
-  - for each sender's revocations, once in a drain;
+  - for each sender's revocations, by looking up those revocations once in a drain (Section 12.3, check 7);
   - whenever its owner says.
 
   A mailbox whose server keeps no mailbox for it looks up its own revocations with `GET …/revocations`.
@@ -1799,6 +1799,7 @@ Dromas protects a message's content from everyone but the message's recipient. D
   - The answer is the server's word, and a server can give either answer whatever the recipient did.
   - Removing the signal would need a record of each acked message, which Section 13 rules out.
 - **The lookup before a post tells the server that the mailbox is about to be written to.** The post tells the server the same thing a moment later.
+- **A reader's look-up of a sender's revocations tells the server which senders the reader has just verified.** The reader makes that call during its drain, once for each sender, right after that sender's signature verifies (Section 12.3, check 7). So the server can link the sender to the reader at read time, from the reader's own calls. Any call that names the sender tells the server the same, so no choice of route removes this link.
 - **A lookup answered with gzip has a length that depends on the mailbox's own bytes.** So the length can help a network observer narrow down whom a sender is about to write to.
 - **Only a lookup's answer is compressed (Section 11.2).** A list, for example, sets values that senders chose beside the mailbox's own values (BREACH, RFC 7457 §2.6).
 - **Anything that terminates TLS for a server is part of the server.** A TLS terminator sees everything the server sees, and each pass in transit. For the minutes a pass has left, the pass does at that server everything that Section 15.5 lists. A third party in that position would replace the server for every mailbox whose pass the third party sees. That is why Section 11.1 keeps TLS inside the server.
