@@ -388,7 +388,9 @@ func (b *Mailbox) clearOwed(ctx context.Context, key, id string, gaveUp bool) er
 
 // owedMessages reads what the state file records as owed, under the command that
 // holds the lock, and drops the record of a handling that gave up where inbox/
-// no longer keeps its message.
+// no longer keeps its message. An owed message's file that others can reach,
+// or that another user owns, is refused before it is read (judgeKept), and
+// nothing is handed over.
 func (b *Mailbox) owedMessages() ([]owedMessage, error) {
 	var owed []owedMessage
 	var left []string
@@ -412,6 +414,9 @@ func (b *Mailbox) owedMessages() ([]owedMessage, error) {
 		id := owed[i].id
 		if !hexID.MatchString(id) {
 			return nil, fmt.Errorf("the mailbox's state file records a message owed under an id that is not one")
+		}
+		if err := b.judgeKept(b.path("inbox", id+".json")); err != nil {
+			return nil, err
 		}
 		data, err := os.ReadFile(b.path("inbox", id+".json")) //nolint:gosec // a path inside the mailbox's own directory, named by 64 hex
 		if errors.Is(err, fs.ErrNotExist) {
