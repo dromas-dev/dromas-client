@@ -164,7 +164,7 @@ func TestAnAPIErrorPrintsNoneOfTheServersWords(t *testing.T) {
 // server who a sender is, since a message carries what proves it, and keeps
 // nothing of one whose message did not verify: peers/ holds only senders that
 // signed something this mailbox delivered. The one thing it asks about a sender
-// is whether a revocation of it exists, by one read of its mailbox, and only once
+// is whether a revocation of it exists, by one read of its revocations, and only once
 // that sender's signature has verified: a sender a server made up costs no
 // call at all.
 func TestMadeUpSendersLeaveNothingInPeers(t *testing.T) {
@@ -190,7 +190,7 @@ func TestMadeUpSendersLeaveNothingInPeers(t *testing.T) {
 	}
 	reads, madeUp := map[protocol.Address]int{}, 0
 	e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
-		if x, ok := forge.ReadOf(r); ok {
+		if x, ok := forge.RevocationsOf(r); ok {
 			reads[x]++
 		}
 		if named, _, _ := strings.Cut(strings.TrimPrefix(r.URL.Path, "/v1/"), "/"); fake[named] {
@@ -212,7 +212,7 @@ func TestMadeUpSendersLeaveNothingInPeers(t *testing.T) {
 		}
 	}
 	if len(reads) != 1 || reads[a.Address()] != 1 || madeUp != 0 {
-		t.Errorf("reads of a mailbox %v, want one, of the sender whose signature verified; %d calls named a sender the server made up", reads, madeUp)
+		t.Errorf("reads of an address's revocations %v, want one, of the sender whose signature verified; %d calls named a sender the server made up", reads, madeUp)
 	}
 	all, err := client.RecordsAt(b.Dir())
 	if err != nil {

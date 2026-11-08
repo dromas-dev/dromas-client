@@ -261,10 +261,10 @@ func TestAMessageFromARevokedSenderIsRefused(t *testing.T) {
 	send(t, a, b, "waiting, two")
 	revoke(t, e, a)
 
-	var lookups atomic.Int32
+	var reads atomic.Int32
 	e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
-		if _, ok := forge.ReadOf(r); ok {
-			lookups.Add(1)
+		if _, ok := forge.RevocationsOf(r); ok {
+			reads.Add(1)
 		}
 		next.ServeHTTP(w, r)
 	})
@@ -272,8 +272,8 @@ func TestAMessageFromARevokedSenderIsRefused(t *testing.T) {
 	if len(res.Delivered) != 0 || len(res.Refused) != 2 || res.Refused[0].Code != client.RefusedRevoked || res.Refused[1].Code != client.RefusedRevoked {
 		t.Fatalf("a message from a revoked sender: %+v", res)
 	}
-	if lookups.Load() != 1 || !keptRevocation(b, a.Address()) || e.srv.Count(b.Address()) != 0 {
-		t.Fatalf("%d lookups for one sender; kept: %v; left on the server: %d", lookups.Load(), keptRevocation(b, a.Address()), e.srv.Count(b.Address()))
+	if reads.Load() != 1 || !keptRevocation(b, a.Address()) || e.srv.Count(b.Address()) != 0 {
+		t.Fatalf("%d reads of one sender's revocations; kept: %v; left on the server: %d", reads.Load(), keptRevocation(b, a.Address()), e.srv.Count(b.Address()))
 	}
 
 	// The operator hides the revocation and delivers a message A's working key
@@ -287,47 +287,52 @@ func TestAMessageFromARevokedSenderIsRefused(t *testing.T) {
 	}
 }
 
-// A drain reads each sender's mailbox once, however many of its messages it
-// holds, from senders this mailbox holds no revocation of (PROTOCOL.md §12.3 check
-// 8), whatever the read answered: a mailbox served, no such mailbox, or "revoked"
-// with nothing that verifies (#447). The read marks the sender answered
-// (readMailbox), and judge reads none it has marked. Above, the sender is
-// revoked, so judge asks nothing after its first message, marked or not
-// (#384).
-func TestADrainReadsEachSendersMailboxOnce(t *testing.T) {
+// A drain reads each sender's revocations once, however many of its messages
+// it holds, from senders this mailbox holds no revocation of (PROTOCOL.md §12.3
+// check 7), whatever the read answered: none held, or a record that does not
+// verify, which counts as nothing shown. The read marks the sender answered
+// (readRevocations), and judge reads none it has marked. No sender's mailbox
+// is read. Above, the sender is revoked, so judge asks nothing after its
+// first message, marked or not (#384).
+func TestADrainReadsEachSendersRevocationsOnce(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
-	to, a, c := e.mailbox(), e.mailbox(), e.mailbox()
-	none, unproved := e.mailbox(), e.mailbox()
+	to, a, c, unproved := e.mailbox(), e.mailbox(), e.mailbox(), e.mailbox()
 	for range 3 {
 		send(t, a, to, "from a")
 	}
 	for range 2 {
 		send(t, c, to, "from c")
-		send(t, none, to, "from a mailbox its server says it holds none of")
-		send(t, unproved, to, "from a mailbox its server says is revoked, showing nothing")
+		send(t, unproved, to, "from a mailbox its server shows a revocation of that does not verify")
+	}
+	rec, err := c.Revocation(t.Context()) // another identity's signature
+	if err != nil {
+		t.Fatal(err)
 	}
 	op := watch(e, func(w http.ResponseWriter, r *http.Request) bool {
-		switch x, _ := forge.ReadOf(r); x {
-		case none.Address():
-			return answer(w, protocol.CodeNoSuchMailbox)
-		case unproved.Address():
-			return answer(w, protocol.CodeRevoked)
+		if x, _ := forge.RevocationsOf(r); x == unproved.Address() {
+			fakeserver.WriteJSON(w, http.StatusOK, &protocol.Revocations{Identity: unproved.Identity().Document(), Revocation: rec.Revocation})
+			return true
 		}
 		return false
 	})
-	if res := receive(t, to); len(res.Delivered) != 9 {
-		t.Fatalf("delivered %d of 9", len(res.Delivered))
+	if res := receive(t, to); len(res.Delivered) != 7 {
+		t.Fatalf("delivered %d of 7", len(res.Delivered))
 	}
 	for name, from := range map[string]*client.Mailbox{
-		"three messages, its mailbox served":      a,
-		"two, its mailbox served":                 c,
-		"two, no such mailbox":                    none,
-		"two, revoked with nothing that verifies": unproved,
+		"three messages, none held":                 a,
+		"two, none held":                            c,
+		"two, a record served that does not verify": unproved,
 	} {
-		if n := op.count(http.MethodGet, mailboxPath(from)); n != 1 {
-			t.Errorf("a sender of %s: its mailbox read %d times, want 1", name, n)
+		if n := op.count(http.MethodGet, mailboxPath(from)+"/revocations"); n != 1 {
+			t.Errorf("a sender of %s: its revocations read %d times, want 1", name, n)
 		}
+		if n := op.count(http.MethodGet, mailboxPath(from)); n != 0 {
+			t.Errorf("a sender of %s: its mailbox read %d times, want none", name, n)
+		}
+	}
+	if keptRevocation(to, unproved.Address()) {
+		t.Error("a revocation that does not verify was kept")
 	}
 }
 
@@ -368,7 +373,7 @@ func TestNoAnswerAboutASenderStopsTheDrain(t *testing.T) {
 	a, b := e.mailbox(), e.mailbox()
 	send(t, a, b, "waits for an answer")
 	e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
-		if x, ok := forge.ReadOf(r); ok && x == a.Address() {
+		if x, ok := forge.RevocationsOf(r); ok && x == a.Address() {
 			http.Error(w, "down", http.StatusServiceUnavailable)
 			return
 		}
@@ -381,10 +386,25 @@ func TestNoAnswerAboutASenderStopsTheDrain(t *testing.T) {
 	if q, _ := os.ReadDir(filepath.Join(b.Dir(), "mail", "refused")); len(q) != 0 {
 		t.Fatal("a message nobody could judge was kept in refused/")
 	}
-	// Nor has a 2xx whose body is no mailbox, as PROTOCOL.md §3.3 reads one.
-	bad, _ := filepath.Glob("../testdata/vectors/answer/mailbox-bad-*.json")
+	// Nor has a 404 no_such_mailbox, which a read of revocations never
+	// answers, or a 410 revoked with nothing that verifies.
+	for _, c := range []protocol.Code{protocol.CodeNoSuchMailbox, protocol.CodeRevoked} {
+		e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
+			if x, ok := forge.RevocationsOf(r); ok && x == a.Address() {
+				answer(w, c)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+		res, err := b.Receive(context.Background())
+		if err == nil || len(res.Delivered) != 0 || len(res.Refused) != 0 || e.srv.Count(b.Address()) != 1 {
+			t.Errorf("%s on the read: %v, %+v, %d left on the server", c, err, res, e.srv.Count(b.Address()))
+		}
+	}
+	// Nor has a 2xx whose body is no record, as PROTOCOL.md §3.3 reads one.
+	bad, _ := filepath.Glob("../testdata/vectors/answer/record-bad-*.json")
 	if len(bad) == 0 {
-		t.Fatal("no answer/mailbox-bad-* vectors")
+		t.Fatal("no answer/record-bad-* vectors")
 	}
 	for _, f := range bad {
 		body, err := os.ReadFile(f) //nolint:gosec // a test vector
@@ -392,7 +412,7 @@ func TestNoAnswerAboutASenderStopsTheDrain(t *testing.T) {
 			t.Fatal(err)
 		}
 		e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
-			if x, ok := forge.ReadOf(r); ok && x == a.Address() {
+			if x, ok := forge.RevocationsOf(r); ok && x == a.Address() {
 				w.Header().Set("Content-Type", "application/json")
 				_, _ = w.Write(body)
 				return
@@ -409,7 +429,7 @@ func TestNoAnswerAboutASenderStopsTheDrain(t *testing.T) {
 	for _, f := range problemBad(t) {
 		body, _ := os.ReadFile(f) //nolint:gosec // a test vector
 		e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
-			if x, ok := forge.ReadOf(r); ok && x == a.Address() {
+			if x, ok := forge.RevocationsOf(r); ok && x == a.Address() {
 				w.Header().Set("Content-Type", "application/problem+json")
 				w.WriteHeader(http.StatusNotFound)
 				_, _ = w.Write(body)
@@ -426,7 +446,7 @@ func TestNoAnswerAboutASenderStopsTheDrain(t *testing.T) {
 	// another status.
 	for _, o := range outOfForm {
 		e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
-			if x, ok := forge.ReadOf(r); ok && x == a.Address() {
+			if x, ok := forge.RevocationsOf(r); ok && x == a.Address() {
 				o.write(w)
 				return
 			}
@@ -702,10 +722,11 @@ func protocolPut(e *env, a protocol.Address, rec *protocol.Revocations) (*http.R
 	return client.PutRevocations(context.Background(), e.opts(), a, rec)
 }
 
-// What the reader keeps comes before any lookup (PROTOCOL.md §12.3, check 7): a
+// What the reader keeps comes before any call (PROTOCOL.md §12.3, check 7): a
 // message whose signer a kept revocation covers is refused and acked with no
-// read of its sender, whatever the server would answer, and a kept revocation
-// that does not cover the signer leaves a failed lookup holding the message.
+// read of its sender's revocations, whatever the server would answer, and a
+// kept revocation that does not cover the signer leaves a failed read holding
+// the message.
 func TestAKeptRevocationRefusesAMessageWithNoLookup(t *testing.T) {
 	t.Parallel()
 	for _, c := range []struct {
@@ -738,14 +759,14 @@ func TestAKeptRevocationRefusesAMessageWithNoLookup(t *testing.T) {
 				t.Fatal(err)
 			}
 			lookup := watch(e, func(w http.ResponseWriter, r *http.Request) bool {
-				if x, ok := forge.ReadOf(r); ok && x == a.Address() {
+				if x, ok := forge.RevocationsOf(r); ok && x == a.Address() {
 					http.Error(w, "down", http.StatusServiceUnavailable)
 					return true
 				}
 				return false
 			})
 			res, err := b.Receive(context.Background())
-			read := lookup.count(http.MethodGet, "/v1/"+a.Address().String())
+			read := lookup.count(http.MethodGet, "/v1/"+a.Address().String()+"/revocations")
 			if c.holds {
 				if err == nil || len(res.Refused) != 0 || len(res.Delivered) != 0 || e.srv.Count(b.Address()) != 1 || read != 1 {
 					t.Fatalf("no answer about a signer nothing kept covers: %v, %+v, %d left on the server, %d reads", err, res, e.srv.Count(b.Address()), read)

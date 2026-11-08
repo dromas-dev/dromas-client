@@ -34,6 +34,18 @@ func ReadOf(r *http.Request) (protocol.Address, bool) {
 	return a, err == nil
 }
 
+// RevocationsOf reports whether r is a read of an address's revocations, GET
+// /v1/<address>/revocations, and of which address.
+func RevocationsOf(r *http.Request) (protocol.Address, bool) {
+	rest, ok := strings.CutPrefix(r.URL.Path, "/v1/")
+	addr, ok2 := strings.CutSuffix(rest, "/revocations")
+	if !ok || !ok2 || r.Method != http.MethodGet || strings.Contains(addr, "/") {
+		return protocol.Address{}, false
+	}
+	a, err := protocol.ParseAddress(addr)
+	return a, err == nil
+}
+
 // Serve answers r, a read of a mailbox, with the mailbox s holds, edited first: an
 // operator that serves a mailbox otherwise than it holds it. A revoked mailbox is
 // served as it was before, from its last prekey, with none of what its
@@ -76,9 +88,14 @@ func Carry(w http.ResponseWriter, r *http.Request, next http.Handler, rec *proto
 
 // Hides puts an operator in front of s that serves every mailbox without what
 // its identity signed about it: a revoked mailbox as if it were not, and no
-// revocation of a mailbox's certificates.
+// revocation of a mailbox's certificates. A read of an address's revocations
+// is answered 404 not_revoked.
 func Hides(t testing.TB, s *fakeserver.Server) {
 	s.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
+		if _, ok := RevocationsOf(r); ok {
+			Refuse(w, protocol.CodeNotRevoked)
+			return
+		}
 		if _, ok := ReadOf(r); !ok {
 			next.ServeHTTP(w, r)
 			return

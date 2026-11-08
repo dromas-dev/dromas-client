@@ -74,8 +74,8 @@ func TestTheScriptAndAGoMailboxOfEachSigner(t *testing.T) {
 
 // A Go mailbox whose identity signs renews under a certificate (dromas cert
 // switch): the script takes what the identity signed before, read after,
-// and the first message under the certificate, by one read of the sender in
-// the drain; its sends follow the statement under the certificate, which
+// and the first message under the certificate, by one read of the sender's
+// revocations in the drain; its sends follow the statement under the certificate, which
 // stands above every one the identity signed, so a server that serves the
 // identity's again is refused it (PROTOCOL.md §5.3).
 func TestTheScriptFollowsAGoMailboxUnderACertificate(t *testing.T) {
@@ -104,12 +104,12 @@ func TestTheScriptFollowsAGoMailboxUnderACertificate(t *testing.T) {
 	d := s.recv()
 	reads := 0
 	for _, c := range w.calls(n) {
-		if c == http.MethodGet+" /v1/"+gb.addr.String() {
+		if c == http.MethodGet+" /v1/"+gb.addr.String()+"/revocations" {
 			reads++
 		}
 	}
 	if d.rc != 0 || !slices.Equal(slices.Sorted(slices.Values(d.bodies())), []string{"by the identity, read after the renewal", "under the first certificate"}) || strings.Contains(d.said, "REFUSED") || reads != 1 {
-		t.Errorf("the identity's message and the certificate's, in one drain: %v, %d reads of the sender", d, reads)
+		t.Errorf("the identity's message and the certificate's, in one drain: %v, %d reads of the sender's revocations", d, reads)
 	}
 	s.mustSend(gb, "to the statement under the certificate")
 	peer := "peers/" + gb.addr.String() + "/"

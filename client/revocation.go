@@ -328,9 +328,9 @@ func (b *Mailbox) heldRecord(a protocol.Address) (doc, revocation, certs, certsS
 // nothing shown, since only a statement the identity signed can revoke an
 // address or a certificate. No such mailbox, and "revoked" with nothing that
 // verifies, are answers that serve no mailbox: they come back as the server's
-// error, which a caller reads as none held (lookupRevocation) or as nothing
-// to seal to (resolve). This mailbox's own revocation, which ends its command, is
-// the error, and anything else is no answer.
+// error, which a caller reads as nothing to seal to (resolve) or, proving a
+// 410, as none held (proved). This mailbox's own revocation, which ends its
+// command, is the error, and anything else is no answer.
 func (b *Mailbox) readMailbox(ctx context.Context, a protocol.Address, l *lookups) (*protocol.MailboxResponse, bool, error) {
 	var br protocol.MailboxResponse
 	_, err := b.lookup(ctx, a, &br)
@@ -347,9 +347,9 @@ func (b *Mailbox) readMailbox(ctx context.Context, a protocol.Address, l *lookup
 	case code(err) != protocol.CodeRevoked && code(err) != protocol.CodeNoSuchMailbox:
 		return nil, false, err
 	}
-	// The mailbox's own server has answered, whatever it served: with l, a is
-	// marked answered in the command, whichever read it here (resolve, at
-	// each post of a send; lookupRevocation, in a drain or a question).
+	// The mailbox's own server has answered, whatever it served: with l, a
+	// send's lookups, a is marked answered in the command (resolve, at each
+	// post of a send).
 	if l != nil {
 		l.answered[a] = true
 	}
@@ -368,15 +368,14 @@ func recordOf(err error) *protocol.Revocations {
 	return nil
 }
 
-// lookupRevocation asks what this mailbox's server holds about a (readMailbox), and
-// keeps what verifies. It reports whether this mailbox now holds a revocation of a. A
-// server that serves no mailbox, because it holds none or says "revoked" and
-// shows nothing that verifies, has answered that it holds no revocation,
-// and the caller goes on. No answer is an error, which the caller stops on.
-//
-// Of this mailbox's own address it reads what its server holds of it (known):
-// its revocations too where the server holds no mailbox. Any call there not
-// answered is an error.
+// lookupRevocation asks what this mailbox's server holds about a, and keeps
+// what verifies. It reports whether this mailbox now holds a revocation of a.
+// What the mailbox keeps comes first, with no call. Of another address it
+// reads the address's revocations (readRevocations), as check 7 does
+// (PROTOCOL.md §12.3) and a question of the owner's does (Ask). Of this
+// mailbox's own address it reads what its server holds of it (known): its
+// revocations too where the server holds no mailbox. No answer is an error,
+// which the caller stops on.
 func (b *Mailbox) lookupRevocation(ctx context.Context, a protocol.Address, l *lookups) (bool, error) {
 	if held, err := b.revoked(a); held || err != nil {
 		return held, err
@@ -398,12 +397,44 @@ func (b *Mailbox) lookupRevocation(ctx context.Context, a protocol.Address, l *l
 		}
 		return gone != nil, nil
 	}
-	_, gone, err := b.readMailbox(ctx, a, l)
-	switch code(err) {
-	case protocol.CodeRevoked, protocol.CodeNoSuchMailbox:
-		err = nil
+	return b.readRevocations(ctx, a, l)
+}
+
+// readRevocations reads the revocations this mailbox's server holds of a, GET
+// /v1/<a>/revocations (PROTOCOL.md §11.15), keeps what verifies of the record,
+// and with l marks a as answered in the command. It reports whether this
+// mailbox now holds a revocation of a. The server keeps and serves a record
+// whether or not a mailbox is at a, so a sender whose mailbox the server has
+// forgotten is still shown the revocation of its certificates.
+//
+// Two answers are answers: a 200 with the record, whose parts that do not
+// verify count as nothing shown (take), and 404 not_revoked, the server's
+// word that it holds none. A 410 revoked whose record verifies is kept
+// (proved, in call). Anything else is no answer, an error, a 404
+// no_such_mailbox and a 410 with nothing that verifies among them.
+func (b *Mailbox) readRevocations(ctx context.Context, a protocol.Address, l *lookups) (bool, error) {
+	var rec protocol.Revocations
+	_, err := b.call(ctx, http.MethodGet, "/v1/"+a.String()+"/revocations", nil, nil, &rec)
+	var gone *RevokedError
+	switch {
+	case errors.As(err, &gone) && gone.Address == a:
+		return true, nil
+	case err == nil:
+		held, err := b.take(a, &rec)
+		if err != nil {
+			return false, err
+		}
+		if l != nil {
+			l.answered[a] = true
+		}
+		return held, nil
+	case code(err) == protocol.CodeNotRevoked:
+		if l != nil {
+			l.answered[a] = true
+		}
+		return false, nil
 	}
-	return gone, err
+	return false, err
 }
 
 // revokedCerts returns the revocation of a's certificates this mailbox holds, or
@@ -780,8 +811,8 @@ var provedCodes = []protocol.Code{protocol.CodeRevoked, protocol.CodeSenderRevok
 //
 //   - 410 revoked names the mailbox the call's path names. The record it carries
 //     is taken as a read's is (take); without one that verifies, that mailbox is
-//     read for one (lookupRevocation), unless the call was itself a read of
-//     it or of its revocations, whose answer is that read (#353).
+//     read for one (readMailbox), unless the call was itself a read of it or
+//     of its revocations, whose answer is that read (#353).
 //   - 403 sender_revoked names this mailbox, which reads itself.
 //   - 401 certificate_revoked names the signer this mailbox signs with: it
 //     reads itself (known), which keeps a revocation of its certificates once
@@ -852,7 +883,19 @@ func (b *Mailbox) proved(ctx context.Context, method, path string, err error) er
 		}
 		return refuse("this mailbox's identity has revoked the certificate it signs under, as its server shows, so it is taken nowhere it is held: dromas recv or dromas prekey renew publishes a new one")
 	}
-	held, lerr := b.lookupRevocation(ctx, who, nil)
+	held, lerr := b.revoked(who)
+	switch {
+	case held || lerr != nil:
+	case who == own:
+		held, lerr = b.lookupRevocation(ctx, who, nil)
+	default:
+		// The mailbox the 410 is about is read (PROTOCOL.md §12.5), and a
+		// 410 with its record is the proof.
+		_, held, lerr = b.readMailbox(ctx, who, nil)
+		if c := code(lerr); c == protocol.CodeRevoked || c == protocol.CodeNoSuchMailbox {
+			lerr = nil
+		}
+	}
 	if lerr != nil {
 		// The call's error alone is wrapped: its code is what a caller reads,
 		// whichever comes first.

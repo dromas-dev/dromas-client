@@ -492,13 +492,14 @@ dr_lookup(){ # <address> → reads the address's mailbox from this mailbox's ser
     *) cat "$DR/read.err" >&2; return 2 ;; esac; fi      # no answer: its error line, the status, the code and the wait, and none of the server's words
   return 1
 }
-dr_revocations(){ # <address> → reads the address's revocations from this mailbox's server (GET /v1/<address>/revocations), which a server keeps with a mailbox there or none (PROTOCOL.md §11.15), and keeps what verifies: dr_lookup's answer. dr_renew's, for a mailbox its server holds no more. A record that is no record is no answer; not_revoked, and revoked with nothing that verifies, are none
+dr_revocations(){ # <address> → reads the address's revocations from this mailbox's server (GET /v1/<address>/revocations), which a server keeps with a mailbox there or none (PROTOCOL.md §11.15), and keeps what verifies: dr_lookup's answer. dr_judge's, for each sender in a drain (PROTOCOL.md §12.3 check 7), and dr_renew's, for a mailbox its server holds no more. A revocation of the address this mailbox keeps answers with no call. A record served and not_revoked are answers, and anything else is none: a record that is no record, and revoked with nothing that verifies, among them (PROTOCOL.md §12.3 check 7)
   local r w=$1; [ "$1" != "$(cat "$DR/address" 2> /dev/null)" ] || w="this mailbox"
+  dr_gone "$1"; case $? in 0) return 0 ;; 3) return 3 ;; esac
   if dr_api GET "/v1/$1/revocations" > "$DR/rev.json" 2> "$DR/read.err"; then dr_isrecord "$DR/rev.json" || { dr_refuse "the server's answer for $w's revocations is not one this client reads: a record, each byte field base64"; return 2; }      # a 2xx that is no record is no answer, as one that is no JSON is
     dr_take "$1"; return
   fi
   case $(dr_code) in
-    revoked) dr_takerecord "$1"; r=$?; [ $r = 1 ] || return $r ;;
+    revoked) dr_takerecord "$1"; r=$?; [ $r = 1 ] || return $r; cat "$DR/read.err" >&2; return 2 ;;      # the record it carries proves itself; without one that verifies, the server's word is no answer
     not_revoked) ;;
     *) cat "$DR/read.err" >&2; return 2 ;;
   esac
@@ -656,8 +657,8 @@ dr_judge(){ # <me> <message stem> → 0 only if EVERY check passes, in this orde
   A=$(dr_open "$B" "$m") || { echo "$A"; return 1; }      # the sender, proved by what was decrypted
   f=$(dr_floor 2> /dev/null) || { echo "$DR/seen-floor names no time"; return 3; }
   [ "$f" -eq 0 ] || [ "$(dr_time "$(jq -r .sent_at "$m.P")")" -ge $((f + 7*86400)) ] || { echo "stale: sent_at is before this mailbox's replay set reaches back to, since its clock once read later than it does now"; return 1; }      # freshness has a floor too: a sent_at before the highest cutoff the replay set was pruned at may be a message whose line went, and so may one up to 7 days above it, a retry of such a message, dated afresh up to 7 days after its first copy (check 9 knows a retry by that copy's line). dr_open checked sent_at's grammar
-  if ! grep -qxF -e "$A" "$DR/asked" 2> /dev/null; then      # the server is asked once for each sender in a drain. That it holds none is an answer; no answer is not, and the message then stays where it is
-    dr_lookup "$A" >> "$DR/said"; case $? in 0) ;; 1) printf '%s\n' "$A" >> "$DR/asked" ;; 3) echo "what this mailbox keeps of its sender's revocations does not verify, or cannot be written"; return 3 ;; *) echo "whether its sender is revoked could not be asked"; return 4 ;; esac
+  if ! grep -qxF -e "$A" "$DR/asked" 2> /dev/null; then      # the server is asked once for each sender in a drain, by a read of its revocations, which the server serves whether or not it holds the sender's mailbox. That it holds none is an answer; no answer is not, and the message then stays where it is
+    dr_revocations "$A" >> "$DR/said"; case $? in 0) ;; 1) printf '%s\n' "$A" >> "$DR/asked" ;; 3) echo "what this mailbox keeps of its sender's revocations does not verify, or cannot be written"; return 3 ;; *) echo "whether its sender is revoked could not be asked"; return 4 ;; esac
   fi
   dr_gone "$A"; case $? in      # nobody can vouch for when a signature was made, so a revocation reaches back over everything that address signed
     0) echo "revoked: its sender's address is revoked, and the revocation verifies: nothing signed for that address is taken, whenever it was signed"; return 1 ;;

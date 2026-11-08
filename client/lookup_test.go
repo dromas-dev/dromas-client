@@ -11,12 +11,14 @@ import (
 	"github.com/dromas-dev/dromas-client/protocol"
 )
 
-// lookups records, for each read of a mailbox, whether it carried a pass.
+// lookups records, for each read of a mailbox or of an address's revocations,
+// whether it carried a pass.
 func lookups(e *env) (seen func() map[string]bool) {
 	var mu sync.Mutex
 	got := map[string]bool{}
 	e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
-		if _, ok := forge.ReadOf(r); ok {
+		_, read := forge.ReadOf(r)
+		if _, revocations := forge.RevocationsOf(r); read || revocations {
 			mu.Lock()
 			got[r.URL.Path] = r.Header.Get("Authorization") != ""
 			mu.Unlock()
@@ -34,10 +36,10 @@ func lookups(e *env) (seen func() map[string]bool) {
 	}
 }
 
-// A mailbox's lookups carry no pass (PROTOCOL.md §11.8, §11.5): the read is public,
-// and a server reads none on it. Not the
-// recipient's mailbox before a send, not a sender's in a drain, and not a mailbox's
-// read of its own.
+// A mailbox's reads carry no pass (PROTOCOL.md §11.8, §11.15, §11.5): the
+// reads are public, and a server reads none on them. Not the recipient's
+// mailbox before a send, not a sender's revocations in a drain, and not a
+// mailbox's read of its own.
 func TestLookupsCarryNoPass(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -49,7 +51,7 @@ func TestLookupsCarryNoPass(t *testing.T) {
 		t.Fatalf("delivered %d", len(res.Delivered))
 	}
 	got := seen()
-	for _, p := range []string{mailboxPath(b), mailboxPath(a)} {
+	for _, p := range []string{mailboxPath(b), mailboxPath(a) + "/revocations"} {
 		if carried, asked := got[p]; !asked || carried {
 			t.Errorf("GET %s: asked %v, with a pass %v", p, asked, carried)
 		}

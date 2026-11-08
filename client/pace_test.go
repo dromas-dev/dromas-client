@@ -59,9 +59,9 @@ func TestAPacedDrainStopsAndResumes(t *testing.T) {
 	}
 }
 
-// Only a paced fetch stops a drain quietly. Any other 429 met in a drain, a
-// sender's lookup the mailbox's call budget refused among them, is an error, and
-// the messages stay on the server: such a refusal says nothing of them, and
+// Only a paced fetch stops a drain quietly. Any other 429 met in a drain, one
+// to the read of a sender's revocations among them, is an error, and the
+// messages stay on the server: such a refusal says nothing of them, and
 // a drain that ended quietly on it would hide that a sender went unchecked
 // (#116).
 func TestOnlyAPacedFetchEndsADrainQuietly(t *testing.T) {
@@ -69,15 +69,15 @@ func TestOnlyAPacedFetchEndsADrainQuietly(t *testing.T) {
 	fetch := func(r *http.Request) bool {
 		return r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/messages/")
 	}
-	lookup := func(r *http.Request) bool { _, ok := forge.ReadOf(r); return ok }
+	lookup := func(r *http.Request) bool { _, ok := forge.RevocationsOf(r); return ok }
 	for _, c := range []struct {
 		name   string
 		match  func(*http.Request) bool
 		status int
 		code   protocol.Code
 	}{
-		{"a call budget's 429 on the sender's lookup", lookup, http.StatusTooManyRequests, protocol.CodeRateLimited},
-		{"a pacing code on the sender's lookup", lookup, http.StatusTooManyRequests, protocol.CodeFetchPaced},
+		{"a call budget's 429 on the read of the sender's revocations", lookup, http.StatusTooManyRequests, protocol.CodeRateLimited},
+		{"a pacing code on the read of the sender's revocations", lookup, http.StatusTooManyRequests, protocol.CodeFetchPaced},
 		{"a pacing code under another status on the fetch", fetch, http.StatusServiceUnavailable, protocol.CodeFetchPaced},
 		{"a call budget's 429 on the fetch", fetch, http.StatusTooManyRequests, protocol.CodeRateLimited},
 	} {

@@ -93,6 +93,38 @@ func TestRevokeEarlierEndsWhatAnOldWorkingKeySigns(t *testing.T) {
 	}
 }
 
+// A server keeps a revocation of an address's certificates after it has
+// forgotten the address's mailbox (PROTOCOL.md §13), and serves the record on
+// a read of the address's revocations (§11.15), where a read of the mailbox
+// answers 404 no_such_mailbox (§11.8). Check 7 reads the revocations (§12.3),
+// so a message under a certificate so revoked is refused, and the record kept,
+// though the server holds no mailbox for its sender.
+func TestASenderWhoseMailboxIsForgottenIsRefusedByItsRevokedCertificates(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	e := newWorkEnv(t)
+	a, b := e.mailbox(), e.mailbox()
+	send(t, a, b, "sent under the first certificate, and unread")
+	if _, err := a.Rekey(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if certs, err := a.RevokeEarlier(ctx); err != nil || certs == nil {
+		t.Fatalf("revoke earlier: %+v, %v", certs, err)
+	}
+	e.srv.Forget(a.Address())
+	op := watch(e, nil)
+	res := receive(t, b)
+	if len(res.Delivered) != 0 || len(res.Refused) != 1 || res.Refused[0].Code != client.RefusedCertificate {
+		t.Fatalf("a message under a revoked certificate, from a sender whose mailbox its server forgot: %+v", res)
+	}
+	if !keptList(b, a.Address()) || keptRevocation(b, a.Address()) {
+		t.Fatal("the revocation of certificates was not kept, or the address was taken as revoked")
+	}
+	if n, m := op.count(http.MethodGet, mailboxPath(a)+"/revocations"), op.count(http.MethodGet, mailboxPath(a)); n != 1 || m != 0 {
+		t.Fatalf("the sender's revocations read %d times, its mailbox %d: want once, and never", n, m)
+	}
+}
+
 // RevokeEarlier after a renewal the server took whose answer the mailbox never
 // had, its process killed at "renewal taken": its read of itself records that
 // renewal (noteServed), so it revokes below the certificate in use once the
@@ -147,12 +179,18 @@ func TestOnlyTheIdentitysHighestRevocationCounts(t *testing.T) {
 	e := newWorkEnv(t)
 	a, b := e.mailbox(), e.mailbox()
 	doc := a.Identity().Document()
-	// show serves A's mailbox with rec's revocation of certificates in place of
-	// what the server holds, and counts the reads it served so.
+	// show serves A's mailbox, and A's revocations, with rec's revocation of
+	// certificates in place of what the server holds, and counts the reads it
+	// served so.
 	var shown atomic.Int32
 	show := func(rec protocol.Revocations) {
 		shown.Store(0)
 		e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
+			if x, ok := forge.RevocationsOf(r); ok && x == a.Address() {
+				shown.Add(1)
+				fakeserver.WriteJSON(w, http.StatusOK, &rec)
+				return
+			}
 			if x, ok := forge.ReadOf(r); ok && x == a.Address() {
 				shown.Add(1)
 				e.serve(w, r, next, func(br *protocol.MailboxResponse) {
