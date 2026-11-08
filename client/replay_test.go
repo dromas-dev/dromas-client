@@ -7,6 +7,8 @@ import (
 	"encoding/hex"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -249,4 +251,44 @@ func TestARestoreRefusesAMessageItDeliveredBeforeAsStale(t *testing.T) {
 	if res := receive(t, x); len(res.Delivered) != 1 || len(res.Refused) != 0 {
 		t.Fatalf("a message at the edge: %+v", res)
 	}
+}
+
+// A state file restored from a copy older than a renewal, the prekeys left as
+// they are, does not name the renewal's key, so it adopts that key and owes the
+// floor: a message the lost state delivered under that key is refused as stale
+// (PROTOCOL.md §15.9).
+func TestAStateRestoredFromAnOlderCopyAdoptsTheNewerKey(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	e := newEnv(t)
+	a, b := e.mailbox(), e.mailbox()
+	path := filepath.Join(b.Dir(), "state")
+	old, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.Rekey(ctx); err != nil {
+		t.Fatal(err)
+	}
+	sent := forge.Capture(e.srv, http.MethodPost, "/v1/"+b.Address().String()+"/messages")
+	send(t, a, b, "sealed to the renewal's key")
+	e.srv.SetMiddle(nil)
+	if res := receive(t, b); len(res.Delivered) != 1 {
+		t.Fatalf("the first delivery: %+v", res)
+	}
+	if err := os.WriteFile(path, old, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	x, err := client.Open(b.Dir(), e.opts())
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.clock.Add(2 * time.Second)
+	id := sha256.Sum256(*sent)
+	e.srv.Inject(x.Address(), hex.EncodeToString(id[:]), *sent) // the server kept its copy
+	res, err := x.Receive(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	refusedBeforeAdoption(t, x, res, a, 1)
 }
