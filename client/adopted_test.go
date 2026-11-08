@@ -629,3 +629,131 @@ func TestAKeyMountedDuringADrainDecryptsNothingUntilAdopted(t *testing.T) {
 	}
 	refusedBeforeAdoption(t, x, res, a, 1)
 }
+
+// No adoption and no prune lowers the replay floor, and an adoption whose floor
+// is already higher records no beginning of its own: what that floor refuses is
+// stale by the floor's own reason, never as sent before the adoption
+// (PROTOCOL.md §12.3 check 8).
+func TestNothingLowersTheFloor(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	a, b := e.mailbox(), e.mailbox()
+	send(t, a, b, "delivered, its line pruned later")
+	if res := receive(t, b); len(res.Delivered) != 1 {
+		t.Fatalf("the first delivery: %+v", res)
+	}
+	seen, _ := stateOf(b, "seen")
+	// Above the cutoff the prune drops that line at, and above the floor the
+	// adoption below owes.
+	floor := strconv.FormatInt(e.clock.Now().Add(protocol.SeenFor+24*time.Hour).Unix(), 10)
+	b.SetRecord(t, "seen-floor", []byte(floor))
+	// A key the state names nowhere, which the next command adopts.
+	key, err := os.ReadFile(prekeyFile(b, numberOf(t, b), ".agekey"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := numberOf(t, b) - 1
+	if err := os.WriteFile(prekeyFile(b, found, ".agekey"), key, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	e.clock.Add(protocol.SeenFor + time.Second)
+	if res := receive(t, b); res.Renewed == nil {
+		t.Fatalf("the drain past the line's time: %+v", res)
+	}
+	if got := client.AdoptedKeys(t, b); !slices.Contains(got, found) {
+		t.Fatalf("adopted %v, want %d among them", got, found)
+	}
+	if after, _ := stateOf(b, "seen"); bytes.Equal(after, seen) {
+		t.Fatal("the prune dropped no line")
+	}
+	if raw, _ := stateOf(b, "seen-floor"); string(raw) != floor {
+		t.Fatalf("seen-floor %q after the adoption and the prune, want %s, which neither lowers", raw, floor)
+	}
+	if has(b, "seen-began") || has(b, "floor-owed") {
+		t.Fatal("an adoption whose floor did not rise recorded its beginning, or left the floor owed")
+	}
+	send(t, e.mailbox(), b, "below the floor")
+	res := receive(t, b)
+	if len(res.Delivered) != 0 || len(res.Refused) != 1 || res.Refused[0].Code != protocol.RefusedStale || res.RefusedBeforeAdoption() != 0 {
+		t.Fatalf("a message below the floor: %+v, want it stale, and not as sent before an adoption", res)
+	}
+}
+
+// Only a refusal below the floor an adoption raised, under the adoption's
+// confirmed time plus the skew allowance, is said as sent before the adoption: one
+// below a prune's floor alone, or below a prune's floor past that edge, is stale
+// by the floor's own reason (Refusal.BeforeAdoption).
+func TestOnlyARefusalBelowAnAdoptionsEdgeIsSaidAsSentBeforeIt(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	a, b := e.mailbox(), e.mailbox()
+	now := e.clock.Now().Unix()
+	for _, c := range []struct {
+		name   string
+		began  []byte
+		before int
+	}{
+		{"a prune's floor alone", nil, 0},
+		{"a prune's floor past the adoption's edge", strconv.AppendInt(nil, now-2*int64(protocol.MaxSkew/time.Second), 10), 0},
+		{"below the adoption's edge", strconv.AppendInt(nil, now, 10), 1},
+	} {
+		b.SetRecord(t, "seen-floor", strconv.AppendInt(nil, now, 10))
+		b.SetRecord(t, "seen-began", c.began)
+		send(t, a, b, c.name)
+		res := receive(t, b)
+		if len(res.Delivered) != 0 || len(res.Refused) != 1 || res.Refused[0].Code != protocol.RefusedStale || res.RefusedBeforeAdoption() != c.before {
+			t.Fatalf("%s: %+v, want it stale, %d of it as sent before an adoption", c.name, res, c.before)
+		}
+	}
+	qs, err := b.RefusedMessages(t.Context())
+	before := 0
+	for _, q := range qs {
+		if q.BeforeAdoption {
+			before++
+		}
+	}
+	if err != nil || len(qs) != 3 || before != 1 {
+		t.Fatalf("refused/: %+v, %v, want 3, 1 of them as sent before an adoption", qs, err)
+	}
+}
+
+// status names the messages refused as sent before an adoption by what refused/
+// keeps, never by the state's records of them alone: a file its owner deleted
+// by hand takes it out of what status says.
+func TestStatusCountsTheMessagesRefusedKeeps(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	e := newEnv(t)
+	a, b := e.mailbox(), e.mailbox()
+	sent := forge.Capture(e.srv, http.MethodPost, "/v1/"+b.Address().String()+"/messages")
+	send(t, a, b, "delivered before the state file was lost")
+	e.srv.SetMiddle(nil)
+	receive(t, b)
+	x := lostState(t, e, b)
+	e.clock.Add(2 * time.Second)
+	id := sha256.Sum256(*sent)
+	e.srv.Inject(x.Address(), hex.EncodeToString(id[:]), *sent) // the server kept its copy
+	res, err := x.Receive(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	refusedBeforeAdoption(t, x, res, a, 1)
+	// A second refusal, for another reason, which refused/ keeps beside it.
+	junk := []byte("not an age file")
+	jid := sha256.Sum256(junk)
+	e.srv.Inject(x.Address(), hex.EncodeToString(jid[:]), junk)
+	if res := receive(t, x); len(res.Refused) != 1 || res.Refused[0].Code != client.RefusedDecrypt {
+		t.Fatalf("the second refusal: %+v", res)
+	}
+	words := client.BeforeAdoptionWords(1)
+	if st, err := x.Status(ctx); err != nil || st.Refused != 2 || !slices.Contains(st.Attention, words) {
+		t.Fatalf("status while refused/ keeps both: %+v, %v", st, err)
+	}
+	if err := os.Remove(filepath.Join(x.Path("refused"), hex.EncodeToString(id[:])+".json")); err != nil {
+		t.Fatal(err)
+	}
+	st, err := x.Status(ctx)
+	if err != nil || st.Refused != 1 || slices.ContainsFunc(st.Attention, func(s string) bool { return strings.Contains(s, "sent before this mailbox adopted") }) {
+		t.Fatalf("status once the copy's file is deleted by hand: %+v, %v", st, err)
+	}
+}
