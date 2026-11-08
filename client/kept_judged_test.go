@@ -2,6 +2,7 @@ package client_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -54,14 +55,15 @@ func TestAKeptDirectoryOthersCanWriteIsRefused(t *testing.T) {
 
 // A message file inbox-dir or held/ keeps that others can reach is refused
 // before it is read as a delivered message, naming it, by each command that
-// prints or moves one, and the line the refusal gives puts it right (#717).
+// prints or moves one, an owed loop's handover of it among them, and the line
+// the refusal gives puts it right (#717, #774).
 func TestAKeptMessageOthersCanReachIsRefused(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	e := newEnv(t)
 	a, b, c := e.mailbox(), e.mailbox(), e.heldMailbox()
 	send(t, a, b, "kept")
-	in := receive(t, b).Delivered[0]
+	in := owedDelivery(t, b)
 	inPath := b.Path("inbox", in.ID+".json")
 	send(t, a, c, "held")
 	held := receive(t, c)
@@ -77,6 +79,14 @@ func TestAKeptMessageOthersCanReachIsRefused(t *testing.T) {
 		"inbox show": func() error { _, err := b.InboxMessage(ctx, in.ID); return err },
 		"held list":  func() error { _, err := c.HeldMessages(ctx); return err },
 		"peer allow": func() error { _, err := c.Allow(ctx, a.Address()); return err },
+		"an owed handover": func() error {
+			return b.Follow(ctx, oneDrain(true), func(_ context.Context, ev client.Event) error {
+				if ev.Kind == client.EventDelivery {
+					t.Errorf("an owed loop handed over %s", ev.Delivery.ID)
+				}
+				return nil
+			})
+		},
 	} {
 		err := run()
 		if err == nil || !strings.Contains(err.Error(), fixWord) {
@@ -133,4 +143,25 @@ func mustOpen(t *testing.T, dir string, opt client.Options) *client.Mailbox {
 		t.Fatal(err)
 	}
 	return b
+}
+
+// owedDelivery is the one message b's server holds, delivered by an owed loop
+// whose handler fails, so the message stays owed its handling.
+func owedDelivery(t *testing.T, b *client.Mailbox) client.Delivery {
+	t.Helper()
+	boom := errors.New("boom")
+	var got []client.Delivery
+	if err := b.Follow(context.Background(), oneDrain(true), func(_ context.Context, ev client.Event) error {
+		if ev.Kind == client.EventDelivery {
+			got = append(got, *ev.Delivery)
+			return boom
+		}
+		return nil
+	}); !errors.Is(err, boom) || len(got) != 1 {
+		t.Fatalf("an owed loop: %v, having handed over %d", err, len(got))
+	}
+	if st, err := b.Status(context.Background()); err != nil || st.Owed != 1 {
+		t.Fatalf("after: %+v, %v", st, err)
+	}
+	return got[0]
 }

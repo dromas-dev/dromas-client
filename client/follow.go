@@ -130,8 +130,11 @@ type FollowOptions struct {
 // A handler's error ends the loop after the last of them.
 //
 // A drain that fails in a way a wait may mend ([Transient]) is an [EventRetry],
-// and the loop drains again after the error's Retry-After, or the later of the
-// server's poll interval and its pace, or a minute. Where that lands past Until
+// a no_such_mailbox among them where the renewal that registers the mailbox
+// again failed so ([Result.RenewErr]), and the loop drains again after the
+// error's Retry-After, or the later of the server's poll interval and its pace,
+// or a minute, or [ReceiveEvery] after a refusal this machine puts right without
+// its owner ([NotReady]). Where that lands past Until
 // the drain's error ends the loop, as any other drain's error does. Follow returns
 // that error, the handler's, ctx's when ctx ended, and nil for [ErrStop] or at Until.
 func (b *Mailbox) Follow(ctx context.Context, o FollowOptions, h Handler) error {
@@ -151,6 +154,9 @@ func (b *Mailbox) Follow(ctx context.Context, o FollowOptions, h Handler) error 
 	}
 	for {
 		res, err := locked(ctx, b, func() (*Result, error) { return b.receive(ctx, o.Owed) })
+		if renewalMends(code(err)) && res != nil && Transient(res.RenewErr) {
+			err = &notRegistered{err}
+		}
 		if serr := b.handOver(ctx, o.Owed, res, h); serr != nil && stopped == nil {
 			stopped = serr
 		}
@@ -187,6 +193,17 @@ func (b *Mailbox) Follow(ctx context.Context, o FollowOptions, h Handler) error 
 	}
 }
 
+// notRegistered is a drain's no_such_mailbox whose renewal, which registers the
+// mailbox again, failed in a way a wait may mend, or is held back after such a
+// failure ([Transient]): a later drain renews again.
+type notRegistered struct{ err error }
+
+func (e *notRegistered) Error() string {
+	return e.err.Error() + "; registering this mailbox again failed in a way a wait may mend, and a later recv tries again"
+}
+
+func (e *notRegistered) Unwrap() error { return e.err }
+
 // ended is what Follow returns for a handler's error.
 func ended(err error) error {
 	if errors.Is(err, ErrStop) {
@@ -195,8 +212,13 @@ func ended(err error) error {
 	return err
 }
 
-// pauseAfter is how long the loop waits before the drain after res and err.
+// pauseAfter is how long the loop waits before the drain after res and err:
+// ReceiveEvery after a refusal this machine puts right ([NotReady]), the
+// longest the loop otherwise goes between drains.
 func pauseAfter(res *Result, err error) time.Duration {
+	if NotReady(err) {
+		return ReceiveEvery
+	}
 	pause := time.Minute
 	if res != nil && res.Again() > 0 {
 		pause = res.Again()
@@ -388,7 +410,9 @@ func (b *Mailbox) clearOwed(ctx context.Context, key, id string, gaveUp bool) er
 
 // owedMessages reads what the state file records as owed, under the command that
 // holds the lock, and drops the record of a handling that gave up where inbox/
-// no longer keeps its message.
+// no longer keeps its message. An owed message's file that others can reach,
+// or that another user owns, is refused before it is read (judgeKept), and
+// nothing is handed over.
 func (b *Mailbox) owedMessages() ([]owedMessage, error) {
 	var owed []owedMessage
 	var left []string
@@ -412,6 +436,9 @@ func (b *Mailbox) owedMessages() ([]owedMessage, error) {
 		id := owed[i].id
 		if !hexID.MatchString(id) {
 			return nil, fmt.Errorf("the mailbox's state file records a message owed under an id that is not one")
+		}
+		if err := b.judgeKept(b.path("inbox", id+".json")); err != nil {
+			return nil, err
 		}
 		data, err := os.ReadFile(b.path("inbox", id+".json")) //nolint:gosec // a path inside the mailbox's own directory, named by 64 hex
 		if errors.Is(err, fs.ErrNotExist) {
