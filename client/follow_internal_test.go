@@ -14,7 +14,7 @@ import (
 func TestHandOverHandsOverEveryKindInItsOrder(t *testing.T) {
 	t.Parallel()
 	res := &Result{
-		Delivered: []Delivery{{ID: "d"}}, Duplicates: []string{"u"}, Refused: []Refusal{{ID: "r", BeforeAdoption: true}},
+		Delivered: []Delivery{{ID: "d"}}, Duplicates: []string{"u"}, Refused: []Refusal{{ID: "r", BeforeRestore: true}},
 		Held: []Delivery{{ID: "h"}}, Blocked: []string{"b"}, More: true,
 		Renewed: &protocol.Prekey{}, RenewErr: errors.New("renew"), NotMade: &NotMade{},
 		ACLErr: errors.New("acl"), ACLReplaced: true,

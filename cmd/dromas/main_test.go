@@ -915,31 +915,49 @@ func TestRecvSaysItRefusedMessagesSentBeforeItAdoptedAKey(t *testing.T) {
 	if err := do(ctx, "recv", nil, nil, &out, &errs); err != nil || typesOf(printed(t, out.String())) != "message" {
 		t.Fatalf("the first recv: %v, stdout %q, stderr %q", err, out.String(), errs.String())
 	}
-	// The state file lost, the keys kept: the restore's recv renews, and meets
-	// the lost machine's statement, which the next read of itself clears.
+	// The state file lost, the keys kept: each command that touches messages
+	// stops with exit status 4 until init --restore, which status says, and
+	// then init's restore renews, and meets the lost machine's statement, which
+	// the next read of itself clears.
 	if err := os.Remove(filepath.Join(b.Dir(), "state")); err != nil {
 		t.Fatal(err)
 	}
-	for _, c := range [][]string{{"recv"}, {"prekey", "renew"}} {
-		if err := do(ctx, strings.Join(c, " "), nil, nil, io.Discard, io.Discard); err != nil && !errors.As(err, new(*needsALook)) {
-			t.Fatalf("%v after the state file was lost: %v", c, err)
-		}
-	}
 	id := sha256.Sum256(*sent)
 	srv.Inject(b.Address(), hex.EncodeToString(id[:]), *sent) // the server kept its copy
+	for _, c := range []string{"recv", "prekey renew", "init", "outbox flush"} {
+		errs.Reset()
+		err := do(ctx, c, nil, nil, io.Discard, &errs)
+		if got := report(err, &errs); got != 4 || !strings.Contains(errs.String(), `"fatal":true`) || !strings.Contains(errs.String(), `"code":"`+client.StateNotTheKeys+`"`) || srv.Count(b.Address()) != 1 {
+			t.Fatalf("%s after the state file was lost: exit %d, stderr %q", c, got, errs.String())
+		}
+	}
+	var look *needsALook
+	out.Reset()
+	if err := do(ctx, "status", nil, nil, &out, io.Discard); !errors.As(err, &look) || !strings.Contains(out.String(), "dromas init --restore") {
+		t.Fatalf("status before init --restore: %v, %q", err, out.String())
+	}
+	out.Reset()
+	if err := do(ctx, "init --restore", nil, nil, &out, io.Discard); err != nil && !errors.As(err, &look) {
+		t.Fatalf("init --restore: %v", err)
+	}
+	if ls := printed(t, out.String()); typesOf(ls) != "restore mailbox" || ls[0]["acknowledged"] != true {
+		t.Fatalf("init --restore printed %q", out.String())
+	}
+	if err := do(ctx, "prekey renew", nil, nil, io.Discard, io.Discard); err != nil && !errors.As(err, &look) {
+		t.Fatalf("prekey renew after init --restore: %v", err)
+	}
 	out.Reset()
 	errs.Reset()
-	var look *needsALook
 	if err := do(ctx, "recv", nil, nil, &out, &errs); !errors.As(err, &look) {
 		t.Fatalf("a refusal of a message sent before the adoption must give exit status 3, not %v; stdout %q", err, out.String())
 	}
 	ls := printed(t, out.String())
-	if typesOf(ls) != "refused stale_after_restore" || ls[0]["code"] != protocol.RefusedStale || !strings.Contains(ls[0]["detail"].(string), "sent before this mailbox adopted a prekey") ||
-		ls[1]["count"] != json.Number("1") || ls[1]["detail"] != client.BeforeAdoptionWords(1) || errs.Len() != 0 {
+	if typesOf(ls) != "refused stale_after_restore" || ls[0]["code"] != protocol.RefusedStale || !strings.Contains(ls[0]["detail"].(string), "sent before this mailbox's restore") ||
+		ls[1]["count"] != json.Number("1") || ls[1]["detail"] != client.BeforeRestoreWords(1) || errs.Len() != 0 {
 		t.Fatalf("stdout %q, stderr %q", out.String(), errs.String())
 	}
 	out.Reset()
-	if err := do(ctx, "status", nil, nil, &out, io.Discard); !errors.As(err, &look) || !strings.Contains(out.String(), client.BeforeAdoptionWords(1)) {
+	if err := do(ctx, "status", nil, nil, &out, io.Discard); !errors.As(err, &look) || !strings.Contains(out.String(), client.BeforeRestoreWords(1)) {
 		t.Fatalf("status while refused/ keeps it: %v, %q", err, out.String())
 	}
 	// The next drain refuses nothing, and needs no look.

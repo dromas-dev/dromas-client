@@ -105,7 +105,8 @@ func TestEveryCommandWaitsForTheLock(t *testing.T) {
 
 // A mailbox with no state file, restored or made before there was one, makes it
 // at its first command, beside its place and linked in, and commands that
-// make it at once all run: a link replaces nothing another made first. Each
+// make it at once all run, each to the refusal of a state that does not name
+// the prekeys kept: a link replaces nothing another made first. Each
 // opens its mailbox as it runs, or opened it before; Open makes no state file,
 // which a command makes once it has the mailbox's format (#327, #462).
 func TestTheStateFileIsMadeAtTheFirstCommand(t *testing.T) {
@@ -146,7 +147,9 @@ func TestTheStateFileIsMadeAtTheFirstCommand(t *testing.T) {
 						x = mailboxes[k]
 					}
 					if err == nil {
-						_, err = x.Receive(context.Background())
+						if _, err = x.Receive(context.Background()); client.NotTheKeys(err) {
+							err = nil
+						}
 					}
 					errs <- err
 				})
@@ -176,7 +179,8 @@ func TestTheStateFileIsMadeAtTheFirstCommand(t *testing.T) {
 // A state file of no bytes, which this client never leaves, is refused by a
 // command and a reading alike, and left as it is: bbolt would make a
 // database in it in place, which a cut can leave faulting every process
-// after (#323). Once it is deleted, the next command makes it.
+// after (#323). Once it is deleted, the next command makes it, and refuses a
+// state that does not name the prekeys kept until the restore is acknowledged.
 func TestAnEmptyStateFileIsRefusedAndLeftAsItIs(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -202,8 +206,16 @@ func TestAnEmptyStateFileIsRefusedAndLeftAsItIs(t *testing.T) {
 	if err := os.Remove(state); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := b.Receive(ctx); err != nil {
+	if _, err := b.Receive(ctx); !client.NotTheKeys(err) || !exists(state) {
 		t.Fatalf("a command once the empty file was deleted: %v", err)
+	}
+	opt := e.opts()
+	opt.Restore = true
+	if _, err := client.Init(ctx, b.Dir(), opt); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.Receive(ctx); err != nil {
+		t.Fatalf("a command once the restore was acknowledged: %v", err)
 	}
 }
 

@@ -42,8 +42,8 @@ const (
 	// the mailbox replaced.
 	EventACLReplaced
 	// EventStaleAfterRestore is the drain's refusals of messages sent before the
-	// mailbox adopted a prekey its state did not record:
-	// [Result.RefusedBeforeAdoption].
+	// mailbox's restore (Options.Restore):
+	// [Result.RefusedBeforeRestore].
 	EventStaleAfterRestore
 	// EventDrained ends each drain's events, and carries its [Result].
 	EventDrained
@@ -316,7 +316,7 @@ func (b *Mailbox) handOver(ctx context.Context, owed bool, res *Result, h Handle
 	if res.ACLReplaced {
 		give(Event{Kind: EventACLReplaced})
 	}
-	if res.RefusedBeforeAdoption() > 0 {
+	if res.RefusedBeforeRestore() > 0 {
 		give(Event{Kind: EventStaleAfterRestore})
 	}
 	give(Event{Kind: EventDrained})
@@ -414,6 +414,9 @@ func (b *Mailbox) clearOwed(ctx context.Context, key, id string, gaveUp bool) er
 // or that another user owns, is refused before it is read (judgeKept), and
 // nothing is handed over.
 func (b *Mailbox) owedMessages() ([]owedMessage, error) {
+	if err := b.keysMatch(); err != nil {
+		return nil, err
+	}
 	var owed []owedMessage
 	var left []string
 	if err := b.view(func(s store) error {

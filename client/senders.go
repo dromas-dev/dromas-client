@@ -372,6 +372,9 @@ func (b *Mailbox) heldMessages() ([]UnknownSender, error) {
 // error from that leaves the sender allowed here.
 func (b *Mailbox) Allow(ctx context.Context, a protocol.Address) ([]Delivery, error) {
 	return locked(ctx, b, func() ([]Delivery, error) {
+		if err := b.keysMatch(); err != nil {
+			return nil, err
+		}
 		moved, err := b.allow(a)
 		if err != nil {
 			return moved, err

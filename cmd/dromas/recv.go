@@ -101,7 +101,7 @@ func (e *cli) recv(c *cobra.Command, b *client.Mailbox, o recvOptions) error {
 	case err != nil:
 		return err
 	}
-	if r.renewErr != nil || r.aclErr != nil || r.notMade != nil || r.replaced || r.gaveUp || r.beforeAdoption {
+	if r.renewErr != nil || r.aclErr != nil || r.notMade != nil || r.replaced || r.gaveUp || r.beforeRestore {
 		return &needsALook{}
 	}
 	return nil
@@ -125,11 +125,11 @@ type recvRun struct {
 	// the mailbox's last read of itself served that it did not make; replaced that
 	// a renewal of this run found an ACL at the server that the mailbox had not
 	// sent, and replaced it; gaveUp that a callback ran out of tries; and
-	// beforeAdoption that a drain refused messages sent before the mailbox
-	// adopted a prekey.
-	renewErr, aclErr                 error
-	notMade                          *client.NotMade
-	replaced, gaveUp, beforeAdoption bool
+	// beforeRestore that a drain refused messages sent before the mailbox's
+	// restore.
+	renewErr, aclErr                error
+	notMade                         *client.NotMade
+	replaced, gaveUp, beforeRestore bool
 }
 
 func (r *recvRun) print(l []byte) {
@@ -185,9 +185,9 @@ func (r *recvRun) handle(ctx context.Context, ev client.Event) error {
 		r.replaced = true
 		r.print(line("acl_replaced", "detail", "this mailbox's server held an ACL other than the one this mailbox last sent it, which another machine of this mailbox, someone holding its pass or the server itself wrote: this mailbox sent its own in its place"))
 	case client.EventStaleAfterRestore:
-		r.beforeAdoption = true
-		n := ev.Result.RefusedBeforeAdoption()
-		r.print(line("stale_after_restore", "count", n, "detail", client.BeforeAdoptionWords(n)))
+		r.beforeRestore = true
+		n := ev.Result.RefusedBeforeRestore()
+		r.print(line("stale_after_restore", "count", n, "detail", client.BeforeRestoreWords(n)))
 	case client.EventDrained:
 		r.notMade, r.aclErr, r.stale = ev.Result.NotMade, ev.Result.ACLErr, true
 		switch {

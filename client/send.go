@@ -103,6 +103,9 @@ func (b *Mailbox) Send(ctx context.Context, to protocol.Address, body string) (*
 // that writes the mailbox does.
 func (b *Mailbox) SendWith(ctx context.Context, to protocol.Address, body string, f Fields) (*Sent, error) {
 	return locked(ctx, b, func() (*Sent, error) {
+		if err := b.keysMatch(); err != nil {
+			return nil, err
+		}
 		env, err := protocol.NewEnvelope(b.id.Address(), to, body, b.now())
 		if err != nil {
 			return nil, err
@@ -118,6 +121,9 @@ func (b *Mailbox) SendWith(ctx context.Context, to protocol.Address, body string
 // and sent compact, as written.
 func (b *Mailbox) SendJSON(ctx context.Context, to protocol.Address, body []byte, f Fields) (*Sent, error) {
 	return locked(ctx, b, func() (*Sent, error) {
+		if err := b.keysMatch(); err != nil {
+			return nil, err
+		}
 		env, err := protocol.NewJSONEnvelope(b.id.Address(), to, body, b.now())
 		if err != nil {
 			return nil, err
@@ -208,7 +214,12 @@ func (b *Mailbox) replyWaits(peer protocol.Address, aclErr error) error {
 // failed. The server is asked about the recipient before each post, as a
 // send asks ([Mailbox.SendWith]).
 func (b *Mailbox) Flush(ctx context.Context) ([]*Sent, error) {
-	return lockedFinished(ctx, b, func() ([]*Sent, error) { return b.flush(ctx) })
+	return lockedFinished(ctx, b, func() ([]*Sent, error) {
+		if err := b.keysMatch(); err != nil {
+			return nil, err
+		}
+		return b.flush(ctx)
+	})
 }
 
 func (b *Mailbox) flush(ctx context.Context) ([]*Sent, error) {

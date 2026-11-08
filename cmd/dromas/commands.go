@@ -158,7 +158,7 @@ func orNil(s string) any {
 
 func (e *cli) initCmd() *cobra.Command {
 	var idType, revocationFile string
-	var offline bool
+	var offline, restore bool
 	c := command("init [flags]", "create this mailbox and register it; prints its link",
 		`Create this mailbox and register it, and print its address and its link,
 <server>/to/<address>, as addr does. Its identity signs what it says. With
@@ -174,7 +174,17 @@ file gets one, each path in full. With --revocation-file, init also writes the
 mailbox's revocation record, as dromas revocation make prints it, to a new file
 outside every directory of the mailbox, for the day the mailbox is lost: keep
 it where only you can read it. On a mailbox already registered, init with
---revocation-file writes the record and changes nothing else.`,
+--revocation-file writes the record and changes nothing else.
+
+A mailbox whose state does not match its prekeys/, as after state is lost or
+put back from an older copy with prekeys/ kept, receives, sends and renews
+nothing, init among them, until init --restore acknowledges it: it adopts the
+prekeys the state does not name, and the next drain refuses as stale every
+message sent before the server next takes one of the mailbox's calls, and in
+the hour after (stale_after_restore), since those keys may open a message the
+mailbox delivered already. On a mailbox whose state matches, init --restore
+changes nothing, so it may run at every start. A mailbox restored from its
+identity alone needs no --restore.`,
 		checked(nargs(0, 0), func(c *cobra.Command, _ []string) error {
 			if idType != "" && !slices.Contains(protocol.IdentityTypes(), idType) {
 				return wrong(c, "%s makes an identity of the key type %s, and %q is not one", c.CommandPath(), strings.Join(protocol.IdentityTypes(), " or "), idType)
@@ -182,7 +192,7 @@ it where only you can read it. On a mailbox already registered, init with
 			return nil
 		}), func(c *cobra.Command, _ []string) error {
 			opt := e.opt
-			opt.WorkingKey = offline
+			opt.WorkingKey, opt.Restore = offline, restore
 			if revocationFile == "" {
 				revocationFile = os.Getenv("DROMAS_REVOCATION_FILE")
 			}
@@ -206,6 +216,11 @@ it where only you can read it. On a mailbox already registered, init with
 			if err != nil {
 				return err
 			}
+			if r := b.Restored(); r != nil {
+				if err := e.out(line("restore", "acknowledged", r.Acknowledged(), "detail", restoreWords(*r))); err != nil {
+					return err
+				}
+			}
 			if inGit := b.KeysInGit(); len(inGit) > 0 {
 				words := strings.Join(inGit, "; ")
 				if w, ok := warning.(string); ok {
@@ -215,10 +230,26 @@ it where only you can read it. On a mailbox already registered, init with
 			}
 			return e.out(line("mailbox", "address", b.Address(), "link", b.Link(), "detail", warning))
 		})
+	c.Flags().BoolVar(&restore, "restore", false, "acknowledge a state that does not match prekeys/, as after state is lost or put back from an older copy, so the mailbox runs again: on one that matches, it changes nothing")
 	c.Flags().BoolVar(&offline, "offline", false, "register the mailbox under a certificate, whose working key signs in place of its identity: for good")
 	c.Flags().StringVar(&revocationFile, "revocation-file", "", "write this mailbox's revocation record, as dromas revocation make prints it, to this new `file`, outside every directory of the mailbox: $DROMAS_REVOCATION_FILE")
 	c.Flags().StringVar(&idType, "identity-type", "", "make the identity a key of this `type`, not ssh-ed25519: "+protocol.IdentityP256+", which every client verifies too")
 	return c
+}
+
+// restoreWords says what init --restore found and did.
+func restoreWords(r client.Restored) string {
+	if !r.Acknowledged() {
+		return "this mailbox's state matches its prekeys: nothing to acknowledge, and nothing changed"
+	}
+	var found []string
+	if r.Adopted > 0 {
+		found = append(found, fmt.Sprintf("adopted %d prekeys the state did not name", r.Adopted))
+	}
+	if r.RolledBack {
+		found = append(found, "found the state older than prekeys/generation")
+	}
+	return "acknowledged the restore: " + strings.Join(found, ", and ") + ". The next drain refuses as stale every message sent before the server next takes one of this mailbox's calls, and in the hour after (stale_after_restore)"
 }
 
 func (e *cli) addrCmd() *cobra.Command {

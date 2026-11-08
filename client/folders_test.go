@@ -186,7 +186,8 @@ func TestARestoreMakesItsFoldersAndThenBindsThem(t *testing.T) {
 }
 
 // A state file lost beside a missing folder is a new state file: its first
-// command makes the folder again.
+// command makes the folder again, before it refuses a state that does not name
+// the prekeys kept.
 func TestANewStateFileMakesAMissingFolder(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
@@ -197,7 +198,7 @@ func TestANewStateFileMakesAMissingFolder(t *testing.T) {
 	if err := os.RemoveAll(b.Path("held")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := b.Rekey(context.Background()); err != nil {
+	if _, err := b.Rekey(context.Background()); !client.NotTheKeys(err) {
 		t.Fatalf("the renewal on a new state file: %v", err)
 	}
 	if !exists(b.Path("held")) {

@@ -187,9 +187,10 @@ func TestTheSeenFloor(t *testing.T) {
 
 // A server that kept a message the mailbox delivered serves it again once the
 // state file is lost and the keys kept, which a restore supports: the new state
-// file adopts the keys, and the adoption owes a floor at the first confirmed time
-// after it, so the copy is refused as stale, kept in refused/ with its signer,
-// and said in status while refused/ keeps it. Every sent_at below that confirmed
+// file names none of the keys, so recv stops before it lists anything, and
+// status says so, until dromas init --restore adopts them, which owes a floor at
+// the first confirmed time after it, so the copy is refused as stale, kept in
+// refused/ with its signer, and said in status while refused/ keeps it. Every sent_at below that confirmed
 // time plus the skew allowance is stale, and one at it is delivered (PROTOCOL.md
 // §12.3 check 8, §15.9).
 func TestARestoreRefusesAMessageItDeliveredBeforeAsStale(t *testing.T) {
@@ -203,19 +204,26 @@ func TestARestoreRefusesAMessageItDeliveredBeforeAsStale(t *testing.T) {
 	if res := receive(t, b); len(res.Delivered) != 1 {
 		t.Fatalf("the first delivery: %+v", res)
 	}
-	x := lostState(t, e, b)
+	x := lostUnacknowledged(t, e, b)
 	e.clock.Add(2 * time.Second)
 	id := sha256.Sum256(*sent)
 	e.srv.Inject(x.Address(), hex.EncodeToString(id[:]), *sent) // the server kept its copy
+	if _, err := x.Receive(ctx); !client.NotTheKeys(err) || e.srv.Count(x.Address()) != 1 {
+		t.Fatalf("recv before the restore is acknowledged: %v", err)
+	}
+	if st, err := x.Status(ctx); err != nil || !slices.ContainsFunc(st.Attention, func(s string) bool { return strings.Contains(s, "dromas init --restore") }) {
+		t.Fatalf("status before the restore is acknowledged: %q, %v", st.Attention, err)
+	}
+	restoreAcknowledged(t, e, x, 1, true) // a new state counts no drain, and prekeys/generation one
 	res, err := x.Receive(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	refusedBeforeAdoption(t, x, res, a, 1)
+	refusedBeforeRestore(t, x, res, a, 1)
 	if got := inbox(t, x); len(got) != 1 {
 		t.Fatalf("inbox/ holds %q: the copy was delivered again", got)
 	}
-	words := client.BeforeAdoptionWords(1)
+	words := client.BeforeRestoreWords(1)
 	st, err := x.Status(ctx)
 	if err != nil || !slices.Contains(st.Attention, words) {
 		t.Fatalf("status while refused/ keeps it: %q, %v", st.Attention, err)
@@ -243,7 +251,7 @@ func TestARestoreRefusesAMessageItDeliveredBeforeAsStale(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(res.Delivered) != 0 || res.RefusedBeforeAdoption() != 1 {
+	if len(res.Delivered) != 0 || res.RefusedBeforeRestore() != 1 {
 		t.Fatalf("a message a second below the edge: %+v", res)
 	}
 	e.clock.Add(time.Second)
@@ -253,10 +261,11 @@ func TestARestoreRefusesAMessageItDeliveredBeforeAsStale(t *testing.T) {
 	}
 }
 
-// A state file restored from a copy older than a renewal, the prekeys left as
-// they are, does not name the renewal's key, so it adopts that key and owes the
-// floor: a message the lost state delivered under that key is refused as stale
-// (PROTOCOL.md §15.9).
+// A state file restored from a copy older than a renewal and a drain that
+// delivered, the prekeys left as they are, does not name the renewal's key and
+// is behind prekeys/generation, so recv stops before it lists anything until
+// dromas init --restore adopts that key and owes the floor: a message the lost
+// state delivered under that key is refused as stale (PROTOCOL.md §15.9).
 func TestAStateRestoredFromAnOlderCopyAdoptsTheNewerKey(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -286,9 +295,13 @@ func TestAStateRestoredFromAnOlderCopyAdoptsTheNewerKey(t *testing.T) {
 	e.clock.Add(2 * time.Second)
 	id := sha256.Sum256(*sent)
 	e.srv.Inject(x.Address(), hex.EncodeToString(id[:]), *sent) // the server kept its copy
+	if _, err := x.Receive(ctx); !client.NotTheKeys(err) || e.srv.Count(x.Address()) != 1 {
+		t.Fatalf("recv on the older copy: %v", err)
+	}
+	restoreAcknowledged(t, e, x, 1, true)
 	res, err := x.Receive(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	refusedBeforeAdoption(t, x, res, a, 1)
+	refusedBeforeRestore(t, x, res, a, 1)
 }

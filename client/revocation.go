@@ -637,7 +637,12 @@ type Remedy struct {
 // (certificatesOwn). One restored with nothing published, whose read went
 // unanswered, goes on.
 func (b *Mailbox) RenewAndRevoke(ctx context.Context) (*Remedy, error) {
-	return locked(ctx, b, func() (*Remedy, error) { return b.renewAndRevoke(ctx) })
+	return locked(ctx, b, func() (*Remedy, error) {
+		if err := b.keysMatch(); err != nil {
+			return nil, err
+		}
+		return b.renewAndRevoke(ctx)
+	})
 }
 
 // certificatesOwn is the refusal of a revocation of a mailbox's earlier

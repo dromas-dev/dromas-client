@@ -178,6 +178,9 @@ func (b *Mailbox) certificateLifetime(ctx context.Context) (time.Duration, error
 // before anything is signed (noRoom).
 func (b *Mailbox) RenewUnderCertificate(ctx context.Context) (*protocol.Prekey, error) {
 	return locked(ctx, b, func() (*protocol.Prekey, error) {
+		if err := b.keysMatch(); err != nil {
+			return nil, err
+		}
 		p, at, err := b.renewAs(ctx, true, true)
 		if err != nil {
 			return p, err
