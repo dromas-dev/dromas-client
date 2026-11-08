@@ -451,7 +451,7 @@ renews nothing, but in a command run with --askpass or at a terminal.`,
 				}
 				defer os.RemoveAll(dir) //nolint:errcheck // the count of one run
 				tries = filepath.Join(dir, "tries")
-				env = append(env, "SSH_ASKPASS="+exe, "SSH_ASKPASS_REQUIRE=force", "DROMAS_ASKPASS="+e.cfg.askpass, askpassTriesEnv+"="+tries)
+				env = append(env, "SSH_ASKPASS="+exe, "SSH_ASKPASS_REQUIRE=force", "DROMAS_ASKPASS="+e.cfg.askpass, triesEnv+"="+tries)
 			}
 			var args []string
 			if life != "" {
@@ -491,9 +491,9 @@ renews nothing, but in a command run with --askpass or at a terminal.`,
 	return c
 }
 
-// askpassTriesEnv names the file that counts the runs of agent add's askpass
+// triesEnv names the file that counts the runs of agent add's askpass
 // program (countedAskpass).
-const askpassTriesEnv = "DROMAS_ASKPASS_TRIES"
+const triesEnv = "DROMAS_ASKPASS_TRIES"
 
 // askpassTries is how many passphrases agent add takes from its askpass
 // program: ssh's NumberOfPasswordPrompts default (ssh_config(5)).
@@ -503,7 +503,7 @@ const askpassTries = 3
 // environment names a count's file and the one argument is ssh-add's prompt,
 // and returns its exit status.
 func countedAskpassMain() (int, bool) {
-	tries, ok := os.LookupEnv(askpassTriesEnv)
+	tries, ok := os.LookupEnv(triesEnv)
 	if !ok || len(os.Args) != 2 {
 		return 0, false
 	}
@@ -532,7 +532,7 @@ func countedAskpass(tries, program, prompt string) int {
 	}
 	cmd := exec.Command(program, prompt) //nolint:gosec // the askpass program its owner set
 	cmd.Stdout = os.Stdout
-	cmd.Env = slices.DeleteFunc(os.Environ(), func(kv string) bool { return strings.HasPrefix(kv, askpassTriesEnv+"=") })
+	cmd.Env = slices.DeleteFunc(os.Environ(), func(kv string) bool { return strings.HasPrefix(kv, triesEnv+"=") })
 	if err := cmd.Run(); err != nil {
 		return 1
 	}
