@@ -325,7 +325,9 @@ this address, or a refusal of the client's own. Exit status 1 is any other failu
 With --exec, recv runs a command for each message that lands in inbox/, with
 the message's line on stdin, as recv prints it. It takes --wait or --follow.
 --exec names the program, and the arguments after -- go to it one for one: no
-shell runs, and nothing is split or expanded. The program's stdout and stderr
+shell runs, and nothing is split or expanded. On Windows, cmd.exe runs a .bat
+or .cmd program, and cmd.exe splits and expands those arguments. Nothing of a
+message is ever on the command line. The program's stdout and stderr
 are discarded. The commands run one at a time, in delivery order, with the
 mailbox's lock free, so a command may run dromas. Each message is kept in
 inbox/ first, so a command is a notification and never the only copy. A message
