@@ -157,10 +157,12 @@ func checkKeyFile(path string) error {
 	return nil
 }
 
-// checkPrivateFile refuses a private file of the mailbox's that anyone but its
-// owner, SYSTEM and the Administrators can reach, or another user owns
-// (readAccess; judgeFiles). The refusal gives the icacls line that leaves it those
-// three alone, by SID, which every shell and language reads alike.
+// checkPrivateFile refuses a private file of the mailbox's that another user owns,
+// or that anyone but its owner, SYSTEM and the Administrators can reach
+// (readAccess; judgeFiles). It judges the owner before the list, because a file's
+// owner can change its list: so the icacls line a refusal of the list gives
+// leaves a file that passes. That line leaves the list to those three alone, by
+// SID, which every shell and language reads alike.
 func checkPrivateFile(path string) error {
 	a, err := readAccess(path)
 	if err != nil {
@@ -169,6 +171,9 @@ func checkPrivateFile(path string) error {
 	self, err := processUser()
 	if err != nil {
 		return err
+	}
+	if a.foreignOwner {
+		return fmt.Errorf(`the mailbox's file %s is owned by %s, who can read and change it. If you made it, run: icacls "%s" /setowner *%s. Otherwise delete it`, path, accountName(a.owner), path, self)
 	}
 	if len(a.others) > 0 {
 		fix := fmt.Sprintf(`icacls "%s" /inheritance:r /grant:r *%s:F *S-1-5-18:F *S-1-5-32-544:F`, path, self)
@@ -180,9 +185,6 @@ func checkPrivateFile(path string) error {
 			}
 		}
 		return fmt.Errorf("the mailbox's file %s is accessible by %s, and it is private as a key is. Run: %s", path, a.others[0].trustee(), fix)
-	}
-	if a.foreignOwner {
-		return fmt.Errorf(`the mailbox's file %s is owned by %s, who can read and change it. If you made it, run: icacls "%s" /setowner *%s. Otherwise delete it`, path, accountName(a.owner), path, self)
 	}
 	return nil
 }
@@ -205,11 +207,12 @@ func CheckConfigFile(path string) error {
 	return nil
 }
 
-// checkKeptDir refuses inbox-dir or held/ that anyone but its owner, SYSTEM and
-// the Administrators can write, or another user owns (readAccess): whoever can
+// checkKeptDir refuses inbox-dir or held/ that another user owns, or that anyone
+// but its owner, SYSTEM and the Administrators can write (readAccess): whoever can
 // write there can put in a file that reads as a delivered message (#717).
-// Others may read it: each file in it is judged on its own (judgeKept). The
-// refusal gives the icacls line that leaves it those three alone.
+// Others may read it: each file in it is judged on its own (judgeKept). It judges
+// the owner before the list, as checkPrivateFile does. The refusal of a list
+// gives the icacls line that leaves it to those three alone.
 func checkKeptDir(path string) error {
 	a, err := readAccess(path)
 	if err != nil {
@@ -218,6 +221,9 @@ func checkKeptDir(path string) error {
 	self, err := processUser()
 	if err != nil {
 		return err
+	}
+	if a.foreignOwner {
+		return fmt.Errorf(`the mailbox's directory %s is owned by %s, who could put a message in it that reads as delivered. If you made it, run: icacls "%s" /setowner *%s`, path, accountName(a.owner), path, self)
 	}
 	var writer *accessEntry
 	fix := fmt.Sprintf(`icacls "%s" /inheritance:r /grant:r *%s:(OI)(CI)F *S-1-5-18:(OI)(CI)F *S-1-5-32-544:(OI)(CI)F`, path, self)
@@ -236,9 +242,6 @@ func checkKeptDir(path string) error {
 	}
 	if writer != nil {
 		return fmt.Errorf("the mailbox's directory %s is writable by %s, who could put a message in it that reads as delivered. Run: %s", path, writer.trustee(), fix)
-	}
-	if a.foreignOwner {
-		return fmt.Errorf(`the mailbox's directory %s is owned by %s, who could put a message in it that reads as delivered. If you made it, run: icacls "%s" /setowner *%s`, path, accountName(a.owner), path, self)
 	}
 	return nil
 }

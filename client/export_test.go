@@ -43,6 +43,9 @@ func CheckKeyFile(path string) error { return checkKeyFile(path) }
 // CheckPrivateFile is checkPrivateFile, for a test of what it refuses.
 func CheckPrivateFile(path string) error { return checkPrivateFile(path) }
 
+// CheckKeptDir is checkKeptDir, for a test of what it refuses.
+func CheckKeptDir(path string) error { return checkKeptDir(path) }
+
 // PrivateFiles are the base directory's files judged at every open, read from
 // baseFiles and publicFiles.
 func PrivateFiles() []string {
@@ -101,6 +104,13 @@ func Undeliverable() []protocol.Code { return slices.Clone(undeliverable) }
 // mailbox's lock, for a test.
 func (b *Mailbox) RemovePrekey(ctx context.Context, n uint64) error {
 	_, err := locked(ctx, b, func() (struct{}, error) { return struct{}{}, b.removePrekey(n) })
+	return err
+}
+
+// PruneByNoReading runs prune under the mailbox's lock with no reading, taken's
+// zero value, for a test.
+func (b *Mailbox) PruneByNoReading(ctx context.Context) error {
+	_, err := locked(ctx, b, func() (struct{}, error) { return struct{}{}, b.prune(taken{}) })
 	return err
 }
 

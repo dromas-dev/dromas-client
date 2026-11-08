@@ -4,6 +4,7 @@ package client_test
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -186,6 +187,60 @@ func TestAPrivateFileAnotherUserOwnsIsRefused(t *testing.T) {
 	}
 	if err := client.CheckPrivateFileAs(file, me+1); err == nil || !strings.Contains(err.Error(), "owned by another user") {
 		t.Errorf("another user's: %v", err)
+	}
+}
+
+// A private file and a kept directory, each both open to others and owned by
+// another user, are refused for their owner: only a file's owner can change its
+// mode, so a chmod line there is one the mailbox's user cannot run. Once the
+// owner gives it to the mailbox's user, the refusal's own line, run, leaves one
+// that passes.
+func TestTheOwnerIsJudgedBeforeTheMode(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		name  string
+		mode  os.FileMode
+		make  func(path string, mode os.FileMode) error
+		check func(path string, me int) error
+	}{
+		{"a private file", 0o644, func(p string, m os.FileMode) error { return os.WriteFile(p, nil, m) }, client.CheckPrivateFileAs},
+		{"a kept directory", 0o777, os.Mkdir, client.CheckKeptDirAs},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			path := filepath.Join(t.TempDir(), "judged")
+			if err := c.make(path, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chmod(path, c.mode); err != nil {
+				t.Fatal(err)
+			}
+			owner := os.Getuid()
+			if owner == 0 { // owned by neither root nor the user the test says it is
+				if err := os.Chown(path, 1, 1); err != nil {
+					t.Fatal(err)
+				}
+				owner = 1
+			}
+			err := c.check(path, owner+1)
+			if err == nil || !strings.Contains(err.Error(), "owned by another user") || strings.Contains(err.Error(), "Run: ") {
+				t.Fatalf("judged as another user's: %v; want the refusal of its owner, with no line to run", err)
+			}
+			err = c.check(path, owner)
+			if err == nil {
+				t.Fatalf("its owner's at %04o passed", c.mode)
+			}
+			_, line, ok := strings.Cut(err.Error(), "Run: ")
+			if !ok {
+				t.Fatalf("its owner's at %04o: %v; want a line to run", c.mode, err)
+			}
+			if out, err := exec.Command("sh", "-c", line).CombinedOutput(); err != nil { //nolint:gosec // the refusal's own line
+				t.Fatalf("%s: %v %s", line, err, out)
+			}
+			if err := c.check(path, owner); err != nil {
+				t.Errorf("after the refusal's own line (%s): %v", line, err)
+			}
+		})
 	}
 }
 

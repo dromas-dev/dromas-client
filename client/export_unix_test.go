@@ -7,3 +7,6 @@ func CheckConfigFileAs(path string, uid int) error { return checkConfigFile(path
 
 // CheckPrivateFileAs is checkPrivateFile, for a test that says which user it is.
 func CheckPrivateFileAs(path string, me int) error { return checkPrivateFileAs(path, me) }
+
+// CheckKeptDirAs is checkKeptDir, for a test that says which user it is.
+func CheckKeptDirAs(path string, me int) error { return checkKeptDirAs(path, me) }
