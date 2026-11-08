@@ -324,8 +324,9 @@ time source sets it, are tried again every %s, each try said in an "error"
 line, until they are put right. Where recv ends before its next try, as a
 bare recv does, either ends it with exit status 1. Exit status 4 and "fatal" in
 the "error" line say that no wait mends the refusal: a revocation, no mailbox
-at this address that registering it again does not mend, or another refusal of
-the client's own. Exit status 1 is any other failure.
+at this address with its registration refused, a mailbox in another format, or
+any other refusal of the server's or of this client's. Exit status 1 is any
+other failure.
 
 With --exec, recv runs a command for each message that lands in inbox/, with
 the message's line on stdin, as recv prints it. It takes --wait or --follow.
