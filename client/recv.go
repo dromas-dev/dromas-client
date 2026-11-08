@@ -640,9 +640,9 @@ type verdict struct {
 //  5. The signature over the line as decrypted, in this mailbox's message
 //     namespace, by that identity or a working key it certified.
 //  6. The rest of the envelope: version 1, to is this mailbox, msg_id in its
-//     form, and sent_at no older than protocol.TTL, not before the
-//     floor the seen-set was pruned at (seenFloor), and at most
-//     protocol.MaxSkew ahead.
+//     form, and sent_at no older than protocol.TTL, at most
+//     protocol.MaxSkew ahead, and not before the floor the seen-set was
+//     pruned at (seenFloor), in that order.
 //  7. Revocation: this mailbox holds no revocation of the sender. The server is
 //     asked for one, once for each sender in a drain. A revocation that
 //     verifies refuses the message and every later one, whenever they were
