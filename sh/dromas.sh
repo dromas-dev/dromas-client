@@ -624,7 +624,6 @@ dr_drain(){ # stops at a transient error or a fault of this mailbox, leaving the
   local B c="" n i id k=0 pages=0; B=$(cat "$DR/address") || return 1
   dr_finished || { dr_done $?; return 1; }
   dr_matched || return      # nothing listed, fetched or acked on records that do not match prekeys/
-  DR_COUNTED=      # set once this drain has counted itself as one that accepted a message (dr_count)
   rm -f "$DR/asked"      # the senders this drain has asked the server about: one lookup each
   while :; do
     [ $((pages += 1)) -le 100 ] || { dr_out more --arg detail "this run stopped at the most one drain takes: run recv again for the rest, which is still on the server"; return 0; }
@@ -652,8 +651,8 @@ dr_one(){ # <me> <id> <its list entry> → 0 once the message is judged and its 
   rm -f "$DR/said"; why=$(dr_judge "$B" "$m"); rc=$?; cat "$DR/said" 2> /dev/null; rm -f "$DR/said"      # what the judge met on the way is printed here: its stdout is its verdict
   if [ $rc -eq 0 ] || [ $rc -eq 2 ]; then [ "$h" = "$id" ] || { why="bad_id: the server's id for it is not the SHA-256 of its ciphertext"; rc=1; }; fi
   case $rc in
-    0) dr_count && A=$(jq -r .from "$m.P") && dr_putout "$DR/inbox/$h.json" dr_line "$m.P" && dr_seen "$A" "$m" "$h" || return 1      # counted first, once a drain, then stored, then seen, all on disk before the ack: a crash delivers again, never loses
-       printf '{"type":"message","id":"%s","envelope":' "$h" && cat "$DR/inbox/$h.json" && echo '}' ;;      # the envelope the line inbox/ keeps, as its bytes are (jq would write the line breaks dr_line escaped), and only inside "envelope", so a member it gains later never meets the line's own (#356)
+    0) A=$(jq -r .from "$m.P") && dr_putout "$DR/inbox/$h.json" dr_line "$m.P" && dr_seen "$A" "$m" "$h" || return 1      # stored, then seen, all on disk before the ack: a crash delivers again, never loses
+       printf '{"type":"message","id":"%s","envelope":' "$h" && cat "$DR/inbox/$h.json" && echo '}' && dr_count ;;      # counted once its line is said, and before the ack, so a fault at the count leaves it said      # the envelope the line inbox/ keeps, as its bytes are (jq would write the line breaks dr_line escaped), and only inside "envelope", so a member it gains later never meets the line's own (#356)
     2) dr_out duplicate --arg id "$h" --arg detail "a retry of a message already delivered: not delivered again" ;;
     3) dr_err "$why: nothing is judged or acked until this mailbox is fixed"; return 1 ;;
     4) dr_err "$why: the message stays on the server, and the next recv asks again"; return 1 ;;
@@ -763,21 +762,20 @@ dr_unnamed(){ # → 0 where prekeys/ holds a key age reads that seen-keys does n
   done
   [ ${#DR_FOUND[@]} -gt 0 ]
 }
-dr_count(){ # → generation, this mailbox's count of drains that accepted a message, raised by one, then prekeys/generation written with it, each on disk: once a drain, before its first message is kept as accepted. So prekeys/generation, which is never backed up, counts every such drain, and records put back from a copy older than one are behind it (dr_matched); a crash between the two leaves the file behind, never ahead
-  [ -z "${DR_COUNTED-}" ] || return 0
+dr_count(){ # → generation, this mailbox's count of the messages it accepted, raised by one, then prekeys/generation written with it, each on disk: for each message, once it is seen and before its ack. So prekeys/generation, which is never backed up, counts every message accepted, and records put back from a copy taken before one was seen are behind it, wherever in a drain the copy was taken (dr_matched); a crash between the two leaves the file behind, never ahead
   local g; g=$(dr_gen "$DR/generation") || return 1
-  dr_putline "$DR/generation" $((g + 1)) && dr_putline "$DR/prekeys/generation" $((g + 1)) && DR_COUNTED=1
+  dr_putline "$DR/generation" $((g + 1)) && dr_putline "$DR/prekeys/generation" $((g + 1))
 }
 dr_gen(){ # <file> → the count it keeps, a number and a line feed, or 0 where it is missing; a file that keeps anything else is an error, never a count
   local g; [ -e "$1" ] || { echo 0; return 0; }
   g=$(cat "$1" 2> /dev/null) && [[ $g =~ ^(0|[1-9][0-9]{0,17})$ ]] && printf '%s\n' "$g" | cmp -s - "$1" && echo "$g" ||      # compared with itself rebuilt: $(…) drops line feeds and NULs
-    { dr_err "$1 keeps no count of this mailbox's drains: it is a number and a line feed, written by recv"; return 1; }
+    { dr_err "$1 keeps no count of the messages this mailbox accepted: it is a number and a line feed, written by recv"; return 1; }
 }
 dr_matched(){ # → 0 where this mailbox's records match its prekeys/: no key there that seen-keys does not name (dr_unnamed), and prekeys/generation at or behind generation, which it writes where it is missing or behind, since a missing file is a mailbox that has counted nothing yet. Otherwise the error line, fatal, with the code state_not_the_keys, and 4, writing nothing: such records cannot tell a message this mailbox delivered under records it lost from one that waited, so nothing is received, sent or renewed until init --restore (dr_restore)
   local g f why=
   g=$(dr_gen "$DR/generation") && f=$(dr_gen "$DR/prekeys/generation") || return 1
   ! dr_unnamed || why="prekeys/ holds ${#DR_FOUND[@]} prekeys seen-keys does not name, as after seen and seen-keys are lost, or put back from a copy older than a renewal, with prekeys/ kept"
-  [ "$f" -le "$g" ] || why="${why:+$why; and }prekeys/generation counts more drains that delivered than generation does, as after this mailbox's records are put back from a copy older than the mailbox"
+  [ "$f" -le "$g" ] || why="${why:+$why; and }prekeys/generation counts more messages accepted than generation does, as after this mailbox's records are put back from a copy older than the mailbox"
   if [ -n "$why" ]; then
     jq -cn --arg m "REFUSED: this mailbox's records do not match its prekeys: $why. Such records cannot tell a message this mailbox delivered under the records it lost from one that waited, so the mailbox receives, sends and renews nothing, and acks nothing, until its owner runs dromas.sh init --restore: from then, every message sent before the pass of its next recv's list, and in the hour after, is refused as stale" '{type:"error", fatal:true, code:"state_not_the_keys", detail:$m}' >&2
     return 4

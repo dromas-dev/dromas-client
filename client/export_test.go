@@ -284,8 +284,8 @@ func PutRevocations(ctx context.Context, opt Options, a protocol.Address, rec *p
 // the server's ACL a renewal recv began owes), "adopt-acl" (a restore's
 // adoption of its server's ACL, begun), "renew-failed", "not-made",
 // "acl-another-writer", "acl-replaced", "floor-owed" (the replay floor an acknowledged
-// restore owes, not yet set), "generation" (the drains that accepted a message
-// it counted), "seen-began" (the confirmed time beginFloor last set
+// restore owes, not yet set), "generation" (the messages it counted as
+// accepted), "seen-began" (the confirmed time beginFloor last set
 // the floor by), "partial" (the message the
 // partial file is of, and how many of its bytes are synced) and "format"
 // (the mailbox's format, as it is recorded). So a test
@@ -549,7 +549,7 @@ func (b *Mailbox) SetPrekeyLifetime(_ context.Context, d time.Duration) error {
 // DrainBound is how long b's next Receive drains.
 func DrainBound(b *Mailbox) time.Duration { return b.drainBound() }
 
-// AdoptedKeys is the serial of every key b's state file adopted (adoptKeys).
+// AdoptedKeys is the serial of every key b's state file adopted (matchKeys).
 func AdoptedKeys(t *testing.T, b *Mailbox) []uint64 {
 	t.Helper()
 	keys, err := b.adopted()

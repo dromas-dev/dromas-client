@@ -1,15 +1,19 @@
 package client_test
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -319,15 +323,20 @@ func TestInitRestoreOnAMailboxThatMatchesChangesNothing(t *testing.T) {
 	}
 }
 
-// A drain killed between the count it keeps in its state and the count it
-// writes to prekeys/generation leaves the file behind the state, never ahead:
-// the next command raises no alarm, writes the file again, and delivers the
-// message. A command killed as it writes a missing file again does the same.
+// A drain killed between the count it keeps in its state, in the transaction
+// that records the message seen, and the count it writes to prekeys/generation
+// leaves the file behind the state, never ahead: the next command raises no
+// alarm, writes the file again, and acks the message, which inbox/ keeps
+// already, as one handled. A command killed as it writes a missing file again
+// raises no alarm either, and delivers the message.
 func TestACrashBetweenTheCountAndItsFileRaisesNoAlarm(t *testing.T) {
 	t.Parallel()
-	for _, c := range []struct{ step, file string }{
-		{"generation raised", ""},
-		{"generation synced", "removed"},
+	for _, c := range []struct {
+		step, file string
+		delivered  int
+	}{
+		{"delivery seen", "", 0},
+		{"generation synced", "removed", 1},
 	} {
 		t.Run(c.step, func(t *testing.T) {
 			t.Parallel()
@@ -344,12 +353,15 @@ func TestACrashBetweenTheCountAndItsFileRaisesNoAlarm(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if c.step == "generation raised" && generationOf(t, x) >= stateGeneration(t, x) {
+			if c.step == "delivery seen" && generationOf(t, x) >= stateGeneration(t, x) {
 				t.Fatalf("killed at %s: %d in prekeys/generation and %d in the state, want the file behind", c.step, generationOf(t, x), stateGeneration(t, x))
 			}
 			res, err := x.Receive(context.Background())
-			if err != nil || len(res.Delivered) != 1 {
+			if err != nil || len(res.Delivered) != c.delivered {
 				t.Fatalf("the drain after the crash: %+v, %v", res, err)
+			}
+			if kept, err := filepath.Glob(filepath.Join(x.Path("inbox"), "*.json")); err != nil || len(kept) != 1 {
+				t.Fatalf("inbox/ after the drain: %v, %v", kept, err)
 			}
 			if generationOf(t, x) != stateGeneration(t, x) {
 				t.Fatalf("after the drain: %d in prekeys/generation and %d in the state", generationOf(t, x), stateGeneration(t, x))
@@ -412,5 +424,311 @@ func TestARestoreFromTheIdentityAloneNeedsNoAcknowledgement(t *testing.T) {
 	send(t, a, x, "sent since")
 	if res := receive(t, x); len(res.Delivered) != 1 || len(res.Refused) != 0 {
 		t.Fatalf("a message sent since: %+v", res)
+	}
+}
+
+// A copy of the state taken inside a drain, as a backup that copies the base
+// directory while recv runs takes one, is behind prekeys/generation once the
+// drain accepts a message after it, since each message accepted is counted:
+// put back with prekeys/ kept, it is stopped before anything is listed, and
+// status names it, so a server that kept its copies replays nothing (#798). A
+// copy taken once the drain accepted its last message matches, and the
+// server's copies are acked as handled, delivered to nobody.
+func TestACopyOfTheStateTakenInsideADrainIsStopped(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		at      int // the ack the copy is taken at
+		stopped bool
+	}{
+		{1, true},
+		{2, false},
+	} {
+		t.Run(strconv.Itoa(c.at), func(t *testing.T) {
+			t.Parallel()
+			ctx := context.Background()
+			e := newEnv(t)
+			a, b := e.mailbox(), e.mailbox()
+			path := filepath.Join(b.Dir(), "state")
+			mine := "/v1/" + b.Address().String() + "/messages"
+			var mu sync.Mutex
+			var cts [][]byte
+			var copied []byte
+			acks := 0
+			e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
+				mu.Lock()
+				switch {
+				case r.Method == http.MethodPost && r.URL.Path == mine:
+					body, _ := io.ReadAll(r.Body)
+					r.Body = io.NopCloser(bytes.NewReader(body))
+					cts = append(cts, body)
+				case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, mine+"/"):
+					if acks++; acks == c.at { // a backup of the state taken as the drain acks
+						var err error
+						if copied, err = os.ReadFile(path); err != nil { //nolint:gosec // a test mailbox's own file
+							t.Error(err)
+						}
+					}
+				}
+				mu.Unlock()
+				next.ServeHTTP(w, r)
+			})
+			send(t, a, b, "first")
+			send(t, a, b, "second: pay invoice 13 once")
+			before := stateGeneration(t, b)
+			if res := receive(t, b); len(res.Delivered) != 2 {
+				t.Fatalf("the drain: %+v", res)
+			}
+			e.srv.SetMiddle(nil)
+			if got := stateGeneration(t, b); got != before+2 || generationOf(t, b) != got {
+				t.Fatalf("a drain that accepted two: %d in the state and %d in prekeys/generation, want both %d", got, generationOf(t, b), before+2)
+			}
+			if err := os.WriteFile(path, copied, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			x, err := client.Open(b.Dir(), e.opts())
+			if err != nil {
+				t.Fatal(err)
+			}
+			e.clock.Add(2 * time.Second)
+			for _, ct := range cts { // the server kept its copies
+				sum := sha256.Sum256(ct)
+				e.srv.Inject(x.Address(), hex.EncodeToString(sum[:]), ct)
+			}
+			st, err := x.Status(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			says := slices.ContainsFunc(st.Attention, func(w string) bool { return strings.Contains(w, "dromas init --restore") })
+			res, err := x.Receive(ctx)
+			if c.stopped {
+				if !client.NotTheKeys(err) || !says {
+					t.Fatalf("a copy taken at ack %d: status names it %v; recv %+v, %v", c.at, says, res, err)
+				}
+				return
+			}
+			if err != nil || says || len(res.Delivered) != 0 || len(res.Refused) != 0 {
+				t.Fatalf("a copy taken at the last ack: status names it %v; recv %+v, %v", says, res, err)
+			}
+		})
+	}
+}
+
+// Options.Restore is Init's alone (#799 item 2): a Mailbox opened with it
+// acknowledges nothing, and the Mailbox Init returns under it is stopped, as
+// any other is, by a key that appears in prekeys/ after Init, as on a volume
+// mounted late.
+func TestRestoreIsInitsAlone(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	t.Run("Open", func(t *testing.T) {
+		t.Parallel()
+		e := newEnv(t)
+		a, b := e.mailbox(), e.mailbox()
+		send(t, a, b, "delivered before the state was lost")
+		receive(t, b)
+		if err := os.Remove(filepath.Join(b.Dir(), "state")); err != nil {
+			t.Fatal(err)
+		}
+		opt := e.opts()
+		opt.Restore = true
+		x, err := client.Open(b.Dir(), opt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		landAll(t, x)
+		if _, err := x.Receive(ctx); !client.NotTheKeys(err) || has(x, "floor-owed") || len(client.AdoptedKeys(t, x)) != 0 {
+			t.Fatalf("Receive on a Mailbox opened with Restore, on a lost state: %v, adopted %v", err, client.AdoptedKeys(t, x))
+		}
+	})
+	t.Run("Init", func(t *testing.T) {
+		t.Parallel()
+		e := newEnv(t)
+		a, b := e.mailbox(), e.mailbox()
+		send(t, a, b, "delivered")
+		receive(t, b)
+		opt := e.opts()
+		opt.Restore = true
+		y, err := client.Init(ctx, b.Dir(), opt) // init --restore at every start: on a state that matches it changes nothing
+		if err != nil || y.Restored() == nil || y.Restored().Acknowledged() {
+			t.Fatalf("init --restore on a state that matches: %+v, %v", y.Restored(), err)
+		}
+		landAll(t, y)
+		key, err := os.ReadFile(prekeyFile(y, numberOf(t, y), ".agekey"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(prekeyFile(y, numberOf(t, y)-1, ".agekey"), key, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if st, err := y.Status(ctx); err != nil || !slices.ContainsFunc(st.Attention, func(w string) bool { return strings.Contains(w, "dromas init --restore") }) {
+			t.Fatalf("status does not name the key: %+v, %v", st, err)
+		}
+		e.clock.Add(2 * time.Second)
+		if _, err := y.Receive(ctx); !client.NotTheKeys(err) || len(client.AdoptedKeys(t, y)) != 0 {
+			t.Fatalf("Receive on the Mailbox Init returned, after a key appeared: %v, adopted %v", err, client.AdoptedKeys(t, y))
+		}
+	})
+}
+
+// An Init under Restore whose acknowledgement committed and which then failed,
+// on a server that answers 503, says what the acknowledgement did in its error
+// (RestoredBy, #799 item 3), since the next Init under Restore finds the state
+// matching and nothing to acknowledge.
+func TestAnInitThatFailsAfterItsAcknowledgementSaysWhatItDid(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	e := newEnv(t)
+	a, b := e.mailbox(), e.mailbox()
+	send(t, a, b, "delivered once")
+	receive(t, b)
+	if err := os.Remove(filepath.Join(b.Dir(), "state")); err != nil {
+		t.Fatal(err)
+	}
+	e.srv.SetMiddle(func(w http.ResponseWriter, _ *http.Request, _ http.Handler) {
+		http.Error(w, "down", http.StatusServiceUnavailable)
+	})
+	opt := e.opts()
+	opt.Restore = true
+	_, err := client.Init(ctx, b.Dir(), opt)
+	if r := client.RestoredBy(err); err == nil || r == nil || r.Adopted == 0 {
+		t.Fatalf("init --restore with its server down: %+v, %v", r, err)
+	}
+	var api *client.APIError
+	if !errors.As(err, &api) || api.Status != http.StatusServiceUnavailable {
+		t.Fatalf("the error does not carry the server's answer: %v", err)
+	}
+	e.srv.SetMiddle(nil)
+	y, err := client.Init(ctx, b.Dir(), opt)
+	if err != nil || y.Restored() == nil || y.Restored().Acknowledged() || client.RestoredBy(err) != nil {
+		t.Fatalf("init --restore again: %+v, %v", y.Restored(), err)
+	}
+}
+
+// Follow under FollowOptions.Owed hands over no owed message on a state that
+// does not match prekeys/: it is refused before the handover, as the drain
+// after it is (#799 item 4).
+func TestFollowHandsOverNoOwedMessageOnAStateThatDoesNotMatch(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	a, b := e.mailbox(), e.mailbox()
+	send(t, a, b, "owed")
+	boom := errors.New("boom")
+	if err := b.Follow(context.Background(), client.FollowOptions{Owed: true}, func(_ context.Context, ev client.Event) error {
+		if ev.Kind == client.EventDelivery {
+			return boom
+		}
+		return nil
+	}); !errors.Is(err, boom) {
+		t.Fatalf("the first Follow: %v", err)
+	}
+	if st, err := b.Status(context.Background()); err != nil || st.Owed != 1 {
+		t.Fatalf("owed: %+v, %v", st, err)
+	}
+	key, err := os.ReadFile(prekeyFile(b, numberOf(t, b), ".agekey"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(prekeyFile(b, numberOf(t, b)-1, ".agekey"), key, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	handed := 0
+	err = b.Follow(context.Background(), client.FollowOptions{Owed: true}, func(_ context.Context, ev client.Event) error {
+		if ev.Kind == client.EventDelivery {
+			handed++
+		}
+		return nil
+	})
+	if !client.NotTheKeys(err) || handed != 0 {
+		t.Errorf("Follow on a state that does not match: %v, having handed over %d", err, handed)
+	}
+}
+
+// The count is raised in the transaction that records a message seen, never
+// before it: a copy of the state taken once the drain's last message is
+// written to inbox/, and before it is recorded seen, is behind
+// prekeys/generation when put back, so that message is never delivered again.
+// Not parallel: SetStep is the package's.
+func TestACopyTakenBeforeAMessageIsRecordedSeenIsBehind(t *testing.T) {
+	ctx := context.Background()
+	e := newEnv(t)
+	a, b := e.mailbox(), e.mailbox()
+	path := filepath.Join(b.Dir(), "state")
+	sent := forge.Capture(e.srv, http.MethodPost, "/v1/"+b.Address().String()+"/messages")
+	send(t, a, b, "first")
+	first := *sent
+	send(t, a, b, "second: pay invoice 13 once")
+	e.srv.SetMiddle(nil)
+	var copied []byte
+	written := 0
+	client.SetStep(func(name string) {
+		if name != "delivery written" {
+			return
+		}
+		if written++; written == 2 { // the last message written, not yet seen
+			var err error
+			if copied, err = os.ReadFile(path); err != nil { //nolint:gosec // a test mailbox's own file
+				t.Error(err)
+			}
+		}
+	})
+	t.Cleanup(func() { client.SetStep(nil) })
+	if res := receive(t, b); len(res.Delivered) != 2 || copied == nil {
+		t.Fatalf("the drain: %+v, copied %v", res, copied != nil)
+	}
+	client.SetStep(nil)
+	if err := os.WriteFile(path, copied, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	x, err := client.Open(b.Dir(), e.opts())
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.clock.Add(2 * time.Second)
+	for _, ct := range [][]byte{first, *sent} { // the server kept its copies
+		sum := sha256.Sum256(ct)
+		e.srv.Inject(x.Address(), hex.EncodeToString(sum[:]), ct)
+	}
+	if res, err := x.Receive(ctx); !client.NotTheKeys(err) {
+		t.Fatalf("a copy taken before the last message was recorded seen: %+v, %v", res, err)
+	}
+}
+
+// A fault at writing prekeys/generation, once the message is recorded seen,
+// stops the drain before the ack, and the Result still says the message: the
+// next drain writes the file first, then acks the message as one handled, and
+// never says it again. Not parallel: SetStep is the package's.
+func TestAFaultAtTheCountsFileStillSaysTheMessage(t *testing.T) {
+	ctx := context.Background()
+	e := newEnv(t)
+	a, b := e.mailbox(), e.mailbox()
+	send(t, a, b, "said once")
+	file := generationFile(b)
+	client.SetStep(func(name string) {
+		if name != "delivery seen" {
+			return
+		}
+		// A directory where prekeys/generation is, which no file replaces.
+		if err := os.Remove(file); err != nil {
+			t.Error(err)
+		}
+		if err := os.MkdirAll(filepath.Join(file, "x"), 0o700); err != nil {
+			t.Error(err)
+		}
+	})
+	t.Cleanup(func() { client.SetStep(nil) })
+	res, err := b.Receive(ctx)
+	client.SetStep(nil)
+	if err == nil || res == nil || len(res.Delivered) != 1 || e.srv.Count(b.Address()) != 1 {
+		t.Fatalf("a drain whose count's file cannot be written: %+v, %v", res, err)
+	}
+	if err := os.RemoveAll(file); err != nil {
+		t.Fatal(err)
+	}
+	res, err = b.Receive(ctx)
+	if err != nil || len(res.Delivered) != 0 || e.srv.Count(b.Address()) != 0 {
+		t.Fatalf("the drain after: %+v, %v", res, err)
+	}
+	if generationOf(t, b) != stateGeneration(t, b) {
+		t.Fatalf("after the drain: %d in prekeys/generation and %d in the state", generationOf(t, b), stateGeneration(t, b))
 	}
 }

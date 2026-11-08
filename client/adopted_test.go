@@ -806,8 +806,11 @@ func TestStatusCountsTheMessagesRefusedKeeps(t *testing.T) {
 	if err := os.Remove(filepath.Join(x.Path("refused"), hex.EncodeToString(id[:])+".json")); err != nil {
 		t.Fatal(err)
 	}
+	// The words of any count, as BeforeRestoreWords makes them: a status that
+	// counted by the state's records alone would still say 1 (#805 item 2).
+	stale := strings.TrimPrefix(client.BeforeRestoreWords(1), "1")
 	st, err := x.Status(ctx)
-	if err != nil || st.Refused != 1 || slices.ContainsFunc(st.Attention, func(s string) bool { return strings.Contains(s, "sent before this mailbox adopted") }) {
+	if err != nil || st.Refused != 1 || slices.ContainsFunc(st.Attention, func(s string) bool { return strings.HasSuffix(s, stale) }) {
 		t.Fatalf("status once the copy's file is deleted by hand: %+v, %v", st, err)
 	}
 }

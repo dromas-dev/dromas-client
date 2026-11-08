@@ -1028,6 +1028,53 @@ func TestRecvSaysItRefusedMessagesSentBeforeItAdoptedAKey(t *testing.T) {
 	}
 }
 
+// An init --restore whose acknowledgement commits and whose init then fails,
+// on a server that answers 503, prints its restore line before the error, since
+// the next init --restore finds nothing to acknowledge (#799 item 3).
+func TestAFailedInitRestoreSaysItsAcknowledgement(t *testing.T) {
+	ctx := context.Background()
+	srv := fakeserver.New(t, time.Now)
+	b, err := client.Init(ctx, t.TempDir(), client.Options{Base: srv.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := client.Init(ctx, t.TempDir(), client.Options{Base: srv.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	allows(t, b, a)
+	if _, err := a.Send(ctx, b.Address(), "delivered once"); err != nil {
+		t.Fatal(err)
+	}
+	useMailbox(t, b.Dir())
+	t.Setenv("DROMAS_SERVER_URL", srv.URL)
+	if err := do(ctx, "recv", nil, nil, io.Discard, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(b.Dir(), "state")); err != nil {
+		t.Fatal(err)
+	}
+	srv.SetMiddle(func(w http.ResponseWriter, _ *http.Request, _ http.Handler) {
+		http.Error(w, "down", http.StatusServiceUnavailable)
+	})
+	var out, errs bytes.Buffer
+	err = do(ctx, "init --restore", nil, nil, &out, &errs)
+	if got := report(err, &errs); got == 0 || !strings.Contains(errs.String(), "503") {
+		t.Fatalf("init --restore with its server down: exit %d, stderr %q", got, errs.String())
+	}
+	if ls := printed(t, out.String()); typesOf(ls) != "restore" || ls[0]["acknowledged"] != true {
+		t.Fatalf("init --restore with its server down printed %q", out.String())
+	}
+	srv.SetMiddle(nil)
+	out.Reset()
+	if err := do(ctx, "init --restore", nil, nil, &out, io.Discard); err != nil {
+		t.Fatalf("init --restore again: %v", err)
+	}
+	if ls := printed(t, out.String()); len(ls) == 0 || ls[0]["acknowledged"] != false {
+		t.Fatalf("init --restore again printed %q", out.String())
+	}
+}
+
 // recv says when the prekey was due for renewal and the renewal failed, in a
 // line and by its exit status, and still prints the messages it received.
 func TestRecvSaysARenewalFailed(t *testing.T) {

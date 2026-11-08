@@ -10,7 +10,7 @@ var steps = map[string][]string{
 	"identity":   {"identity key written"},
 	"renewal":    {"renewal begun", "working key made", "prekey made", "statement kept", "renewal taken", "renewal recorded"},
 	"revocation": {"revocation published", "revocation kept"},
-	"delivery":   {"generation raised", "generation written", "delivery written", "delivery seen"},
+	"delivery":   {"delivery written", "delivery seen", "generation written"},
 	"owed":       {"handler begun", "handler returned", "owed cleared"},
 	"refusal":    {"refusal written", "refusal kept"},
 	"post":       {"outbox written", "posted", "sent kept"},
