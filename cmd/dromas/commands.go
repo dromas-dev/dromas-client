@@ -320,7 +320,8 @@ SIGTERM ends --follow with exit status 0. The mailbox's lock stays free
 between drains, so its other commands run meanwhile. A call that may mend is
 made again, each said on stderr ("waiting"). Exit status 4 and "fatal" in the
 "error" line say that no wait mends the refusal: a revocation, no mailbox at
-this address, or a refusal of the client's own. Exit status 1 is any other failure.
+this address that registering it again does not mend, or a refusal of the
+client's own. Exit status 1 is any other failure.
 
 With --exec, recv runs a command for each message that lands in inbox/, with
 the message's line on stdin, as recv prints it. It takes --wait or --follow.

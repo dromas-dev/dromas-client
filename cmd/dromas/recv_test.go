@@ -241,3 +241,25 @@ func TestRecvTellsAFatalEndFromOneToRetry(t *testing.T) {
 		t.Fatalf("a revoked mailbox's recv --follow: %v", err)
 	}
 }
+
+// A server that forgot the mailbox, and that answers its registration again
+// 503, ends recv with exit status 1 and no "fatal": the next recv registers it
+// (#773).
+func TestRecvOfAForgottenMailboxWhoseRegistrationFailsForNowExits1(t *testing.T) {
+	e := newRecvEnv(t)
+	e.srv.Forget(e.b.Address())
+	e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
+		if r.Method != http.MethodGet {
+			fakeserver.WriteJSON(w, http.StatusServiceUnavailable, protocol.Problem{Type: protocol.CodeUnavailable.TypeURI(), Code: protocol.CodeUnavailable})
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+	_, _, err := e.recv(context.Background())
+	var errs bytes.Buffer
+	status := report(err, &errs)
+	line := printed(t, errs.String())
+	if status != 1 || len(line) != 1 || line[0]["type"] != "error" || line[0]["fatal"] != nil || line[0]["code"] != string(protocol.CodeNoSuchMailbox) {
+		t.Fatalf("exit %d, %s; err %v", status, errs.String(), err)
+	}
+}

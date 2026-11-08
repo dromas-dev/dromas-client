@@ -200,7 +200,8 @@ func defaultTransport(h *holding) *http.Transport {
 // HoldResult is what one held list came to.
 type HoldResult struct {
 	// Changed reports that the mailbox's list changed, or that the mailbox must
-	// receive to find out (its pass refused): a Receive follows.
+	// receive to find out (its pass refused, or no mailbox at this address): a
+	// Receive follows.
 	Changed bool
 	// Dropped reports that a connection of the hold dropped: before the
 	// hold's answer, seen as it dropped or only at the hold's deadline, or,
@@ -245,15 +246,21 @@ func timedOut(err error) bool {
 // Transient reports whether err is a call that failed and that making it
 // again may get past: no answer, a server error, a rate limit or a request
 // timeout. So is a lock another command held for as long as a command waits for
-// it. A refusal no wait mends is not: [Fatal] names those.
+// it, a renewal held back until renewRetry after one that failed so, and a
+// server's no_such_mailbox whose registration again failed so ([Mailbox.Follow]).
+// A refusal no wait mends is not: [Fatal] names those.
 func Transient(err error) bool {
 	var ae *APIError
 	var re *RevokedError
+	var rh *renewalHeld
+	var nr *notRegistered
 	switch {
 	case err == nil, errors.As(err, &re):
 		return false
-	case errors.Is(err, errLocked):
+	case errors.Is(err, errLocked), errors.As(err, &nr):
 		return true
+	case errors.As(err, &rh):
+		return rh.transient
 	case errors.As(err, &ae):
 		return ae.Status >= 500 || ae.Status == http.StatusTooManyRequests || ae.Status == http.StatusRequestTimeout
 	}
@@ -264,7 +271,8 @@ func Transient(err error) bool {
 // Fatal reports whether err is a refusal no wait mends, which only the mailbox's
 // owner or its server's operator can put right: a revocation, a mailbox in
 // another format, a server's refusal that [Transient] does not take, such as no
-// mailbox at this address, or this client's own refusal. A supervisor that
+// mailbox at this address that a registration again does not mend, or this
+// client's own refusal. A supervisor that
 // starts the process again gains nothing. An error that is neither Fatal nor
 // Transient, such as a fault of the disk, ends a run and may pass.
 func Fatal(err error) bool {
@@ -312,8 +320,10 @@ func (h *holding) turn(ctx context.Context, wait time.Duration) (bool, error) {
 // of the mailbox's state: an answer about a revocation is proved under the lock
 // once it comes (provedLocked).
 //
-// A mailbox with no tag kept, one whose last list found messages, or whose pass the
-// server refused, is Changed at once, for a Receive to settle. An error is a
+// A mailbox with no tag kept, one whose last list found messages, whose pass the
+// server refused, or that the server holds no mailbox for, is Changed at once,
+// for a Receive to settle: the Receive signs another pass, or renews the
+// prekey, which registers the mailbox again (mendable). An error is a
 // call that failed and that holding again may get past ([Transient]), or a
 // refusal no wait mends ([Fatal]).
 func (b *Mailbox) Hold(ctx context.Context, wait time.Duration) (*HoldResult, error) {
@@ -384,7 +394,7 @@ func (b *Mailbox) Hold(ctx context.Context, wait time.Duration) (*HoldResult, er
 	var te *transportError
 	switch {
 	case err == nil && resp.StatusCode == http.StatusNotModified && sameTag(resp.Header.Get("ETag"), k.tag):
-	case err == nil, passRefused(code(err)):
+	case err == nil, passRefused(code(err)), renewalMends(code(err)):
 		h.Changed = true
 	case ctx.Err() == nil && errors.As(err, &te) && after >= MinHold/2:
 		// The connection dropped part way through a hold, or its answer

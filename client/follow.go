@@ -130,8 +130,10 @@ type FollowOptions struct {
 // A handler's error ends the loop after the last of them.
 //
 // A drain that fails in a way a wait may mend ([Transient]) is an [EventRetry],
-// and the loop drains again after the error's Retry-After, or the later of the
-// server's poll interval and its pace, or a minute. Where that lands past Until
+// a no_such_mailbox among them where the renewal that registers the mailbox
+// again failed so ([Result.RenewErr]), and the loop drains again after the
+// error's Retry-After, or the later of the server's poll interval and its pace,
+// or a minute. Where that lands past Until
 // the drain's error ends the loop, as any other drain's error does. Follow returns
 // that error, the handler's, ctx's when ctx ended, and nil for [ErrStop] or at Until.
 func (b *Mailbox) Follow(ctx context.Context, o FollowOptions, h Handler) error {
@@ -151,6 +153,9 @@ func (b *Mailbox) Follow(ctx context.Context, o FollowOptions, h Handler) error 
 	}
 	for {
 		res, err := locked(ctx, b, func() (*Result, error) { return b.receive(ctx, o.Owed) })
+		if renewalMends(code(err)) && res != nil && Transient(res.RenewErr) {
+			err = &notRegistered{err}
+		}
 		if serr := b.handOver(ctx, o.Owed, res, h); serr != nil && stopped == nil {
 			stopped = serr
 		}
@@ -186,6 +191,17 @@ func (b *Mailbox) Follow(ctx context.Context, o FollowOptions, h Handler) error 
 		}
 	}
 }
+
+// notRegistered is a drain's no_such_mailbox whose renewal, which registers the
+// mailbox again, failed in a way a wait may mend, or is held back after such a
+// failure ([Transient]): a later drain renews again.
+type notRegistered struct{ err error }
+
+func (e *notRegistered) Error() string {
+	return e.err.Error() + "; registering this mailbox again failed in a way a wait may mend, and a later recv tries again"
+}
+
+func (e *notRegistered) Unwrap() error { return e.err }
 
 // ended is what Follow returns for a handler's error.
 func ended(err error) error {

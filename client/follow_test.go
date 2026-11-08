@@ -613,3 +613,143 @@ func TestAnOwedMessageGoneFromInboxIsSaidAndCleared(t *testing.T) {
 		})
 	}
 }
+
+// A server that forgets the mailbox while its list is held answers the hold
+// no_such_mailbox: the hold is Changed, and the loop's next drain registers the
+// mailbox again and goes on, so a message sent after is delivered (#773).
+func TestAMailboxForgottenWhileItsListIsHeldIsRegisteredAgainByTheLoop(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		e := newMemEnv(t)
+		a, b := e.mailbox(), e.mailbox()
+		receive(t, b)
+		var forgot atomic.Bool
+		e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
+			if r.URL.Query().Has("wait") && forgot.CompareAndSwap(false, true) {
+				e.srv.Forget(b.Address())
+			}
+			next.ServeHTTP(w, r)
+		})
+		var renewed bool
+		var got []string
+		err := b.Follow(context.Background(), client.FollowOptions{}, func(_ context.Context, ev client.Event) error {
+			switch ev.Kind {
+			case client.EventRenewed:
+				renewed = true
+			case client.EventDrained:
+				if renewed && len(got) == 0 {
+					send(t, a, b, "after the registration")
+				}
+			case client.EventDelivery:
+				got = append(got, bodyOf(t, *ev.Delivery))
+				return client.ErrStop
+			}
+			return nil
+		})
+		if err != nil || !forgot.Load() || !renewed || !slices.Equal(got, []string{"after the registration"}) {
+			t.Fatalf("Follow: %v; forgotten %v, renewed %v, delivered %q", err, forgot.Load(), renewed, got)
+		}
+	})
+}
+
+// A held list answered no_such_mailbox is Changed, as one whose pass is
+// refused, for the Receive that registers the mailbox again.
+func TestAHoldItsServerHoldsNoMailboxForIsChanged(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		e := newMemEnv(t)
+		b := e.mailbox()
+		receive(t, b)
+		e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
+			if r.URL.Query().Has("wait") {
+				forge.Refuse(w, protocol.CodeNoSuchMailbox)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+		if h, err := b.Hold(context.Background(), time.Hour); err != nil || !h.Changed {
+			t.Fatalf("a hold answered no_such_mailbox came to %+v, %v; want changed", h, err)
+		}
+	})
+}
+
+// A drain answered no_such_mailbox whose registration again fails in a way a
+// wait may mend (a 503 or a 429) is an EventRetry, not Fatal: in the loop that
+// met it, and in a loop started again while the renewal is held back
+// (renewRetry). Once the hour has passed, a drain registers the mailbox again
+// (#773).
+func TestANoSuchMailboxWhoseRegistrationFailsForNowIsARetry(t *testing.T) {
+	t.Parallel()
+	for _, refusal := range []protocol.Code{protocol.CodeUnavailable, protocol.CodeRateLimited} {
+		t.Run(string(refusal), func(t *testing.T) {
+			t.Parallel()
+			ctx := context.Background()
+			e := newEnv(t)
+			b := e.mailbox()
+			receive(t, b)
+			e.srv.Forget(b.Address())
+			e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
+				if r.Method != http.MethodGet {
+					forge.Refuse(w, refusal)
+					return
+				}
+				next.ServeHTTP(w, r)
+			})
+			retry := func(b *client.Mailbox) error {
+				var retried error
+				if err := b.Follow(ctx, client.FollowOptions{}, func(_ context.Context, ev client.Event) error {
+					if ev.Kind == client.EventRetry {
+						retried = ev.Err
+						return client.ErrStop
+					}
+					return nil
+				}); err != nil {
+					return err
+				}
+				return retried
+			}
+			for _, run := range []string{"the loop that met it", "a loop started again"} {
+				err := retry(mustOpen(t, b.Dir(), e.opts()))
+				if client.Code(err) != protocol.CodeNoSuchMailbox || !client.Transient(err) || client.Fatal(err) {
+					t.Fatalf("%s: %v; Transient %v, Fatal %v", run, err, client.Transient(err), client.Fatal(err))
+				}
+			}
+			if err := b.Follow(ctx, oneDrain(false), nil); err == nil || client.Fatal(err) {
+				t.Fatalf("one drain within the hour: %v", err)
+			}
+			e.srv.SetMiddle(nil)
+			e.clock.Add(61 * time.Minute)
+			if err := b.Follow(ctx, oneDrain(false), nil); err != nil {
+				t.Fatalf("one drain an hour later: %v", err)
+			}
+			if _, err := b.Receive(ctx); err != nil {
+				t.Fatalf("the drain after: %v", err)
+			}
+		})
+	}
+}
+
+// A drain answered no_such_mailbox whose registration again is refused for
+// good ends the loop, as Fatal.
+func TestANoSuchMailboxWhoseRegistrationIsRefusedIsFatal(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	b := e.mailbox()
+	receive(t, b)
+	e.srv.Forget(b.Address())
+	e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
+		if r.Method != http.MethodGet {
+			forge.Refuse(w, protocol.CodeBadRequest)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+	err := b.Follow(context.Background(), client.FollowOptions{}, func(_ context.Context, ev client.Event) error {
+		if ev.Kind == client.EventRetry {
+			t.Errorf("retried: %v", ev.Err)
+			return client.ErrStop
+		}
+		return nil
+	})
+	if client.Code(err) != protocol.CodeNoSuchMailbox || !client.Fatal(err) {
+		t.Fatalf("Follow: %v", err)
+	}
+}
