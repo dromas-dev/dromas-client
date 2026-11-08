@@ -1,9 +1,13 @@
 package sh_test
 
 import (
+	"net/http"
+	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -137,5 +141,62 @@ func TestScriptACountBehindOrMissingRaisesNoAlarm(t *testing.T) {
 		if got := q.read("prekeys/generation"); got != q.read("generation") || got == want {
 			t.Fatalf("with prekeys/generation %s, after the drain: %q, generation %q", c.name, got, q.read("generation"))
 		}
+	}
+}
+
+// Records copied inside a drain, as a backup that copies the base directory
+// while recv runs takes them, are behind prekeys/generation once the drain
+// accepts a message after the copy, since each message accepted is counted:
+// put back with prekeys/ kept, they stop recv with exit 4, so a server that
+// kept its copies replays nothing (#798).
+func TestScriptRecordsCopiedInsideADrainAreStopped(t *testing.T) {
+	w := newWorld(t)
+	p, q := w.mailbox(), w.mailbox()
+	l1 := p.line(q.addr, "00000000-0000-4000-8000-0000000000f1", "first", 0)
+	ct1 := forge.Encrypt(t, w.srv, q.addr, l1, p.sign(q.addr, l1))
+	l2 := p.line(q.addr, "00000000-0000-4000-8000-0000000000f2", "second: pay invoice 16 once", 0)
+	ct2 := forge.Encrypt(t, w.srv, q.addr, l2, p.sign(q.addr, l2))
+	w.put(q, "", ct1)
+	w.put(q, "", ct2)
+	records := []string{"seen", "seen-keys", "generation"}
+	mid := t.TempDir()
+	var once sync.Once
+	w.srv.SetMiddle(func(rw http.ResponseWriter, r *http.Request, next http.Handler) {
+		if r.Method == http.MethodDelete && strings.Contains(r.URL.Path, "/v1/"+q.addr.String()+"/messages/") {
+			once.Do(func() { // a backup of the records taken as the drain acks its first message
+				for _, f := range records {
+					b, err := os.ReadFile(q.file(f))
+					if err == nil {
+						err = os.WriteFile(filepath.Join(mid, f), b, 0o600)
+					}
+					if err != nil {
+						t.Errorf("copy %s: %v", f, err)
+					}
+				}
+			})
+		}
+		next.ServeHTTP(rw, r)
+	})
+	before := q.read("generation")
+	if d := q.recv(); d.rc != 0 || len(d.messages) != 2 {
+		t.Fatalf("the drain: %v", d)
+	}
+	w.honest()
+	if g, f := q.read("generation"), q.read("prekeys/generation"); g != f || g == before {
+		t.Fatalf("after a drain that accepted two: generation %q, prekeys/generation %q, before %q", g, f, before)
+	}
+	for _, f := range records {
+		b, err := os.ReadFile(filepath.Join(mid, f))
+		if err == nil {
+			err = os.WriteFile(q.file(f), b, 0o600)
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	w.put(q, "", ct1) // the server kept its copies
+	w.put(q, "", ct2)
+	if d := q.recv(); d.rc != 4 || len(d.messages) != 0 {
+		t.Fatalf("recv on records copied inside the drain: exit %d, delivered %q", d.rc, d.bodies())
 	}
 }

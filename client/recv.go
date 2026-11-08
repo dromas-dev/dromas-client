@@ -130,9 +130,6 @@ type Result struct {
 	// owing has the drain record each message it lands in inbox/ as owed its
 	// handling, in the transaction that records it seen ([Mailbox.Follow]).
 	owing bool
-	// counted is set once the command has counted a drain that accepts a
-	// message (count), before it keeps the first.
-	counted bool
 	// receiveWithin is RecvWithin for the prekey in use, where the mailbox knows
 	// its lifetime: how soon [Mailbox.Follow] drains again.
 	receiveWithin time.Duration
@@ -630,16 +627,12 @@ func (b *Mailbox) receiveOne(ctx context.Context, m protocol.MessageInfo, res *R
 			// Stored before it is recorded as seen, and both, on disk,
 			// before the ack: a crash or power loss in between delivers it
 			// again, never loses it. A message from a blocked sender is recorded
-			// as seen too, so that a retry of it is a duplicate. The command
-			// counts itself first, once, as a drain that accepted a message: a
-			// state put back from a copy older than this is behind
-			// prekeys/generation (count, matchKeys).
-			if !res.counted {
-				if err := b.count(); err != nil {
-					return fetched, err
-				}
-				res.counted = true
-			}
+			// as seen too, so that a retry of it is a duplicate. The transaction
+			// that records it seen also counts it as accepted, and
+			// prekeys/generation takes that count before the ack: a state put
+			// back from a copy taken before the message was recorded is behind
+			// the file, wherever in a drain the copy was taken (countOne,
+			// matchKeys).
 			d.ID = local
 			where := who.land(d.Envelope.From)
 			switch where {
@@ -658,6 +651,7 @@ func (b *Mailbox) receiveOne(ctx context.Context, m protocol.MessageInfo, res *R
 			if err := removeIfExists(b.path("refused", local+".json")); err != nil {
 				return fetched, err
 			}
+			var accepted uint64
 			if err := b.update(func(s store) error {
 				if err := recordSeen(s, ct.bytes, d.Envelope); err != nil {
 					return err
@@ -666,6 +660,9 @@ func (b *Mailbox) receiveOne(ctx context.Context, m protocol.MessageInfo, res *R
 					if d.owed, err = owe(s, local); err != nil {
 						return err
 					}
+				}
+				if accepted, err = countOne(s); err != nil {
+					return err
 				}
 				return s.del(bucketRefused, local)
 			}); err != nil {
@@ -680,6 +677,13 @@ func (b *Mailbox) receiveOne(ctx context.Context, m protocol.MessageInfo, res *R
 			default:
 				res.Blocked = append(res.Blocked, local)
 			}
+			// Said in the Result before the file is written: a fault there
+			// stops the drain before the ack, and the message, recorded seen,
+			// would never be said again.
+			if err := b.writeGeneration(accepted); err != nil {
+				return fetched, err
+			}
+			step("generation written")
 		}
 		// Judged, and the verdict on disk: what was kept of it goes.
 		if err := p.drop(); err != nil {

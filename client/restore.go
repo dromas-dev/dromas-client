@@ -22,9 +22,12 @@ import (
 //     the state is lost, or put back from a copy older than a renewal, with
 //     prekeys/ kept;
 //   - prekeys/generation ahead of the state's generation, as after the state is
-//     put back from a copy older than a drain that delivered. Each drain that
-//     accepts a message raises the state's generation and then writes the file
-//     (count), so a crash leaves the file at or below the state, never ahead.
+//     put back from a copy older than a message the mailbox accepted. Each
+//     message accepted raises the state's generation, in the transaction that
+//     records it seen, and then the file takes the count (countOne), so a crash
+//     leaves the file at or below the state, never ahead. A count kept per
+//     message, not per drain, is behind for a copy taken inside a drain too, as
+//     Active Directory's update sequence number counts each update.
 //
 // Either stops every command that receives, sends, renews or hands over a
 // message, before it lists, acks or renews anything (keysMatch), with the
@@ -49,9 +52,11 @@ func NotTheKeys(err error) bool {
 	return errors.As(err, &re) && re.Code == StateNotTheKeys
 }
 
-// keyGeneration is the state's count of drains that accepted a message, in the
-// mailbox's own bucket, and generationFile is the same count in prekeys/: each
-// a decimal number, absent as 0.
+// keyGeneration is the state's count of the messages the mailbox accepted, in
+// the mailbox's own bucket, and generationFile is the same count in prekeys/:
+// each a decimal number, absent as 0. A mailbox that counted once a drain, as
+// clients before #798 did, reads on from its count: only that it never falls
+// matters.
 const (
 	keyGeneration  = "generation"
 	generationFile = "generation"
@@ -73,6 +78,29 @@ func (r Restored) Acknowledged() bool { return r.Adopted > 0 || r.RolledBack }
 // (Options.Restore), or nil where Init was not asked for one.
 func (b *Mailbox) Restored() *Restored { return b.restored }
 
+// RestoredBy returns what an acknowledgement of a restore found and did, where
+// err is the error of an Init under Options.Restore that failed after the
+// acknowledgement committed: the restore stands, and the mailbox owes the
+// replay floor. It returns nil for a nil err and for any other error, that of
+// an Init whose acknowledgement found nothing to do included.
+func RestoredBy(err error) *Restored {
+	var ar *afterRestore
+	if errors.As(err, &ar) {
+		return &ar.r
+	}
+	return nil
+}
+
+// afterRestore is the error of an Init that failed after its acknowledgement
+// of a restore committed: err, with what the acknowledgement did.
+type afterRestore struct {
+	r   Restored
+	err error
+}
+
+func (e *afterRestore) Error() string { return e.err.Error() }
+func (e *afterRestore) Unwrap() error { return e.err }
+
 // keysMatch is the refusal of a command that receives, sends, renews or hands
 // over a message, where the command's hold found the state does not match its
 // prekeys/ (matchKeys): nil otherwise.
@@ -89,16 +117,20 @@ func (b *Mailbox) keysMatch() error { return b.notKeys }
 // none, it writes prekeys/generation where it is missing or behind the state:
 // a missing file is a mailbox that has not counted yet, and owes nothing.
 func (b *Mailbox) matchKeys() error {
-	b.notKeys, b.restored = nil, nil
+	// Options.Restore is Init's alone, and acknowledges once: a later command
+	// of the Mailbox Init returns is stopped for its owner as any other is.
+	restoring := b.restoring
+	b.notKeys, b.restored, b.restoring = nil, nil, false
 	found, kept, file, there, err := b.keysState()
 	if err != nil {
 		return err
 	}
 	ahead := there && file > kept
 	switch {
-	case b.restoring:
-		b.restored = &Restored{Adopted: len(found), RolledBack: ahead}
-		if !b.restored.Acknowledged() {
+	case restoring:
+		r := &Restored{Adopted: len(found), RolledBack: ahead}
+		if !r.Acknowledged() {
+			b.restored = r
 			break
 		}
 		kept = max(kept, file)
@@ -118,6 +150,7 @@ func (b *Mailbox) matchKeys() error {
 		}); err != nil {
 			return err
 		}
+		b.restored = r
 		step("keys adopted")
 	case len(found) > 0 || ahead:
 		b.notKeys = notTheKeys(len(found), ahead)
@@ -173,7 +206,7 @@ func notTheKeys(found int, ahead bool) error {
 		why = append(why, fmt.Sprintf("prekeys/ holds %d prekeys the state does not name, as after the state is lost, or put back from a copy older than a renewal, with prekeys/ kept", found))
 	}
 	if ahead {
-		why = append(why, "prekeys/generation counts more drains that delivered than the state does, as after the state is put back from a copy older than the mailbox")
+		why = append(why, "prekeys/generation counts more messages accepted than the state does, as after the state is put back from a copy older than the mailbox")
 	}
 	return &RefusedError{Code: StateNotTheKeys, Reason: "this mailbox's state does not match its prekeys: " + strings.Join(why, "; and ") + ". Such a state cannot tell a message this mailbox delivered under the state it lost from one that waited, so the mailbox receives, sends, delivers and renews nothing, and acks nothing, until its owner runs dromas init --restore: from then, every message sent before its server next takes one of its calls, and in the hour after, is refused as stale (stale_after_restore)"}
 }
@@ -229,7 +262,7 @@ func (b *Mailbox) generationOnDisk() (uint64, bool, error) {
 	digits, ok := strings.CutSuffix(string(raw), "\n")
 	n, perr := strconv.ParseUint(digits, 10, 64)
 	if !ok || perr != nil || strconv.FormatUint(n, 10) != digits {
-		return 0, false, fmt.Errorf("%s keeps no count of this mailbox's drains: it is a decimal number and a line feed, which this client writes", name)
+		return 0, false, fmt.Errorf("%s keeps no count of the messages this mailbox accepted: it is a decimal number and a line feed, which this client writes", name)
 	}
 	return n, true, nil
 }
@@ -240,27 +273,18 @@ func (b *Mailbox) writeGeneration(n uint64) error {
 	return writeFile(b.path("prekeys", generationFile), append(strconv.AppendUint(nil, n, 10), '\n'))
 }
 
-// count raises the state's generation, and then writes it to
-// prekeys/generation: before a drain keeps its first message as accepted, so
-// the file counts every drain that accepted one, and a crash between the two
-// leaves the file behind the state, which the next command writes again
-// (matchKeys), never ahead of it.
-func (b *Mailbox) count() error {
-	var n uint64
-	if err := b.update(func(s store) error {
-		kept, err := decimal(s.get(bucketMailbox, keyGeneration), keyGeneration)
-		if err != nil {
-			return err
-		}
-		n = kept + 1
-		return s.put(bucketMailbox, keyGeneration, strconv.AppendUint(nil, n, 10))
-	}); err != nil {
-		return err
+// countOne raises the state's generation by one, in the transaction s that
+// records a message as accepted (receiveOne), and returns the count, which
+// prekeys/generation takes after that transaction and before the message's
+// ack. So the file counts every message the mailbox accepted, a state that
+// lacks one is behind it, and a crash between the two leaves the file behind
+// the state, which the next command writes again (matchKeys), never ahead of
+// it.
+func countOne(s store) (uint64, error) {
+	kept, err := decimal(s.get(bucketMailbox, keyGeneration), keyGeneration)
+	if err != nil {
+		return 0, err
 	}
-	step("generation raised")
-	if err := b.writeGeneration(n); err != nil {
-		return err
-	}
-	step("generation written")
-	return nil
+	n := kept + 1
+	return n, s.put(bucketMailbox, keyGeneration, strconv.AppendUint(nil, n, 10))
 }

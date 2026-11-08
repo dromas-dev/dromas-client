@@ -216,6 +216,11 @@ identity alone needs no --restore.`,
 			}
 			b, err := client.Init(c.Context(), e.dir, opt)
 			if err != nil {
+				// An acknowledgement that committed before init failed is said
+				// first: the next init --restore finds nothing to acknowledge.
+				if r := client.RestoredBy(err); r != nil {
+					_ = e.out(line("restore", "acknowledged", r.Acknowledged(), "detail", restoreWords(*r))) // the error is init's
+				}
 				return err
 			}
 			if r := b.Restored(); r != nil {
