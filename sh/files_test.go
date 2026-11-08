@@ -571,3 +571,51 @@ func TestAddrNeedsAMailbox(t *testing.T) {
 		t.Errorf("addr on a mailbox restored from its identity alone: exit %d, stdout %q, stderr %q, want %q", code, got, errs, out)
 	}
 }
+
+// The script refuses a mailbox directory that is not its user's alone, before
+// the command runs, as the Go client refuses its private files and its kept
+// directories (checkPrivateFileAs, checkKeptDirAs): whoever can write there
+// could rewrite seen and seen-floor, after which the mailbox takes a replay.
+// A directory others may read is taken. A directory group or others can
+// write is refused, as is a file group or others can read or write, and a
+// file or directory owned by a user other than the one checking or root.
+func TestTheScriptRefusesAMailboxOthersCanReach(t *testing.T) {
+	w := newWorld(t)
+	b := w.mailbox()
+	const refusal = "is owned by a user other than this one or root, or others can write a directory in it or read or write a file in it"
+	for _, c := range []struct {
+		name    string
+		mode    os.FileMode
+		refused bool
+	}{
+		{".", 0o755, false},
+		{".", 0o770, true},
+		{"inbox", 0o703, true},
+		{"identity", 0o640, true},
+		{"identity", 0o602, true},
+	} {
+		f := b.file(c.name)
+		fi, err := os.Stat(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(f, c.mode); err != nil {
+			t.Fatal(err)
+		}
+		calls := len(w.srv.Requests())
+		r := b.sh("dr_recv")
+		if got := r.rc != 0 && strings.Contains(r.err, refusal); got != c.refused || c.refused && len(w.srv.Requests()) != calls {
+			t.Errorf("%s at mode %04o: %v, %d calls", c.name, c.mode, r, len(w.srv.Requests())-calls)
+		}
+		if err := os.Chmod(f, fi.Mode().Perm()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if os.Getuid() == 0 {
+		t.Log("run as root, whose files every check takes: no other user owns this mailbox's files")
+		return
+	}
+	if r := b.sh("dr_ours " + strconv.Itoa(os.Getuid()+1)); r.rc == 0 || !strings.Contains(r.err, refusal) {
+		t.Errorf("a mailbox owned by a user other than the one checking: %v", r)
+	}
+}
