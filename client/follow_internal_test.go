@@ -21,7 +21,7 @@ func TestHandOverHandsOverEveryKindInItsOrder(t *testing.T) {
 	}
 	first := errors.New("first")
 	var kinds []EventKind
-	err := (&Mailbox{}).handOver(context.Background(), false, res, func(_ context.Context, ev Event) error {
+	err, fault := (&Mailbox{}).handOver(context.Background(), false, res, func(_ context.Context, ev Event) error {
 		kinds = append(kinds, ev.Kind)
 		if ev.Result != res {
 			t.Errorf("event %d carries no Result", ev.Kind)
@@ -31,8 +31,8 @@ func TestHandOverHandsOverEveryKindInItsOrder(t *testing.T) {
 		}
 		return errors.New("later")
 	})
-	if !errors.Is(err, first) {
-		t.Errorf("handOver: %v, want the first error", err)
+	if !errors.Is(err, first) || fault != nil {
+		t.Errorf("handOver: %v, %v; want the first error and no fault", err, fault)
 	}
 	if len(kinds) != int(EventDrained) {
 		t.Fatalf("%d events, want %d: %v", len(kinds), EventDrained, kinds)

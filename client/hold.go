@@ -246,19 +246,19 @@ func timedOut(err error) bool {
 // Transient reports whether err is a call that failed and that making it
 // again may get past: no answer, a server error, a rate limit or a request
 // timeout. So is a lock another command held for as long as a command waits for
-// it, a renewal held back until renewRetry after one that failed so, a
-// server's no_such_mailbox whose registration again failed so ([Mailbox.Follow]),
+// it, a renewal held back until renewRetry after one that failed so, a drain
+// refused for what a renewal mends whose renewal failed so ([Mailbox.Receive]),
 // and a refusal that this machine puts right without its owner ([NotReady]).
 // A refusal no wait mends is not: [Fatal] names those.
 func Transient(err error) bool {
 	var ae *APIError
 	var re *RevokedError
 	var rh *renewalHeld
-	var nr *notRegistered
+	var ro *renewalOwed
 	switch {
 	case err == nil, errors.As(err, &re):
 		return false
-	case errors.Is(err, errLocked), errors.As(err, &nr), NotReady(err):
+	case errors.Is(err, errLocked), errors.As(err, &ro), NotReady(err):
 		return true
 	case errors.As(err, &rh):
 		return rh.transient
@@ -322,9 +322,10 @@ func (h *holding) turn(ctx context.Context, wait time.Duration) (bool, error) {
 // once it comes (provedLocked).
 //
 // A mailbox with no tag kept, one whose last list found messages, whose pass the
-// server refused, or that the server holds no mailbox for, is Changed at once,
-// for a Receive to settle: the Receive signs another pass, or renews the
-// prekey, which registers the mailbox again (mendable). An error is a
+// server refused, that the server holds no mailbox for, or whose certificate in
+// use its server shows revoked (renewalMends), is Changed at once, for a
+// Receive to settle: the Receive signs another pass, or renews the prekey,
+// which registers the mailbox again or makes a new certificate (mendable). An error is a
 // call that failed and that holding again may get past ([Transient]), or a
 // refusal no wait mends ([Fatal]).
 func (b *Mailbox) Hold(ctx context.Context, wait time.Duration) (*HoldResult, error) {
@@ -398,7 +399,7 @@ func (b *Mailbox) Hold(ctx context.Context, wait time.Duration) (*HoldResult, er
 	var te *transportError
 	switch {
 	case err == nil && resp.StatusCode == http.StatusNotModified && sameTag(resp.Header.Get("ETag"), k.tag):
-	case err == nil, passRefused(code(err)), renewalMends(code(err)):
+	case err == nil, passRefused(code(err)), renewalMends(err):
 		h.Changed = true
 	case ctx.Err() == nil && errors.As(err, &te) && after >= MinHold/2:
 		// The connection dropped part way through a hold, or its answer
