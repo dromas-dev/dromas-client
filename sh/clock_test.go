@@ -259,6 +259,30 @@ func TestScriptRefusesAReplayAfterItsStateIsLost(t *testing.T) {
 	}
 }
 
+// The floor after seen and seen-keys are lost is dated by a pass signed after
+// the keys were found, never by the pass the mailbox kept, which may be older
+// than the last message the lost set took: a message the lost set took, dated
+// 59 minutes ahead of the mailbox's clock under a kept pass, is refused as stale
+// at the next drain, a minute later (PROTOCOL.md §12.3 check 8).
+func TestScriptAFloorAfterALossIsDatedByAPassSignedSince(t *testing.T) {
+	w := newWorld(t)
+	p, q := w.mailbox(), w.mailbox()
+	if d := q.recv(); d.rc != 0 { // signs and keeps a pass
+		t.Fatalf("the first recv: %v", d)
+	}
+	l := p.line(q.addr, "00000000-0000-4000-8000-0000000000fb", "pay invoice 12 once", -64*time.Minute) // 59 minutes ahead of q's clock at its drain
+	ct := forge.Encrypt(t, w.srv, q.addr, l, p.sign(q.addr, l))
+	w.put(q, "", ct)
+	if d := (at{q, 5 * time.Minute}).recv(); d.rc != 0 || !slices.Equal(d.bodies(), []string{"pay invoice 12 once"}) {
+		t.Fatalf("the first delivery, 5 minutes on, under the kept pass: %v", d)
+	}
+	q.must(`rm "$DR/seen" "$DR/seen-keys"`)
+	w.put(q, "", ct) // the server kept its copy
+	if d := (at{q, 6 * time.Minute}).recv(); len(d.messages) != 0 || d.refused("stale") != 1 {
+		t.Errorf("the server's copy a minute after the loss: %v; seen-floor %q", d, q.read("seen-floor"))
+	}
+}
+
 // A key file whose name is no serial is never named in seen-keys, so it decrypts
 // nothing: after seen and seen-keys are lost, the copy the server kept of a
 // message the lost set delivered, which only that key opens, is not delivered

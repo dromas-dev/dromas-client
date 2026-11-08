@@ -622,6 +622,9 @@ dr_drain(){ # stops at a transient error or a fault of this mailbox, leaving the
   while :; do
     [ $((pages += 1)) -le 100 ] || { dr_out more --arg detail "this run stopped at the most one drain takes: run recv again for the rest, which is still on the server"; return 0; }
     dr_owner GET "/v1/$B/messages${c:+?cursor=$c}" > "$DR/list.json" || { dr_own; return 1; }
+    if [ "$pages" -eq 1 ] && dr_unnamed; then      # keys seen-keys does not name: the floor goes by a pass signed after they were found, never by one kept from before, which may be older than the last message a lost replay set took
+      rm -f "$DR/pass" "$DR/pass-server"; dr_owner GET "/v1/$B/messages" > "$DR/list.json" || { dr_own; return 1; }
+    fi
     [ "$pages" -gt 1 ] || { DR_LISTED=$(dr_taken) && dr_adopt "$DR_LISTED" && dr_forget "$DR_LISTED"; } || return 1      # the replay set pruned by this clock only once the server has taken a pass dated by it, and by that pass's date (dr_taken): a drain that a clock far off would prune is stopped at its pass first. DR_LISTED tells dr_recv the same reading for the keys
     dr_shape "$DR/list.json" list && n=$(jq -r '.messages | length' "$DR/list.json") || { dr_err "the server's list of messages is not one this client reads: the messages stay on the server"; return 1; }
     for ((i = 0; i < n; i++)); do
@@ -746,16 +749,20 @@ dr_covered(){ # <serial> → seen-keys names it, on disk: a prekey this mailbox 
   local new=; [ -e "$DR/seen-keys" ] || new=$DR
   printf '%s\n' "$1" >> "$DR/seen-keys" && sync "$DR/seen-keys" ${new:+"$new"}
 }
-dr_adopt(){ # <Unix time, one a server took (dr_taken)> → where prekeys/ holds a key age reads that seen-keys does not name, as after seen and seen-keys are lost with the keys kept, the floor raised to that reading plus an hour, less 7 days, then each such key named: only such a key opens a ciphertext a replay set this mailbox no longer holds saw delivered, and a server may serve one again. So a message sent before that reading and the hour after, which this clock's check may have taken before, is stale (PROTOCOL.md §12.3 check 8)
-  local k n found=()
+dr_unnamed(){ # → 0 where prekeys/ holds a key age reads that seen-keys does not name, as after seen and seen-keys are lost with the keys kept, each such serial left in DR_FOUND for dr_adopt; 1 where it holds none
+  local k n; DR_FOUND=()
   for k in "$DR"/prekeys/*.agekey; do
     [ -e "$k" ] || continue
     n=$(basename "$k" .agekey); [[ $n =~ ^[1-9][0-9]{0,15}$ ]] || continue
-    grep -qxF -e "$n" "$DR/seen-keys" 2> /dev/null || ! age-keygen -y "$k" > /dev/null 2>&1 || found+=("$n")      # a file age cannot read opens nothing, and stops the drain (dr_judge)
+    grep -qxF -e "$n" "$DR/seen-keys" 2> /dev/null || ! age-keygen -y "$k" > /dev/null 2>&1 || DR_FOUND+=("$n")      # a file age cannot read opens nothing: it is named once it holds a key
   done
-  [ ${#found[@]} -gt 0 ] || return 0
+  [ ${#DR_FOUND[@]} -gt 0 ]
+}
+dr_adopt(){ # <Unix time, one a server took (dr_taken) by a pass signed after dr_unnamed found DR_FOUND> → where it found keys, the floor raised to that reading plus an hour, less 7 days, then each such key named: only such a key opens a ciphertext a replay set this mailbox no longer holds saw delivered, and a server may serve one again. So a message sent before that reading and the hour after, which this clock's check may have taken before, is stale (PROTOCOL.md §12.3 check 8). A key that appears after dr_unnamed looked is named at the next drain, and opens nothing until then (dr_judge)
+  local n
+  [ ${#DR_FOUND[@]} -gt 0 ] || return 0
   dr_raise $(($1 + 3600 - 7*86400)) || return 1      # the floor first: a crash leaves the floor raised and the keys to name again
-  for n in "${found[@]}"; do dr_covered "$n" || return 1; done
+  for n in "${DR_FOUND[@]}"; do dr_covered "$n" || return 1; done
 }
 dr_floor(){ # → the highest cutoff a prune of the replay set has dropped a line at, from seen-floor, or 0 when it has none: a message sent before it, or less than 7 days after it, is stale whatever the clock now reads, since its line, or its first copy's, may be gone, as a Kerberos server that has lost its replay cache refuses until the window has passed (RFC 4120 §3.2.3). A file that names anything else is an error, never the default
   local f; [ -e "$DR/seen-floor" ] || { echo 0; return 0; }

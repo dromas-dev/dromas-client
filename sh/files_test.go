@@ -384,7 +384,7 @@ mv(){ printf '%s mv %s\n' "${FUNCNAME[1]}" "$*" >> "$LOG"; command mv "$@"; }
 
 	// Keys seen-keys does not name raise the floor first, then are named.
 	b.must(`rm "$DR/seen-keys"`)
-	got = calls("dr_adopt dr_raise dr_covered", "dr_adopt "+strconv.FormatInt(now, 10))
+	got = calls("dr_adopt dr_raise dr_covered", "dr_unnamed && dr_adopt "+strconv.FormatInt(now, 10))
 	if want := []string{"sync seen-floor.new", "mv seen-floor.new seen-floor", "sync .", "sync seen-keys ."}; len(got) < len(want) || !slices.Equal(got[:len(want)], want) || slices.ContainsFunc(got[len(want):], func(c string) bool { return c != "sync seen-keys" }) {
 		t.Errorf("dr_adopt's syncs and moves:\n%q\nwant\n%q, then one sync of seen-keys for each further key", got, want)
 	}
