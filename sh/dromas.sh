@@ -93,7 +93,7 @@ dr_wait(){ sed -n '2{/^[0-9]\{1,\}$/p;}' "$DR/error.meta" 2> /dev/null | sed 's/
 dr_dated(){ local d; d=$(sed -n '3{/^[A-Za-z0-9 ,:]*$/p;}' "$DR/error.meta" 2> /dev/null) && [ -n "$d" ] && jq -nr --arg d "$d" '$d | strptime("%a, %d %b %Y %H:%M:%S GMT") | mktime | todate' 2> /dev/null; }      # the time the last API error's Date header gives, the server's word
 dr_shape(){ # <answer> <mailbox|list|record|receipt|problem> → 0 only for one JSON object of that kind, each member this script reads of its type, and null as if the member were left out. An integer is from 0 to 2^53 - 1 and jq gives it back as digits, since bash reads it. A byte member is a string, read by dr_bytes. Members it does not read are ignored
   jq -en --arg k "$2" 'def s: . == null or type == "string"; def n: . == null or (type == "number" and . == floor and . >= 0 and . <= 9007199254740991 and (tostring | test("\\A(0|[1-9][0-9]*)\\z")));
-    def record: all(.identity, .revocation_signature, .revoked_certificates, .revoked_certificates_signature; s);
+    def record: (.type | . == null or . == "revocation_record") and all(.identity, .revocation_signature, .revoked_certificates, .revoked_certificates_signature; s);
     [inputs] | length == 1 and (.[0] | type == "object" and
     {mailbox: all(.identity, .prekey, .prekey_signature, .revoked_certificates, .revoked_certificates_signature; s),
      list: ((.next_cursor | . == null or (type == "string" and test("\\A[A-Za-z0-9_-]+\\z"))) and (.messages | . == null or (type == "array" and all(.[]; . == null or (type == "object" and (.id | s) and (.size | n and (. // 0) <= 16777216)))))),
@@ -463,7 +463,7 @@ dr_keepcerts(){ # <address> <identity document> <statement> <signature> → keep
 dr_keep(){ # <address> <its identity document> <signature> → the revocation, kept for good: called only once dr_revcheck took it. A revoked address stays revoked
   if [ "$1" = "$(cat "$DR/address" 2> /dev/null)" ]; then dr_put "$3" "$DR/revoked.sig"; else dr_meet "$1" "$2" && dr_put "$3" "$DR/peers/$1/revoke.sig"; fi
 }
-dr_record(){ # <record> → the address it is a revocation of, only if it verifies; its parts are left in $DR/rev.doc and $DR/rev.sig. A record is one line of JSON, {type, identity, revocation_signature}: its type, revocation_record, which this script does not read, then the identity document and the signature, each base64
+dr_record(){ # <record> → the address it is a revocation of, only if it verifies; its parts are left in $DR/rev.doc and $DR/rev.sig. A record is one line of JSON, {type, identity, revocation_signature}: its type, revocation_record or left out (dr_shape), then the identity document and the signature, each base64
   local A
   dr_isrecord "$1" && dr_bytes "$1" identity "$DR/rev.doc" && dr_bytes "$1" revocation_signature "$DR/rev.sig" || return 1
   A=$(dr_address "$DR/rev.doc") && dr_revcheck "$A" "$DR/rev.doc" "$DR/rev.sig" && printf '%s\n' "$A"
@@ -503,7 +503,9 @@ dr_lookup(){ # <address> → reads the address's mailbox from this mailbox's ser
 dr_revocations(){ # <address> → reads the address's revocations from this mailbox's server (GET /v1/<address>/revocations), which a server keeps with a mailbox there or none (PROTOCOL.md §11.15), and keeps what verifies: dr_lookup's answer. dr_judge's, for each sender in a drain (PROTOCOL.md §12.3 check 7), and dr_renew's, for a mailbox its server holds no more. A revocation of the address this mailbox keeps answers with no call. A record served and not_revoked are answers, and anything else is none: a record that is no record, and revoked with nothing that verifies, among them (PROTOCOL.md §12.3 check 7)
   local r w=$1; [ "$1" != "$(cat "$DR/address" 2> /dev/null)" ] || w="this mailbox"
   dr_gone "$1"; case $? in 0) return 0 ;; 3) return 3 ;; esac
-  if dr_api GET "/v1/$1/revocations" > "$DR/rev.json" 2> "$DR/read.err"; then dr_isrecord "$DR/rev.json" || { dr_refuse "the server's answer for $w's revocations is not one this client reads: a record, each byte field base64"; return 2; }      # a 2xx that is no record is no answer, as one that is no JSON is
+  if dr_api GET "/v1/$1/revocations" > "$DR/rev.json" 2> "$DR/read.err"; then
+    [ "$(sed -n 1p "$DR/response.meta")" = 200 ] && dr_isrecord "$DR/rev.json" && jq -e '(.identity | strings | length > 0) and ([.revocation_signature, .revoked_certificates] | any(strings | length > 0))' "$DR/rev.json" > /dev/null 2>&1 ||
+      { dr_refuse "the server's answer for $w's revocations is not one this client reads: a 200 with a record that holds the identity and at least one revocation, each byte field base64"; return 2; }      # another 2xx, or a 2xx that is no record, is no answer, as one that is no JSON is (PROTOCOL.md §10.3, §12.3 check 7)
     dr_take "$1"; return
   fi
   case $(dr_code) in
@@ -622,6 +624,9 @@ dr_drain(){ # stops at a transient error or a fault of this mailbox, leaving the
   while :; do
     [ $((pages += 1)) -le 100 ] || { dr_out more --arg detail "this run stopped at the most one drain takes: run recv again for the rest, which is still on the server"; return 0; }
     dr_owner GET "/v1/$B/messages${c:+?cursor=$c}" > "$DR/list.json" || { dr_own; return 1; }
+    if [ "$pages" -eq 1 ] && dr_unnamed; then      # keys seen-keys does not name: the floor goes by a pass signed after they were found, never by one kept from before, which may be older than the last message a lost replay set took
+      rm -f "$DR/pass" "$DR/pass-server"; dr_owner GET "/v1/$B/messages" > "$DR/list.json" || { dr_own; return 1; }
+    fi
     [ "$pages" -gt 1 ] || { DR_LISTED=$(dr_taken) && dr_adopt "$DR_LISTED" && dr_forget "$DR_LISTED"; } || return 1      # the replay set pruned by this clock only once the server has taken a pass dated by it, and by that pass's date (dr_taken): a drain that a clock far off would prune is stopped at its pass first. DR_LISTED tells dr_recv the same reading for the keys
     dr_shape "$DR/list.json" list && n=$(jq -r '.messages | length' "$DR/list.json") || { dr_err "the server's list of messages is not one this client reads: the messages stay on the server"; return 1; }
     for ((i = 0; i < n; i++)); do
@@ -659,7 +664,8 @@ dr_kept(){ # <message stem> <id> → the message as refused/ keeps it: the id th
 }
 dr_judge(){ # <me> <message stem> → 0 only if EVERY check passes, in this order; 2 for a resend of an accepted msg_id; 1 refused, with "<code>: <words>" on stdout, the words this script's own and never the message's; 3 a fault of this mailbox, no verdict; 4 no answer from the server on whether the sender is revoked, no verdict. Who the sender is, is never asked of the server, nor read from its list: the message carries what proves it. The one thing asked is whether a revocation of that sender, or of its certificates, exists, and the answer proves itself
   local B=$1 m=$2 ids=() k h A c f
-  for k in "$DR"/prekeys/*.agekey; do [ -e "$k" ] || continue; age-keygen -y "$k" > /dev/null 2>&1 || { echo "cannot read the prekey key $k"; return 3; }; ids+=(-i "$k"); done      # a key file age cannot read is a fault of this mailbox, which stops the drain: never a message refused for it
+  for k in "$DR"/prekeys/*.agekey; do [ -e "$k" ] || continue; grep -qxF -e "$(basename "$k" .agekey)" "$DR/seen-keys" 2> /dev/null || continue      # only a key seen-keys names: one it does not name opens nothing until dr_adopt has named it and raised the floor, a file whose name is no serial or one that appears during the drain among them
+    age-keygen -y "$k" > /dev/null 2>&1 || { echo "cannot read the prekey key $k"; return 3; }; ids+=(-i "$k"); done      # a key file age cannot read is a fault of this mailbox, which stops the drain: never a message refused for it
   [ ${#ids[@]} -gt 0 ] || { echo "this mailbox has no prekeys"; return 3; }
   age -d "${ids[@]}" < "$m.age" > "$m.T" 2> /dev/null || { echo "undecryptable: it does not decrypt with this mailbox's prekeys"; return 1; }
   A=$(dr_open "$B" "$m") || { echo "$A"; return 1; }      # the sender, proved by what was decrypted
@@ -745,16 +751,20 @@ dr_covered(){ # <serial> → seen-keys names it, on disk: a prekey this mailbox 
   local new=; [ -e "$DR/seen-keys" ] || new=$DR
   printf '%s\n' "$1" >> "$DR/seen-keys" && sync "$DR/seen-keys" ${new:+"$new"}
 }
-dr_adopt(){ # <Unix time, one a server took (dr_taken)> → where prekeys/ holds a key age reads that seen-keys does not name, as after seen and seen-keys are lost with the keys kept, the floor raised to that reading plus an hour, less 7 days, then each such key named: only such a key opens a ciphertext a replay set this mailbox no longer holds saw delivered, and a server may serve one again. So a message sent before that reading and the hour after, which this clock's check may have taken before, is stale (PROTOCOL.md §12.3 check 8)
-  local k n found=()
+dr_unnamed(){ # → 0 where prekeys/ holds a key age reads that seen-keys does not name, as after seen and seen-keys are lost with the keys kept, each such serial left in DR_FOUND for dr_adopt; 1 where it holds none
+  local k n; DR_FOUND=()
   for k in "$DR"/prekeys/*.agekey; do
     [ -e "$k" ] || continue
     n=$(basename "$k" .agekey); [[ $n =~ ^[1-9][0-9]{0,15}$ ]] || continue
-    grep -qxF -e "$n" "$DR/seen-keys" 2> /dev/null || ! age-keygen -y "$k" > /dev/null 2>&1 || found+=("$n")      # a file age cannot read opens nothing, and stops the drain (dr_judge)
+    grep -qxF -e "$n" "$DR/seen-keys" 2> /dev/null || ! age-keygen -y "$k" > /dev/null 2>&1 || DR_FOUND+=("$n")      # a file age cannot read opens nothing: it is named once it holds a key
   done
-  [ ${#found[@]} -gt 0 ] || return 0
+  [ ${#DR_FOUND[@]} -gt 0 ]
+}
+dr_adopt(){ # <Unix time, one a server took (dr_taken) by a pass signed after dr_unnamed found DR_FOUND> → where it found keys, the floor raised to that reading plus an hour, less 7 days, then each such key named: only such a key opens a ciphertext a replay set this mailbox no longer holds saw delivered, and a server may serve one again. So a message sent before that reading and the hour after, which this clock's check may have taken before, is stale (PROTOCOL.md §12.3 check 8). A key that appears after dr_unnamed looked is named at the next drain, and opens nothing until then (dr_judge)
+  local n
+  [ ${#DR_FOUND[@]} -gt 0 ] || return 0
   dr_raise $(($1 + 3600 - 7*86400)) || return 1      # the floor first: a crash leaves the floor raised and the keys to name again
-  for n in "${found[@]}"; do dr_covered "$n" || return 1; done
+  for n in "${DR_FOUND[@]}"; do dr_covered "$n" || return 1; done
 }
 dr_floor(){ # → the highest cutoff a prune of the replay set has dropped a line at, from seen-floor, or 0 when it has none: a message sent before it, or less than 7 days after it, is stale whatever the clock now reads, since its line, or its first copy's, may be gone, as a Kerberos server that has lost its replay cache refuses until the window has passed (RFC 4120 §3.2.3). A file that names anything else is an error, never the default
   local f; [ -e "$DR/seen-floor" ] || { echo 0; return 0; }

@@ -265,8 +265,23 @@ func TestOnlyTheIdentitysHighestRevocationCounts(t *testing.T) {
 	}
 	show(firstList)
 	shownAndJudged("with the lower revocation shown again")
-	// And with nothing shown at all, the kept revocation still stands.
-	show(protocol.Revocations{Identity: doc})
+	// And with nothing shown at all, the server's word that it holds none,
+	// the kept revocation still stands.
+	e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
+		if x, ok := forge.RevocationsOf(r); ok && x == a.Address() {
+			shown.Add(1)
+			answer(w, protocol.CodeNotRevoked)
+			return
+		}
+		if x, ok := forge.ReadOf(r); ok && x == a.Address() {
+			shown.Add(1)
+			e.serve(w, r, next, func(br *protocol.MailboxResponse) {
+				br.RevokedCertificates, br.RevokedCertificatesSignature = nil, nil
+			})
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 	shownAndJudged("with no revocation shown")
 }
 

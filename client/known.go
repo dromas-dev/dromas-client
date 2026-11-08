@@ -83,7 +83,10 @@ func (b *Mailbox) known(ctx context.Context) (*own, error) {
 	case code(err) == protocol.CodeNoSuchMailbox:
 		o.at = atNone
 		var held protocol.Revocations
-		_, err := b.call(ctx, http.MethodGet, b.mailboxPath("/revocations"), nil, nil, &held)
+		resp, err := b.call(ctx, http.MethodGet, b.mailboxPath("/revocations"), nil, nil, &held)
+		if err == nil {
+			err = recordAnswer(b.mailboxPath("/revocations"), resp, &held)
+		}
 		switch {
 		case errors.As(err, &gone):
 			return o, err

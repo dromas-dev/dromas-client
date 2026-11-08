@@ -830,10 +830,14 @@ var answerTypes = map[string]func() any{
 
 // answerRead are the answer/ vectors the script refuses: those that are not one
 // object, or break a member the script reads (a byte member it decodes, an id
-// or a size it uses, the cursor it puts in a query). Every other bad-* vector
-// is the Go client's to refuse, and breaks a member the script never reads but
-// in two, which name a member it reads twice: jq takes the last, where the Go
-// client refuses the text (PROTOCOL.md §3.3). Neither difference guards any of
+// or a size it uses, the cursor it puts in a query, a record's type, in a
+// record and in a problem's). The four records that hold no identity or no
+// revocation the script refuses where it reads a sender's revocations
+// (dr_revocations, TestScriptTakesARecordOnlyAsA200ThatHoldsOne), as the Go
+// client does there. Every other bad-* vector is the Go client's to refuse, and
+// breaks a member the script never reads but in two, which name a member it
+// reads twice: jq takes the last, where the Go client refuses the text
+// (PROTOCOL.md §3.3). Neither difference guards any of
 // the five. In record-bad-identity-twice the address comes from the identity
 // the script read, which must hash to the address asked about and sign the
 // record; in problem-bad-code-twice the code is held to its status and type,
@@ -844,6 +848,7 @@ var answerRead = map[string]bool{
 	"list-bad-id-a-number": true, "list-bad-messages-an-object": true, "list-bad-size-a-string": true, "list-bad-size-past-the-largest": true, "receipt-bad-id-an-array": true,
 	"record-bad-a-second-value": true, "record-bad-an-array": true, "record-bad-empty": true, "record-bad-identity-a-number": true,
 	"record-bad-identity-wrapped": true, "record-bad-revocation-signature-unpadded": true, "record-bad-revocation-signature-unused-bits-set": true,
+	"record-bad-type-another": true, "record-bad-type-empty": true, "record-bad-type-a-number": true, "problem-bad-record-another-type": true,
 }
 
 // The script reads every answer/ vector the Go client takes, a whole answer of
@@ -853,8 +858,8 @@ func TestVectorsAnswer(t *testing.T) {
 	t.Parallel()
 	need(t, scriptTools...)
 	files, _ := filepath.Glob(filepath.Join(vectors, "answer", "*.json"))
-	if len(files) != 60 {
-		t.Fatalf("%d answer/ vectors, want 60", len(files))
+	if len(files) != 63 {
+		t.Fatalf("%d answer/ vectors, want 63", len(files))
 	}
 	for name := range answerRead {
 		if _, err := os.Stat(filepath.Join(vectors, "answer", name+".json")); err != nil {
@@ -883,7 +888,11 @@ func TestVectorsAnswer(t *testing.T) {
 		name := strings.TrimSuffix(filepath.Base(f), ".json")
 		kind, verdict, _ := strings.Cut(name, "-")
 		data, _ := os.ReadFile(f) //nolint:gosec // a test vector
-		goTakes, shTakes := protocol.Unmarshal(data, answerTypes[kind]()) == nil, verdicts[i] == "0"
+		v := answerTypes[kind]()
+		goTakes, shTakes := protocol.Unmarshal(data, v) == nil, verdicts[i] == "0"
+		if rec, ok := v.(*protocol.Revocations); ok && goTakes {
+			goTakes = rec.Check() == nil // as a reader of a server's revocations holds a record (PROTOCOL.md §12.3 check 7)
+		}
 		if goTakes != strings.HasPrefix(verdict, "ok") {
 			t.Errorf("%s: the Go client takes it: %v", name, goTakes)
 		}

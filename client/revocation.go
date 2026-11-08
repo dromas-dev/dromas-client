@@ -407,19 +407,24 @@ func (b *Mailbox) lookupRevocation(ctx context.Context, a protocol.Address, l *l
 // whether or not a mailbox is at a, so a sender whose mailbox the server has
 // forgotten is still shown the revocation of its certificates.
 //
-// Two answers are answers: a 200 with the record, whose parts that do not
-// verify count as nothing shown (take), and 404 not_revoked, the server's
-// word that it holds none. A 410 revoked whose record verifies is kept
-// (proved, in call). Anything else is no answer, an error, a 404
-// no_such_mailbox and a 410 with nothing that verifies among them.
+// Two answers are answers: a 200 with the record, which holds the identity and
+// at least one revocation (recordAnswer), whose parts that do not verify count
+// as nothing shown (take), and 404 not_revoked, the server's word that it holds
+// none. A 410 revoked whose record verifies is kept (proved, in call). Anything
+// else is no answer, an error, another 2xx, a 404 no_such_mailbox and a 410
+// with nothing that verifies among them.
 func (b *Mailbox) readRevocations(ctx context.Context, a protocol.Address, l *lookups) (bool, error) {
 	var rec protocol.Revocations
-	_, err := b.call(ctx, http.MethodGet, "/v1/"+a.String()+"/revocations", nil, nil, &rec)
+	path := "/v1/" + a.String() + "/revocations"
+	resp, err := b.call(ctx, http.MethodGet, path, nil, nil, &rec)
 	var gone *RevokedError
 	switch {
 	case errors.As(err, &gone) && gone.Address == a:
 		return true, nil
 	case err == nil:
+		if err := recordAnswer(path, resp, &rec); err != nil {
+			return false, err
+		}
 		held, err := b.take(a, &rec)
 		if err != nil {
 			return false, err
@@ -435,6 +440,20 @@ func (b *Mailbox) readRevocations(ctx context.Context, a protocol.Address, l *lo
 		return false, nil
 	}
 	return false, err
+}
+
+// recordAnswer is nil for an answer to GET …/revocations that is one: a 200,
+// whose record holds the identity and at least one revocation
+// (protocol.Revocations.Check). Any other 2xx is no answer (PROTOCOL.md §12.3
+// check 7), named by its method and path.
+func recordAnswer(path string, resp *http.Response, rec *protocol.Revocations) error {
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("GET %s: a %d, which is no answer: a server serves a record with a 200", path, resp.StatusCode)
+	}
+	if err := rec.Check(); err != nil {
+		return fmt.Errorf("GET %s: %w", path, err)
+	}
+	return nil
 }
 
 // revokedCerts returns the revocation of a's certificates this mailbox holds, or

@@ -63,8 +63,8 @@ type Refusal struct {
 	// as for a signature that does not verify (#265).
 	Findings *protocol.Findings
 	// BeforeAdoption marks a refusal as stale whose sent_at is below the
-	// confirmed time after the mailbox last adopted a prekey its state did not
-	// record, plus protocol.MaxSkew (beginFloor): a message such a key may open
+	// confirmed time after an adoption of a prekey its state did not record,
+	// the last whose floor rose, plus protocol.MaxSkew (beginFloor): a message such a key may open
 	// that the mailbox delivered under a state now lost, which its owner is told
 	// of (Result.RefusedBeforeAdoption).
 	BeforeAdoption bool
@@ -189,8 +189,9 @@ func (b *Mailbox) receive(ctx context.Context, owing bool) (*Result, error) {
 	if err := b.prekeyKept(); err != nil {
 		return nil, err
 	}
-	// What this command has asked as it went: the renewal's ask for the
-	// mailbox's own revocation, then the drain's about each sender.
+	// What this command's drains have asked about each sender (judge), which
+	// a second drain asks nothing more about. The renewals ask through no
+	// lookups set.
 	asked := newLookups()
 	renewed, renewErr := b.renewIfDue(ctx)
 	// A renewal recv began owes, once it is taken, a read of the ACL the
@@ -660,7 +661,8 @@ type verdict struct {
 // says which failed, in a code and in this client's own words. An error is
 // this mailbox's own fault, not the message's: no verdict.
 //
-//  1. Decryption with every retained prekey, of a file with exactly one
+//  1. Decryption with every retained prekey the state file names
+//     (prekeyIdentities), of a file with exactly one
 //     native recipient stanza, counted before anything is decrypted
 //     (decrypt, oneNative).
 //  2. What came out is an envelope line and then a signature block.
@@ -772,7 +774,7 @@ func (b *Mailbox) judge(ctx context.Context, ct []byte, asked *lookups) (verdict
 	}
 	if !gone && !covered && !asked.answered[from] {
 		if _, err := b.lookupRevocation(ctx, from, asked); err != nil {
-			return verdict{}, fmt.Errorf("whether its sender is revoked could not be asked, so the message stays on the server: %w", err)
+			return verdict{}, fmt.Errorf("whether its sender is revoked could not be asked, so the message stays on the server: %w", aboutAnother(err))
 		}
 		if gone, covered, err = b.keptAgainst(from, signed.Signer); err != nil {
 			return verdict{}, fmt.Errorf("a fault of this mailbox, so the message stays on the server: %w", err)
@@ -932,6 +934,19 @@ func recordSeen(s store, ciphertext []byte, env *protocol.Envelope) error {
 	return s.put(bucketSeenTime, seenTimeKey(env.SentAt.Unix(), h), nil)
 }
 
+// aboutAnother is err, a read about another address that failed, with the API
+// error in it, if any, as its words alone: the server's code there refuses a
+// read of that address, never this mailbox's own calls, so nothing reads it as
+// this mailbox's (mendable). The mailbox's own revocation, which a read about
+// a sender may show, stays as it is (ownRevoked).
+func aboutAnother(err error) error {
+	var api *APIError
+	if !errors.As(err, &api) || ownRevoked(err) != nil {
+		return err
+	}
+	return errors.New(err.Error())
+}
+
 // pruneSeen drops the lines past protocol.SeenFor by the reading at, one a
 // server took. When it drops one, the floor rises to the cutoff in the same
 // transaction, so a clock that later reads further back than SeenFor allows
@@ -952,7 +967,7 @@ func (b *Mailbox) pruneSeen(at taken) error {
 		if len(old) == 0 {
 			return nil
 		}
-		if err := b.raiseFloor(s, cutoff); err != nil {
+		if _, err := b.raiseFloor(s, cutoff); err != nil {
 			return err
 		}
 		for _, k := range old {
@@ -1010,20 +1025,21 @@ func floorOf(s store, key string) (int64, error) {
 	return int64(n), err
 }
 
-// raiseFloor sets the floor to t, unless it is already that high.
-func (b *Mailbox) raiseFloor(s store, t int64) error {
+// raiseFloor sets the floor to t, unless it is already that high, and reports
+// whether it rose.
+func (b *Mailbox) raiseFloor(s store, t int64) (bool, error) {
 	floor, err := floorOf(s, "seen-floor")
 	if err != nil || floor >= t {
-		return err
+		return false, err
 	}
-	return s.put(bucketMailbox, "seen-floor", strconv.AppendInt(nil, t, 10))
+	return true, s.put(bucketMailbox, "seen-floor", strconv.AppendInt(nil, t, 10))
 }
 
 // keyFloorOwed is the mark, in the mailbox's own bucket, that the mailbox adopted
 // a prekey its state did not record and its replay floor is not yet set from
 // that: written in the transaction that adopts the key (adoptKeys), and dropped
-// by beginFloor. keySeenBegan is the confirmed time beginFloor set the floor by,
-// which says why its refusals are stale.
+// by beginFloor. keySeenBegan is the confirmed time beginFloor last raised the
+// floor by, which says why its refusals are stale.
 const (
 	keyFloorOwed = "floor-owed"
 	keySeenBegan = "seen-began"
@@ -1041,18 +1057,24 @@ var errFloorOwed = errors.New("this mailbox adopted a prekey its state did not r
 // covers every sent_at check 6 could have taken at this mailbox's clock before
 // the adoption. Only an adopted key can open a ciphertext a lost replay set saw
 // delivered, a server may still hold one, and the replay set this mailbox keeps
-// cannot tell it from one that waited (PROTOCOL.md §12.3 check 8, §15.9). It does nothing where no floor is owed, or at is no reading, which
-// leaves it owed: a drain's list always gives one before any message is judged.
+// cannot tell it from one that waited (PROTOCOL.md §12.3 check 8, §15.9). It
+// records at as the floor's beginning (keySeenBegan) only where the floor rose:
+// a floor already higher refuses those messages as stale by its own reason. It
+// does nothing where no floor is owed, or at is no reading, which leaves it owed:
+// a drain's list always gives one before any message is judged.
 func (b *Mailbox) beginFloor(s store, at taken) error {
 	if s.get(bucketMailbox, keyFloorOwed) == nil || at.None() {
 		return nil
 	}
 	began := at.At().Unix()
-	if err := b.raiseFloor(s, began+int64((protocol.MaxSkew-protocol.TTL)/time.Second)); err != nil {
+	rose, err := b.raiseFloor(s, began+int64((protocol.MaxSkew-protocol.TTL)/time.Second))
+	if err != nil {
 		return err
 	}
-	if err := s.put(bucketMailbox, keySeenBegan, strconv.AppendInt(nil, began, 10)); err != nil {
-		return err
+	if rose {
+		if err := s.put(bucketMailbox, keySeenBegan, strconv.AppendInt(nil, began, 10)); err != nil {
+			return err
+		}
 	}
 	return s.del(bucketMailbox, keyFloorOwed)
 }

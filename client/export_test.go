@@ -418,7 +418,7 @@ func (b *Mailbox) SetRecord(t *testing.T, name string, v []byte) {
 				}
 				return s.put(bucket, key, v)
 			}
-			for key, file := range map[string]string{"serial": "serial", "pass": "pass", "etag": "etag", "seen-floor": "seen-floor", "acl": "acl.json", "revoked": "revoked.sig", "revoked-certs": "revoked-certs.json", "renew-failed": "renew-failed", "not-made": "not-made", "acl-another-writer": "acl-another-writer", "acl-replaced": "acl-replaced"} {
+			for key, file := range map[string]string{"serial": "serial", "pass": "pass", "etag": "etag", "seen-floor": "seen-floor", "seen-began": "seen-began", "acl": "acl.json", "revoked": "revoked.sig", "revoked-certs": "revoked-certs.json", "renew-failed": "renew-failed", "not-made": "not-made", "acl-another-writer": "acl-another-writer", "acl-replaced": "acl-replaced"} {
 				if name == file {
 					return put(bucketMailbox, key, v)
 				}
