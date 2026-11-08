@@ -12,6 +12,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -668,3 +669,49 @@ func TestStatusOfARevokedMailboxAsksNoAgent(t *testing.T) {
 		t.Errorf("status of a revoked mailbox reached its agent %d times", dialed.Load())
 	}
 }
+
+// init takes an identity.pub it cannot read for an identity it cannot read,
+// never for no identity: a link to nothing (a volume not mounted), an empty
+// file and one it may not read are refused, and init writes no key and leaves
+// identity.pub as it was.
+func TestInitRefusesAnIdentityPubItCannotRead(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	for name, plant := range map[string]func(pub string) error{
+		"a link to nothing": func(pub string) error {
+			return os.Symlink(filepath.Join(filepath.Dir(pub), "unmounted", "identity.pub"), pub)
+		},
+		"an empty file": func(pub string) error { return os.WriteFile(pub, nil, 0o600) },
+		"a file it may not read": func(pub string) error {
+			if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+				return errSkip
+			}
+			return os.WriteFile(pub, []byte("ssh-ed25519 AAAA\n"), 0o200)
+		},
+	} {
+		dir := t.TempDir()
+		pub := filepath.Join(dir, "identity.pub")
+		if err := plant(pub); errors.Is(err, errSkip) {
+			continue
+		} else if err != nil {
+			t.Logf("%s: not made here: %v", name, err)
+			continue
+		}
+		before, err := os.Lstat(pub)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := client.Init(t.Context(), dir, e.opts()); err == nil {
+			t.Errorf("%s: init made a mailbox", name)
+		}
+		if _, err := os.Lstat(filepath.Join(dir, "identity")); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("%s: init wrote a key: %v", name, err)
+		}
+		if after, err := os.Lstat(pub); err != nil || after.Mode() != before.Mode() || after.Size() != before.Size() {
+			t.Errorf("%s: identity.pub after init: %v, %v", name, after, err)
+		}
+	}
+}
+
+// errSkip is a case a system cannot make.
+var errSkip = errors.New("not on this system")

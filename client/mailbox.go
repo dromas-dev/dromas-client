@@ -569,8 +569,24 @@ func (b *Mailbox) init(ctx context.Context) (*Mailbox, error) {
 	if err := CheckLayout(b.dir, b.layout); err != nil {
 		return nil, err
 	}
-	// A mailbox with identity.pub and no key file has its key in an agent.
-	fresh := !exists(b.path("identity")) && !exists(b.path("identity.pub"))
+	// A mailbox with identity.pub and no key file has its key in an agent. Each
+	// is there where a name is, as Lstat finds it: a link to nothing, or a file
+	// that does not read, is an identity init cannot read, never no identity, so
+	// a volume not mounted makes no new address.
+	key, err := present(b.path("identity"))
+	if err != nil {
+		return nil, err
+	}
+	pub, err := present(b.path("identity.pub"))
+	if err != nil {
+		return nil, err
+	}
+	if pub {
+		if _, err := readPublicKey(b.path("identity.pub")); err != nil {
+			return nil, fmt.Errorf("the identity's public key cannot be read, and init makes no identity beside it: %w", err)
+		}
+	}
+	fresh := !key && !pub
 	if fresh {
 		// A state file bound to an address is that identity's: a new key at another
 		// path would be refused by it, and left behind.
@@ -589,7 +605,7 @@ func (b *Mailbox) init(ctx context.Context) (*Mailbox, error) {
 	if err := b.loadIdentity(); err != nil {
 		return nil, err
 	}
-	if !exists(b.path("identity.pub")) {
+	if !pub {
 		if err := b.writeIdentityPub(b.id.PublicKey()); err != nil {
 			return nil, err
 		}
