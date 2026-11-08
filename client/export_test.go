@@ -43,6 +43,9 @@ func CheckKeyFile(path string) error { return checkKeyFile(path) }
 // CheckPrivateFile is checkPrivateFile, for a test of what it refuses.
 func CheckPrivateFile(path string) error { return checkPrivateFile(path) }
 
+// CheckKeptDir is checkKeptDir, for a test of what it refuses.
+func CheckKeptDir(path string) error { return checkKeptDir(path) }
+
 // PrivateFiles are the base directory's files judged at every open, read from
 // baseFiles and publicFiles.
 func PrivateFiles() []string {
