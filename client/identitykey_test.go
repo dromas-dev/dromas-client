@@ -715,3 +715,38 @@ func TestInitRefusesAnIdentityPubItCannotRead(t *testing.T) {
 
 // errSkip is a case a system cannot make.
 var errSkip = errors.New("not on this system")
+
+// The identity's public key is the key file's where one exists, and
+// identity.pub's otherwise: an identity.pub that names another key changes
+// nothing beside a key file, and an agent that holds the key identity.pub
+// names, and not the key file's, gives no key.
+func TestTheIdentitysPublicKeyIsTheKeyFilesWhereOneExists(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	b, other := e.mailbox(), e.mailbox()
+	pub, err := os.ReadFile(other.Path("identity.pub"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(b.Path("identity.pub"), pub, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	o := reopen(t, b, e.opts())
+	if o.Address() != b.Address() {
+		t.Fatalf("the mailbox's address is %s, not its key file's %s", o.Address(), b.Address())
+	}
+	if _, err := o.Rekey(t.Context()); err != nil {
+		t.Errorf("a renewal beside an identity.pub of another key: %v", err)
+	}
+	encrypt(t, b, "correct horse")
+	kr := agent.NewKeyring()
+	if err := kr.Add(agent.AddedKey{PrivateKey: identityPrivate(t, other)}); err != nil {
+		t.Fatal(err)
+	}
+	opt := e.opts()
+	opt.Agent = serveAgent(t, kr)
+	var locked *client.IdentityLockedError
+	if _, err := reopen(t, b, opt).Rekey(t.Context()); !errors.As(err, &locked) {
+		t.Errorf("a renewal whose agent holds identity.pub's key and not the key file's: %v", err)
+	}
+}

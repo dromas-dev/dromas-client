@@ -348,8 +348,10 @@ socket --agent names, apart from the shell's agent, which ssh forwards. The key
 file can then keep a passphrase. After a reboot the agent holds no key, so the
 mailbox is locked until its owner runs dromas agent add again, or runs a
 command with --askpass or at a terminal. A command that needs the key and has
-it from none of these fails as "identity_locked". The agent is stock ssh-agent,
-and dromas agent start and dromas agent add each print the command they run.`,
+it from none of these fails as "identity_locked". The agent's key is taken only
+where it matches the identity's public key: the key file's where the mailbox
+has one, and identity.pub's otherwise. The agent is stock ssh-agent, and dromas
+agent start and dromas agent add each print the command they run.`,
 		e.agentStartCmd(), e.agentAddCmd())
 }
 
