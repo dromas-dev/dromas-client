@@ -1266,3 +1266,56 @@ func TestAWaitAboutASenderIsTheLoopsRetry(t *testing.T) {
 		}
 	})
 }
+
+// Under FollowOptions.Owed, a folder that goes missing while the handler runs
+// on a message owed from an earlier loop leaves it owed: the loop tries again
+// ReceiveEvery after, and hands it over again once the folder is back (#801).
+func TestAFolderGoneDuringTheHandoverOfWhatIsOwedHandsItOverAgain(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		e := newMemEnv(t)
+		a, b := e.mailbox(), e.mailbox()
+		receive(t, b)
+		send(t, a, b, "owed")
+		failed := errors.New("the handler failed")
+		if err := b.Follow(context.Background(), client.FollowOptions{Owed: true}, func(_ context.Context, ev client.Event) error {
+			if ev.Kind == client.EventDelivery {
+				return failed
+			}
+			return nil
+		}); !errors.Is(err, failed) {
+			t.Fatalf("the loop that left it owed: %v", err)
+		}
+		inbox := b.Path("inbox")
+		start := time.Now()
+		var at []time.Duration
+		var got []string
+		err := b.Follow(context.Background(), client.FollowOptions{Owed: true}, func(_ context.Context, ev client.Event) error {
+			switch ev.Kind {
+			case client.EventDelivery:
+				if got = append(got, bodyOf(t, *ev.Delivery)); len(got) == 1 {
+					if err := os.Rename(inbox, inbox+".unmounted"); err != nil {
+						t.Error(err)
+					}
+					return nil
+				}
+				return client.ErrStop
+			case client.EventRetry:
+				if !client.NotReady(ev.Err) || client.Fatal(ev.Err) {
+					t.Errorf("retried %v; NotReady %v", ev.Err, client.NotReady(ev.Err))
+				}
+				if at = append(at, time.Since(start)); len(at) == 2 {
+					if err := os.Rename(inbox+".unmounted", inbox); err != nil {
+						t.Error(err)
+					}
+				}
+			}
+			return nil
+		})
+		if err != nil || !slices.Equal(got, []string{"owed", "owed"}) {
+			t.Fatalf("Follow: %v, handing over %q after %s", err, got, time.Since(start))
+		}
+		if want := []time.Duration{0, client.ReceiveEvery}; !slices.Equal(at, want) {
+			t.Fatalf("tried at %v, want %v", at, want)
+		}
+	})
+}
