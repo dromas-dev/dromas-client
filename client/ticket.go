@@ -24,15 +24,19 @@ const (
 // ticketCache is the default client's TLS session cache. The embedded cache
 // holds what this process learned, of every server name. The file holds the
 // last TLS 1.3 ticket of the mailbox's server, so a new process resumes TLS on
-// its first connection (RFC 8446 §2.2). A ticket resumes a TLS session and
-// authenticates nothing, so every call that needs a pass still carries one
-// (PROTOCOL.md §8). A session read from the file offers no early data (decode).
+// its first connection (RFC 8446 §2.2). A written ticket authenticates the
+// server it resumes to, because a resumed session carries no certificate, and it
+// authenticates the mailbox to nobody, so every call that needs a pass still
+// carries one (PROTOCOL.md §8). A session read from the file offers no early
+// data (decode).
 //
-// The ticket's secret is a key, and the state file holds no key, because a key
-// deleted inside a database stays in its free pages (client/store.go). crypto/tls
-// calls Put as a connection reads, during a Hold that holds no lock, and during a
-// command that holds the state file. So Put writes the ticket's own file, through
-// writeKey, with no lock and no transaction. Two processes that write at once
+// The ticket's secret is a key: whoever reads the file and is on the network
+// path can stand in for the server (SECURITY.md). The state file holds no key,
+// because a key deleted inside a database stays in its free pages
+// (client/store.go). crypto/tls calls Put as a connection reads, during a Hold
+// that holds no lock, and during a command that holds the state file. So Put
+// writes the ticket's own file, through writeKey, with no lock and no
+// transaction. Two processes that write at once
 // leave one whole ticket, and either ticket resumes.
 //
 // Only a TLS 1.3 ticket goes in the file. A TLS 1.2 session's secret is its master
