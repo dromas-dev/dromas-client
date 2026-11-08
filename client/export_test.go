@@ -107,6 +107,13 @@ func (b *Mailbox) RemovePrekey(ctx context.Context, n uint64) error {
 	return err
 }
 
+// PruneByNoReading runs prune under the mailbox's lock with no reading, taken's
+// zero value, for a test.
+func (b *Mailbox) PruneByNoReading(ctx context.Context) error {
+	_, err := locked(ctx, b, func() (struct{}, error) { return struct{}{}, b.prune(taken{}) })
+	return err
+}
+
 // SetLockPatience shortens how long a command waits for the mailbox's lock, for
 // one test.
 func SetLockPatience(t *testing.T, d time.Duration) {
