@@ -318,14 +318,22 @@ delivery, without end, or until the end of --wait's duration where both are
 given: run one in the foreground under a service manager. An interrupt or a
 SIGTERM ends --follow with exit status 0. The mailbox's lock stays free
 between drains, so its other commands run meanwhile. A call that may mend is
-made again, each said on stderr ("waiting"). Exit status 4 and "fatal" in the
-"error" line say that no wait mends the refusal: a revocation, no mailbox at
-this address, or a refusal of the client's own. Exit status 1 is any other failure.
+made again, each said on stderr ("waiting"). A folder of the mailbox missing,
+as on a volume not yet mounted, and this machine's clock behind, as before a
+time source sets it, are tried again every %s, each try said in an "error"
+line, until they are put right. Where recv ends before its next try, as a
+bare recv does, either ends it with exit status 1. Exit status 4 and "fatal" in
+the "error" line say that no wait mends the refusal: a revocation, no mailbox
+at this address with its registration refused, a mailbox in another format, or
+any other refusal of the server's or of this client's. Exit status 1 is any
+other failure.
 
 With --exec, recv runs a command for each message that lands in inbox/, with
 the message's line on stdin, as recv prints it. It takes --wait or --follow.
 --exec names the program, and the arguments after -- go to it one for one: no
-shell runs, and nothing is split or expanded. The program's stdout and stderr
+shell runs, and nothing is split or expanded. On Windows, cmd.exe runs a .bat
+or .cmd program, and cmd.exe splits and expands those arguments. Nothing of a
+message is ever on the command line. The program's stdout and stderr
 are discarded. The commands run one at a time, in delivery order, with the
 mailbox's lock free, so a command may run dromas. Each message is kept in
 inbox/ first, so a command is a notification and never the only copy. A message
@@ -340,7 +348,7 @@ an "exec_gave_up" line, which dromas status then lists under attention, and
 recv goes on to the next message and exits with status 3 at its end. A
 process killed before a command's tries end runs that command again when recv
 --exec next starts, so a command runs at least once for each message and
-may run twice: it should take the "id" as the message's name.`, formatTime(client.RecvWithin(protocol.PrekeyLifetime)), execTries, execDelay),
+may run twice: it should take the "id" as the message's name.`, formatTime(client.RecvWithin(protocol.PrekeyLifetime)), formatTime(client.ReceiveEvery), execTries, execDelay),
 		checked(o.takesArguments, func(c *cobra.Command, args []string) error {
 			if drain <= 0 {
 				return wrong(c, "%s --drain-time takes a duration above zero, such as 15m", c.CommandPath())
