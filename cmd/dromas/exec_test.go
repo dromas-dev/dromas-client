@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -286,6 +287,84 @@ func TestExecIsTriedThreeTimesAndGivesUp(t *testing.T) {
 	if got := strings.Count(c.recorded(), "\n"); got != 6 {
 		t.Fatalf("%d runs of the callback after the next recv: nothing tries a message again", got)
 	}
+}
+
+// A message whose callback gave up keeps dromas status at exit status 3 while
+// inbox/ keeps its file, through a later recv --exec. dromas inbox clear-failed
+// takes no id, clears every one in one "gave_up_cleared" line with their count,
+// and status exits 0; a callback that gives up after it raises status again.
+func TestInboxClearFailedClearsEveryCallbackThatGaveUpUntilTheNext(t *testing.T) {
+	c := newCallback(t)
+	ctx := context.Background()
+	run := func(command string, args ...string) (string, int) {
+		t.Helper()
+		var out, errs bytes.Buffer
+		err := do(ctx, command, args, strings.NewReader(""), &out, &errs)
+		return out.String(), report(err, io.Discard)
+	}
+	status := func(want int, gaveUp ...string) {
+		t.Helper()
+		stdout, code := run("status")
+		ls := ofType(t, stdout, "status")
+		if code != want || len(ls) != 1 {
+			t.Fatalf("status: exit %d, want %d: %s", code, want, stdout)
+		}
+		var got []string
+		if ids, ok := ls[0]["gave_up"].([]any); ok {
+			for _, id := range ids {
+				got = append(got, fmt.Sprint(id))
+			}
+		}
+		slices.Sort(got)
+		slices.Sort(gaveUp)
+		if !slices.Equal(got, gaveUp) {
+			t.Fatalf("status lists %q as gave up, want %q: %s", got, gaveUp, stdout)
+		}
+	}
+	cleared := func(want int) {
+		t.Helper()
+		stdout, code := run("inbox clear-failed")
+		ls := printed(t, stdout)
+		if code != 0 || len(ls) != 1 || ls[0]["type"] != "gave_up_cleared" || ls[0]["count"] != jsonInt(want) || len(ls[0]) != 2 {
+			t.Fatalf("inbox clear-failed: exit %d, %s; want one gave_up_cleared line of count %d", code, stdout, want)
+		}
+	}
+	c.send("fails", "fails too")
+	stdout, _, err := c.recv(ctx, append([]string{"--wait", "0s"}, c.exec("exit", "100")...)...)
+	if code := report(err, io.Discard); code != 3 {
+		t.Fatalf("recv: exit %d, %s", code, stdout)
+	}
+	var ids []string
+	for _, l := range ofType(t, stdout, "exec_gave_up") {
+		ids = append(ids, fmt.Sprint(l["id"]))
+	}
+	if len(ids) != 2 {
+		t.Fatalf("recv printed %s", stdout)
+	}
+	status(3, ids...)
+	if _, _, err := c.recv(ctx, append([]string{"--wait", "0s"}, c.exec("exit", "0")...)...); err != nil {
+		t.Fatalf("the next recv: %v", err)
+	}
+	status(3, ids...)
+	if _, code := run("inbox clear-failed", ids[0]); code != 2 {
+		t.Fatalf("inbox clear-failed <id>: exit %d, want 2: it takes no id", code)
+	}
+	status(3, ids...)
+	cleared(2)
+	status(0)
+	if stdout, code := run("inbox list"); code != 0 || len(ofType(t, stdout, "message")) != 2 {
+		t.Fatalf("inbox list after clear-failed: exit %d, %s", code, stdout)
+	}
+	cleared(0)
+	c.send("fails again")
+	stdout, _, err = c.recv(ctx, append([]string{"--wait", "0s"}, c.exec("exit", "100")...)...)
+	again := ofType(t, stdout, "exec_gave_up")
+	if code := report(err, io.Discard); code != 3 || len(again) != 1 {
+		t.Fatalf("recv: exit %d, %s", code, stdout)
+	}
+	status(3, fmt.Sprint(again[0]["id"]))
+	cleared(1)
+	status(0)
 }
 
 // Exit status 100 says failed for good: no more tries.
