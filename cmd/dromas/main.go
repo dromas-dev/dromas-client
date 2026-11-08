@@ -95,6 +95,10 @@ The README has the rest, with what this client checks and how to test it:
 const readme = "https://github.com/dromas-dev/dromas-client#readme"
 
 func main() {
+	// Run by ssh-add as agent add's askpass program (countedAskpass).
+	if status, ok := countedAskpassMain(); ok {
+		os.Exit(status)
+	}
 	// net/http logs some of what a server sends after its answer through the
 	// standard logger, raw (#297): stderr has only this client's lines.
 	log.SetOutput(io.Discard)

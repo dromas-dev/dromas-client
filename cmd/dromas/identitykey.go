@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -159,7 +160,7 @@ func (e *cli) passphrase(file string) ([]byte, error) {
 	if e.cfg.askpass != "" {
 		return askpass(e.cfg.askpass, prompt)
 	}
-	if e.cfg.noPrompt || !isTerminal(e.stdin) {
+	if !e.mayPrompt() {
 		return nil, client.ErrNoPassphrase
 	}
 	tty, err := openTerminal()
@@ -180,8 +181,15 @@ func (e *cli) passphrase(file string) ([]byte, error) {
 	return pass, nil
 }
 
-// isTerminal reports whether r is a terminal.
-func isTerminal(r io.Reader) bool {
+// mayPrompt reports whether a passphrase may be asked at the terminal: stdin is
+// one, and no-prompt is not set.
+func (e *cli) mayPrompt() bool {
+	return !e.cfg.noPrompt && isTerminal(e.stdin)
+}
+
+// isTerminal reports whether r is a terminal. A test that needs a terminal on
+// stdin, which go test does not give, sets it (TestAgentAddAsksOnlyAtATerminal).
+var isTerminal = func(r io.Reader) bool {
 	f, ok := r.(*os.File)
 	return ok && term.IsTerminal(int(f.Fd())) //nolint:gosec // a file descriptor
 }
@@ -267,11 +275,16 @@ shell's.`,
 func (e *cli) agentAddCmd() *cobra.Command {
 	var life string
 	c := command("add [flags]", "load the identity's key into the mailbox's agent, with ssh-add",
-		`Run stock ssh-add on the identity key file, against the socket --agent names:
-SSH_AUTH_SOCK=<socket> ssh-add <identity-file>. ssh-add asks for the key's
-passphrase at the terminal, or with --askpass runs that program for it
-(SSH_ASKPASS=<program> SSH_ASKPASS_REQUIRE=force). Before ssh-add runs, an
-"agent_add" line gives the command. Once the agent holds the key, an
+		`Run stock ssh-add on the identity key file, against the socket --agent names,
+with the command's stdin: SSH_AUTH_SOCK=<socket> ssh-add <identity-file>.
+Without --askpass, ssh-add asks for the key's passphrase at the terminal and
+runs no askpass program (SSH_ASKPASS_REQUIRE=never), and agent add fails as
+"identity_locked", before ssh-add runs, where stdin is no terminal or
+--no-prompt is set. With --askpass, ssh-add runs that program through dromas
+(SSH_ASKPASS=<dromas> SSH_ASKPASS_REQUIRE=force DROMAS_ASKPASS=<program>),
+which gives ssh-add no passphrase after 3, as ssh's NumberOfPasswordPrompts
+does, and agent add then fails as "identity_locked". Before ssh-add runs, an
+"agent_add" line gives the command it runs. Once the agent holds the key, an
 "agent_added" line gives the mailbox's signer, as status names it.
 --lifetime is ssh-add -t: when it ends, the agent drops the key. While the
 agent lacks the key, and the key file has a passphrase, a mailbox whose
@@ -288,8 +301,27 @@ renews nothing, but in a command run with --askpass or at a terminal.`,
 			}
 			file := b.Path("identity")
 			env := []string{"SSH_AUTH_SOCK=" + socket}
-			if e.cfg.askpass != "" {
-				env = append(env, "SSH_ASKPASS="+e.cfg.askpass, "SSH_ASKPASS_REQUIRE=force")
+			var tries string
+			if e.cfg.askpass == "" {
+				// Without --askpass, ssh-add reads the passphrase at the
+				// terminal alone, and never runs an askpass program that the
+				// environment names (SSH_ASKPASS, DISPLAY).
+				if !e.mayPrompt() {
+					return &client.IdentityLockedError{File: file, Agent: socket, Reason: "without --askpass, agent add runs ssh-add only where stdin is a terminal and no-prompt is not set, since ssh-add asks for the key file's passphrase at the terminal"}
+				}
+				env = append(env, "SSH_ASKPASS_REQUIRE=never")
+			} else {
+				exe, err := os.Executable()
+				if err != nil {
+					return err
+				}
+				dir, err := os.MkdirTemp("", "dromas-askpass")
+				if err != nil {
+					return err
+				}
+				defer os.RemoveAll(dir) //nolint:errcheck // the count of one run
+				tries = filepath.Join(dir, "tries")
+				env = append(env, "SSH_ASKPASS="+exe, "SSH_ASKPASS_REQUIRE=force", "DROMAS_ASKPASS="+e.cfg.askpass, askpassTriesEnv+"="+tries)
 			}
 			var args []string
 			if life != "" {
@@ -305,9 +337,15 @@ renews nothing, but in a command run with --askpass or at a terminal.`,
 			}
 			cmd := exec.CommandContext(c.Context(), "ssh-add", args...) //nolint:gosec // stock ssh-add on the mailbox's own key file
 			// ssh-add reads a passphrase from the terminal itself, and what it
-			// prints is its own: neither stream is this client's.
+			// prints is its own: neither output stream is this client's. Its
+			// stdin is the command's, which ssh-add reads to choose between the
+			// terminal and an askpass program.
+			cmd.Stdin = e.stdin
 			cmd.Env = append(os.Environ(), env...)
 			if err := cmd.Run(); err != nil {
+				if tries != "" && askedTimes(tries) > askpassTries {
+					return &client.IdentityLockedError{File: file, Agent: socket, Reason: fmt.Sprintf("the askpass program gave a passphrase %d times, and none unlocked the key file", askpassTries)}
+				}
 				return fmt.Errorf("ssh-add did not load the key: %w; run its line above to see why", err)
 			}
 			st, err := b.Status(c.Context())
@@ -321,6 +359,63 @@ renews nothing, but in a command run with --askpass or at a terminal.`,
 		})
 	c.Flags().StringVar(&life, "lifetime", "", "how long the agent keeps the key, as ssh-add -t: a `time`")
 	return c
+}
+
+// askpassTriesEnv names the file that counts the runs of agent add's askpass
+// program (countedAskpass).
+const askpassTriesEnv = "DROMAS_ASKPASS_TRIES"
+
+// askpassTries is how many passphrases agent add takes from its askpass
+// program: ssh's NumberOfPasswordPrompts default (ssh_config(5)).
+const askpassTries = 3
+
+// countedAskpassMain runs dromas as agent add's askpass program, where the
+// environment names a count's file and the one argument is ssh-add's prompt,
+// and returns its exit status.
+func countedAskpassMain() (int, bool) {
+	tries, ok := os.LookupEnv(askpassTriesEnv)
+	if !ok || len(os.Args) != 2 {
+		return 0, false
+	}
+	return countedAskpass(tries, os.Getenv("DROMAS_ASKPASS"), os.Args[1]), true
+}
+
+// countedAskpass is the askpass program agent add gives ssh-add with --askpass,
+// a counter around the owner's program. ssh-add asks its askpass program again
+// after each wrong passphrase, and stops only at an empty answer (ssh-add.c's
+// add_file), so a program that prints a wrong one would be run without end.
+// ssh-add runs the askpass program anew for each try, so the count is kept in
+// the file tries, one byte a run, in a directory agent add made for the run and
+// removes after it. Past askpassTries runs, or where the count cannot be kept,
+// it answers empty, which ssh-add takes as no passphrase. Otherwise it runs
+// program with prompt, as ssh runs SSH_ASKPASS, the program's stdout its own
+// and its stderr discarded, and exits as the program did: ssh reads a failed
+// program as no passphrase.
+func countedAskpass(tries, program, prompt string) int {
+	f, err := os.OpenFile(tries, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0o600) //nolint:gosec // agent add's own count
+	if err != nil {
+		return 0
+	}
+	_, werr := f.Write([]byte{'.'})
+	if cerr := f.Close(); werr != nil || cerr != nil || askedTimes(tries) > askpassTries {
+		return 0
+	}
+	cmd := exec.Command(program, prompt) //nolint:gosec // the askpass program its owner set
+	cmd.Stdout = os.Stdout
+	cmd.Env = slices.DeleteFunc(os.Environ(), func(kv string) bool { return strings.HasPrefix(kv, askpassTriesEnv+"=") })
+	if err := cmd.Run(); err != nil {
+		return 1
+	}
+	return 0
+}
+
+// askedTimes is how many times countedAskpass ran with the count tries.
+func askedTimes(tries string) int64 {
+	fi, err := os.Stat(tries)
+	if err != nil {
+		return 0
+	}
+	return fi.Size()
 }
 
 // agentSocket is the socket the agent commands use. On Windows, OpenSSH runs one

@@ -25,9 +25,22 @@ func TestMain(m *testing.M) {
 	if len(os.Args) > 2 && os.Args[1] == callbackWord {
 		os.Exit(callbackMain(os.Args[2], os.Args[3], os.Args[4:]))
 	}
+	// Run by ssh-add as agent add's askpass program, as the binary is.
+	if status, ok := countedAskpassMain(); ok {
+		os.Exit(status)
+	}
 	// Run as an askpass program, as ssh-add and the client run one, with the
-	// prompt as its one argument: it prints the passphrase the test set.
-	if pass, ok := os.LookupEnv(askpassEnv); ok && len(os.Args) == 2 && strings.HasPrefix(os.Args[1], "Enter passphrase") {
+	// prompt as its one argument: it prints the passphrase the test set, and
+	// notes the run in askpassRunsEnv's file where that is set.
+	if pass, ok := os.LookupEnv(askpassEnv); ok && len(os.Args) == 2 && (strings.HasPrefix(os.Args[1], "Enter passphrase") || strings.HasPrefix(os.Args[1], "Bad passphrase")) {
+		if runs := os.Getenv(askpassRunsEnv); runs != "" {
+			f, err := os.OpenFile(runs, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600) //nolint:gosec // the test's own file
+			if err != nil {
+				os.Exit(1)
+			}
+			_, _ = f.WriteString(os.Args[1] + "\n")
+			_ = f.Close()
+		}
 		fmt.Println(pass)
 		os.Exit(0)
 	}

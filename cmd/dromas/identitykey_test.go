@@ -5,9 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"io"
+	"io/fs"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -20,8 +23,11 @@ import (
 )
 
 // askpassEnv, set, has the test binary run as an askpass program print its
-// value (TestMain).
-const askpassEnv = "DROMAS_TEST_ASKPASS_PRINTS"
+// value (TestMain), and askpassRunsEnv names a file it notes each run in.
+const (
+	askpassEnv     = "DROMAS_TEST_ASKPASS_PRINTS"
+	askpassRunsEnv = "DROMAS_TEST_ASKPASS_RUNS"
+)
 
 // encryptIdentity puts the identity file at file under passphrase, as
 // ssh-keygen -p does, in the file itself, so that its permissions stay.
@@ -237,7 +243,7 @@ func TestAgentStartAndAddRunStockSSHAgent(t *testing.T) {
 	if err := do(t.Context(), "agent add", []string{"--askpass", exe}, nil, &added, io.Discard); err != nil {
 		t.Fatalf("agent add: %v: %s", err, added.String())
 	}
-	for _, want := range []string{`"command":"SSH_AUTH_SOCK=` + socket + ` SSH_ASKPASS=` + exe + ` SSH_ASKPASS_REQUIRE=force ssh-add `, `"type":"agent_added"`} {
+	for _, want := range []string{`"command":"SSH_AUTH_SOCK=` + socket + ` SSH_ASKPASS=` + exe + ` SSH_ASKPASS_REQUIRE=force DROMAS_ASKPASS=` + exe + ` DROMAS_ASKPASS_TRIES=`, `"type":"agent_added"`} {
 		if !strings.Contains(added.String(), want) {
 			t.Errorf("agent add says no %s: %s", want, added.String())
 		}
@@ -250,5 +256,159 @@ func TestAgentStartAndAddRunStockSSHAgent(t *testing.T) {
 	_ = do(t.Context(), "status", nil, nil, &out, io.Discard) // its exit status is any attention's
 	if !strings.Contains(out.String(), `"identity_key":"agent"`) {
 		t.Errorf("status: %s", out.String())
+	}
+}
+
+// fakeSSHAdd puts first in PATH an ssh-add that records, in the file it
+// returns, what it was run with: SSH_ASKPASS_REQUIRE, SSH_ASKPASS, its
+// arguments and its stdin; and fails, as ssh-add does when it loads no key.
+func fakeSSHAdd(t *testing.T) string {
+	t.Helper()
+	bin := t.TempDir()
+	record := filepath.Join(t.TempDir(), "ran")
+	script := "#!/bin/sh\n{ echo \"SSH_ASKPASS_REQUIRE=${SSH_ASKPASS_REQUIRE-unset}\"; echo \"SSH_ASKPASS=${SSH_ASKPASS-unset}\"; echo \"args=$*\"; cat; } > " + shellQuote(record) + "\nexit 1\n"
+	if err := os.WriteFile(filepath.Join(bin, "ssh-add"), []byte(script), 0o700); err != nil { //nolint:gosec // a program the test runs
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return record
+}
+
+// terminalStdin has isTerminal take stdin as a terminal, for one test: go test
+// gives none.
+func terminalStdin(t *testing.T) {
+	t.Helper()
+	was := isTerminal
+	isTerminal = func(io.Reader) bool { return true }
+	t.Cleanup(func() { isTerminal = was })
+}
+
+// Without --askpass, agent add runs ssh-add only where stdin is a terminal and
+// no-prompt is not set, and fails as identity_locked otherwise, before
+// ssh-add runs or the agent_add line is printed. Where it runs ssh-add, it
+// gives it the command's stdin and SSH_ASKPASS_REQUIRE=never, so an askpass
+// program the environment names (SSH_ASKPASS, DISPLAY) is not run, and the
+// agent_add line names what ssh-add was run with. With --askpass, ssh-add runs
+// agent add's counted askpass, forced. The terminal itself is the seam
+// isTerminal, since go test gives none: a run under a pseudo-terminal is a
+// test by hand.
+func TestAgentAddAsksOnlyAtATerminal(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("a mailbox's own agent is not built for Windows (TestAgentStartAndAddRunStockSSHAgent)")
+	}
+	cleanEnv(t)
+	srv := fakeserver.New(t, time.Now)
+	dir := t.TempDir()
+	t.Setenv("DROMAS_CONFIG", configFor(t, dir))
+	t.Setenv("DROMAS_SERVER_URL", srv.URL)
+	socket := filepath.Join(shortDir(t), "s")
+	t.Setenv("DROMAS_AGENT", socket)
+	if err := do(t.Context(), "init", nil, nil, io.Discard, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	encryptIdentity(t, filepath.Join(dir, "identity"), "correct horse")
+	t.Setenv("SSH_ASKPASS", "/a/desktop/askpass")
+	t.Setenv("DISPLAY", ":0")
+	record := fakeSSHAdd(t)
+	refused := func(name string, args []string) {
+		t.Helper()
+		var out bytes.Buffer
+		err := do(t.Context(), "agent add", args, strings.NewReader("typed\n"), &out, io.Discard)
+		if l := failed(t, err); l["code"] != client.IdentityLocked || l["identity_file"] != filepath.Join(dir, "identity") {
+			t.Errorf("%s: %v", name, l)
+		}
+		if out.Len() != 0 {
+			t.Errorf("%s: printed %s", name, out.String())
+		}
+		if _, err := os.Stat(record); !errors.Is(err, fs.ErrNotExist) {
+			t.Errorf("%s: ssh-add ran: %v", name, err)
+		}
+	}
+	refused("stdin no terminal", nil)
+	terminalStdin(t)
+	refused("--no-prompt", []string{"--no-prompt"})
+	t.Setenv("DROMAS_NO_PROMPT", "true")
+	refused("$DROMAS_NO_PROMPT", nil)
+	t.Setenv("DROMAS_NO_PROMPT", "")
+
+	var out bytes.Buffer
+	if err := do(t.Context(), "agent add", nil, strings.NewReader("typed\n"), &out, io.Discard); err == nil {
+		t.Error("agent add whose ssh-add failed did not fail")
+	}
+	ran, err := os.ReadFile(record) //nolint:gosec // the test's own
+	if err != nil {
+		t.Fatalf("ssh-add did not run at a terminal: %v", err)
+	}
+	want := "SSH_ASKPASS_REQUIRE=never\nSSH_ASKPASS=/a/desktop/askpass\nargs=" + filepath.Join(dir, "identity") + "\ntyped\n"
+	if string(ran) != want {
+		t.Errorf("ssh-add ran with %q, not %q", ran, want)
+	}
+	if l := printed(t, out.String()); len(l) != 1 || l[0]["command"] != "SSH_AUTH_SOCK="+socket+" SSH_ASKPASS_REQUIRE=never ssh-add "+filepath.Join(dir, "identity") {
+		t.Errorf("agent add's line: %s", out.String())
+	}
+
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := do(t.Context(), "agent add", []string{"--askpass", exe}, nil, io.Discard, io.Discard); err == nil {
+		t.Error("agent add whose ssh-add failed did not fail")
+	}
+	if ran, err := os.ReadFile(record); err != nil || !strings.HasPrefix(string(ran), "SSH_ASKPASS_REQUIRE=force\nSSH_ASKPASS="+exe+"\n") { //nolint:gosec // the test's own
+		t.Errorf("ssh-add under --askpass ran with %q: %v", ran, err)
+	}
+}
+
+// A wrong passphrase from --askpass ends agent add after three tries, as ssh's
+// NumberOfPasswordPrompts does, as identity_locked: stock ssh-add asks its
+// askpass program again until it answers empty, so agent add counts.
+func TestAWrongPassphraseFromAskpassEndsAgentAddAfterThreeTries(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("a mailbox's own agent is not built for Windows (TestAgentStartAndAddRunStockSSHAgent)")
+	}
+	for _, tool := range []string{"ssh-agent", "ssh-add"} {
+		if _, err := exec.LookPath(tool); err != nil {
+			t.Skipf("no %s", tool)
+		}
+	}
+	cleanEnv(t)
+	srv := fakeserver.New(t, time.Now)
+	dir := t.TempDir()
+	t.Setenv("DROMAS_CONFIG", configFor(t, dir))
+	t.Setenv("DROMAS_SERVER_URL", srv.URL)
+	socket := filepath.Join(shortDir(t), "agent", "s")
+	t.Setenv("DROMAS_AGENT", socket)
+	if err := do(t.Context(), "init", nil, nil, io.Discard, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	encryptIdentity(t, filepath.Join(dir, "identity"), "correct horse")
+	ctx, stop := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- do(ctx, "agent start", nil, nil, io.Discard, io.Discard) }()
+	t.Cleanup(func() { stop(); <-done })
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+		if c, err := net.Dial("unix", socket); err == nil {
+			_ = c.Close()
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("no agent answers at %s", socket)
+		}
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	runs := filepath.Join(t.TempDir(), "runs")
+	t.Setenv(askpassEnv, "battery staple")
+	t.Setenv(askpassRunsEnv, runs)
+	bounded, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	err = do(bounded, "agent add", []string{"--askpass", exe}, nil, io.Discard, io.Discard)
+	if l := failed(t, err); l["code"] != client.IdentityLocked {
+		t.Errorf("agent add with a wrong passphrase: %v", l)
+	}
+	if raw, err := os.ReadFile(runs); err != nil || bytes.Count(raw, []byte{'\n'}) != 3 { //nolint:gosec // the test's own
+		t.Errorf("the askpass program ran %d times, not 3: %v", bytes.Count(raw, []byte{'\n'}), err)
 	}
 }
