@@ -792,7 +792,18 @@ func (b *Mailbox) prekeyStatement(n uint64) (*protocol.Prekey, error) {
 type renewFailure struct {
 	At    string `json:"at"`
 	Error string `json:"error"`
+	// Transient is set where the failure was one a wait may mend ([Transient]).
+	Transient bool `json:"transient,omitempty"`
 }
+
+// renewalHeld is a renewal renewNow did not try, because the last one failed
+// less than renewRetry ago: [Transient] where that failure was.
+type renewalHeld struct {
+	words     string
+	transient bool
+}
+
+func (e *renewalHeld) Error() string { return e.words }
 
 // renewIfDue publishes a new prekey, of the current type, when renewDue
 // says so. The caller holds the lock. A failure is kept, and tried again only
@@ -821,7 +832,7 @@ func (b *Mailbox) renewNow(ctx context.Context) (*protocol.Prekey, error) {
 	if at, err := protocol.ParseTime(last.At); err == nil {
 		retry := b.renewRetry()
 		if since := b.now().Sub(at); since >= 0 && since < retry {
-			return nil, fmt.Errorf("the renewal at %s did not go through, and recv tries it again from %s: %s", last.At, at.Add(retry).Format(protocol.TimeLayout), last.Error)
+			return nil, &renewalHeld{fmt.Sprintf("the renewal at %s did not go through, and recv tries it again from %s: %s", last.At, at.Add(retry).Format(protocol.TimeLayout), last.Error), last.Transient}
 		}
 	}
 	// The renewal recv makes is followed by a read of the ACL its server
@@ -844,10 +855,10 @@ func (b *Mailbox) renewNow(ctx context.Context) (*protocol.Prekey, error) {
 	return p, err
 }
 
-// holdRenewal keeps why a renewal did not go through, so renewNow tries the
-// next one only renewRetry after it.
+// holdRenewal keeps why a renewal did not go through, and whether a wait may
+// mend it, so renewNow tries the next one only renewRetry after it.
 func (b *Mailbox) holdRenewal(why error) error {
-	failed, err := json.Marshal(renewFailure{At: b.now().UTC().Format(protocol.TimeLayout), Error: why.Error()})
+	failed, err := json.Marshal(renewFailure{At: b.now().UTC().Format(protocol.TimeLayout), Error: why.Error(), Transient: Transient(why)})
 	if err != nil {
 		return err
 	}
