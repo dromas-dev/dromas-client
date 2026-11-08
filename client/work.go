@@ -172,6 +172,10 @@ const passMargin = 30 * time.Second
 // refuses it if the clock is too far behind: a mailbox whose clock is wrong is
 // stopped at its pass, before it fetches messages it would judge by that clock.
 //
+// A kept pass is used only at the server name it was signed for (PROTOCOL.md
+// §8): a mailbox that now calls another server signs a new pass, so no server
+// is handed a live pass for another.
+//
 // A mailbox that holds its own revocation uses no pass, the kept one included:
 // this is the one place a call gets its pass, so the check is here, and a
 // new pass is a signature, which sign refuses too.
@@ -179,13 +183,19 @@ func (b *Mailbox) pass() (string, error) {
 	if err := b.finished(); err != nil {
 		return "", err
 	}
+	server, err := b.serverName()
+	if err != nil {
+		return "", err
+	}
 	var kept []byte
 	if err := b.view(func(s store) error { kept = s.get(bucketMailbox, "pass"); return nil }); err != nil {
 		return "", err
 	}
-	if p, err := protocol.ParsePass(string(kept)); err == nil && p.Address == b.id.Address() {
-		if left := p.NotAfter.Sub(b.now()); left > passMargin && left <= protocol.PassLifetime {
-			return string(kept), nil
+	if name, h, ok := strings.Cut(string(kept), "\n"); ok && name == server {
+		if p, err := protocol.ParsePass(h); err == nil && p.Address == b.id.Address() {
+			if left := p.NotAfter.Sub(b.now()); left > passMargin && left <= protocol.PassLifetime {
+				return h, nil
+			}
 		}
 	}
 	by, _, err := b.currentSigner()
@@ -212,7 +222,21 @@ func (b *Mailbox) signPass(by signer) (string, error) {
 
 // keepPass keeps a pass in the mailbox, for the calls that follow.
 func (b *Mailbox) keepPass(h string) error {
-	return b.update(func(s store) error { return s.put(bucketMailbox, "pass", []byte(h)) })
+	rec, err := b.passRecord(h)
+	if err != nil {
+		return err
+	}
+	return b.update(func(s store) error { return s.put(bucketMailbox, "pass", rec) })
+}
+
+// passRecord is what the state file keeps of pass h, signed for the server
+// this mailbox calls: that server's name, a newline, then h.
+func (b *Mailbox) passRecord(h string) ([]byte, error) {
+	server, err := b.serverName()
+	if err != nil {
+		return nil, err
+	}
+	return []byte(server + "\n" + h), nil
 }
 
 // dropPass drops the pass the mailbox keeps, so the next call signs another.

@@ -790,3 +790,30 @@ func TestASenderRefusesAPrekeyThatEndsFurtherAheadThanAnyServerTakes(t *testing.
 		t.Fatal("something was sent")
 	}
 }
+
+// A certificate that began less than an hour before the mailbox's clock was
+// made while the clock read ahead (PROTOCOL.md §12.4, §15.7), and signs no
+// message, whose reader may be behind: the entry waits, and the next
+// renewal's certificate, begun an hour before the clock as it is, signs it.
+func TestACertificateBegunLessThanAnHourAgoSignsNoMessage(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	e := newWorkEnv(t)
+	a, b := e.mailbox(), e.mailbox()
+	e.clock.Add(-30 * time.Minute)
+	if _, err := a.Send(ctx, b.Address(), "under a certificate made while the clock read ahead"); err == nil || !strings.Contains(err.Error(), "began less than an hour ago") {
+		t.Fatalf("a send under it: %v", err)
+	}
+	if res := receive(t, b); len(res.Delivered) != 0 {
+		t.Fatal("a message under it was delivered")
+	}
+	if _, err := a.Rekey(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if rs, err := a.Flush(ctx); err != nil || len(rs) != 1 {
+		t.Fatalf("flush after the renewal: %d sent, %v", len(rs), err)
+	}
+	if res := receive(t, b); len(res.Delivered) != 1 {
+		t.Fatal("the message the renewal let go was not delivered")
+	}
+}

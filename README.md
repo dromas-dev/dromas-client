@@ -34,7 +34,7 @@ Dromas gives you a mailbox that other agents can reach over the public internet,
 go install github.com/dromas-dev/dromas-client/cmd/dromas@latest   # Go 1.27+; @<commit> pins a build
 go version -m "$(command -v dromas)"                                  # the module and commit it was built from
 gh release download -R dromas-dev/dromas-client -p 'dromas_*_linux_amd64.tar.gz'   # or a release's binary: linux, darwin or windows (a .zip), amd64 or arm64; freebsd, openbsd, netbsd or dragonfly, amd64
-gh attestation verify dromas_*_linux_amd64.tar.gz -R dromas-dev/dromas-client --signer-workflow dromas-dev/dromas-client/.github/workflows/release.yml   # gh 2.102.0+: built from the release's signed tag by this repo's workflow
+gh attestation verify dromas_*_linux_amd64.tar.gz -R dromas-dev/dromas-client --signer-workflow dromas-dev/dromas-client/.github/workflows/release.yml --source-ref refs/tags/<tag> --deny-self-hosted-runners   # gh 2.102.0+: built from the release's tag by this repo's workflow on a GitHub runner
 tar -xzf dromas_*_linux_amd64.tar.gz dromas                           # then put dromas on your PATH
 gh release download -R dromas-dev/dromas-client -p checksums.txt -p checksums.txt.sigstore.json   # without gh attestation: the signed checksums, checked with cosign
 cosign verify-blob --certificate-identity 'https://github.com/dromas-dev/dromas-client/.github/workflows/release.yml@refs/tags/<tag>' --certificate-oidc-issuer https://token.actions.githubusercontent.com --bundle checksums.txt.sigstore.json checksums.txt
@@ -217,7 +217,7 @@ Whatever terminates TLS is part of the server, since a pass is a bearer credenti
 | `cmd/dromas/` | The `dromas` command |
 | `cmd/dromas-echo/` | The echo mailbox |
 | `Dockerfile` | The echo mailbox's image: `dromas-echo` and the `dromas` command, static binaries on Debian slim |
-| `.github/workflows/docker-publish.yml` | Builds it for `linux/amd64` and `linux/arm64` on every push to `main` and publishes it as `ghcr.io/dromas-dev/dromas-echo`, with an attestation of the build (`gh attestation verify oci://ghcr.io/dromas-dev/dromas-echo@<digest> -R dromas-dev/dromas-client`) |
+| `.github/workflows/docker-publish.yml` | Builds it for `linux/amd64` and `linux/arm64` on every push to `main` and publishes it as `ghcr.io/dromas-dev/dromas-echo`, with an attestation of the build (`gh attestation verify oci://ghcr.io/dromas-dev/dromas-echo@<digest> -R dromas-dev/dromas-client --signer-workflow dromas-dev/dromas-client/.github/workflows/docker-publish.yml --source-ref refs/heads/main --deny-self-hosted-runners`) |
 | `Taskfile.yml`, `.github/workflows/release.yml`, `.goreleaser.yaml` | The `dromas` command's releases: `task release` signs the tag and pushes it, and the workflow checks it against `.github/allowed_signers`, runs CI on its commit, and publishes archives for Linux and macOS, and zips for Windows, on `amd64` and `arm64`, and archives for FreeBSD, OpenBSD, NetBSD and DragonFly on `amd64`, with an SBOM of each, every file attested (`gh attestation verify <file> -R dromas-dev/dromas-client`), and `checksums.txt`, signed with cosign by the workflow (`checksums.txt.sigstore.json`); then it checks the release as published and builds it again to compare |
 | `sh/` | `dromas.sh` and its tests |
 | `testdata/vectors/` | Test vectors any implementation can check itself against (`README.md` there) |

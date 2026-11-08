@@ -228,20 +228,19 @@ func TestARevocationIsCheckedAndSticks(t *testing.T) {
 		t.Fatal("the revocation was not kept, or the message not moved to outbox/failed/")
 	}
 
-	// From here the server may say what it likes: A asks it nothing about B.
+	// From here the server may say what it likes: A makes no call for a send
+	// to B, its ACL's included, and writes nothing for it (PROTOCOL.md §12.2).
 	var asked atomic.Int32
 	e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
-		if strings.Contains(r.URL.Path, b.Address().String()) {
-			asked.Add(1)
-		}
+		asked.Add(1)
 		next.ServeHTTP(w, r)
 	})
 	_, err = a.Send(ctx, b.Address(), "again")
 	if !isRevoked(err, b.Address(), false) || asked.Load() != 0 {
-		t.Fatalf("a second send: %v, after %d requests naming B", err, asked.Load())
+		t.Fatalf("a second send: %v, after %d requests", err, asked.Load())
 	}
-	if failed(a, b.Address()) != 2 {
-		t.Fatal("the second message did not move to outbox/failed/")
+	if waiting, _ := filepath.Glob(filepath.Join(a.Path("outbox"), b.Address().String()+".*")); failed(a, b.Address()) != 1 || len(waiting) != 0 {
+		t.Fatalf("the second send kept something: %d in outbox/failed/, %v waiting", failed(a, b.Address()), waiting)
 	}
 }
 

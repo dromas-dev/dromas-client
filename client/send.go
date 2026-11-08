@@ -130,6 +130,14 @@ func (b *Mailbox) sendWith(ctx context.Context, to protocol.Address, env *protoc
 	if err := f.check(); err != nil {
 		return nil, err
 	}
+	// A revocation of the recipient this mailbox keeps refuses it before any
+	// call, and before anything is written (PROTOCOL.md §12.2): no ACL names
+	// it, and no outbox entry waits for it.
+	if held, err := b.revoked(to); err != nil {
+		return nil, err
+	} else if held {
+		return nil, &RevokedError{Address: to, Own: to == b.id.Address()}
+	}
 	env.Subject, env.InReplyTo, env.Supersedes = f.Subject, f.InReplyTo, f.Supersedes
 	// The envelope carries this mailbox's identity document, so its recipient
 	// can check a sender it has never met without asking the server.
@@ -539,6 +547,13 @@ func (b *Mailbox) seal(ctx context.Context, to protocol.Address, stem string, l 
 		// still be valid then.
 		if !cert.SignsMessages(b.now()) {
 			return nil, refuse("this mailbox's certificate ends within %d days, too soon to sign a message that may wait that long: dromas prekey renew makes a new one, as dromas recv does daily", protocol.TTL/(24*time.Hour))
+		}
+		// Nor does one that began less than an hour before this mailbox's
+		// clock (PROTOCOL.md §12.4): it was made while the clock read ahead,
+		// and a reader whose clock is behind refuses what it signs. The entry
+		// waits for the next certificate.
+		if cert.NotBefore().After(b.now().Add(-protocol.MaxSkew)) {
+			return nil, refuse("this mailbox's certificate began less than an hour ago by this machine's clock, so it was made while the clock read ahead, and a reader whose clock is behind would refuse a message signed under it: dromas prekey renew makes a new one, and the message waits for it")
 		}
 	}
 	rs, err := b.resolve(ctx, to, l)
