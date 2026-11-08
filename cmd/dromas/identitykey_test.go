@@ -557,3 +557,48 @@ func TestAnAgentNotThereFailsNoCommandThatAddsTheKey(t *testing.T) {
 		t.Errorf("printed %s", out.String())
 	}
 }
+
+// agent add refuses a revoked mailbox before ssh-add runs: it signs nothing
+// more, so its key goes in no agent.
+func TestAgentAddRefusesARevokedMailbox(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("a mailbox's own agent is not built for Windows (TestAgentStartAndAddRunStockSSHAgent)")
+	}
+	cleanEnv(t)
+	srv := fakeserver.New(t, time.Now)
+	dir := t.TempDir()
+	t.Setenv("DROMAS_CONFIG", configFor(t, dir))
+	t.Setenv("DROMAS_SERVER_URL", srv.URL)
+	t.Setenv("DROMAS_AGENT", filepath.Join(shortDir(t), "s"))
+	if err := do(t.Context(), "init", nil, nil, io.Discard, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	b, err := client.Open(dir, client.Options{Base: srv.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec, err := b.Revocation(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.Publish(t.Context(), rec); err != nil {
+		t.Fatal(err)
+	}
+	_, _ = b.Receive(t.Context()) // which keeps the revocation it meets
+	if st, err := b.Status(t.Context()); err != nil || !st.Revoked {
+		t.Fatalf("the mailbox keeps no revocation of its own: %v", err)
+	}
+	record := fakeSSHAdd(t)
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	err = do(t.Context(), "agent add", []string{"--askpass", exe}, nil, &out, io.Discard)
+	if gone, ok := errors.AsType[*client.RevokedError](err); !ok || !gone.Own || out.Len() != 0 {
+		t.Errorf("agent add of a revoked mailbox: %v; printed %s", err, out.String())
+	}
+	if _, err := os.Stat(record); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("ssh-add ran: %v", err)
+	}
+}

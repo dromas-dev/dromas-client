@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -568,5 +569,102 @@ func TestAKeyWhoseCurveIsExplicitIsRefusedWithItsFix(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "explicit parameters") || !strings.Contains(err.Error(), "ssh-keygen -p -f "+filepath.Join(dir, "identity")) || !strings.Contains(err.Error(), "OpenSSH format") {
 			t.Errorf("%s: %v", name, err)
 		}
+	}
+}
+
+// lists counts the lists an agent answers: one at each command that has the
+// identity's key from it.
+type lists struct {
+	agent.Agent
+	n *atomic.Int32
+}
+
+func (a lists) List() ([]*agent.Key, error) {
+	a.n.Add(1)
+	return a.Agent.List()
+}
+
+// Revocation, a reading that signs, lets go of the identity's key at its end,
+// as every command does: without KeepIdentity, the next command asks for the
+// passphrase again, and with the key from the agent, under KeepIdentity too,
+// the next command has it from the agent again.
+func TestARevocationLetsGoOfTheIdentitysKey(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	b := e.mailbox()
+	kr := agent.NewKeyring()
+	if err := kr.Add(agent.AddedKey{PrivateKey: identityPrivate(t, b)}); err != nil {
+		t.Fatal(err)
+	}
+	encrypt(t, b, "correct horse")
+	asked := 0
+	opt := e.opts()
+	opt.Passphrase = func(string) ([]byte, error) { asked++; return []byte("correct horse"), nil }
+	o := reopen(t, b, opt)
+	if _, err := o.Revocation(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := o.Rekey(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if asked != 2 {
+		t.Errorf("Revocation then Rekey asked for the passphrase %d times, not once each", asked)
+	}
+
+	var listed atomic.Int32
+	opt = e.opts()
+	opt.Agent, opt.KeepIdentity = serveAgent(t, lists{kr, &listed}), true
+	o = reopen(t, b, opt)
+	if _, err := o.Revocation(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := o.Rekey(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if listed.Load() != 2 {
+		t.Errorf("Revocation then Rekey had the key from the agent %d times, not once each", listed.Load())
+	}
+}
+
+// A revoked mailbox reaches no agent: status of one makes no connection to the
+// agent's socket, and says where its key file is alone.
+func TestStatusOfARevokedMailboxAsksNoAgent(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	b := e.mailbox()
+	revoke(t, e, b)
+	if _, err := b.Receive(t.Context()); err == nil {
+		t.Fatal("a revoked mailbox received")
+	}
+	var dialed atomic.Int32
+	dir, err := os.MkdirTemp("", "dra")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	socket := filepath.Join(dir, "s")
+	l, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = l.Close() })
+	go func() {
+		for {
+			c, err := l.Accept()
+			if err != nil {
+				return
+			}
+			dialed.Add(1)
+			_ = c.Close()
+		}
+	}()
+	opt := e.opts()
+	opt.Agent = socket
+	st, err := reopen(t, b, opt).Status(t.Context())
+	if err != nil || !st.Revoked || st.IdentityKey != client.KeyFile {
+		t.Fatalf("status of a revoked mailbox: %v, %+v", err, st)
+	}
+	if dialed.Load() != 0 {
+		t.Errorf("status of a revoked mailbox reached its agent %d times", dialed.Load())
 	}
 }

@@ -404,7 +404,8 @@ runs no askpass program (SSH_ASKPASS_REQUIRE=never), and agent add fails as
 --no-prompt is set. With --askpass, ssh-add runs that program through dromas
 (SSH_ASKPASS=<dromas> SSH_ASKPASS_REQUIRE=force DROMAS_ASKPASS=<program>),
 which gives ssh-add no passphrase after 3, as ssh's NumberOfPasswordPrompts
-does, and agent add then fails as "identity_locked". Before ssh-add runs, an
+does, and agent add then fails as "identity_locked". A revoked mailbox, which
+signs nothing more, is refused before ssh-add runs. Before ssh-add runs, an
 "agent_add" line gives the command it runs. Once the agent holds the key, an
 "agent_added" line gives the mailbox's signer, as status names it.
 --lifetime is ssh-add -t: when it ends, the agent drops the key. While the
@@ -419,6 +420,12 @@ renews nothing, but in a command run with --askpass or at a terminal.`,
 			socket, err := e.agentSocket()
 			if err != nil {
 				return err
+			}
+			// A revoked mailbox signs nothing more, so its key goes in no agent.
+			if st, err := b.Status(c.Context()); err != nil {
+				return err
+			} else if st.Revoked {
+				return &client.RevokedError{Address: b.Address(), Own: true}
 			}
 			file := b.Path("identity")
 			env := []string{"SSH_AUTH_SOCK=" + socket}

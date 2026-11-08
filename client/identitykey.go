@@ -291,9 +291,10 @@ func lockedAt(conn *agentConn, file string) func(error) error {
 }
 
 // identityKey is where the identity's private key is, for Status: nothing is
-// unlocked, and no passphrase asked.
-func (b *Mailbox) identityKey() string {
-	if b.unlock.agent != "" && AgentHolds(b.unlock.agent, b.id.PublicKey()) {
+// unlocked, and no passphrase asked. The agent is asked only where askAgent
+// is set: a finished mailbox reaches no agent (PROTOCOL.md §12.5).
+func (b *Mailbox) identityKey(askAgent bool) string {
+	if askAgent && b.unlock.agent != "" && AgentHolds(b.unlock.agent, b.id.PublicKey()) {
 		return KeyInAgent
 	}
 	pemBytes, err := os.ReadFile(b.path("identity")) //nolint:gosec // the mailbox's own identity key
