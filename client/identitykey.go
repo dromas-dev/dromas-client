@@ -2,6 +2,7 @@ package client
 
 import (
 	"crypto/x509"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -88,13 +89,24 @@ func (b *Mailbox) identityPublicKey() (ssh.PublicKey, error) {
 		return pub, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("the identity key: %w", err)
+		return nil, keyFileError(file, pemBytes, err)
 	}
 	key, err := ssh.NewSignerFromKey(raw)
 	if err != nil {
 		return nil, fmt.Errorf("the identity key: %w", err)
 	}
 	return key.PublicKey(), nil
+}
+
+// keyFileError is err, ssh's refusal to read the identity key file, in this
+// client's words. A PEM EC key that Go's x509 does not read is said with its
+// fix, the OpenSSH format: one whose curve is given by explicit parameters,
+// as ssh-keygen -m PEM on LibreSSL writes one, is refused by x509 on purpose.
+func keyFileError(file string, pemBytes []byte, err error) error {
+	if block, _ := pem.Decode(pemBytes); block != nil && block.Type == "EC PRIVATE KEY" {
+		return fmt.Errorf("the identity key file %s is a PEM EC key that Go's x509 does not read (%v), as one whose curve is given by explicit parameters, which ssh-keygen -m PEM writes on LibreSSL. ssh-keygen -p -f %s writes it again in the OpenSSH format, which this client reads", file, err, file)
+	}
+	return fmt.Errorf("the identity key: %w", err)
 }
 
 // readPublicKey reads a public key file as ssh-keygen writes one beside a key.
@@ -167,7 +179,7 @@ func (b *Mailbox) unlockIdentity() (ssh.Signer, func(), error) {
 		}
 	}
 	if err != nil {
-		return nil, nil, fmt.Errorf("the identity key: %w", err)
+		return nil, nil, keyFileError(file, pemBytes, err)
 	}
 	key, err := ssh.NewSignerFromKey(raw)
 	if err != nil {

@@ -1,8 +1,14 @@
 package client_test
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"encoding/asn1"
 	"encoding/pem"
 	"errors"
+	"math/big"
 	"net"
 	"os"
 	"path/filepath"
@@ -469,5 +475,98 @@ func TestAnAgentThatDoesNotTakeTheKeyFailsNothing(t *testing.T) {
 	}
 	if len(told) != 1 || numberOf(t, b) == before {
 		t.Errorf("told %v; serial %d, %d before", told, numberOf(t, b), before)
+	}
+}
+
+// explicitCurveKey is a P-256 key in PEM, under passphrase where it is not
+// empty, whose curve is given by explicit parameters, as ssh-keygen -m PEM on
+// LibreSSL writes one (RFC 5480 §2.1.1's specifiedCurve, SEC 1 §C.2): Go's
+// x509 refuses it on purpose. It returns the PEM and the key's public key.
+func explicitCurveKey(t *testing.T, passphrase string) ([]byte, ssh.PublicKey) {
+	t.Helper()
+	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := priv.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	point, err := priv.PublicKey.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := elliptic.P256().Params()
+	a := new(big.Int).Sub(c.P, big.NewInt(3))
+	type fieldID struct {
+		Type  asn1.ObjectIdentifier
+		Prime *big.Int
+	}
+	type curve struct{ A, B []byte }
+	type ecParameters struct {
+		Version  int
+		Field    fieldID
+		Curve    curve
+		Base     []byte
+		Order    *big.Int
+		Cofactor int
+	}
+	type ecPrivateKey struct {
+		Version    int
+		PrivateKey []byte
+		Parameters ecParameters   `asn1:"explicit,tag:0"`
+		PublicKey  asn1.BitString `asn1:"explicit,tag:1"`
+	}
+	der, err := asn1.Marshal(ecPrivateKey{
+		Version:    1,
+		PrivateKey: d,
+		Parameters: ecParameters{
+			Version:  1,
+			Field:    fieldID{asn1.ObjectIdentifier{1, 2, 840, 10045, 1, 1}, c.P}, // prime-field
+			Curve:    curve{a.FillBytes(make([]byte, 32)), c.B.FillBytes(make([]byte, 32))},
+			Base:     elliptic.Marshal(elliptic.P256(), c.Gx, c.Gy), //nolint:staticcheck // the generator's encoding, as a specifiedCurve writes it
+			Order:    c.N,
+			Cofactor: 1,
+		},
+		PublicKey: asn1.BitString{Bytes: point, BitLength: 8 * len(point)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	block := &pem.Block{Type: "EC PRIVATE KEY", Bytes: der}
+	if passphrase != "" {
+		block, err = x509.EncryptPEMBlock(rand.Reader, block.Type, der, []byte(passphrase), x509.PEMCipherAES128) //nolint:staticcheck // ssh-keygen -m PEM's own legacy encryption
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	pub, err := ssh.NewPublicKey(&priv.PublicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return pem.EncodeToMemory(block), pub
+}
+
+// A PEM EC key whose curve is given by explicit parameters, which Go's x509
+// refuses on purpose, is refused with words that name it and its fix, the
+// OpenSSH format: without a passphrase, and under one, given.
+func TestAKeyWhoseCurveIsExplicitIsRefusedWithItsFix(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	for name, passphrase := range map[string]string{"no passphrase": "", "a passphrase": "correct horse"} {
+		key, pub := explicitCurveKey(t, passphrase)
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "identity"), key, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "identity.pub"), ssh.MarshalAuthorizedKey(pub), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		opt := e.opts()
+		opt.Passphrase = func(string) ([]byte, error) { return []byte(passphrase), nil }
+		_, err := client.Init(t.Context(), dir, opt)
+		if err == nil || !strings.Contains(err.Error(), "explicit parameters") || !strings.Contains(err.Error(), "ssh-keygen -p -f "+filepath.Join(dir, "identity")) || !strings.Contains(err.Error(), "OpenSSH format") {
+			t.Errorf("%s: %v", name, err)
+		}
 	}
 }
