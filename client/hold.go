@@ -338,6 +338,9 @@ func (b *Mailbox) Hold(ctx context.Context, wait time.Duration) (*HoldResult, er
 	}
 	type kept struct{ pass, tag, path string }
 	k, err := locked(ctx, b, func() (kept, error) {
+		if err := b.keysMatch(); err != nil {
+			return kept{}, err
+		}
 		hdr, err := b.ifNoneMatch()
 		if err != nil || hdr == nil {
 			return kept{}, err

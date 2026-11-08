@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -48,6 +47,9 @@ import (
 // of this mailbox after that.
 func (b *Mailbox) Rekey(ctx context.Context) (*protocol.Prekey, error) {
 	return locked(ctx, b, func() (*protocol.Prekey, error) {
+		if err := b.keysMatch(); err != nil {
+			return nil, err
+		}
 		p, err := b.rekeyAdopting(ctx)
 		if p != nil {
 			err = errors.Join(err, b.forgetLost())
@@ -959,7 +961,7 @@ func (b *Mailbox) dropRetired(at taken) error {
 // leaves a marked record, which the next prune finishes (finishGoing), and which
 // recv does not read as a key lost (prekeyKept); or an adoption of a key gone,
 // which the next prune deletes again. A crash never leaves a key no record names
-// by this path. A state file lost does, and the next one adopts it (adoptKeys).
+// by this path. A state file lost does, and its owner's acknowledgement adopts it (matchKeys).
 func (b *Mailbox) removePrekey(n uint64) error {
 	if err := b.update(func(s store) error {
 		raw := s.get(bucketPrekeys, serialKey(n))
@@ -1069,70 +1071,6 @@ func (b *Mailbox) prune(at taken) error {
 			}
 		}
 	}
-	return nil
-}
-
-// adoptKeys adopts each key file in prekeys/ that the state file names nowhere:
-// no statement's, no adopted key's, and not the renewal under way's, whose key is
-// made before its statement is kept. It adopts each as a retired prekey that
-// prune deletes. A state file lost takes those keys' statements with it, and a
-// rotating-keys-dir that was not mounted when the state file was made comes back
-// with keys it never recorded. prekeyIdentities decrypts with the keys the state
-// file names alone, so without this such a key would open nothing and never go.
-// It runs at every command, under the
-// mailbox's lock (hold), and writes only where it finds such a key. Adoption keeps
-// the keys in their own bucket, so what reads statements never meets one, and none
-// is taken for the prekey published last, which only a take records. A file whose
-// name is no serial is no key this client made, and it stays where its owner put
-// it; one that holds no age key is not adopted until it does.
-//
-// Only an adopted key can open a ciphertext that a replay set this state file
-// does not hold saw delivered, so the same transaction marks the replay floor
-// owed (keyFloorOwed): no drain judges a message before beginFloor sets it,
-// however a process ended in between. A mailbox that adopts nothing, a new one or
-// one restored from its identity alone, owes no floor.
-func (b *Mailbox) adoptKeys() error {
-	names, err := matching(b.path("prekeys", "*.agekey"))
-	if err != nil {
-		return err
-	}
-	var found []uint64
-	// A read first: every command comes here, and a write transaction syncs the
-	// file even when it changes nothing.
-	if err := b.view(func(s store) error {
-		named, err := namedKeys(s)
-		if err != nil {
-			return err
-		}
-		for _, name := range names {
-			if n, ok := serialOfKeyFile(name); ok && !named(n) {
-				found = append(found, n)
-			}
-		}
-		return nil
-	}); err != nil {
-		return err
-	}
-	// A file that holds no age key opens nothing: it is adopted once it holds
-	// one.
-	found = slices.DeleteFunc(found, func(n uint64) bool {
-		_, err := readAgeKeys(b.path("prekeys", strconv.FormatUint(n, 10)+".agekey"))
-		return err != nil
-	})
-	if len(found) == 0 {
-		return nil
-	}
-	if err := b.update(func(s store) error {
-		for _, n := range found {
-			if err := s.put(bucketAdopted, serialKey(n), []byte{}); err != nil {
-				return err
-			}
-		}
-		return s.put(bucketMailbox, keyFloorOwed, []byte("1"))
-	}); err != nil {
-		return err
-	}
-	step("keys adopted")
 	return nil
 }
 

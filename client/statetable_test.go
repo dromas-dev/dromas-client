@@ -185,6 +185,26 @@ func signerRows() []stateRow {
 			publish(t, e, rec)
 			identityAlone(t, dir)
 		}},
+		stateRow{"full, its state lost and prekeys/ kept", false, func(t *testing.T, e *env, dir string, peer *client.Mailbox) {
+			makeMailbox(t, e, dir, peer, false)
+			if err := os.Remove(filepath.Join(dir, "state")); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		stateRow{"full, its state put back from a copy older than a drain", false, func(t *testing.T, e *env, dir string, peer *client.Mailbox) {
+			makeMailbox(t, e, dir, peer, false)
+			old, err := os.ReadFile(filepath.Join(dir, "state")) //nolint:gosec // a test mailbox's own file
+			if err != nil {
+				t.Fatal(err)
+			}
+			if res := receive(t, openMailbox(t, e, dir)); len(res.Delivered) != 1 {
+				t.Fatalf("the drain the copy is older than: %+v", res)
+			}
+			send(t, peer, openMailbox(t, e, dir), "waiting")
+			if err := os.WriteFile(filepath.Join(dir, "state"), old, 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}},
 		stateRow{"full, finished: it holds its own revocation", false, func(t *testing.T, e *env, dir string, peer *client.Mailbox) {
 			makeMailbox(t, e, dir, peer, false)
 			a := openMailbox(t, e, dir)
@@ -313,6 +333,16 @@ func stateCommands() []stateCommand {
 			opt.WorkingKey = false
 			_, err := client.Init(ctx, dir, opt)
 			return "", err
+		}},
+		{"init --restore", func(ctx context.Context, e *env, dir string, _ *client.Mailbox) (string, error) {
+			opt := e.opts()
+			opt.WorkingKey, opt.Restore = false, true
+			b, err := client.Init(ctx, dir, opt)
+			if b == nil || b.Restored() == nil {
+				return "", err
+			}
+			r := b.Restored()
+			return fmt.Sprintf("acknowledged %v: adopted %d, rolled back %v", r.Acknowledged(), r.Adopted, r.RolledBack), err
 		}},
 		{"init --offline", func(ctx context.Context, e *env, dir string, _ *client.Mailbox) (string, error) {
 			opt := e.opts()

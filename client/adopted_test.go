@@ -21,8 +21,20 @@ import (
 )
 
 // lostState deletes b's state file, leaving its keys, as a lost state file does,
+// acknowledges the restore as dromas init --restore does (Mailbox.Acknowledge),
 // and gives the mailbox again, with the policy env.mailbox gives.
 func lostState(t *testing.T, e *env, b *client.Mailbox) *client.Mailbox {
+	t.Helper()
+	x := lostUnacknowledged(t, e, b)
+	if r, err := x.Acknowledge(t.Context()); err != nil || !r.Acknowledged() {
+		t.Fatalf("the acknowledgement of the restore: %+v, %v", r, err)
+	}
+	return x
+}
+
+// lostUnacknowledged deletes b's state file, leaving its keys, and gives the
+// mailbox again, its restore not acknowledged.
+func lostUnacknowledged(t *testing.T, e *env, b *client.Mailbox) *client.Mailbox {
 	t.Helper()
 	if err := os.Remove(filepath.Join(b.Dir(), "state")); err != nil {
 		t.Fatal(err)
@@ -35,13 +47,13 @@ func lostState(t *testing.T, e *env, b *client.Mailbox) *client.Mailbox {
 	return x
 }
 
-// refusedBeforeAdoption holds what r's drain did with the messages that waited
+// refusedBeforeRestore holds what r's drain did with the messages that waited
 // at a restore: each refused as stale, as sent before the new state file's
 // replay set began, and kept in refused/ as signed by from, which shows that a
 // key the state file adopted decrypted it.
-func refusedBeforeAdoption(t *testing.T, x *client.Mailbox, res *client.Result, from *client.Mailbox, n int) {
+func refusedBeforeRestore(t *testing.T, x *client.Mailbox, res *client.Result, from *client.Mailbox, n int) {
 	t.Helper()
-	if len(res.Delivered) != 0 || len(res.Refused) != n || res.RefusedBeforeAdoption() != n {
+	if len(res.Delivered) != 0 || len(res.Refused) != n || res.RefusedBeforeRestore() != n {
 		t.Fatalf("the drain after the restore: %+v, want %d refused as sent before the adoption", res, n)
 	}
 	qs, err := x.RefusedMessages(t.Context())
@@ -49,7 +61,7 @@ func refusedBeforeAdoption(t *testing.T, x *client.Mailbox, res *client.Result, 
 		t.Fatalf("refused/: %+v, %v", qs, err)
 	}
 	for _, q := range qs {
-		if q.Code != protocol.RefusedStale || !q.BeforeAdoption || q.SignedBy != from.Address().String() {
+		if q.Code != protocol.RefusedStale || !q.BeforeRestore || q.SignedBy != from.Address().String() {
 			t.Fatalf("refused/ keeps %+v, want stale before the adoption, signed by %s", q, from.Address())
 		}
 	}
@@ -158,7 +170,7 @@ func TestAMessageSealedToAnAdoptedKeyIsRefusedWithItsSigner(t *testing.T) {
 	if err != nil {
 		t.Fatalf("recv after the state file was lost: %v", err)
 	}
-	refusedBeforeAdoption(t, x, res, a, 2)
+	refusedBeforeRestore(t, x, res, a, 2)
 	e.clock.Add(3 * time.Hour)
 	if _, err := x.Receive(ctx); err != nil {
 		t.Fatal(err)
@@ -252,7 +264,7 @@ func TestAClockThatJumpsDuringARenewalDeletesNoAdoptedKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("once the clock is right: %v", err)
 	}
-	refusedBeforeAdoption(t, right, res, a, 1)
+	refusedBeforeRestore(t, right, res, a, 1)
 }
 
 // A clock past the time that no server takes deletes nothing, and the message that
@@ -286,7 +298,7 @@ func TestAnUnconfirmedClockDeletesNoAdoptedKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("once the clock is right: %v", err)
 	}
-	refusedBeforeAdoption(t, fast, res, a, 1)
+	refusedBeforeRestore(t, fast, res, a, 1)
 }
 
 // A number by the clock that lands on a file adopted takes no old key for a new
@@ -369,8 +381,9 @@ func TestStatusCountsAnAdoptedKeyPastItsTime(t *testing.T) {
 }
 
 // A state file that records its folders made refuses a prekeys/ gone missing
-// before adoption reads it, so a volume not mounted marks nothing, and a key it
-// holds that the state file does not record is adopted once it returns.
+// before the match of the state and prekeys/ reads it, so a volume not mounted
+// marks nothing, and a key it holds that the state file does not record stops
+// the next drain once it returns, and is adopted once that is acknowledged.
 func TestAFolderMissingAdoptsNothing(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
@@ -388,7 +401,12 @@ func TestAFolderMissingAdoptsNothing(t *testing.T) {
 		t.Fatalf("recv with prekeys/ moved aside: %v", err)
 	}
 	back()
-	receive(t, b)
+	if _, err := b.Receive(t.Context()); !client.NotTheKeys(err) || len(client.AdoptedKeys(t, b)) != 0 {
+		t.Fatalf("recv once prekeys/ is back: %v", err)
+	}
+	if r, err := b.Acknowledge(t.Context()); err != nil || r.Adopted != 1 {
+		t.Fatalf("the acknowledgement: %+v, %v", r, err)
+	}
 	if got := client.AdoptedKeys(t, b); !slices.Equal(got, []uint64{orphan}) {
 		t.Fatalf("adopted %v, want %d", got, orphan)
 	}
@@ -457,9 +475,10 @@ func TestAKeyMadeSinceIsNotAdopted(t *testing.T) {
 
 // A rotating-keys-dir not mounted when the state file is lost is made again empty,
 // so the restore adopts nothing and owes no floor; once the volume is back, its
-// keys are adopted at the next command, and that adoption owes the floor: a copy
-// the server kept of a message the lost state delivered, which those keys open,
-// is refused as stale with its signer (PROTOCOL.md §12.3 check 8).
+// keys stop the next drain before it lists anything, and dromas init --restore
+// adopts them, which owes the floor: a copy the server kept of a message the
+// lost state delivered, which those keys open, is refused as stale with its
+// signer (PROTOCOL.md §12.3 check 8).
 func TestAKeyOnAVolumeMountedLateOwesTheFloor(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -506,11 +525,39 @@ func TestAKeyOnAVolumeMountedLateOwesTheFloor(t *testing.T) {
 	e.clock.Add(2 * time.Second)
 	id := sha256.Sum256(*sent)
 	e.srv.Inject(x.Address(), hex.EncodeToString(id[:]), *sent) // the server kept its copy
+	var lists atomic.Int32
+	watch(e, func(_ http.ResponseWriter, r *http.Request) bool {
+		if strings.Contains(r.URL.Path, "/messages") {
+			lists.Add(1)
+		}
+		return false
+	})
+	if _, err := x.Receive(ctx); !client.NotTheKeys(err) || lists.Load() != 0 || e.srv.Count(x.Address()) != 1 {
+		t.Fatalf("recv once the volume is back: %v, with %d calls about messages", err, lists.Load())
+	}
+	e.srv.SetMiddle(nil)
+	restoreAcknowledged(t, e, x, 1, false)
 	res, err := x.Receive(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	refusedBeforeAdoption(t, x, res, a, 1)
+	refusedBeforeRestore(t, x, res, a, 1)
+}
+
+// restoreAcknowledged runs dromas init --restore on x, as its owner does, and
+// holds what it found: adopted keys, and whether the state was behind
+// prekeys/generation.
+func restoreAcknowledged(t *testing.T, e *env, x *client.Mailbox, adopted int, rolledBack bool) {
+	t.Helper()
+	opt := e.opts()
+	opt.Restore = true
+	b, err := client.Init(t.Context(), x.Dir(), opt)
+	if err != nil {
+		t.Fatalf("init --restore: %v", err)
+	}
+	if r := b.Restored(); r == nil || r.Adopted != adopted || r.RolledBack != rolledBack || !r.Acknowledged() {
+		t.Fatalf("init --restore found %+v, want %d adopted, rolled back %v", r, adopted, rolledBack)
+	}
 }
 
 // A key file whose name is no serial is never adopted, so it decrypts nothing:
@@ -554,9 +601,10 @@ func TestAKeyUnderANameNoSerialDecryptsNothing(t *testing.T) {
 	}
 }
 
-// A key that appears in prekeys/ during a drain, after the command adopted what
-// it found, decrypts nothing in that drain; the next command adopts it, and that
-// adoption owes the floor (PROTOCOL.md §12.3 check 8).
+// A key that appears in prekeys/ during a drain, after the command matched the
+// state and prekeys/, decrypts nothing in that drain; the next command stops on
+// it, and its acknowledgement adopts it and owes the floor (PROTOCOL.md §12.3
+// check 8).
 func TestAKeyMountedDuringADrainDecryptsNothingUntilAdopted(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -620,14 +668,17 @@ func TestAKeyMountedDuringADrainDecryptsNothingUntilAdopted(t *testing.T) {
 	}
 	e.srv.Inject(x.Address(), hex.EncodeToString(id[:]), *sent) // and serves it again
 	e.clock.Add(2 * time.Second)
+	if _, err := x.Receive(ctx); !client.NotTheKeys(err) || e.srv.Count(x.Address()) != 1 {
+		t.Fatalf("the next command: %v", err)
+	}
+	if r, err := x.Acknowledge(ctx); err != nil || r.Adopted == 0 {
+		t.Fatalf("the acknowledgement adopted none of the volume's keys: %+v, %v", r, err)
+	}
 	res, err = x.Receive(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := client.AdoptedKeys(t, x); len(got) == 0 {
-		t.Fatal("the next command adopted none of the volume's keys")
-	}
-	refusedBeforeAdoption(t, x, res, a, 1)
+	refusedBeforeRestore(t, x, res, a, 1)
 }
 
 // No adoption and no prune lowers the replay floor, and an adoption whose floor
@@ -647,13 +698,16 @@ func TestNothingLowersTheFloor(t *testing.T) {
 	// adoption below owes.
 	floor := strconv.FormatInt(e.clock.Now().Add(protocol.SeenFor+24*time.Hour).Unix(), 10)
 	b.SetRecord(t, "seen-floor", []byte(floor))
-	// A key the state names nowhere, which the next command adopts.
+	// A key the state names nowhere, which the acknowledgement adopts.
 	key, err := os.ReadFile(prekeyFile(b, numberOf(t, b), ".agekey"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	found := numberOf(t, b) - 1
 	if err := os.WriteFile(prekeyFile(b, found, ".agekey"), key, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.Acknowledge(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	e.clock.Add(protocol.SeenFor + time.Second)
@@ -674,7 +728,7 @@ func TestNothingLowersTheFloor(t *testing.T) {
 	}
 	send(t, e.mailbox(), b, "below the floor")
 	res := receive(t, b)
-	if len(res.Delivered) != 0 || len(res.Refused) != 1 || res.Refused[0].Code != protocol.RefusedStale || res.RefusedBeforeAdoption() != 0 {
+	if len(res.Delivered) != 0 || len(res.Refused) != 1 || res.Refused[0].Code != protocol.RefusedStale || res.RefusedBeforeRestore() != 0 {
 		t.Fatalf("a message below the floor: %+v, want it stale, and not as sent before an adoption", res)
 	}
 }
@@ -682,7 +736,7 @@ func TestNothingLowersTheFloor(t *testing.T) {
 // Only a refusal below the floor an adoption raised, under the adoption's
 // confirmed time plus the skew allowance, is said as sent before the adoption: one
 // below a prune's floor alone, or below a prune's floor past that edge, is stale
-// by the floor's own reason (Refusal.BeforeAdoption).
+// by the floor's own reason (Refusal.BeforeRestore).
 func TestOnlyARefusalBelowAnAdoptionsEdgeIsSaidAsSentBeforeIt(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
@@ -701,14 +755,14 @@ func TestOnlyARefusalBelowAnAdoptionsEdgeIsSaidAsSentBeforeIt(t *testing.T) {
 		b.SetRecord(t, "seen-began", c.began)
 		send(t, a, b, c.name)
 		res := receive(t, b)
-		if len(res.Delivered) != 0 || len(res.Refused) != 1 || res.Refused[0].Code != protocol.RefusedStale || res.RefusedBeforeAdoption() != c.before {
+		if len(res.Delivered) != 0 || len(res.Refused) != 1 || res.Refused[0].Code != protocol.RefusedStale || res.RefusedBeforeRestore() != c.before {
 			t.Fatalf("%s: %+v, want it stale, %d of it as sent before an adoption", c.name, res, c.before)
 		}
 	}
 	qs, err := b.RefusedMessages(t.Context())
 	before := 0
 	for _, q := range qs {
-		if q.BeforeAdoption {
+		if q.BeforeRestore {
 			before++
 		}
 	}
@@ -737,7 +791,7 @@ func TestStatusCountsTheMessagesRefusedKeeps(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	refusedBeforeAdoption(t, x, res, a, 1)
+	refusedBeforeRestore(t, x, res, a, 1)
 	// A second refusal, for another reason, which refused/ keeps beside it.
 	junk := []byte("not an age file")
 	jid := sha256.Sum256(junk)
@@ -745,7 +799,7 @@ func TestStatusCountsTheMessagesRefusedKeeps(t *testing.T) {
 	if res := receive(t, x); len(res.Refused) != 1 || res.Refused[0].Code != client.RefusedDecrypt {
 		t.Fatalf("the second refusal: %+v", res)
 	}
-	words := client.BeforeAdoptionWords(1)
+	words := client.BeforeRestoreWords(1)
 	if st, err := x.Status(ctx); err != nil || st.Refused != 2 || !slices.Contains(st.Attention, words) {
 		t.Fatalf("status while refused/ keeps both: %+v, %v", st, err)
 	}

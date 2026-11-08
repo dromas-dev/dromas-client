@@ -590,7 +590,7 @@ func TestInitOfAMailboxThatHoldsItsOwnRevocationSignsNothing(t *testing.T) {
 	})
 	_, err = client.Init(ctx, dir, e.opts())
 	made, _ := filepath.Glob(filepath.Join(dir, "keys", "work", "*"))
-	stmts, _ := filepath.Glob(filepath.Join(dir, "keys", "prekeys", "*"))
+	stmts, _ := filepath.Glob(filepath.Join(dir, "keys", "prekeys", "*.agekey"))
 	var gone *client.RevokedError
 	if !errors.As(err, &gone) || !gone.Own || calls.Load() != 0 || len(made) != 0 || len(stmts) != 0 {
 		t.Errorf("init of a mailbox that holds its own revocation: %v; %d requests; it made %v and %v", err, calls.Load(), made, stmts)

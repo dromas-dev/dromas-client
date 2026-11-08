@@ -222,12 +222,14 @@ func TestScriptKeepsItsReplaySetByItsClock(t *testing.T) {
 	}
 }
 
-// A mailbox that loses seen and seen-keys, its prekeys kept, finds at its next
-// drain keys its replay set does not cover, and raises its floor to that list's
-// reading plus an hour, less 7 days: a copy the server kept of a message it
-// delivered is refused as stale, a message dated a second below the floor's
-// edge is refused, and one at the edge is delivered (PROTOCOL.md §12.3 check 8).
-// A mailbox the script made covers its own keys, and owes no floor.
+// A mailbox that loses seen and seen-keys, its prekeys kept, holds keys its
+// replay set does not cover: its next drain stops with exit 4 before it lists
+// anything, as the Go client's does, until init --restore names them and owes
+// the floor, which the next drain raises to its list's reading plus an hour,
+// less 7 days: a copy the server kept of a message it delivered is refused as
+// stale, a message dated a second below the floor's edge is refused, and one
+// at the edge is delivered (PROTOCOL.md §12.3 check 8). A mailbox the script
+// made covers its own keys, and owes no floor.
 func TestScriptRefusesAReplayAfterItsStateIsLost(t *testing.T) {
 	w := newWorld(t)
 	p, q := w.mailbox(), w.mailbox()
@@ -239,7 +241,13 @@ func TestScriptRefusesAReplayAfterItsStateIsLost(t *testing.T) {
 	}
 	q.must(`rm "$DR/seen" "$DR/seen-keys"`)
 	w.put(q, "", ct) // the server kept its copy
-	if d := q.recv(); len(d.messages) != 0 || d.refused("stale") != 1 || !q.has("refused/"+id+".json") || !q.has("seen-floor") {
+	if d := q.recv(); d.rc != 4 || len(d.messages) != 0 || !strings.Contains(d.said, "state_not_the_keys") || w.srv.Count(q.addr) != 1 || q.has("seen-floor") {
+		t.Fatalf("the drain before init --restore: %v", d)
+	}
+	if out := q.must("dr_init --restore"); !strings.Contains(out, `"type":"restore","acknowledged":true`) {
+		t.Fatalf("init --restore: %q", out)
+	}
+	if d := q.recv(); len(d.messages) != 0 || d.refused("stale") != 1 || !q.has("refused/"+id+".json") || !q.has("seen-floor") || q.has("floor-owed") {
 		t.Fatalf("the server's copy after the state was lost: %v", d)
 	}
 	f, err := strconv.ParseInt(strings.TrimSpace(q.read("seen-floor")), 10, 64)
@@ -260,9 +268,9 @@ func TestScriptRefusesAReplayAfterItsStateIsLost(t *testing.T) {
 }
 
 // The floor after seen and seen-keys are lost is dated by a pass signed after
-// the keys were found, never by the pass the mailbox kept, which may be older
-// than the last message the lost set took: a message the lost set took, dated
-// 59 minutes ahead of the mailbox's clock under a kept pass, is refused as stale
+// init --restore, never by the pass the mailbox kept, which may be older than
+// the last message the lost set took: a message the lost set took, dated 59
+// minutes ahead of the mailbox's clock under a kept pass, is refused as stale
 // at the next drain, a minute later (PROTOCOL.md §12.3 check 8).
 func TestScriptAFloorAfterALossIsDatedByAPassSignedSince(t *testing.T) {
 	w := newWorld(t)
@@ -277,6 +285,7 @@ func TestScriptAFloorAfterALossIsDatedByAPassSignedSince(t *testing.T) {
 		t.Fatalf("the first delivery, 5 minutes on, under the kept pass: %v", d)
 	}
 	q.must(`rm "$DR/seen" "$DR/seen-keys"`)
+	(at{q, 6 * time.Minute}).must("dr_init --restore > /dev/null")
 	w.put(q, "", ct) // the server kept its copy
 	if d := (at{q, 6 * time.Minute}).recv(); len(d.messages) != 0 || d.refused("stale") != 1 {
 		t.Errorf("the server's copy a minute after the loss: %v; seen-floor %q", d, q.read("seen-floor"))
@@ -307,9 +316,10 @@ func TestScriptAKeyUnderANameNoSerialDecryptsNothing(t *testing.T) {
 	}
 }
 
-// A key that appears in prekeys/ during a drain, after dr_adopt named what it
-// found, decrypts nothing in that drain; the next drain names it, raising the
-// floor, as in the Go client (TestAKeyMountedDuringADrainDecryptsNothingUntilAdopted).
+// A key that appears in prekeys/ during a drain, after dr_matched looked,
+// decrypts nothing in that drain; the next drain stops on it, and init
+// --restore names it and owes the floor, as in the Go client
+// (TestAKeyMountedDuringADrainDecryptsNothingUntilAdopted).
 func TestScriptAKeyMountedDuringADrainDecryptsNothingUntilNamed(t *testing.T) {
 	w := newWorld(t)
 	p, q := w.mailbox(), w.mailbox()
@@ -344,8 +354,12 @@ func TestScriptAKeyMountedDuringADrainDecryptsNothingUntilNamed(t *testing.T) {
 	}
 	w.honest()
 	w.put(q, "", ct) // and serves it again
+	if d := q.recv(); d.rc != 4 || len(d.messages) != 0 || w.srv.Count(q.addr) != 1 {
+		t.Fatalf("the next drain: %v", d)
+	}
+	q.must("dr_init --restore > /dev/null")
 	if d := q.recv(); len(d.messages) != 0 || d.refused("stale") != 1 || !q.has("seen-floor") {
-		t.Errorf("the next drain: %v", d)
+		t.Errorf("the drain after init --restore: %v", d)
 	}
 }
 

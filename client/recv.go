@@ -62,12 +62,12 @@ type Refusal struct {
 	// certificate, it is the clock and the identity alone, with Signed false,
 	// as for a signature that does not verify (#265).
 	Findings *protocol.Findings
-	// BeforeAdoption marks a refusal as stale whose sent_at is below the
-	// confirmed time after an adoption of a prekey its state did not record,
-	// the last whose floor rose, plus protocol.MaxSkew (beginFloor): a message such a key may open
-	// that the mailbox delivered under a state now lost, which its owner is told
-	// of (Result.RefusedBeforeAdoption).
-	BeforeAdoption bool
+	// BeforeRestore marks a refusal as stale whose sent_at is below the
+	// confirmed time after the mailbox's restore (Options.Restore), the last
+	// whose floor rose, plus protocol.MaxSkew (beginFloor): a message its keys
+	// may open that the mailbox delivered under a state it no longer holds,
+	// which its owner is told of (Result.RefusedBeforeRestore).
+	BeforeRestore bool
 }
 
 // Result is what one Receive did.
@@ -130,17 +130,20 @@ type Result struct {
 	// owing has the drain record each message it lands in inbox/ as owed its
 	// handling, in the transaction that records it seen ([Mailbox.Follow]).
 	owing bool
+	// counted is set once the command has counted a drain that accepts a
+	// message (count), before it keeps the first.
+	counted bool
 	// receiveWithin is RecvWithin for the prekey in use, where the mailbox knows
 	// its lifetime: how soon [Mailbox.Follow] drains again.
 	receiveWithin time.Duration
 }
 
-// RefusedBeforeAdoption is how many of the drain's refusals are stale because
-// they were sent before the mailbox adopted a prekey (Refusal.BeforeAdoption).
-func (r *Result) RefusedBeforeAdoption() int {
+// RefusedBeforeRestore is how many of the drain's refusals are stale because
+// they were sent before the mailbox's restore (Refusal.BeforeRestore).
+func (r *Result) RefusedBeforeRestore() int {
 	n := 0
 	for _, q := range r.Refused {
-		if q.BeforeAdoption {
+		if q.BeforeRestore {
 			n++
 		}
 	}
@@ -186,6 +189,9 @@ func (b *Mailbox) Receive(ctx context.Context) (*Result, error) {
 }
 
 func (b *Mailbox) receive(ctx context.Context, owing bool) (*Result, error) {
+	if err := b.keysMatch(); err != nil {
+		return nil, err
+	}
 	if err := b.prekeyKept(); err != nil {
 		return nil, err
 	}
@@ -438,7 +444,7 @@ func (b *Mailbox) drainPages(ctx context.Context, asked *lookups, res *Result) e
 		}
 		if page == 0 {
 			res.listedAt = at
-			// The floor an adopted prekey owes, where no renewal's confirmed
+			// The floor a restore owes, where no renewal's confirmed
 			// time has set it, is set by this list's before any message is
 			// judged (beginFloor). Pruned by this clock
 			// only once the server has taken a pass dated by it, and by that
@@ -592,7 +598,16 @@ func (b *Mailbox) receiveOne(ctx context.Context, m protocol.MessageInfo, res *R
 			// Stored before it is recorded as seen, and both, on disk,
 			// before the ack: a crash or power loss in between delivers it
 			// again, never loses it. A message from a blocked sender is recorded
-			// as seen too, so that a retry of it is a duplicate.
+			// as seen too, so that a retry of it is a duplicate. The command
+			// counts itself first, once, as a drain that accepted a message: a
+			// state put back from a copy older than this is behind
+			// prekeys/generation (count, matchKeys).
+			if !res.counted {
+				if err := b.count(); err != nil {
+					return fetched, err
+				}
+				res.counted = true
+			}
 			d.ID = local
 			where := who.land(d.Envelope.From)
 			switch where {
@@ -674,7 +689,7 @@ type verdict struct {
 //  6. The rest of the envelope: version 1, to is this mailbox, msg_id in its
 //     form, and sent_at no older than protocol.TTL, at most
 //     protocol.MaxSkew ahead, and at least protocol.TTL above the replay
-//     floor, which a prune raises and an adopted prekey owes (seenFloor),
+//     floor, which a prune raises and a restore owes (seenFloor),
 //     in that order.
 //  7. Revocation: this mailbox holds no revocation of the sender. The server is
 //     asked for one, once for each sender in a drain, by a read of the
@@ -747,18 +762,19 @@ func (b *Mailbox) judge(ctx context.Context, ct []byte, asked *lookups) (verdict
 	// up to protocol.TTL above it, a retry of such a message, dated afresh up
 	// to a TTL after its first copy (check 9 knows a retry by that copy's
 	// line).
-	// The floor an adoption owes makes stale every sent_at below the first
+	// The floor a restore owes makes stale every sent_at below the first
 	// confirmed time after it plus protocol.MaxSkew: one this mailbox's clock may
-	// have accepted before the adoption, under a state now lost (beginFloor).
+	// have accepted before the restore, under a state it no longer holds
+	// (beginFloor).
 	floor, began, err := b.seenFloor()
 	if err != nil {
 		return verdict{}, err
 	}
 	if sentAt := env.SentAt.Unix(); floor > 0 && sentAt < floor+int64(protocol.TTL/time.Second) {
 		if began > 0 && sentAt < began+int64(protocol.MaxSkew/time.Second) {
-			v, err := refused(protocol.RefusedStale, "it was sent before this mailbox adopted a prekey its state did not record: such a key may open a message this mailbox delivered under a state now lost, which its replay set does not hold")
+			v, err := refused(protocol.RefusedStale, "it was sent before this mailbox's restore of its state (dromas init --restore): its prekeys may open a message this mailbox delivered under a state it no longer holds, which its replay set does not hold")
 			if v.refusal != nil {
-				v.refusal.BeforeAdoption = true
+				v.refusal.BeforeRestore = true
 			}
 			return v, err
 		}
@@ -993,8 +1009,8 @@ func (b *Mailbox) pruneSeen(at taken) error {
 var errDone = errors.New("done")
 
 // seenFloor is the replay floor, or 0 when there is none: the highest cutoff a
-// prune of the replay set has dropped a line at, or the floor an adoption of a
-// prekey owed (beginFloor), whichever is higher. A message whose sent_at is
+// prune of the replay set has dropped a line at, or the floor a restore owed
+// (beginFloor), whichever is higher. A message whose sent_at is
 // before it, or less than protocol.TTL above it, is stale whatever the clock
 // now reads, since its line, or its first copy's, may be gone. It is how a
 // Kerberos server that has lost its replay cache refuses until the window
@@ -1035,10 +1051,10 @@ func (b *Mailbox) raiseFloor(s store, t int64) (bool, error) {
 	return true, s.put(bucketMailbox, "seen-floor", strconv.AppendInt(nil, t, 10))
 }
 
-// keyFloorOwed is the mark, in the mailbox's own bucket, that the mailbox adopted
-// a prekey its state did not record and its replay floor is not yet set from
-// that: written in the transaction that adopts the key (adoptKeys), and dropped
-// by beginFloor. keySeenBegan is the confirmed time beginFloor last raised the
+// keyFloorOwed is the mark, in the mailbox's own bucket, that the mailbox's owner
+// acknowledged a restore of a state that did not match its prekeys/ and its
+// replay floor is not yet set from that: written in the transaction that
+// acknowledges it (matchKeys), and dropped by beginFloor. keySeenBegan is the confirmed time beginFloor last raised the
 // floor by, which says why its refusals are stale.
 const (
 	keyFloorOwed = "floor-owed"
@@ -1047,17 +1063,17 @@ const (
 
 // errFloorOwed is a replay set whose floor is owed at a judgement: a bug in this
 // client, since a drain's first list sets it at the latest (beginFloor).
-var errFloorOwed = errors.New("this mailbox adopted a prekey its state did not record, and the floor of its replay set is not set yet: no message is judged until it is")
+var errFloorOwed = errors.New("this mailbox's restore owes the floor of its replay set, which is not set yet: no message is judged until it is")
 
-// beginFloor sets the replay floor owed by an adoption (adoptKeys) at the first
+// beginFloor sets the replay floor owed by a restore (matchKeys) at the first
 // confirmed time after it, at, in the transaction under way: a renewal's, which
 // recordTaken passes, or the drain's first list's, whichever comes first. The
 // floor is at plus protocol.MaxSkew, less protocol.TTL, unless it is higher. So
 // judge refuses as stale every sent_at below at plus protocol.MaxSkew, which
 // covers every sent_at check 6 could have taken at this mailbox's clock before
-// the adoption. Only an adopted key can open a ciphertext a lost replay set saw
-// delivered, a server may still hold one, and the replay set this mailbox keeps
-// cannot tell it from one that waited (PROTOCOL.md §12.3 check 8, §15.9). It
+// the restore. Only a key the replay set did not see every use of can open a
+// ciphertext a lost replay set saw delivered, a server may still hold one, and
+// the replay set this mailbox keeps cannot tell it from one that waited (PROTOCOL.md §12.3 check 8, §15.9). It
 // records at as the floor's beginning (keySeenBegan) only where the floor rose:
 // a floor already higher refuses those messages as stale by its own reason. It
 // does nothing where no floor is owed, or at is no reading, which leaves it owed:

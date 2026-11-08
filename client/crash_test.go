@@ -64,6 +64,11 @@ var crashCommands = map[string]func(ctx context.Context, b *client.Mailbox, o cr
 		_, err := client.Init(ctx, b.Dir(), client.Options{Base: o.Base, Now: func() time.Time { return now }, WorkingKey: true})
 		return err
 	},
+	"init --restore": func(ctx context.Context, b *client.Mailbox, o crashOrder) error {
+		now := time.Unix(o.Now, 0).UTC()
+		_, err := client.Init(ctx, b.Dir(), client.Options{Base: o.Base, Now: func() time.Time { return now }, Restore: true})
+		return err
+	},
 	"switch": func(ctx context.Context, b *client.Mailbox, _ crashOrder) error {
 		_, err := b.RenewUnderCertificate(ctx)
 		return err
@@ -722,9 +727,10 @@ func TestARestoreKilledBeforeTheRecordOfItsFoldersFinishes(t *testing.T) {
 	}
 }
 
-// A new state file killed once it has adopted the keys it found: the next command
-// reads the adoption, and the mailbox is whole, and a message sealed to the adopted
-// key decrypts, refused as sent before the adoption, with its signer.
+// An acknowledgement of a restore killed once it has adopted the keys a new state
+// file did not name: the next command reads the adoption and needs no other,
+// the mailbox is whole, and a message sealed to the adopted key decrypts,
+// refused as sent before the restore, with its signer.
 func TestAnAdoptionKilledLeavesTheMailboxWhole(t *testing.T) {
 	t.Parallel()
 	for _, step := range client.Steps("keys") {
@@ -737,7 +743,7 @@ func TestAnAdoptionKilledLeavesTheMailboxWhole(t *testing.T) {
 				t.Fatal(err)
 			}
 			e.clock.Add(2 * time.Second)
-			crashIn(t, e, b.Dir(), "rekey", step, protocol.Address{})
+			crashIn(t, e, b.Dir(), "init --restore", step, protocol.Address{})
 			x, err := client.Open(b.Dir(), e.opts())
 			if err != nil {
 				t.Fatal(err)
@@ -753,7 +759,7 @@ func TestAnAdoptionKilledLeavesTheMailboxWhole(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			refusedBeforeAdoption(t, x, res, a, 1)
+			refusedBeforeRestore(t, x, res, a, 1)
 			e.clock.Add(protocol.MaxSkew)
 			whole(t, e, x, a)
 		})

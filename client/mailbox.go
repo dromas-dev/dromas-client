@@ -95,6 +95,13 @@ type Options struct {
 	// one where something is, and one whose directory is not there
 	// (checkRevocationFile, writeRevocationFile).
 	RevocationFile string
+	// Restore has Init acknowledge a restore (dromas init --restore): where the
+	// state does not match prekeys/ (StateNotTheKeys), it adopts the keys the
+	// state names nowhere, owes the replay floor, and takes prekeys/generation's
+	// count, so the mailbox runs again; where it matches, it changes nothing
+	// ([Mailbox.Restored]). Without it, Init is refused on such a state, as every
+	// command that receives, sends or renews is.
+	Restore bool
 	// Waiting, if not nil, is told when a command finds the mailbox's lock held
 	// by another command of the mailbox, once, before it waits for it: a mailbox's
 	// commands write its files one at a time.
@@ -194,6 +201,13 @@ type Mailbox struct {
 	// revocationFile is the new file Init writes the mailbox's revocation
 	// record to (Options.RevocationFile), or empty.
 	revocationFile string
+	// restoring has Init acknowledge a restore (Options.Restore); restored is
+	// what the acknowledgement found and did, and notKeys the refusal of a
+	// command that touches messages on a state that does not match prekeys/,
+	// each of the command under way (matchKeys).
+	restoring bool
+	restored  *Restored
+	notKeys   error
 	// lifetime is how long a certificate this mailbox makes runs, read from its
 	// server's document once a command (certificateLifetime); zero until then.
 	lifetime time.Duration
@@ -288,7 +302,7 @@ func newMailbox(dir string, opt Options) (*Mailbox, error) {
 	if d := opt.CertificateLifetime; d != 0 && (d <= protocol.TTL+protocol.MaxSkew || d > protocol.MaxCertificateLifetime || d%time.Second != 0) {
 		return nil, fmt.Errorf("%v is no certificate lifetime: %s", d, CertificateLifetimeRule)
 	}
-	b := &Mailbox{dir: dir, layout: opt.Layout.resolved(dir), configFile: opt.ConfigFile, policySet: opt.Policy, prekeyLife: opt.PrekeyLifetime, certLife: opt.CertificateLifetime, unsafeInbox: opt.UnsafeInboxPermissions, unsafeState: opt.UnsafeStatePermissions, base: strings.TrimRight(opt.Base, "/"), http: opt.HTTPClient, now: opt.Now, identityType: opt.IdentityType, workingKey: opt.WorkingKey, revocationFile: opt.RevocationFile, waiting: opt.Waiting, slot: make(chan struct{}, 1), unlock: unlocking{agent: opt.Agent, passphrase: opt.Passphrase, keep: opt.KeepIdentity, add: opt.AddToAgent, lifetime: opt.AgentLifetime, notAdded: opt.NotAdded}}
+	b := &Mailbox{dir: dir, layout: opt.Layout.resolved(dir), configFile: opt.ConfigFile, policySet: opt.Policy, prekeyLife: opt.PrekeyLifetime, certLife: opt.CertificateLifetime, unsafeInbox: opt.UnsafeInboxPermissions, unsafeState: opt.UnsafeStatePermissions, base: strings.TrimRight(opt.Base, "/"), http: opt.HTTPClient, now: opt.Now, identityType: opt.IdentityType, workingKey: opt.WorkingKey, revocationFile: opt.RevocationFile, restoring: opt.Restore, waiting: opt.Waiting, slot: make(chan struct{}, 1), unlock: unlocking{agent: opt.Agent, passphrase: opt.Passphrase, keep: opt.KeepIdentity, add: opt.AddToAgent, lifetime: opt.AgentLifetime, notAdded: opt.NotAdded}}
 	if b.base == "" {
 		b.base = DefaultBase
 	}
@@ -561,6 +575,9 @@ func Init(ctx context.Context, dir string, opt Options) (*Mailbox, error) {
 	// the mailbox, and with its outcome, once init has read that the mailbox is not
 	// finished.
 	return lockedFinished(ctx, b, func() (*Mailbox, error) {
+		if err := b.keysMatch(); err != nil {
+			return nil, err
+		}
 		r, err := b.init(ctx)
 		if err == nil && b.ended == nil && b.revocationFile != "" {
 			err = b.writeRevocationFile()
@@ -1214,11 +1231,11 @@ func readAgeKeys(name string) ([]age.Identity, error) {
 
 // prekeyIdentities returns every retained prekey that the state file names (namedKeys),
 // to decrypt with once oneNative has taken the file (decrypt). A file in prekeys/
-// that the state file names nowhere decrypts nothing until a command adopts it
-// (adoptKeys), whose adoption owes the replay floor: such a key may open a message
-// that a replay set now lost saw delivered (PROTOCOL.md §12.3 check 8). A file
-// whose name is no serial is never adopted, and one that appears after the
-// command adopted is adopted by the next command.
+// that the state file names nowhere decrypts nothing until its owner's
+// acknowledgement adopts it (matchKeys), which owes the replay floor: such a key
+// may open a message that a replay set now lost saw delivered (PROTOCOL.md
+// §12.3 check 8). A file whose name is no serial is never adopted, and one that
+// appears during a drain stops the next command until it is acknowledged.
 func (b *Mailbox) prekeyIdentities() ([]age.Identity, error) {
 	names, err := matching(b.path("prekeys", "*.agekey"))
 	if err != nil {

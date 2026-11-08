@@ -382,11 +382,23 @@ mv(){ printf '%s mv %s\n' "${FUNCNAME[1]}" "$*" >> "$LOG"; command mv "$@"; }
 		t.Errorf("dr_forget left the set %q under the floor %q", b.read("seen"), b.read("seen-floor"))
 	}
 
-	// Keys seen-keys does not name raise the floor first, then are named.
+	// A drain counts itself in its records first, then in prekeys/generation.
+	got = calls("dr_putline", "dr_count")
+	if want := []string{"sync generation.new", "mv generation.new generation", "sync .", "sync prekeys/generation.new", "mv prekeys/generation.new prekeys/generation", "sync prekeys"}; !slices.Equal(got, want) {
+		t.Errorf("dr_count's syncs and moves:\n%q\nwant\n%q", got, want)
+	}
+
+	// A restore owes the floor first, then names the keys seen-keys does not.
 	b.must(`rm "$DR/seen-keys"`)
-	got = calls("dr_adopt dr_raise dr_covered", "dr_unnamed && dr_adopt "+strconv.FormatInt(now, 10))
-	if want := []string{"sync seen-floor.new", "mv seen-floor.new seen-floor", "sync .", "sync seen-keys ."}; len(got) < len(want) || !slices.Equal(got[:len(want)], want) || slices.ContainsFunc(got[len(want):], func(c string) bool { return c != "sync seen-keys" }) {
-		t.Errorf("dr_adopt's syncs and moves:\n%q\nwant\n%q, then one sync of seen-keys for each further key", got, want)
+	got = calls("dr_putline dr_covered", "dr_restore > /dev/null")
+	if want := []string{"sync floor-owed.new", "mv floor-owed.new floor-owed", "sync .", "sync seen-keys ."}; len(got) < len(want) || !slices.Equal(got[:len(want)], want) || slices.ContainsFunc(got[len(want):], func(c string) bool { return c != "sync seen-keys" }) {
+		t.Errorf("dr_restore's syncs and moves:\n%q\nwant\n%q, then one sync of seen-keys for each further key", got, want)
+	}
+
+	// The floor it owes is raised first, then its mark goes.
+	got = calls("dr_owed dr_raise", "dr_owed "+strconv.FormatInt(now, 10))
+	if want := []string{"sync seen-floor.new", "mv seen-floor.new seen-floor", "sync .", "sync ."}; !slices.Equal(got, want) || b.has("floor-owed") {
+		t.Errorf("dr_owed's syncs and moves:\n%q\nwant\n%q", got, want)
 	}
 }
 

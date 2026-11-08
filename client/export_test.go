@@ -283,8 +283,9 @@ func PutRevocations(ctx context.Context, opt Options, a protocol.Address, rec *p
 // "renewal" (the number of the renewal under way), "acl-read" (the read of
 // the server's ACL a renewal recv began owes), "adopt-acl" (a restore's
 // adoption of its server's ACL, begun), "renew-failed", "not-made",
-// "acl-another-writer", "acl-replaced", "floor-owed" (the replay floor an adopted
-// prekey owes, not yet set), "seen-began" (the confirmed time beginFloor last set
+// "acl-another-writer", "acl-replaced", "floor-owed" (the replay floor an acknowledged
+// restore owes, not yet set), "generation" (the drains that accepted a message
+// it counted), "seen-began" (the confirmed time beginFloor last set
 // the floor by), "partial" (the message the
 // partial file is of, and how many of its bytes are synced) and "format"
 // (the mailbox's format, as it is recorded). So a test
@@ -293,7 +294,7 @@ func (b *Mailbox) Records() (map[string][]byte, error) {
 	out := map[string][]byte{}
 	err := b.view(func(s store) error {
 		for _, r := range []struct{ key, name string }{
-			{"serial", "serial"}, {"pass", "pass"}, {"etag", "etag"}, {"seen-floor", "seen-floor"}, {"floor-owed", "floor-owed"}, {"seen-began", "seen-began"},
+			{"serial", "serial"}, {"pass", "pass"}, {"etag", "etag"}, {"seen-floor", "seen-floor"}, {"floor-owed", "floor-owed"}, {"seen-began", "seen-began"}, {"generation", "generation"},
 			{"acl", "acl.json"}, {"revoked", "revoked.sig"}, {"revoked-certs", "revoked-certs.json"},
 			{"renew-failed", "renew-failed"}, {"not-made", "not-made"}, {"acl-another-writer", "acl-another-writer"}, {"acl-replaced", "acl-replaced"}, {"partial", "partial"},
 			{"deprecation", "deprecation"}, {"sunset", "sunset"}, {"document-read", "document-read"}, {"latest", "latest"},
@@ -418,7 +419,7 @@ func (b *Mailbox) SetRecord(t *testing.T, name string, v []byte) {
 				}
 				return s.put(bucket, key, v)
 			}
-			for key, file := range map[string]string{"serial": "serial", "pass": "pass", "etag": "etag", "seen-floor": "seen-floor", "seen-began": "seen-began", "acl": "acl.json", "revoked": "revoked.sig", "revoked-certs": "revoked-certs.json", "renew-failed": "renew-failed", "not-made": "not-made", "acl-another-writer": "acl-another-writer", "acl-replaced": "acl-replaced"} {
+			for key, file := range map[string]string{"serial": "serial", "pass": "pass", "etag": "etag", "seen-floor": "seen-floor", "seen-began": "seen-began", "generation": "generation", "acl": "acl.json", "revoked": "revoked.sig", "revoked-certs": "revoked-certs.json", "renew-failed": "renew-failed", "not-made": "not-made", "acl-another-writer": "acl-another-writer", "acl-replaced": "acl-replaced"} {
 				if name == file {
 					return put(bucketMailbox, key, v)
 				}
@@ -570,4 +571,13 @@ func Statements(t *testing.T, b *Mailbox) []uint64 {
 		t.Fatal(err)
 	}
 	return ns
+}
+
+// Acknowledge is the acknowledgement Options.Restore has Init make, alone, on
+// b: what it found and did, with nothing of init after it, so a test of what
+// follows a restore times its first renewal itself.
+func (b *Mailbox) Acknowledge(ctx context.Context) (*Restored, error) {
+	b.restoring = true
+	defer func() { b.restoring = false }()
+	return lockedFinished(ctx, b, func() (*Restored, error) { return b.restored, nil })
 }
