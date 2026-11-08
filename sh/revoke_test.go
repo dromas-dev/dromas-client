@@ -97,6 +97,31 @@ func (w *world) failing(b *shMailbox, code protocol.Code) {
 	})
 }
 
+// failingRevocations answers every read of address b's revocations with code:
+// no answer about it.
+func (w *world) failingRevocations(b *shMailbox, code protocol.Code) {
+	w.srv.SetMiddle(func(rw http.ResponseWriter, r *http.Request, next http.Handler) {
+		if x, ok := forge.RevocationsOf(r); ok && x == b.addr {
+			forge.Refuse(rw, code)
+			return
+		}
+		next.ServeHTTP(rw, r)
+	})
+}
+
+// showingRevocations answers every read of address b's revocations 200 with
+// body: whatever an operator shows.
+func (w *world) showingRevocations(b *shMailbox, body []byte) {
+	w.srv.SetMiddle(func(rw http.ResponseWriter, r *http.Request, next http.Handler) {
+		if x, ok := forge.RevocationsOf(r); ok && x == b.addr {
+			rw.Header().Set("Content-Type", "application/json")
+			_, _ = rw.Write(body)
+			return
+		}
+		next.ServeHTTP(rw, r)
+	})
+}
+
 // record reads a JSON record a test made.
 func record(t *testing.T, name string) *protocol.Revocations {
 	t.Helper()
@@ -198,10 +223,10 @@ jq -cn --arg i "$(dr_b64 "$DR/identity.doc")" --arg s "$(dr_b64 "$W/wk.sig")" '{
 	}
 	n := len(w.srv.Requests())
 	reads := func(a protocol.Address, since int) int {
-		return len(slices.DeleteFunc(w.calls(since), func(c string) bool { return c != "GET /v1/"+a.String() }))
+		return len(slices.DeleteFunc(w.calls(since), func(c string) bool { return c != "GET /v1/"+a.String()+"/revocations" }))
 	}
 	if d := ra.recv(); len(d.messages) != 0 || d.refused("revoked") != 2 || reads(rd.addr, n) != 1 || !ra.has("peers/"+rd.addr.String()+"/revoke.sig") || w.srv.Count(ra.addr) != 0 {
-		t.Errorf("messages from a mailbox revoked since: %v, %d reads of it", d, reads(rd.addr, n))
+		t.Errorf("messages from a mailbox revoked since: %v, %d reads of its revocations", d, reads(rd.addr, n))
 	}
 	// The operator then hides the revocation, and delivers a message that
 	// sender's identity signed, which still verifies.
@@ -215,9 +240,10 @@ jq -cn --arg i "$(dr_b64 "$DR/identity.doc")" --arg s "$(dr_b64 "$W/wk.sig")" '{
 	if r := ra.send(rd.addr.String(), "to a revoked mailbox"); r.rc == 0 || !strings.Contains(r.err, "REVOKED: "+rd.addr.String()+" is revoked") || len(w.srv.Requests()) != n || !ra.bare() {
 		t.Errorf("a send to a mailbox this mailbox holds a revocation of: %v, %q", r, w.calls(n))
 	}
-	// No answer about a sender, or a 2xx that is no mailbox this script reads,
-	// stops the drain with the message on the server; the next drain asks
-	// again.
+	// No answer about a sender, a 404 no_such_mailbox, which a read of
+	// revocations never answers, a 410 revoked with nothing that verifies, or a
+	// 2xx that is no record this script reads, stops the drain with the message
+	// on the server; the next drain asks again.
 	rb.mustSend(rc, "waits for an answer")
 	stopped := func(what string) {
 		t.Helper()
@@ -225,11 +251,15 @@ jq -cn --arg i "$(dr_b64 "$DR/identity.doc")" --arg s "$(dr_b64 "$W/wk.sig")" '{
 			t.Errorf("%s: %v", what, d)
 		}
 	}
-	w.failing(rb, protocol.CodeUnavailable)
+	w.failingRevocations(rb, protocol.CodeUnavailable)
 	stopped("no answer about the sender")
-	for _, v := range []string{"mailbox-bad-prekey-a-number.json", "mailbox-bad-revoked-certificates-a-number.json"} {
-		w.showing(rb, mustRead(t, filepath.Join(vectors, "answer", v)))
-		stopped(v + " over the mailbox served")
+	for _, code := range []protocol.Code{protocol.CodeNoSuchMailbox, protocol.CodeRevoked} {
+		w.failingRevocations(rb, code)
+		stopped(string(code) + " on the read of the sender's revocations")
+	}
+	for _, v := range []string{"record-bad-identity-a-number.json", "record-bad-revocation-signature-unpadded.json"} {
+		w.showingRevocations(rb, mustRead(t, filepath.Join(vectors, "answer", v)))
+		stopped(v + " as the sender's revocations")
 	}
 	w.honest()
 	if d := rc.recv(); d.rc != 0 || len(d.messages) != 1 {
@@ -303,11 +333,13 @@ func (w *world) lastQuery(to *shMailbox) string {
 func TestScriptAfterAWorkingKeyIsTaken(t *testing.T) {
 	w := newWorld(t)
 	ctx := t.Context()
-	ca, cc := w.mailbox(), w.mailbox()
+	ca, cc, cf := w.mailbox(), w.mailbox(), w.mailbox()
 	g, cb := w.goMailbox(true)
 	op := w.operator()
-	if _, err := g.Send(ctx, cc.addr, "signed under the first certificate, and read after it was revoked"); err != nil {
-		t.Fatal(err)
+	for _, to := range []*shMailbox{cc, cf} {
+		if _, err := g.Send(ctx, to.addr, "signed under the first certificate, and read after it was revoked"); err != nil {
+			t.Fatal(err)
+		}
 	}
 	n1, first := numberOf(t, g), w.prekey(cb)
 	ca.mustSend(cb, "before the theft")
@@ -391,7 +423,7 @@ dr_api PUT "/v1/$A/prekey" "$W/top.json" -H "Authorization: dromas-pass address=
 	}
 	n := len(w.srv.Requests())
 	reads := func() int {
-		return len(slices.DeleteFunc(w.calls(n), func(c string) bool { return c != "GET /v1/"+cb.addr.String() }))
+		return len(slices.DeleteFunc(w.calls(n), func(c string) bool { return c != "GET /v1/"+cb.addr.String()+"/revocations" }))
 	}
 	if d := ca.recv(); !slices.Equal(d.bodies(), []string{"under the new certificate"}) || d.refused("certificate_revoked") != 1 || reads() != 1 ||
 		ca.keptCerts(cb.addr) != string(certs.Statement()) || strings.Count(ca.read(peer+"revoked-certs.json"), "\n") != 1 || ca.has(peer+"revoke.sig") {
@@ -422,7 +454,7 @@ dr_api PUT "/v1/$A/prekey" "$W/top.json" -H "Authorization: dromas-pass address=
 	if _, err := g.Send(ctx, ca.addr, "another, for a second lookup"); err != nil {
 		t.Fatal(err)
 	}
-	w.showing(cb, mustRead(t, cb.certs("CB1", n1-1, cb.file("identity"))))
+	w.showingRevocations(cb, mustRead(t, cb.certs("CB1", n1-1, cb.file("identity"))))
 	if d := ca.recv(); len(d.messages) != 1 || ca.keptCerts(cb.addr) != string(certs.Statement()) {
 		t.Errorf("a lower revocation replaced a higher one: %v", d)
 	}
@@ -439,6 +471,18 @@ dr_api PUT "/v1/$A/prekey" "$W/top.json" -H "Authorization: dromas-pass address=
 	writeFile(t, ca.file(peer+"revoked-certs.json"), []byte(kept))
 	if d := ca.recv(); d.rc != 0 || len(d.messages) != 1 {
 		t.Errorf("after the kept revocation was put back: %v", d)
+	}
+	// The server forgets CB's mailbox, and keeps its identity's revocation of
+	// its certificates (PROTOCOL.md §13), which a read of CB's revocations
+	// serves: CF, which never saw it, refuses the message under the revoked
+	// certificate at check 7 (§12.3).
+	w.srv.Forget(cb.addr)
+	since := len(w.srv.Requests())
+	d := cf.recv()
+	asked := slices.DeleteFunc(w.calls(since), func(c string) bool { return !strings.HasPrefix(c, "GET /v1/"+cb.addr.String()) })
+	if len(d.messages) != 0 || d.refused("certificate_revoked") != 1 || cf.keptCerts(cb.addr) != string(certs.Statement()) ||
+		!slices.Equal(asked, []string{"GET /v1/" + cb.addr.String() + "/revocations"}) {
+		t.Errorf("a message under a revoked certificate, from a sender whose mailbox the server forgot: %v, %q", d, asked)
 	}
 }
 
