@@ -774,7 +774,7 @@ func TestARemovalKilledAtEachStepFinishesAtTheNextPrune(t *testing.T) {
 			if _, err := b.Rekey(t.Context()); err != nil {
 				t.Fatal(err)
 			}
-			e.clock.Add(2 * time.Hour)
+			e.clock.Add(3 * time.Hour)
 			crash(t, e, b, "receive", step, protocol.Address{})
 			if !slices.Contains(client.Statements(t, b), old) {
 				t.Fatalf("the crash at %s left no record of prekey %d", step, old)

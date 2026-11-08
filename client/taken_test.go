@@ -227,7 +227,7 @@ func TestADrainDeletesByTheDateOfItsFirstList(t *testing.T) {
 	e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
 		next.ServeHTTP(w, r)
 		if r.Method == http.MethodGet && r.URL.Path == list && moved.CompareAndSwap(false, true) {
-			e.clock.Add(2 * time.Hour)
+			e.clock.Add(3 * time.Hour)
 		}
 	})
 	if res := receive(t, b); len(res.Delivered) != 2 {
@@ -238,14 +238,14 @@ func TestADrainDeletesByTheDateOfItsFirstList(t *testing.T) {
 	}
 	receive(t, b)
 	if exists(prekeyFile(b, retired, ".agekey")) {
-		t.Error("the next drain's first list, two hours after the renewal, left the retired prekey")
+		t.Error("the next drain's first list, three hours after the renewal, left the retired prekey")
 	}
 }
 
 // A drain mended part way deletes by the first list of the drain after the renewal,
 // which is the drain that emptied the mailbox, and never by the date of the drain
-// the server refused. That list is two hours after the server took the newest
-// retired prekey, so the prekey older than it goes. It is under an hour after the
+// the server refused. That list is three hours after the server took the newest
+// retired prekey, so the prekey older than it goes. It is under two hours after the
 // server took the renewal, so the newest retired prekey stays.
 func TestADrainMendedPartWayDeletesByTheListOfTheDrainAfterIt(t *testing.T) {
 	t.Parallel()
@@ -271,7 +271,7 @@ func TestADrainMendedPartWayDeletesByTheListOfTheDrainAfterIt(t *testing.T) {
 	var refused atomic.Bool
 	e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
 		if r.Method == http.MethodGet && r.URL.Path == list && r.URL.Query().Get("cursor") != "" && refused.CompareAndSwap(false, true) {
-			e.clock.Add(2 * time.Hour)
+			e.clock.Add(3 * time.Hour)
 			forge.Refuse(w, protocol.CodeNoSuchMailbox)
 			return
 		}
@@ -285,7 +285,7 @@ func TestADrainMendedPartWayDeletesByTheListOfTheDrainAfterIt(t *testing.T) {
 		t.Error("the date of the refused drain kept a prekey the drain after the renewal deletes")
 	}
 	if !exists(prekeyFile(b, newest, ".agekey")) {
-		t.Error("the newest retired prekey went within an hour of the renewal that retired it")
+		t.Error("the newest retired prekey went within two hours of the renewal that retired it")
 	}
 }
 

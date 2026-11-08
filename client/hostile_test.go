@@ -291,7 +291,7 @@ func TestADrainIsBounded(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		e.clock.Add(2 * 60 * 60 * 1e9)
+		e.clock.Add(3 * 60 * 60 * 1e9)
 		client.SetDrainLimits(t, 1, 1<<30, 100)
 		send(t, a, b, "one")
 		send(t, a, b, "two")

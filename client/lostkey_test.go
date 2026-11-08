@@ -66,7 +66,7 @@ func TestAPrunedPrekeyDoesNotStopADrain(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	for name, wait := range map[string]time.Duration{
-		"an emptying drain": 2 * time.Hour,
+		"an emptying drain": 3 * time.Hour,
 		"its deletion time": protocol.PrekeyLifetime + protocol.TTL + time.Minute,
 	} {
 		t.Run(name, func(t *testing.T) {

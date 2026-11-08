@@ -704,8 +704,12 @@ var lifetimeRule = fmt.Sprintf("one is a whole number of seconds from %d (%d hou
 
 // retiredGrace is how long after the server took a renewal the list of a
 // drain must be taken before the drain may delete retired prekeys
-// (dropRetired): room for a send the server took as the renewal landed.
-const retiredGrace = time.Hour
+// (dropRetired): an hour of room for a send the server took as the renewal
+// landed, and an hour more because both dates are passes on the mailbox's
+// clock, which a server takes from 10 minutes behind its own to 50 ahead, so
+// the two can be 60 minutes further apart than the server's clock says
+// (PROTOCOL.md §15.3, §15.7).
+const retiredGrace = 2 * time.Hour
 
 // renewRetry is how long Receive waits to try a failed renewal again, so a
 // refused one (a rate limit, a server that is down) is not tried every poll:

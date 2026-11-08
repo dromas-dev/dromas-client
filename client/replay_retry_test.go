@@ -29,7 +29,7 @@ import (
 // the reader's clock is right again. The reader renews its prekey just
 // before the retry is sealed to it, and reads nothing more until twice the
 // TTL less 31 minutes: so that prekey is the one in use, or the newest retired
-// one within the hour after a renewal, until the retry is read.
+// one within the two hours after a renewal, until the retry is read.
 func TestARetryAboveTheFloorIsDeliveredAgain(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -296,7 +296,7 @@ func TestAStretchedRetryAtClocksAnHonestServerTakes(t *testing.T) {
 }
 
 // The Go client deletes every retired prekey once an emptying drain's list is
-// taken more than an hour after the server took the renewal that retired it,
+// taken more than two hours after the server took the renewal that retired it,
 // so a reader that runs recv daily has deleted, a day after a retry is posted
 // at the TTL, the key the retry was sealed to, unless its renewals fail. The
 // hostile server refuses every renewal after the retry, so that key stays

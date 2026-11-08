@@ -57,7 +57,7 @@ func refusedBeforeAdoption(t *testing.T, x *client.Mailbox, res *client.Result, 
 // adoptedEnd is an adopted key's deletion time, by the confirmed time of the first
 // renewal after its adoption, as the design states it.
 func adoptedEnd(took time.Time) time.Time {
-	return took.Add(protocol.TTL + time.Hour)
+	return took.Add(protocol.TTL + 2*time.Hour)
 }
 
 // refusePrekeyUploads has e's server refuse every renewal, while it answers the rest.
@@ -72,7 +72,7 @@ func refusePrekeyUploads(e *env) {
 }
 
 // State deleted and keys kept: the old key stays until a reading a server confirmed
-// reaches the first renewal's confirmed time plus the TTL and the hour. Later
+// reaches the first renewal's confirmed time plus the TTL and two hours. Later
 // renewals do not move that time, and the first such reading past it deletes the
 // key.
 func TestAnAdoptedKeyGoesByAConfirmedReadingPastItsRenewal(t *testing.T) {
@@ -158,7 +158,7 @@ func TestAMessageSealedToAnAdoptedKeyIsRefusedWithItsSigner(t *testing.T) {
 		t.Fatalf("recv after the state file was lost: %v", err)
 	}
 	refusedBeforeAdoption(t, x, res, a, 2)
-	e.clock.Add(2 * time.Hour)
+	e.clock.Add(3 * time.Hour)
 	if _, err := x.Receive(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -184,7 +184,7 @@ func TestARenewalNeverConfirmedDeletesNoAdoptedKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	e.clock.Add(protocol.TTL + 2*time.Hour)
+	e.clock.Add(protocol.TTL + 3*time.Hour)
 	refusePrekeyUploads(e)
 	// Its read records the take with no reading, and its list is a confirmed
 	// reading well past any time that take could have given.
