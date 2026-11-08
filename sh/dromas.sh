@@ -406,6 +406,7 @@ dr_resolve(){ # <address> [the mailbox dr_lookup read] → prints "<serial> <age
     3) dr_refuse "the revocation of certificates kept for $B does not verify"; return 1 ;;
   esac
   [ "$na" -gt "$(dr_now)" ] || dr_refuse "$B's prekey has expired: its owner must publish a new one" || return 1
+  [ "$na" -le $(($(dr_now) + 8*86400 + 3600)) ] || dr_refuse "$B's prekey ends further ahead than any server takes, 8 days and an hour" || return 1      # a statement no server takes, so a stolen working key's statement lasts no longer than an honest one (PROTOCOL.md §6)
   h=$(sha256sum < "$DR/peer.txt" | cut -c1-64) && dr_hex "$h" || return 1      # the statement's bytes as served, never its signature, which another encoding of an ECDSA signature changes (PROTOCOL.md §11.10)
   dr_meet "$B" "$f" && dr_putline "$d/serial" "$s" && dr_putline "$d/rank" "$c" && dr_put "$DR/peer.txt" "$d/prekey.txt" && dr_put "$DR/peer.sig" "$d/prekey.sig" || return 1      # recorded only after every check passed
   echo "$s $k $c $h"

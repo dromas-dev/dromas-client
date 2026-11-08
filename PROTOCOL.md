@@ -220,7 +220,7 @@ Where this document uses a term below as a defined term, the term has the sense 
 | SHA-256 | a message id; the hash of a prekey statement that a send names (Section 11.10) | FIPS 180-4 |
 | UUID | an envelope's `msg_id` | RFC 9562 |
 
-Every keyed hash in this protocol is HMAC or HKDF, inside age. The protocol applies plain SHA-384 and SHA-256 only to public inputs: the identity document, a prekey statement and the ciphertext.
+Inside age, every keyed hash is HMAC or HKDF. Outside age, the one keyed function is the keyed pseudorandom function that names a value in a server's logs (Section 13). The protocol applies plain SHA-384 and SHA-256 only to public inputs: the identity document, a prekey statement and the ciphertext.
 
 ### 3.2. Signatures
 
@@ -469,7 +469,7 @@ bech32-char      = "0" / %x32-39 / %x61 / %x63-68 / %x6A-6E / %x70-7A
   - A client signs a prekey statement to end one prekey lifetime after the client makes the prekey statement (Section 12.4).
   - A server accepts a prekey statement that ends at most 8 days and the skew allowance after the time on the server's own clock. The longest prekey lifetime is 8 days (Section 12.4).
 - **A sender MUST NOT encrypt to a prekey past the prekey's `not_after`.** There is no grace period.
-- **A sender SHOULD refuse a prekey statement whose `not_after` is more than 8 days and the skew allowance after the sender's clock.** No server accepts such a prekey statement, so this bounds how long a prekey statement that a stolen working key signed stays usable (Section 15.5).
+- **A sender MUST refuse a prekey statement whose `not_after` is more than 8 days and the skew allowance after the sender's clock.** No server accepts such a prekey statement, so this bounds how long a prekey statement that a stolen working key signed stays usable (Section 15.5).
 - **A sender MUST keep, for each mailbox, the latest `(c, p)` it has seen on the mailbox's prekey statements.** The sender MUST refuse an earlier prekey statement. The sender compares `(c, p)` as two numbers, whatever the certificate (Section 5.3).
 - **A sender MUST check a prekey statement against every other rule before it checks the key's type.** The sender refuses a prekey statement as `unsupported_prekey_type`, never as one that does not verify, when both of these are true:
   - the prekey statement meets every other rule;
@@ -1636,7 +1636,7 @@ This table gives each security property, the party that the property holds again
 
 | Property | Against whom | Holds while | Rests on |
 |---|---|---|---|
-| Confidentiality of a message's content | a party that holds the ciphertext, the server included, and that party with a quantum computer later (Section 15.10) | the prekey that the message is sealed to has not leaked (Section 15.5) | IND-CCA of age's `mlkem768x25519` stanza (Section 9.4), which is HPKE [RFC 9180] with the MLKEM768-X25519 KEM [draft-ietf-hpke-pq-03], the X-Wing construction [X-Wing] |
+| Confidentiality of a message's content | a party that holds the ciphertext, the server included, and that party with a quantum computer later (Section 15.10) | the prekey that the message is sealed to has not leaked (Section 15.5) | the confidentiality and integrity of the age v1 file format [age] with one `mlkem768x25519` stanza (Section 9.4), whose stanza is HPKE [RFC 9180] with the MLKEM768-X25519 KEM [draft-ietf-hpke-pq-03], the X-Wing construction [X-Wing] |
 | Confidentiality against a substituted prekey | an active attacker, the server included | the address reached the sender intact (Section 15.1), the mailbox's signing keys are not stolen (Section 15.5), and no quantum computer can forge a signature (Section 15.10). A hostile server can still serve a stale prekey (Section 15.2) | EUF-CMA of the signer's key type under SSHSIG (Sections 3.2, 5, 6); second-preimage resistance of SHA-384 (Section 4.2) |
 | Forward secrecy | a party that steals the mailbox's keys later | from the deletion of every prekey that the message could be encrypted to, which Section 15.3 bounds. A server that accepts no pass from the mailbox holds that deletion back (Section 15.3) | a client's real deletion of retired prekeys (Sections 12.1, 12.4, 15.3); the first row |
 | Sender authentication | any party without the signer's private key, the server and the recipient included | the sender's signing keys are not stolen (Section 15.5), and no quantum computer can forge a signature (Section 15.10). A revocation ends a stolen key only at a reader that has seen the revocation (Section 15.6) | EUF-CMA of Ed25519 [BCJZ] and of ECDSA P-256, under SSHSIG and in a certificate's own signature (Sections 3.1, 3.2, 5.2); collision resistance of SHA-512 (Section 3.2); second-preimage resistance of SHA-384 (Section 4.2); sign-then-encrypt [ADR] |
