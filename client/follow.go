@@ -90,7 +90,8 @@ var ErrStop = errors.New("the handler stopped the loop")
 
 // ErrGaveUp is what a [Handler] returns where [FollowOptions.Owed] is set, for a
 // delivery whose handling failed for good. [Mailbox.Follow] records it, for
-// [Mailbox.Status] to list under attention, and goes on: nothing tries it again.
+// [Mailbox.Status] to list under attention until [Mailbox.ClearFailed] clears
+// every such record, and goes on: nothing tries it again.
 var ErrGaveUp = errors.New("the handler gave up on the message")
 
 // FollowOptions says how [Mailbox.Follow] runs. The zero value runs until its
@@ -473,11 +474,52 @@ func (b *Mailbox) owedCounts() (owed int, gaveUp []string, err error) {
 			return err
 		}
 		return s.each(bucketGaveUp, func(k, _ []byte) error {
-			if hexID.Match(k) && exists(b.path("inbox", string(k)+".json")) {
+			if b.listedGaveUp(k) {
 				gaveUp = append(gaveUp, string(k))
 			}
 			return nil
 		})
 	})
 	return owed, gaveUp, err
+}
+
+// listedGaveUp reports whether Status lists the record of a handling that gave
+// up under key: one named by a message's id whose file inbox/ keeps.
+func (b *Mailbox) listedGaveUp(key []byte) bool {
+	return hexID.Match(key) && exists(b.path("inbox", string(key)+".json"))
+}
+
+// ClearFailed deletes the record of every message whose handling gave up
+// ([ErrGaveUp]), in one transaction, so that [Mailbox.Status] lists none until a
+// handling gives up again. It returns how many of them Status listed, those
+// inbox/ keeps, and drops the records of those inbox/ no longer keeps too. Each
+// message stays in inbox/, and nothing hands one over again. It writes the
+// mailbox, so it waits while another command holds the lock, and a mailbox that
+// holds its own revocation runs it too: it signs and asks nothing.
+func (b *Mailbox) ClearFailed(ctx context.Context) (int, error) {
+	return lockedFinished(ctx, b, func() (int, error) {
+		listed := 0
+		err := b.update(func(s store) error {
+			var keys []string
+			if err := s.each(bucketGaveUp, func(k, _ []byte) error {
+				if b.listedGaveUp(k) {
+					listed++
+				}
+				keys = append(keys, string(k))
+				return nil
+			}); err != nil {
+				return err
+			}
+			for _, k := range keys {
+				if err := s.del(bucketGaveUp, k); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			return 0, err
+		}
+		return listed, nil
+	})
 }

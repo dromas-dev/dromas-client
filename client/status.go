@@ -87,7 +87,8 @@ type Status struct {
 	// begins with them.
 	Owed int `json:"owed,omitempty"`
 	// GaveUp names the messages inbox/ keeps whose handling gave up
-	// ([ErrGaveUp]), which nothing tries again.
+	// ([ErrGaveUp]), which nothing tries again, until [Mailbox.ClearFailed]
+	// clears every one.
 	GaveUp []string `json:"gave_up,omitempty"`
 	// Attention says, in words, each thing that needs a look. It is empty
 	// when nothing does.
@@ -261,7 +262,7 @@ func (b *Mailbox) status() (*Status, error) {
 		return nil, err
 	}
 	if len(s.GaveUp) > 0 {
-		s.Attention = append(s.Attention, fmt.Sprintf("%d in inbox/ whose callback gave up, which nothing tries again (%s): dromas inbox show <id> prints each, and deleting its file in inbox/ clears this", len(s.GaveUp), strings.Join(s.GaveUp, ", ")))
+		s.Attention = append(s.Attention, fmt.Sprintf("%d in inbox/ whose callback gave up, which nothing tries again (%s): dromas inbox show <id> | <program> hands one to a program by hand, and dromas inbox clear-failed clears this for every one", len(s.GaveUp), strings.Join(s.GaveUp, ", ")))
 	}
 	s.Attention = append(s.Attention, b.versionsAttention()...)
 	if s.Outbox > 0 {
