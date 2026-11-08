@@ -154,6 +154,38 @@ func TestAKeyFileUnderAPassphraseIsLockedUntilAPassphraseIsGiven(t *testing.T) {
 	}
 }
 
+// dromas agent start removes a stale socket at the agent's path and nothing
+// else: a path that names a file is refused, and the file is left as it was.
+func TestAgentStartRemovesOnlyASocket(t *testing.T) {
+	cleanEnv(t)
+	srv := fakeserver.New(t, time.Now)
+	dir := t.TempDir()
+	t.Setenv("DROMAS_CONFIG", configFor(t, dir))
+	t.Setenv("DROMAS_SERVER_URL", srv.URL)
+	notes := filepath.Join(shortDir(t), "notes.txt")
+	if err := os.WriteFile(notes, []byte("kept\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("DROMAS_AGENT", notes)
+	if err := do(t.Context(), "init", nil, nil, io.Discard, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	// Bounded, so that an agent start that took the path and ran ssh-agent
+	// there ends, and fails the test, rather than running on.
+	ctx, stop := context.WithTimeout(t.Context(), 10*time.Second)
+	defer stop()
+	want := "is no socket"
+	if runtime.GOOS == "windows" {
+		want = "not built for Windows" // the mailbox's own agent (TestAgentStartAndAddRunStockSSHAgent)
+	}
+	if err := do(ctx, "agent start", nil, nil, io.Discard, io.Discard); err == nil || !strings.Contains(err.Error(), want) {
+		t.Errorf("agent start at a file's path: %v", err)
+	}
+	if b, err := os.ReadFile(notes); err != nil || string(b) != "kept\n" {
+		t.Errorf("the file at the agent's path after agent start: %q, %v", b, err)
+	}
+}
+
 // dromas agent start runs stock ssh-agent at the mailbox's socket, dromas
 // agent add loads the key with stock ssh-add, its passphrase from --askpass,
 // and the mailbox then signs through the agent, its key file locked and no

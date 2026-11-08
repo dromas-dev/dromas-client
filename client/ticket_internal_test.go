@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"io/fs"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -18,7 +19,22 @@ import (
 // same keys resume each other's sessions, as one server on two ports does.
 func ticketServer(t *testing.T, maxVersion uint16) *httptest.Server {
 	t.Helper()
+	return ticketServerOn(t, "", maxVersion)
+}
+
+// ticketServerOn is ticketServer listening on addr, or on httptest's own
+// address where addr is empty.
+func ticketServerOn(t *testing.T, addr string, maxVersion uint16) *httptest.Server {
+	t.Helper()
 	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	if addr != "" {
+		l, err := net.Listen("tcp", addr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = srv.Listener.Close()
+		srv.Listener = l
+	}
 	srv.TLS = &tls.Config{MaxVersion: maxVersion}
 	srv.TLS.SetSessionTicketKeys([][32]byte{{1}})
 	srv.StartTLS()
@@ -67,6 +83,20 @@ func connects(t *testing.T, b *Mailbox) bool {
 }
 
 func ticketPath(dir string) string { return filepath.Join(dir, "keys", ticketFile) }
+
+// A server called by an IPv6 address keeps its ticket as any other does:
+// crypto/tls keys a session by the host without its brackets.
+func TestAnIPv6ServerKeepsItsTicket(t *testing.T) {
+	t.Parallel()
+	srv := ticketServerOn(t, "[::1]:0", 0)
+	dir := ticketDir(t)
+	if connects(t, aProcess(t, dir, srv)) {
+		t.Fatal("the first connection a mailbox ever made resumed")
+	}
+	if !connects(t, aProcess(t, dir, srv)) {
+		t.Fatalf("a new process on %s made a full handshake: no ticket was kept", srv.URL)
+	}
+}
 
 // The test of a new process itself, in a process of its own, is
 // TestASecondProcessResumesOnItsFirstConnection. This one shows what the base URL

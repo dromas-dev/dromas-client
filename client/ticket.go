@@ -7,7 +7,6 @@ import (
 	"net/url"
 	"os"
 	"slices"
-	"strings"
 )
 
 // ticketFile is the file in the rotating keys' directory that keeps a TLS
@@ -58,7 +57,7 @@ type ticketCache struct {
 func newTicketCache(memory tls.ClientSessionCache, file, base string) *ticketCache {
 	c := &ticketCache{ClientSessionCache: memory, file: file, base: base}
 	if u, err := url.Parse(base); err == nil {
-		c.name = strings.TrimSuffix(u.Host, ":"+u.Port())
+		c.name = u.Hostname() // an IPv6 host without its brackets, as crypto/tls keys it
 	}
 	return c
 }

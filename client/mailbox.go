@@ -687,6 +687,13 @@ func (b *Mailbox) publish(ctx context.Context, path string, req any, n uint64) (
 // did not make, which its server took n above (NotMade.RenewedAbove). Then the
 // working keys older than n go.
 func (b *Mailbox) recordTaken(n uint64, pass string, at taken) error {
+	var rec []byte
+	if pass != "" {
+		var err error
+		if rec, err = b.passRecord(pass); err != nil {
+			return err
+		}
+	}
 	if err := b.update(func(s store) error {
 		if err := b.recordTakenAt(s, n, at); err != nil {
 			return err
@@ -727,7 +734,7 @@ func (b *Mailbox) recordTaken(n uint64, pass string, at taken) error {
 		if pass == "" {
 			return s.del(bucketMailbox, "pass")
 		}
-		return s.put(bucketMailbox, "pass", []byte(pass))
+		return s.put(bucketMailbox, "pass", rec)
 	}); err != nil {
 		return err
 	}

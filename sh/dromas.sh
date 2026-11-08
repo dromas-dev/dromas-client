@@ -116,7 +116,7 @@ dr_owner(){ # <METHOD> <PATH> [body file] [curl args…] → dr_api as this mail
   local p; p=$(dr_pass) || return 1
   dr_authed "$p" "$@" && return 0
   case $(dr_code) in unauthorized | pass_expired | certificate_not_current | certificate_revoked) ;; *) return 1 ;; esac
-  rm -f "$DR/pass"; p=$(dr_pass) && dr_authed "$p" "$@" && return 0
+  rm -f "$DR/pass" "$DR/pass-server"; p=$(dr_pass) && dr_authed "$p" "$@" && return 0
   dr_clock; return 1
 }
 dr_taken(){ # → the reading of this machine's clock a server took, in Unix time: the date of the pass in $DR/pass, which the call dr_owner made, or the renewal dr_renew sent, carried once the server answered it: its not_after less the ten minutes a pass is signed for. Every deletion by the clock is by one, never by a reading of the clock (PROTOCOL.md §12.4): a clock far off is stopped at its pass, and one that jumps or steps back while a call is in flight deletes nothing by where it went
@@ -148,19 +148,23 @@ dr_tls(){ # <URL> → 0 when it is a server this mailbox may call: https, or htt
   [[ ${1,,} = https://?* ]] || { [[ ${1,,} = http://?* ]] && dr_here "$1"; } ||
     dr_refuse "$(printf '%.80s' "$1") is not a server this client calls: one is https, or http only to this machine, by its address (127.0.0.0/8, ::1)"
 }
-dr_pass(){ # [new] → the Authorization value of a call as this mailbox, signed by its identity, which a server always takes (PROTOCOL.md §8), unless it may act as its address no more (dr_finished). Without new: the pass kept in $DR/pass while it has more than 30 seconds left and no more than the ten minutes it was signed for, otherwise a new one, kept. With new: a new pass, for the call that publishes a prekey, left in $DR/pass.new until the server has taken it
+dr_pass(){ # [new] → the Authorization value of a call as this mailbox, signed by its identity, which a server always takes (PROTOCOL.md §8), unless it may act as its address no more (dr_finished). Without new: the pass kept in $DR/pass while it has more than 30 seconds left and no more than the ten minutes it was signed for, and $DR/pass-server names the server $DR_SERVER_URL is, otherwise a new one, kept. With new: a new pass, for the call that publishes a prekey, left in $DR/pass.new (its server in $DR/pass.new-server) until the server has taken it (dr_keeppass)
   local A na h; A=$(cat "$DR/address") || return 1
   dr_finished || { dr_done $?; return 1; }
+  h=$(dr_server "$DR_SERVER_URL")      # which server: a kept pass goes only to the one it names (PROTOCOL.md §8)
   if [ -z "${1-}" ]; then
-    na=$(dr_time "$(sed -n 's/.* not_after="\([^"]*\)".*/\1/p' "$DR/pass" 2> /dev/null)") && [ $((na - $(dr_now))) -gt 30 ] && [ $((na - $(dr_now))) -le 600 ] && { cat "$DR/pass"; return; }      # more than ten minutes left: this machine's clock has gone back since it was signed, so a new one, dated by the clock as it is
+    [ "$(cat "$DR/pass-server" 2> /dev/null)" = "$h" ] && na=$(dr_time "$(sed -n 's/.* not_after="\([^"]*\)".*/\1/p' "$DR/pass" 2> /dev/null)") && [ $((na - $(dr_now))) -gt 30 ] && [ $((na - $(dr_now))) -le 600 ] && { cat "$DR/pass"; return; }      # more than ten minutes left: this machine's clock has gone back since it was signed, so a new one, dated by the clock as it is
     [ -s "$DR/serial" ] || dr_refuse "this mailbox has published no prekey: run init, or prekey renew for a mailbox restored from its identity" || return 1
   fi
-  h=$(dr_server "$DR_SERVER_URL"); na=$(jq -nr --argjson t "$(dr_now)" '$t + 600 | todate')      # who is calling, which server, and until when: ten minutes
+  na=$(jq -nr --argjson t "$(dr_now)" '$t + 600 | todate')      # who is calling, which server, and until when: ten minutes
   printf 'dromas-pass-v1\n%s\n%s\n%s\n' "$A" "$h" "$na" | ssh-keygen -q -Y sign -n "dromas-pass-v1:$A" -f "$DR/identity" > "$DR/pass.sig" 2> /dev/null ||
     dr_refuse "this mailbox's identity did not sign a pass" || return 1
-  printf 'dromas-pass address="%s", not_after="%s", signature="%s"\n' "$A" "$na" "$(dr_b64 "$DR/pass.sig")" > "$DR/pass.new" || return 1
-  [ -n "${1-}" ] || mv "$DR/pass.new" "$DR/pass" || return 1
-  cat "$DR/pass${1:+.new}"
+  printf 'dromas-pass address="%s", not_after="%s", signature="%s"\n' "$A" "$na" "$(dr_b64 "$DR/pass.sig")" > "$DR/pass.new" && printf '%s\n' "$h" > "$DR/pass.new-server" || return 1
+  cat "$DR/pass.new"
+  [ -n "${1-}" ] || dr_keeppass
+}
+dr_keeppass(){ # → the pass in $DR/pass.new, and its server, kept as this mailbox's pass
+  mv "$DR/pass.new-server" "$DR/pass-server" && mv "$DR/pass.new" "$DR/pass"
 }
 dr_lock(){ # <command> [args] → runs that dr_ command with $DR/lock, the mailbox's lock, held, once the mailbox's directories and identity files are made (dr_dirs, dr_identity), as the Go client's Open makes them: so a mailbox restored from its identity alone runs. Every command that writes the mailbox runs so, from start to end, so one runs at a time and none reads a file another is writing. While another holds it, says so once and waits up to $DR_LOCK_WAIT seconds. If the command dies, the shell's EXIT trap removes it; a kill -9 leaves it behind
   local end=$((SECONDS + DR_LOCK_WAIT)) said= me=$DR outer=${DR_HELD-} trap rc
@@ -215,11 +219,11 @@ dr_init(){ # → creates this mailbox, or finishes a half-done init, and registe
   local A n p h m; A=$(cat "$DR/address")
   n=$(ls "$DR/prekeys" | sed -n 's/\.agekey$//p; s/\.txt\.sig$//p' | sort -n | tail -n 1); [ -n "$n" ] || n=$(dr_now); [ "$n" -ge 1 ] || n=1; p="$DR/prekeys/$n"      # the mailbox's first prekey takes its number as every later one does, from this machine's clock in seconds (dr_renew). An attempt that got as far as a key keeps the number it took, so a registration whose answer was lost is sent again as it was
   if [ -s "$p.txt.sig" ] && ! { m=$(dr_time "$(cat "$p.made" 2> /dev/null)") && [ "$m" -le "$(dr_now)" ]; }; then      # a first statement an earlier attempt left, made while this machine's clock read ahead of where it reads now, or with no record of when: a server may not take it until the clock catches up, as a pass made then is not used either (PROTOCOL.md §12.4). The statement is made again; the prekey's own key stays, since a server may have taken a registration whose answer was lost, and then messages may be waiting that only this key opens
-    rm -f "$p.txt" "$p.made" "$p.txt.sig" "$DR/pass.new"
+    rm -f "$p.txt" "$p.made" "$p.txt.sig" "$DR/pass.new" "$DR/pass.new-server"
   fi
   dr_prekey "$n" || return 1
   jq -n --arg i "$(dr_b64 "$DR/identity.doc")" --arg p "$(dr_b64 "$p.txt")" --arg s "$(dr_b64 "$p.txt.sig")" '{identity:$i, prekey:$p, prekey_signature:$s}' > "$DR/register.json"
-  h=$(dr_pass new) && { dr_authed "$h" PUT "/v1/$A" "$DR/register.json" > /dev/null || { dr_clock; dr_own; false; }; } && mv "$DR/pass.new" "$DR/pass" && dr_putline "$DR/serial" "$n" && dr_addr
+  h=$(dr_pass new) && { dr_authed "$h" PUT "/v1/$A" "$DR/register.json" > /dev/null || { dr_clock; dr_own; false; }; } && dr_keeppass && dr_putline "$DR/serial" "$n" && dr_addr
 }
 dr_addr(){ local a; dr_held || { [ -s "$DR/identity" ] && [ -s "$DR/address" ]; } || { dr_lock dr_addr; return; }; a=$(cat "$DR/address") && dr_out mailbox --arg address "$a" --arg link "$DR_SERVER_URL/to/$a"; }      # the mailbox's address and its link: what to give whoever should write to it. Read with no lock; with no mailbox, dr_lock's refusal, and a mailbox restored from its identity alone has its files made under the lock first (dr_identity), as the Go client's Open makes them
 dr_dest(){ # <link or address> → the address, "d_" and 64 characters of base64url, or taken from a link to this mailbox's server, $DR_SERVER_URL/to/<address>
@@ -779,7 +783,7 @@ dr_renew(){ # → what dr_rekey does, the lock held. A serial is signed ONCE
   jq -n --arg i "$(dr_b64 "$DR/identity.doc")" --arg p "$(dr_b64 "$DR/prekeys/$s.txt")" --arg g "$(dr_b64 "$DR/prekeys/$s.txt.sig")" "$w"' + {prekey:$p, prekey_signature:$g}' > "$DR/rekey.json"
   h=$(dr_pass new) && dr_authed "$h" PUT "$u" "$DR/rekey.json" > /dev/null || { dr_clock; dr_own; return 1; }      # a new pass, dated as the renewal is sent
   [ "$s" -le "$(cat "$DR/serial" 2> /dev/null || echo 0)" ] || dr_putline "$DR/serial" "$s" || return 1
-  mv "$DR/pass.new" "$DR/pass" || return 1
+  dr_keeppass || return 1
   at=$(dr_taken) && dr_prune "$at" && dr_out prekey --argjson serial "$s" --arg not_after "$(sed -n 6p "$DR/prekeys/$s.txt")"      # by the reading the server took the renewal at: the date of its pass, now $DR/pass
 }
 dr_prune(){ # <Unix time, one a server took (dr_taken)> → deletes every retired prekey past its deletion time by that reading of this machine's clock: its not_after + the 7 days a message is kept. dr_recv gives the date of the pass its list carried, dr_renew that of the renewal's: a clock a server took, never a later reading. After that, a message encrypted to it is unrecoverable. (The Go client also deletes them sooner.)

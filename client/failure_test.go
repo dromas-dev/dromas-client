@@ -241,6 +241,39 @@ func TestAPassIsUsedUntilItRunsOut(t *testing.T) {
 	}
 }
 
+// A kept pass goes only to the server it was signed for (PROTOCOL.md §8): the
+// same mailbox, opened to call another server within the pass's ten minutes,
+// signs a new pass for that one, so no server is handed a live pass for
+// another.
+func TestAKeptPassGoesOnlyToItsServer(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	b := e.mailbox()
+	seen := passes(e)
+	receive(t, b)
+	if len(*seen) == 0 {
+		t.Fatal("no call carried a pass")
+	}
+	kept := (*seen)[0]
+	other := newEnv(t)
+	got := passes(other)
+	o := e.opts()
+	o.Base, o.HTTPClient = other.srv.URL, other.http
+	at, err := client.Open(b.Dir(), o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = at.Receive(context.Background()) // the other server holds no such mailbox
+	if len(*got) == 0 {
+		t.Fatal("the other server was called with no pass")
+	}
+	for _, p := range *got {
+		if p == kept {
+			t.Fatal("the pass kept for one server was sent to another")
+		}
+	}
+}
+
 // A new prekey comes with a new certificate, and the server then takes no
 // pass under the old one. A client still holding such a pass is refused once,
 // signs another under the certificate in use, and carries on.

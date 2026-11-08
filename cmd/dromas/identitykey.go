@@ -244,7 +244,10 @@ shell's.`,
 			if err := os.MkdirAll(filepath.Dir(socket), 0o700); err != nil {
 				return err
 			}
-			if _, err := os.Lstat(socket); err == nil {
+			if fi, err := os.Lstat(socket); err == nil {
+				if fi.Mode()&os.ModeSocket == 0 {
+					return fmt.Errorf("%s is no socket: the agent's path names a file, which agent start never removes; set the agent to a path of its own", socket)
+				}
 				if err := os.Remove(socket); err != nil {
 					return err
 				}

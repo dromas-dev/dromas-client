@@ -154,6 +154,20 @@ func TestScriptSendsAndReadsByItsClock(t *testing.T) {
 	}
 }
 
+// A kept pass goes only to the server it was signed for (PROTOCOL.md §8): the
+// same mailbox calling another server signs a new pass for it.
+func TestScriptKeepsItsPassForItsServer(t *testing.T) {
+	w := newWorld(t)
+	p := w.mailbox()
+	kept := p.must("dr_pass")
+	if p.must("dr_pass") != kept {
+		t.Fatal("control: the kept pass was not used again at its own server")
+	}
+	if p.must("DR_SERVER_URL=http://127.0.0.1:9 dr_pass") == kept {
+		t.Error("the pass kept for one server was used for another")
+	}
+}
+
 // The replay set: pruned by the mailbox's clock only once the server has taken a
 // pass dated by it, a line kept twice the TTL and an hour from its sent_at (protocol.SeenFor), and a
 // floor below which a message is stale whatever the clock reads.

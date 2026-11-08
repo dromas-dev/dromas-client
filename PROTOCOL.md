@@ -541,7 +541,7 @@ server-port    = %x31-39 *4DIGIT   ; no leading zero, at most 65535,
 
 - **A server MUST refuse a value that is too long with `401 unauthorized`, before the server hashes, parses or verifies the value.** A value is too long when, whitespace included, the value is longer than the form a client writes with a signature of the largest bound that any identity key type has (Section 3.2).
 - **Lifetime.** A client signs a pass to end 10 minutes after signing. A server accepts a pass that has not ended and that ends at most the skew allowance after the time on the server's own clock.
-- **A client keeps its pass, and uses the kept pass for every call until the pass is about to end.** A client MUST NOT use a kept pass with more than 10 minutes left, because the client's clock has then gone back since the client signed the pass.
+- **A client keeps its pass, and uses the kept pass for every call until the pass is about to end.** A client MUST NOT use a kept pass with more than 10 minutes left, because the client's clock has then gone back since the client signed the pass. A client MUST NOT send a kept pass to a server whose name is not the one the pass was signed for. It keeps that name beside the pass, and signs a new pass for any other server, which could otherwise replay the kept pass at the server it names.
 - **A server MAY remember a pass it has verified, by the pass's values with the signature in the one form (Section 3.2).** So a pass is one pass, however the header wrote it. A P-256 identity's pass is one pass, with s or with n − s (Section 3.2). A server that remembers passes MUST compare a P-256 identity's pass using the lower of the two values as s.
 - **Which signer.** A server accepts a pass:
   - by the mailbox's identity, always;
