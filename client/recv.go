@@ -243,10 +243,11 @@ func (b *Mailbox) receive(ctx context.Context, owing bool) (*Result, error) {
 		res.Renewed, res.ACLReplaced = renewed, replaced
 		return res, gone
 	}
-	// A drain refused for what a renewal mends, whose renewal failed in a way a
-	// wait may mend, or is held back after one that failed so, is a call to
-	// make again ([Transient]): a later Receive renews again (#773, #800).
-	if err != nil && Transient(renewErr) && b.mendable(err) {
+	// A drain refused for what a renewal mends (renewalMends), whose renewal
+	// failed in a way a wait may mend, or is held back after one that failed
+	// so, is a call to make again ([Transient]): a later Receive renews again
+	// (#773, #800). Any other error stays as it is, whatever the mailbox holds.
+	if err != nil && Transient(renewErr) && renewalMends(err) {
 		err = &renewalOwed{err}
 	}
 	// A replacement of an ACL that held what no file of the mailbox says, which
@@ -387,7 +388,7 @@ func renewalMends(err error) bool {
 	return code(err) == protocol.CodeNoSuchMailbox
 }
 
-// renewalOwed is a drain's error that a renewal mends (mendable), whose
+// renewalOwed is a drain's error that a renewal mends (renewalMends), whose
 // renewal failed in a way a wait may mend, or is held back after one that
 // failed so ([Transient]): a later drain renews again.
 type renewalOwed struct{ err error }
