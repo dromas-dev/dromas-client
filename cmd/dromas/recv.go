@@ -161,11 +161,15 @@ func (r *recvRun) handle(ctx context.Context, ev client.Event) error {
 		}
 		// A message line is this client's own, from the verified fields:
 		// never the sender's bytes.
+		// --headers changes what is printed, never what the callback gets:
+		// so a service whose stdout is a log logs who wrote and when, and
+		// its callback still reads the message.
 		l := message(*ev.Delivery, r.names)
+		printed := l
 		if r.o.headers {
-			l = messageHeaders(*ev.Delivery, r.names)
+			printed = messageHeaders(*ev.Delivery, r.names)
 		}
-		r.print(l)
+		r.print(printed)
 		if r.o.exec != nil {
 			return r.callback(ctx, ev.Delivery.ID, l)
 		}
