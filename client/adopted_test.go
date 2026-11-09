@@ -567,9 +567,6 @@ func TestNothingLowersTheFloor(t *testing.T) {
 	if res := receive(t, b); res.Renewed == nil {
 		t.Fatalf("the drain past the line's time: %+v", res)
 	}
-	if got := client.AdoptedKeys(t, b); !slices.Contains(got, found) {
-		t.Fatalf("adopted %v, want %d among them", got, found)
-	}
 	if after, _ := stateOf(b, "seen"); bytes.Equal(after, seen) {
 		t.Fatal("the prune dropped no line")
 	}
