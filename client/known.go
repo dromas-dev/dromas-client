@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"time"
 
 	"golang.org/x/crypto/ssh"
 
@@ -185,7 +186,7 @@ func (b *Mailbox) noteServed(o *own, served []byte) error {
 		if r := o.signer.Rank(); err != nil || o.statement.Serial <= published || r != 0 && r != o.statement.Serial {
 			return err
 		}
-		return b.recordTaken(o.statement.Serial, "", taken{})
+		return b.recordTaken(o.statement.Serial, "", time.Time{})
 	}
 	var ours bool
 	if err := b.view(func(s store) error { ours = s.get(bucketMade, madeKey(served)) != nil; return nil }); err != nil {

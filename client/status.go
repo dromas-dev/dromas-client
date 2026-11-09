@@ -240,7 +240,7 @@ func (b *Mailbox) status() (*Status, error) {
 		s.Attention = append(s.Attention, fmt.Sprintf("a new prekey signed at %s was never seen published: the server refused it or did not answer; dromas recv sends it again", since))
 	}
 	if n := b.pastDeletion(signed); n > 0 && !s.Revoked {
-		s.Attention = append(s.Attention, fmt.Sprintf("prekeys past their deletion time by this mailbox's clock, which reads %s: %d. Each stays on disk because this mailbox deletes a key only by a time a server has confirmed, and it holds its current prekey until a server accepts its next renewal. A server may be refusing its passes, its clock may be ahead, or no recv has run: only the owner can judge the clock, and dromas recv deletes each once a server accepts its pass and its renewal", b.now().UTC().Format(protocol.TimeLayout), n))
+		s.Attention = append(s.Attention, fmt.Sprintf("prekeys past their deletion time by this mailbox's clock, which reads %s: %d. Each stays on disk because this mailbox deletes a key only once a server has answered a drain's list or taken a renewal, and it holds its current prekey until a server accepts its next renewal. A server may be refusing its passes, its clock may be ahead, or no recv has run: only the owner can judge the clock, and dromas recv deletes each once a server accepts its pass and its renewal", b.now().UTC().Format(protocol.TimeLayout), n))
 	}
 	if s.PrekeyNotMade, err = b.notMade(); err != nil {
 		return nil, err
@@ -272,13 +272,12 @@ func (b *Mailbox) status() (*Status, error) {
 
 // pastDeletion counts the prekeys among signed whose deletion time, not_after
 // plus protocol.TTL as in prune, has come by this mailbox's own clock. prune
-// deletes each retired one by a time a server confirmed, so a retired one
-// still held is one no server has confirmed. It keeps the current prekey and
-// the newest whatever a list confirmed, until a renewal is accepted, and the
-// mailbox keeps no record of a list's date: so those two count here from when
-// their time has come, until then. Nothing is deleted here or on the owner's
-// word, because a key that a message may wait for is never deleted by a clock
-// no server has confirmed (PROTOCOL.md §12.4, §15.3).
+// deletes each retired one only once a server has answered, so a retired one
+// still held is one no answered call has reached. It keeps the current prekey
+// and the newest, until a renewal is accepted: so those two count here from
+// when their time has come, until then. Nothing is deleted here or on the
+// owner's word: a key is deleted only once a server has answered a drain's
+// list or taken a renewal (PROTOCOL.md §12.4, §15.3).
 func (b *Mailbox) pastDeletion(signed []uint64) int {
 	n := 0
 	for _, serial := range signed {

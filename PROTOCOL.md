@@ -193,9 +193,7 @@ Where this document uses a term below as a defined term, the term has the sense 
 - **Drain:** a client's run through the messages in the client's mailbox (Section 12.3).
 - **Held:** of an accepted message, kept apart because the mailbox has not allowed the message's sender (Section 12.3).
 - **Replay set:** the record that a client keeps of each message that the client accepted (Section 12.3, check 8).
-- **Replay floor:** the cutoff to which a mailbox's replay set has been pruned (Section 12.3, check 8).
 - **Deletion time:** the time by which a client deletes a retired prekey (Section 12.4).
-- **Confirmed time:** the date of a pass that the client's server accepted (Section 12.4). A renewal's confirmed time is the date of the pass on the upload that the server accepted for the renewal.
 - **The remedy:** the steps of Section 12.6, for a stolen working key.
 
 **Time**
@@ -1370,7 +1368,6 @@ A client drains every page of its list (Section 11.11) and fetches the message o
    | 4 | `msg_id` is in its form | `bad_envelope` |
    | 5 | `sent_at` is no older than the TTL | `stale` |
    | 6 | `sent_at` is no more than the skew allowance ahead of this mailbox's clock | `future` |
-   | 7 | `sent_at` is at least the TTL above the mailbox's replay floor (check 8), regardless of the clock's reading | `stale` |
 
 7. **Check 7, revocation.** The reader follows three steps, in this order:
    1. **What the reader keeps comes first, with no call.** A kept revocation of the sender's address (Section 12.5) refuses the message as `revoked`, now and for every later message from that address (Section 10.1). A kept revocation of the sender's certificates that covers the signer (Section 5.1) refuses the message as `certificate_revoked`.
@@ -1380,7 +1377,6 @@ A client drains every page of its list (Section 11.11) and fetches the message o
 8. **Check 8, replay.** The reader computes the SHA-256 of the ciphertext. That hash is not in the replay set (`replay`).
    - The reader refuses a message whose listed `id` differs from that hash (`bad_id`).
    - The replay set keeps each message's hash, with the message's `sent_at`, `from` and `msg_id`, until `sent_at` + 14 days and an hour.
-   - **A prune that drops a line first raises the mailbox's replay floor to the prune's cutoff.** The cutoff is the confirmed time that the prune goes by (Section 12.4), less 14 days and an hour.
    - A replay set that is lost, or put back from an older copy, lacks records that the mailbox made before the loss. Section 15.9 states what that costs.
 9. **Check 9, duplicate.** `(from, msg_id)` is not in the replay set. A match means the message is a copy of a message already delivered. The reader acks the copy and does not deliver the copy again.
 
@@ -1425,7 +1421,7 @@ A client drains every page of its list (Section 11.11) and fetches the message o
   - **A client MUST NOT delete a retired prekey if a message that the client's server stores may be sealed to that prekey.**
   - **A client SHOULD delete a retired prekey before the deletion time, when no message that the client's server stores can be sealed to that prekey (Section 15.3).**
   - **A client deletes a working key when the server accepts a renewal under a later certificate.**
-- **A client deletes keys and prunes its replay set by a confirmed time (Sections 2.3, 15.3, 15.7).** The client never deletes keys or prunes the replay set by a reading of the client's clock alone.
+- **A client deletes keys and prunes its replay set only after a call that its server answered, by the client's clock read then (Sections 15.3, 15.7).** A drain's list answered, or a renewal accepted, is such a call.
 - **A mailbox that its server has forgotten sends its renewal as a registration (Section 11.7).** The mailbox sends that registration at a prekey serial above every prekey statement the mailbox has registered or renewed.
 - **When a mailbox looks itself up (Section 11.8), the mailbox checks the lookup's answer by every rule of Section 5 except a certificate's dates (Section 15.7) and the revocation serial (Section 5.1).** The mailbox renews past a certificate that the identity has revoked, so that certificate does not stop the renewal.
   - The mailbox stops the renewals it makes on its own where a served prekey statement does not verify, or is earlier than one the mailbox has registered or renewed (Section 5.3). Its owner's renewal goes past such a prekey statement, by the remedy where the mailbox signs under certificates (Section 12.6).
@@ -1639,14 +1635,13 @@ Dromas protects a message's content from everyone but the message's recipient. D
 ### 15.3. Forward secrecy
 
 - **Every mailbox has forward secrecy, given a client that deletes retired prekeys (Section 12.4).** How often the mailbox renews and deletes sets the bound on that forward secrecy.
-  - A message cannot be recovered from the mailbox's keys once every prekey that the message could be encrypted to is deleted. That time comes, at the latest, at the first confirmed time (Section 2.3) at or past the `not_after` of the prekey statement that the message is sealed to, plus the TTL. That is at most 15 days after the prekey statement was made (Section 6), by a time that a server confirmed. A server that refuses every pass keeps the prekeys on the mailbox's disk for as long as the server refuses.
-  - Suppose a client deletes every retired prekey after a drain that empties its mailbox. For that client, that time comes at the first such drain whose list has a confirmed time more than two hours after the confirmed time of the mailbox's next renewal. For example, that time comes this long after the message arrives:
+  - A message cannot be recovered from the mailbox's keys once every prekey that the message could be encrypted to is deleted. That time comes, at the latest, at the first answered call (Section 12.4) at or past the `not_after` of the prekey statement that the message is sealed to, plus the TTL. That is at most 15 days after the prekey statement was made (Section 6), by the mailbox's clock. A server that refuses every pass keeps the prekeys on the mailbox's disk for as long as the server refuses.
+  - Suppose a client deletes every retired prekey after a drain that empties its mailbox. For that client, that time comes at the first such drain whose list is answered more than an hour after the server accepted the mailbox's next renewal, both by the mailbox's clock. For example, that time comes this long after the message arrives:
     - about a day, for a mailbox that renews daily and polls between renewals;
     - about two days, for a mailbox whose only drain is a daily one and which renews at the start of that drain;
     - about six hours, for a mailbox that renews every six hours and polls.
-  - The first hour is for sends in flight. A server accepts a send only to the current prekey statement (Section 11.10, step 7). So once the server accepts a renewal, the server refuses a send to the prekey that the renewal replaced. A send that the server accepted before the renewal is stored and listed within that hour, or is not stored (Section 13).
-  - The second hour is for the mailbox's clock. Both confirmed times are dates of passes on the mailbox's clock. A server accepts a pass from a clock up to 10 minutes behind the server's clock, or up to 50 minutes ahead (Section 15.7). So the two confirmed times can be up to 60 minutes further apart than the server's clock says.
-  - The bound keeps no state per peer, because the mailbox renews, drains and deletes on its own. The bound needs a server that accepts the mailbox's passes. A client that deletes by these two hours relies on the promise of Section 13 on a send in flight, so that no message arrives sealed to a deleted prekey.
+  - The hour is for sends in flight. A server accepts a send only to the current prekey statement (Section 11.10, step 7). So once the server accepts a renewal, the server refuses a send to the prekey that the renewal replaced. A send that the server accepted before the renewal is stored and listed within that hour, or is not stored (Section 13).
+  - The bound keeps no state per peer, because the mailbox renews, drains and deletes on its own. The bound needs a server that accepts the mailbox's passes. A client that deletes by this hour relies on the promise of Section 13 on a send in flight, so that no message arrives sealed to a deleted prekey.
 - **A message waiting on the server is exposed until the mailbox fetches it.** A mailbox that stops renewing keeps its ended prekey as the current prekey. The mailbox's last messages stay exposed until the mailbox renews.
 - **A mailbox that no server accepts a pass from keeps its retired prekeys past their deletion time.** The mailbox keeps those prekeys until a server accepts a pass from the mailbox. This is because the mailbox cannot tell whether its clock is far ahead or a server is refusing the mailbox, and by that clock the mailbox deletes no key that a message may wait for.
 - **Forward secrecy depends on real deletion.** A key kept in a backup, a synced folder or a store with version history survives its deletion.
@@ -1723,8 +1718,7 @@ Dromas protects a message's content from everyone but the message's recipient. D
   - a clock that goes back by more than an hour in the middle of a drain.
 
   Either case can put a `sent_at` past a reader's skew allowance, or have a reader judge messages by a clock that no server accepted a pass from. The reader then refuses the message, and keeps the message with the findings of the reader's checks, the reader's clock among them. Each case needs a clock that is already wrong.
-- **The replay floor that a prune raises costs only messages that a hostile server accepted a pass for at a clock that an honest server refuses.** That hostile server could withhold those messages anyway. The loss of a replay set costs more (Section 15.9).
-- **A client deletes keys and prunes its replay set by the date of a pass that a server accepted (Section 12.4).** This is because a clock read alone may be far ahead or step back. By a clock far ahead, a client would delete a key that a stored message is sealed to. By a clock that steps back, a client would make a delivered message fresh again.
+- **A client deletes keys and prunes its replay set only after a call that a server answered, by the client's clock read then (Section 12.4).** A clock far ahead is stopped at its pass before that. **A clock that is wrong in other ways is a failure, and its cost is accepted.** A clock stepped back more than an hour after a prune lets a hostile server deliver a pruned message twice. A clock that jumps ahead during a call can delete a retired prekey that a stored message is sealed to.
 - **If a kept certificate began less than an hour before the client's clock, the certificate was made while that clock read ahead (Section 12.4).** A new certificate is made by the clock as the clock now reads.
 - **A mailbox checks its lookup of itself by every rule except a certificate's dates (Section 12.4).** From that lookup, the mailbox needs two things: that its identity signed the prekey statement, and where the prekey statement stands in the mailbox's order. A certificate's dates bind everything signed under the certificate, and never bind a renewal past the certificate. So a date never stops the mailbox from renewing past a served prekey statement.
 

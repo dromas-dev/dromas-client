@@ -124,7 +124,7 @@ func TestAnAdoptedKeyGoesByTheRenewalAboveIt(t *testing.T) {
 // A message sealed to the key before the state file is lost, and one sealed to it
 // after that and before the renewal, decrypt with the key and are delivered, the
 // failure's cost (PROTOCOL.md §15.9). A drain that empties the mailbox more than
-// two hours after the server took the renewal deletes the key, as it deletes any
+// an hour after the server took the renewal deletes the key, as it deletes any
 // retired prekey (dropRetired).
 func TestAnEmptyingDrainDeletesAnAdoptedKey(t *testing.T) {
 	t.Parallel()
@@ -145,14 +145,14 @@ func TestAnEmptyingDrainDeletesAnAdoptedKey(t *testing.T) {
 	}
 	waitedDelivered(t, res, a, 2)
 	if !exists(prekeyFile(b, old, ".agekey")) {
-		t.Fatal("a drain within two hours of the renewal deleted the key")
+		t.Fatal("a drain within an hour of the renewal deleted the key")
 	}
 	e.clock.Add(3 * time.Hour)
 	if _, err := x.Receive(ctx); err != nil {
 		t.Fatal(err)
 	}
 	if exists(prekeyFile(b, old, ".agekey")) || len(client.AdoptedKeys(t, x)) != 0 {
-		t.Fatal("an emptying drain past two hours left the adopted key")
+		t.Fatal("an emptying drain past an hour left the adopted key")
 	}
 }
 
@@ -535,47 +535,4 @@ func TestAKeyMountedDuringADrainDecryptsNothingUntilAdopted(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitedDelivered(t, res, a, 1)
-}
-
-// No adoption and no prune lowers the replay floor: a message below it is
-// stale (PROTOCOL.md §12.3 check 8).
-func TestNothingLowersTheFloor(t *testing.T) {
-	t.Parallel()
-	e := newEnv(t)
-	a, b := e.mailbox(), e.mailbox()
-	send(t, a, b, "delivered, its line pruned later")
-	if res := receive(t, b); len(res.Delivered) != 1 {
-		t.Fatalf("the first delivery: %+v", res)
-	}
-	seen, _ := stateOf(b, "seen")
-	// Above the cutoff the prune drops that line at.
-	floor := strconv.FormatInt(e.clock.Now().Add(protocol.SeenFor+24*time.Hour).Unix(), 10)
-	b.SetRecord(t, "seen-floor", []byte(floor))
-	// A key the state names nowhere, which the acknowledgement adopts.
-	key, err := os.ReadFile(prekeyFile(b, numberOf(t, b), ".agekey"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	found := numberOf(t, b) - 1
-	if err := os.WriteFile(prekeyFile(b, found, ".agekey"), key, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := b.Acknowledge(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	e.clock.Add(protocol.SeenFor + time.Second)
-	if res := receive(t, b); res.Renewed == nil {
-		t.Fatalf("the drain past the line's time: %+v", res)
-	}
-	if after, _ := stateOf(b, "seen"); bytes.Equal(after, seen) {
-		t.Fatal("the prune dropped no line")
-	}
-	if raw, _ := stateOf(b, "seen-floor"); string(raw) != floor {
-		t.Fatalf("seen-floor %q after the adoption and the prune, want %s, which neither lowers", raw, floor)
-	}
-	send(t, e.mailbox(), b, "below the floor")
-	res := receive(t, b)
-	if len(res.Delivered) != 0 || len(res.Refused) != 1 || res.Refused[0].Code != protocol.RefusedStale {
-		t.Fatalf("a message below the floor: %+v, want it stale", res)
-	}
 }

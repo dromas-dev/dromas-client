@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -116,11 +115,10 @@ type Result struct {
 	// mailbox's last read of itself, that the mailbox did not make, or nil
 	// ([NotMade]).
 	NotMade *NotMade
-	// listedAt is the reading the server took for the drain's first list,
-	// the date of the pass the list carried, and zero until it has answered:
-	// what is deleted by it is deleted by a clock a server took, and never by
-	// a reading no server has seen.
-	listedAt taken
+	// listedAt is the clock read once the server answered the drain's first
+	// list, and zero until it has: keys are deleted and the replay set pruned
+	// only by it.
+	listedAt time.Time
 	// owing has the drain record each message it lands in inbox/ as owed its
 	// handling, in the transaction that records it seen ([Mailbox.Follow]).
 	owing bool
@@ -159,8 +157,8 @@ func (r *Result) Again() time.Duration {
 // [Mailbox.dropRetired]): every one, once its list was taken more than an
 // hour after the server took the current prekey, and all but the newest
 // where the mailbox does not know when it did. And once the server has answered
-// the drain's list, so has taken a pass dated by this machine's clock, the
-// prekeys whose deletion time has come by that pass's date go too.
+// the drain's list, the prekeys whose deletion time has come by the clock read
+// then go too.
 //
 // A mailbox that holds its own revocation receives nothing.
 func (b *Mailbox) Receive(ctx context.Context) (*Result, error) {
@@ -242,10 +240,9 @@ func (b *Mailbox) receive(ctx context.Context, owing bool) (*Result, error) {
 	} else {
 		res.NotMade = nm
 	}
-	// Deleted by this clock only once the server has taken a pass dated by
-	// it, and by that pass's date: a clock far ahead is stopped at its pass,
-	// and the keys that messages wait for stay (PROTOCOL.md §12.4).
-	if !res.listedAt.None() {
+	// Deleted only once the server has answered the list, by the clock read
+	// then: a clock far ahead is stopped at its pass (PROTOCOL.md §12.4).
+	if !res.listedAt.IsZero() {
 		// Only a drain that emptied the mailbox may delete retired prekeys
 		// early; and it leaves no message a partial could be of.
 		if err == nil && !res.More {
@@ -447,18 +444,18 @@ func (b *Mailbox) drainPages(ctx context.Context, asked *lookups, res *Result) e
 			}
 		}
 		var list protocol.MessageList
-		resp, at, err := b.ownerTaken(ctx, http.MethodGet, path, hdr, nil, &list)
+		resp, err := b.ownerWith(ctx, http.MethodGet, path, hdr, nil, &list)
 		if err != nil {
 			// A server that says this mailbox is revoked, or its certificate, was
 			// held to what it shows (proved, in call).
 			return err
 		}
 		if page == 0 {
-			res.listedAt = at
-			// Pruned by this clock only once the server has taken a pass dated
-			// by it, and by that pass's date: a drain that a clock far off would
-			// prune is stopped at its pass first (PROTOCOL.md §15.7, §12.4).
-			if err := b.pruneSeen(at); err != nil {
+			// Pruned only once the server has answered the list, by the clock
+			// read then: a clock far off is stopped at its pass first
+			// (PROTOCOL.md §12.4, §15.7).
+			res.listedAt = b.now()
+			if err := b.pruneSeen(res.listedAt); err != nil {
 				return err
 			}
 		}
@@ -681,9 +678,8 @@ type verdict struct {
 //  5. The signature over the line as decrypted, in this mailbox's message
 //     namespace, by that identity or a working key it certified.
 //  6. The rest of the envelope: version 1, to is this mailbox, msg_id in its
-//     form, and sent_at no older than protocol.TTL, at most
-//     protocol.MaxSkew ahead, and at least protocol.TTL above the replay
-//     floor a prune raises (seenFloor).
+//     form, and sent_at no older than protocol.TTL and at most
+//     protocol.MaxSkew ahead.
 //  7. Revocation: this mailbox holds no revocation of the sender. The server is
 //     asked for one, once for each sender in a drain, by a read of the
 //     sender's revocations (readRevocations), which the server serves whether
@@ -698,8 +694,8 @@ type verdict struct {
 //  8. Replay: the locally computed ciphertext hash is not in the seen-set.
 //  9. Retry: (from, msg_id) is not in the seen-set. A match is a duplicate.
 //
-// The numbers are PROTOCOL.md §12.3's. protocol.Examine makes checks 2 to 6,
-// all but the floor, which is this mailbox's own and judge's. Who the sender is,
+// The numbers are PROTOCOL.md §12.3's. protocol.Examine makes checks 2 to 6.
+// Who the sender is,
 // is never asked of the server, nor read from its list: the message carries
 // what proves it. The one thing asked is whether a revocation of that sender
 // exists, and the answer proves itself. The sender's identity is pinned only
@@ -750,19 +746,6 @@ func (b *Mailbox) judge(ctx context.Context, ct []byte, asked *lookups) (verdict
 		return verdict{}, err
 	}
 	from, env := signed.Sender.Address(), signed.Envelope
-	// Freshness has a floor too: a sent_at before the highest cutoff the
-	// seen-set was pruned at may be a message whose line went, and so may one
-	// up to protocol.TTL above it, a retry of such a message, dated afresh up
-	// to a TTL after its first copy (check 9 knows a retry by that copy's
-	// line).
-	sentAt := env.SentAt.Unix()
-	floor, err := b.seenFloor()
-	if err != nil {
-		return verdict{}, err
-	}
-	if floor > 0 && sentAt < floor+int64(protocol.TTL/time.Second) {
-		return refused(protocol.RefusedStale, "sent_at is before this mailbox's replay set reaches back to, since its clock once read later than it does now")
-	}
 	// Check 7. What the mailbox keeps comes first, and asks nobody. Otherwise
 	// the sender's revocations are read, once in a drain, and what the
 	// mailbox then keeps decides: a failed read holds only a message nothing
@@ -899,8 +882,7 @@ var defaultIgnorable = [][2]rune{
 // The replay set: each accepted message, by the hash of its ciphertext, with
 // its sent_at, its sender and its msg_id, kept until sent_at +
 // protocol.SeenFor, so the replay check covers the window the freshness check
-// takes a message in, and the floor (seenFloor) covers a clock that steps
-// back further. Two indexes beside it, in the same transactions: by sender
+// takes a message in. Two indexes beside it, in the same transactions: by sender
 // and msg_id, which a retry is known by, and by sent_at, which a prune walks
 // (#11).
 
@@ -953,13 +935,13 @@ func aboutAnother(err error) error {
 	return &aboutOther{err}
 }
 
-// pruneSeen drops the lines past protocol.SeenFor by the reading at, one a
-// server took. When it drops one, the floor rises to the cutoff in the same
-// transaction, so a clock that later reads further back than SeenFor allows
-// for still takes no message whose line went (seenFloor). A prune that drops
-// nothing writes nothing, the floor included.
-func (b *Mailbox) pruneSeen(at taken) error {
-	cutoff := at.At().Add(-protocol.SeenFor).Unix()
+// pruneSeen drops the lines past protocol.SeenFor by at, the clock read once
+// the server answered a drain's list. A clock stepped back more than the hour
+// SeenFor allows for after a prune makes a pruned message fresh again, so a
+// hostile server can deliver it twice: a cost of a clock already wrong
+// (PROTOCOL.md §15.7).
+func (b *Mailbox) pruneSeen(at time.Time) error {
+	cutoff := at.Add(-protocol.SeenFor).Unix()
 	return b.update(func(s store) error {
 		var old [][]byte
 		if err := s.each(bucketSeenTime, func(k, _ []byte) error {
@@ -969,12 +951,6 @@ func (b *Mailbox) pruneSeen(at taken) error {
 			old = append(old, k)
 			return nil
 		}); err != nil && !errors.Is(err, errDone) {
-			return err
-		}
-		if len(old) == 0 {
-			return nil
-		}
-		if _, err := b.raiseFloor(s, cutoff); err != nil {
 			return err
 		}
 		for _, k := range old {
@@ -998,38 +974,6 @@ func (b *Mailbox) pruneSeen(at taken) error {
 
 // errDone stops a walk of a bucket where it has found what it walked for.
 var errDone = errors.New("done")
-
-// seenFloor is the replay floor, or 0 when there is none: the highest cutoff a
-// prune of the replay set has dropped a line at. A message whose sent_at is
-// before it, or less than protocol.TTL above it, is stale whatever the clock
-// now reads, since its line, or its first copy's, may be gone.
-func (b *Mailbox) seenFloor() (floor int64, err error) {
-	err = b.view(func(s store) error {
-		floor, err = floorOf(s, "seen-floor")
-		return err
-	})
-	return floor, err
-}
-
-// floorOf is the time, in Unix seconds, that s keeps under key in the mailbox's
-// own bucket, or 0 where it keeps none.
-func floorOf(s store, key string) (int64, error) {
-	n, err := decimal(s.get(bucketMailbox, key), key)
-	if n > math.MaxInt64 {
-		return math.MaxInt64, err
-	}
-	return int64(n), err
-}
-
-// raiseFloor sets the floor to t, unless it is already that high, and reports
-// whether it rose.
-func (b *Mailbox) raiseFloor(s store, t int64) (bool, error) {
-	floor, err := floorOf(s, "seen-floor")
-	if err != nil || floor >= t {
-		return false, err
-	}
-	return true, s.put(bucketMailbox, "seen-floor", strconv.AppendInt(nil, t, 10))
-}
 
 // entityTag is an ETag as a mailbox keeps one: an entity-tag of RFC 9110 §8.8.3,
 // weak or strong, in printable ASCII, and short. A server's tag of any other

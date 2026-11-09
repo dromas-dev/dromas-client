@@ -740,7 +740,7 @@ func (b *Mailbox) renewAndRevoke(ctx context.Context) (*Remedy, error) {
 	if err != nil {
 		return done(err)
 	}
-	// By the reading the server took the renewal at (PROTOCOL.md §12.4).
+	// By the clock read once the server took the renewal (PROTOCOL.md §12.4).
 	return done(b.prune(at))
 }
 

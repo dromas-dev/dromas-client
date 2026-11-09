@@ -99,13 +99,12 @@ func (b *Mailbox) rekey(ctx context.Context, asked bool) (*protocol.Prekey, erro
 	if err != nil {
 		return p, err
 	}
-	// By the reading the server took the renewal at (PROTOCOL.md §12.4).
+	// By the clock read once the server took the renewal (PROTOCOL.md §12.4).
 	return p, b.prune(at)
 }
 
 // renew reads the mailbox at its server, numbers and makes the renewal, and
-// sends it. It returns the prekey and the reading the server took it at once
-// it is taken, with an error beside them only for a fault of this mailbox after
+// sends it. It returns the prekey and the clock read once the server took it, with an error beside them only for a fault of this mailbox after
 // that (#110).
 //
 // A renewal its owner did not ask for (asked unset) goes no further where the
@@ -113,23 +112,23 @@ func (b *Mailbox) rekey(ctx context.Context, asked bool) (*protocol.Prekey, erro
 // its own (PROTOCOL.md §12.4): above it the mailbox would take its address back
 // from whoever made it, whom only its owner can judge, and recommend revoking
 // the address to ([NotMade]). A mailbox that has published none is a restore.
-func (b *Mailbox) renew(ctx context.Context, asked bool) (*protocol.Prekey, taken, error) {
+func (b *Mailbox) renew(ctx context.Context, asked bool) (*protocol.Prekey, time.Time, error) {
 	return b.renewAs(ctx, asked, false)
 }
 
 // renewAs is renew, under a new certificate whatever the mailbox signed
 // before where certify is set ([Mailbox.RenewUnderCertificate]).
-func (b *Mailbox) renewAs(ctx context.Context, asked, certify bool) (*protocol.Prekey, taken, error) {
+func (b *Mailbox) renewAs(ctx context.Context, asked, certify bool) (*protocol.Prekey, time.Time, error) {
 	certified, err := b.certified()
 	if err != nil {
-		return nil, taken{}, err
+		return nil, time.Time{}, err
 	}
 	st, err := b.readOwn(ctx, false, asked && !certified)
 	if err != nil {
-		return nil, taken{}, err
+		return nil, time.Time{}, err
 	}
 	if st.notMade && !asked {
-		return nil, taken{}, refuse("this mailbox's server serves a prekey statement in its name that this mailbox did not make, and recv renews nothing above one: dromas status says what to do, and dromas prekey renew renews above it, for its owner to run")
+		return nil, time.Time{}, refuse("this mailbox's server serves a prekey statement in its name that this mailbox did not make, and recv renews nothing above one: dromas status says what to do, and dromas prekey renew renews above it, for its owner to run")
 	}
 	st.certify = st.certify || certify
 	return b.renewFrom(ctx, st)
@@ -139,15 +138,15 @@ func (b *Mailbox) renewAs(ctx context.Context, asked, certify bool) (*protocol.P
 // A statement whose certificate the server answers is longer than it takes
 // (certificate_too_long) is spent, and one under a certificate of the
 // maximum that answer names is made and sent, once (shorter).
-func (b *Mailbox) renewFrom(ctx context.Context, st *ownRead) (*protocol.Prekey, taken, error) {
+func (b *Mailbox) renewFrom(ctx context.Context, st *ownRead) (*protocol.Prekey, time.Time, error) {
 	for attempt := 0; ; attempt++ {
 		next, signed, err := b.nextNumber(st, false)
 		if err != nil {
-			return nil, taken{}, err
+			return nil, time.Time{}, err
 		}
 		p, req, err := b.makeRenewal(ctx, st, next, signed)
 		if err != nil {
-			return nil, taken{}, err
+			return nil, time.Time{}, err
 		}
 		// From here a statement at next exists, signed, whatever the server
 		// makes of it.
@@ -157,10 +156,10 @@ func (b *Mailbox) renewFrom(ctx context.Context, st *ownRead) (*protocol.Prekey,
 			return p, at, err
 		}
 		if attempt > 0 || code(err) != protocol.CodeCertificateTooLong {
-			return nil, taken{}, err
+			return nil, time.Time{}, err
 		}
 		if err := b.shorter(err); err != nil {
-			return nil, taken{}, err
+			return nil, time.Time{}, err
 		}
 	}
 }
@@ -195,8 +194,8 @@ func (b *Mailbox) shorter(err error) error {
 // answer is no error (#402 item 1). The reading at is the server's having
 // taken the upload where a fault of this mailbox kept it from being recorded
 // (#110). The error beside a renewal taken is a fault of this mailbox.
-func (b *Mailbox) tookRenewal(n uint64, at taken, err error) (bool, error) {
-	if !at.None() {
+func (b *Mailbox) tookRenewal(n uint64, at time.Time, err error) (bool, error) {
+	if !at.IsZero() {
 		return true, err
 	}
 	published, perr := b.publishedSerial()
@@ -238,17 +237,17 @@ type renewal struct {
 // process ended before it is recorded, the next send or recv sends the ACL
 // again (#324), and reports no ACL another writer put replaced, since the
 // server dropped it with the mailbox. So does a restore's adoption of it, which
-// has nothing to adopt (#366). It returns the reading the server took, as
-// publish does.
-func (b *Mailbox) sendRenewal(ctx context.Context, r renewal, n uint64) (taken, error) {
+// has nothing to adopt (#366). It returns the clock read once the server took
+// it, as publish does.
+func (b *Mailbox) sendRenewal(ctx context.Context, r renewal, n uint64) (time.Time, error) {
 	if !r.forgotten {
 		at, err := b.publish(ctx, b.mailboxPath("/prekey"), r.req, n)
-		if !at.None() || code(err) != protocol.CodeNoSuchMailbox {
+		if !at.IsZero() || code(err) != protocol.CodeNoSuchMailbox {
 			return at, err
 		}
 		o, kerr := b.known(ctx)
 		if kerr != nil {
-			return taken{}, kerr
+			return time.Time{}, kerr
 		}
 		if o.at != atNone || o.err != nil {
 			return at, err
@@ -262,7 +261,7 @@ func (b *Mailbox) sendRenewal(ctx context.Context, r renewal, n uint64) (taken, 
 		}
 		return s.del(bucketIntent, "adopt-acl")
 	}); err != nil {
-		return taken{}, err
+		return time.Time{}, err
 	}
 	reg := protocol.RegisterRequest{Identity: b.id.Document(), Prekey: r.req.Prekey, PrekeySignature: r.req.PrekeySignature, SenderKeyTypes: r.req.SenderKeyTypes}
 	return b.publish(ctx, b.mailboxPath(""), reg, n)
@@ -706,13 +705,12 @@ func (b *Mailbox) prekeyLifetime() (time.Duration, error) {
 var lifetimeRule = fmt.Sprintf("one is a whole number of seconds from %d (%d hours) to %d (%d days)", int64(MinPrekeyLifetime/time.Second), int64(MinPrekeyLifetime/time.Hour), int64(protocol.PrekeyLifetime/time.Second), int64(protocol.PrekeyLifetime/(24*time.Hour)))
 
 // retiredGrace is how long after the server took a renewal the list of a
-// drain must be taken before the drain may delete retired prekeys
-// (dropRetired): an hour of room for a send the server took as the renewal
-// landed, and an hour more because both dates are passes on the mailbox's
-// clock, which a server takes from 10 minutes behind its own to 50 ahead, so
-// the two can be 60 minutes further apart than the server's clock says
-// (PROTOCOL.md §15.3, §15.7).
-const retiredGrace = 2 * time.Hour
+// drain must be answered before the drain may delete retired prekeys
+// (dropRetired): room for a send the server took as the renewal landed
+// (PROTOCOL.md §15.3). Both times are this mailbox's clock, read once the
+// server answered; a clock that jumps between them can delete a retired key
+// early, a cost of a clock already wrong (§15.7).
+const retiredGrace = time.Hour
 
 // renewRetry is how long Receive waits to try a failed renewal again, so a
 // refused one (a rate limit, a server that is down) is not tried every poll:
@@ -902,8 +900,8 @@ func (b *Mailbox) renewDue() bool {
 }
 
 // dropRetired deletes retired prekeys before their deletion time, after a
-// drain that emptied the mailbox, by at, the reading the server took that
-// drain's list at (PROTOCOL.md §12.4). A send must name the recipient's
+// drain that emptied the mailbox, by at, the clock read once the server
+// answered that drain's list (PROTOCOL.md §12.4). A send must name the recipient's
 // current prekey statement, so a message encrypted to a retired prekey reached
 // the server before the renewal that retired it was taken, or with a send
 // already in progress then, which the server stores within that request's own
@@ -924,7 +922,7 @@ func (b *Mailbox) renewDue() bool {
 // After this, a message encrypted to a deleted prekey is unrecoverable from
 // the mailbox's keys. dromas.sh does not do this; it keeps every retired
 // prekey until prune's deletion time.
-func (b *Mailbox) dropRetired(at taken) error {
+func (b *Mailbox) dropRetired(at time.Time) error {
 	cur, err := b.publishedSerial()
 	if err != nil {
 		return err
@@ -948,11 +946,11 @@ func (b *Mailbox) dropRetired(at taken) error {
 		return nil
 	}
 	drop := retired[:len(retired)-1]
-	if took, ok := b.takenAt(cur); ok && at.At().Sub(took) > retiredGrace {
+	if took, ok := b.takenAt(cur); ok && at.Sub(took) > retiredGrace {
 		drop = retired
 	} else if len(drop) == 0 {
 		return nil
-	} else if since, ok := b.takenAt(retired[len(retired)-1]); !ok || at.At().Sub(since) <= retiredGrace {
+	} else if since, ok := b.takenAt(retired[len(retired)-1]); !ok || at.Sub(since) <= retiredGrace {
 		return nil
 	}
 	for _, n := range drop {
@@ -1009,7 +1007,7 @@ func (b *Mailbox) removePrekey(n uint64) error {
 }
 
 // finishGoing finishes each removal a crash left: a record marked going, whose
-// deletion a confirmed reading already decided.
+// deletion an answered call already decided.
 func (b *Mailbox) finishGoing() error {
 	signed, err := b.prekeys()
 	if err != nil {
@@ -1030,21 +1028,20 @@ func (b *Mailbox) finishGoing() error {
 }
 
 // prune deletes every retired prekey, and every key a renewal passed over,
-// whose deletion time has come by the reading at, one a server took: its
-// not_after plus protocol.TTL. Every message encrypted to it arrived by its
+// whose deletion time has come by at, the clock read once a server answered:
+// its not_after plus protocol.TTL. Every message encrypted to it arrived by its
 // not_after and has expired by then; after this, those messages are
 // unrecoverable from the mailbox's keys. It keeps the newest this mailbox
 // holds, and the one it published last, which is not retired: its statement
 // and its working key sign the mailbox's passes until a renewal is taken. A
-// drain's list taken, and a renewal taken, each run it, by the date of the
-// pass that call carried: a clock far ahead is stopped at that pass, and one
-// that moves while the call is in flight deletes nothing by where it went.
+// drain's list answered, and a renewal taken, each run it: a clock far ahead
+// is stopped at its pass, and the zero time, no answer, deletes nothing.
 // It first finishes a removal a crash left. A key the state file adopted is a
 // retired prekey of the renewal above it, which init --restore makes at once,
 // and goes by that renewal's deletion time: what was sealed to it reached the
 // server before that renewal was taken, or by its own not_after.
-func (b *Mailbox) prune(at taken) error {
-	if !at.None() {
+func (b *Mailbox) prune(at time.Time) error {
+	if !at.IsZero() {
 		if err := b.finishGoing(); err != nil {
 			return err
 		}
@@ -1062,7 +1059,7 @@ func (b *Mailbox) prune(at taken) error {
 		if i == len(signed) {
 			continue
 		}
-		if p, err := b.prekeyStatement(signed[i]); err == nil && !at.At().Before(p.NotAfter.Add(protocol.TTL)) {
+		if p, err := b.prekeyStatement(signed[i]); err == nil && !at.Before(p.NotAfter.Add(protocol.TTL)) {
 			if err := b.removePrekey(k); err != nil {
 				return err
 			}
@@ -1080,7 +1077,7 @@ func (b *Mailbox) prune(at taken) error {
 		if err != nil {
 			continue
 		}
-		if !at.At().Before(p.NotAfter.Add(protocol.TTL)) {
+		if !at.Before(p.NotAfter.Add(protocol.TTL)) {
 			if err := b.removePrekey(n); err != nil {
 				return err
 			}

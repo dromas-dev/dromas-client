@@ -574,20 +574,15 @@ func (b *Mailbox) seal(ctx context.Context, to protocol.Address, stem string, l 
 	pk := rs.prekey
 	// Dated last, once the recipient's mailbox is read: the sent_at a server
 	// meets is this clock at the post, less only what the seal and the
-	// second the dating truncates take (protocol.PostTime). And dated within
-	// the outbox's TTL from when the entry was written, however long the
-	// read took, however the clock moved meanwhile and however often a seal
-	// is made again: never before it was written, and never more than a TTL
-	// after. So every copy is dated within a TTL of every other, and the
-	// line a reader keeps of the copy it delivered, protocol.SeenFor past its
-	// sent_at, is there when any other comes. An entry written while the
-	// clock read ahead of where it reads now waits in the outbox until the
-	// clock passes that time (#334).
+	// second the dating truncates take (protocol.PostTime). And never more
+	// than the outbox's TTL after the entry was written, so every copy is
+	// dated within a TTL of every other, and the line a reader keeps of the
+	// copy it delivered, protocol.SeenFor past its sent_at, is there when any
+	// other comes. A clock that has stepped back since the entry was written
+	// dates the copy earlier, a cost of a clock already wrong (PROTOCOL.md
+	// §15.7).
 	wrote := env.SentAt
 	env.SentAt = b.now().UTC().Truncate(time.Second)
-	if env.SentAt.Before(wrote) {
-		return nil, refuse("its envelope is dated %s, ahead of this machine's clock: it was written while the clock read ahead of where it reads now, and the outbox counts its %d days from when it was written, so it is posted once the clock passes that time", wrote.Format(protocol.TimeLayout), protocol.TTL/(24*time.Hour))
-	}
 	if env.SentAt.After(wrote.Add(protocol.TTL)) {
 		return nil, refuse("it was written more than %d days ago, and an outbox posts a message no longer than that", protocol.TTL/(24*time.Hour))
 	}

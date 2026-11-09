@@ -27,7 +27,7 @@ import (
 //
 // Its buckets:
 //
-//	mailbox          the mailbox's own records, each by its name: policy, serial, pass, etag, seen-floor, acl, acl-another-writer, acl-replaced, revoked, revoked-certs, renew-failed, not-made, partial, folders-made, deprecation, sunset, document-read, latest (version.go)
+//	mailbox          the mailbox's own records, each by its name: policy, serial, pass, etag, acl, acl-another-writer, acl-replaced, revoked, revoked-certs, renew-failed, not-made, partial, folders-made, deprecation, sunset, document-read, latest (version.go)
 //	prekeys      each prekey statement this mailbox signed, by its serial: the statement, its signature, when it was signed and when its server took it, in one value, and that its key is going, once the mailbox has decided to delete it
 //	adopted      each key found in prekeys/ that the state file named nowhere, by its serial, until it is deleted (matchKeys, under its owner's acknowledgement): a retired prekey of the renewal above it (prune, dropRetired)
 //	made         the SHA-256 of every prekey statement this mailbox signed, in hex, never pruned: its serial

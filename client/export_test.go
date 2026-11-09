@@ -118,7 +118,7 @@ func SetAgentPatience(t *testing.T, d time.Duration) {
 // PruneByNoReading runs prune under the mailbox's lock with no reading, taken's
 // zero value, for a test.
 func (b *Mailbox) PruneByNoReading(ctx context.Context) error {
-	_, err := locked(ctx, b, func() (struct{}, error) { return struct{}{}, b.prune(taken{}) })
+	_, err := locked(ctx, b, func() (struct{}, error) { return struct{}{}, b.prune(time.Time{}) })
 	return err
 }
 
