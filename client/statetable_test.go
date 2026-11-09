@@ -342,7 +342,7 @@ func stateCommands() []stateCommand {
 				return "", err
 			}
 			r := b.Restored()
-			return fmt.Sprintf("acknowledged %v: adopted %d, rolled back %v", r.Acknowledged(), r.Adopted, r.RolledBack), err
+			return fmt.Sprintf("acknowledged %v: adopted %d", r.Acknowledged(), r.Adopted), err
 		}},
 		{"init --offline", func(ctx context.Context, e *env, dir string, _ *client.Mailbox) (string, error) {
 			opt := e.opts()

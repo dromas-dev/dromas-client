@@ -224,20 +224,16 @@ func TestScriptKeepsItsReplaySetByItsClock(t *testing.T) {
 
 // A mailbox that loses seen and seen-keys, its prekeys kept, holds keys its
 // replay set does not cover: its next drain stops with exit 4 before it lists
-// anything, as the Go client's does, until init --restore names them, renews
-// and owes the floor of the keys it held, which the next drain sets to its
-// list's reading plus an hour, less 7 days: a copy the server kept of a message
-// it delivered is refused as stale, and a message to the new prekey is
-// delivered at once. Of a message a key held at the restore opens, one dated a
-// second below the floor's edge is refused, and one at the edge is delivered
-// (PROTOCOL.md §12.3 check 8). A mailbox the script made covers its own keys,
-// and owes no floor.
-func TestScriptRefusesAReplayAfterItsStateIsLost(t *testing.T) {
+// anything, as the Go client's does, until init --restore names them and
+// renews. The failure's cost is accepted: a copy the server kept of a message
+// it delivered is delivered again, and a message to the new prekey is
+// delivered (PROTOCOL.md §15.9).
+func TestScriptStopsAfterItsStateIsLostAndAcceptsItsCost(t *testing.T) {
 	w := newWorld(t)
 	p, q := w.mailbox(), w.mailbox()
 	l := p.line(q.addr, "00000000-0000-4000-8000-0000000000f6", "pay invoice 8 once", 0)
 	ct := forge.Encrypt(t, w.srv, q.addr, l, p.sign(q.addr, l))
-	id := w.put(q, "", ct)
+	w.put(q, "", ct)
 	if d := q.recv(); d.rc != 0 || !slices.Equal(d.bodies(), []string{"pay invoice 8 once"}) || q.has("seen-floor") {
 		t.Fatalf("the first delivery: %v", d)
 	}
@@ -250,56 +246,13 @@ func TestScriptRefusesAReplayAfterItsStateIsLost(t *testing.T) {
 	if out := q.must("dr_init --restore"); !strings.Contains(out, `"type":"restore","acknowledged":true`) || q.read("serial") == serial {
 		t.Fatalf("init --restore: %q, serial %q from %q: it renewed nothing", out, q.read("serial"), serial)
 	}
-	if d := q.recv(); len(d.messages) != 0 || d.refused("stale") != 1 || !q.has("refused/"+id+".json") || !q.has("restore-floor") || q.has("seen-floor") || q.has("floor-owed") {
-		t.Fatalf("the server's copy after the state was lost: %v", d)
+	if d := q.recv(); !slices.Equal(d.bodies(), []string{"pay invoice 8 once"}) || q.has("seen-floor") {
+		t.Fatalf("the server's copy after the state was lost: %v, want it delivered again", d)
 	}
-	now := p.line(q.addr, "00000000-0000-4000-8000-0000000002fa", "to the new prekey, at once", 0)
+	now := p.line(q.addr, "00000000-0000-4000-8000-0000000002fa", "to the new prekey", 0)
 	w.inject(q, "", now, p.sign(q.addr, now))
-	if d := q.recv(); !slices.Equal(d.bodies(), []string{"to the new prekey, at once"}) {
+	if d := q.recv(); !slices.Equal(d.bodies(), []string{"to the new prekey"}) {
 		t.Fatalf("a message to the restore's new prekey: %v", d)
-	}
-	f, err := strconv.ParseInt(strings.TrimSpace(q.read("restore-floor")), 10, 64)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Every sender seals to the new prekey, so it is recorded as held at the
-	// restore here to try the floor's edge.
-	q.must(`cat "$DR/serial" >> "$DR/restored-keys"`)
-	edge := time.Unix(f, 0).Add(protocol.TTL)
-	below := p.line(q.addr, "00000000-0000-4000-8000-0000000000f7", "a second below the edge", time.Since(edge.Add(-time.Second)))
-	w.inject(q, "", below, p.sign(q.addr, below))
-	if d := q.recv(); len(d.messages) != 0 || d.refused("stale") != 1 {
-		t.Errorf("a message a second below the floor's edge: %v", d)
-	}
-	at := p.line(q.addr, "00000000-0000-4000-8000-0000000000f8", "at the edge", time.Since(edge))
-	w.inject(q, "", at, p.sign(q.addr, at))
-	if d := q.recv(); !slices.Equal(d.bodies(), []string{"at the edge"}) {
-		t.Errorf("a message at the floor's edge: %v", d)
-	}
-}
-
-// The floor after seen and seen-keys are lost is dated by a pass signed after
-// init --restore, never by the pass the mailbox kept, which may be older than
-// the last message the lost set took: a message the lost set took, dated 59
-// minutes ahead of the mailbox's clock under a kept pass, is refused as stale
-// at the next drain, a minute later (PROTOCOL.md §12.3 check 8).
-func TestScriptAFloorAfterALossIsDatedByAPassSignedSince(t *testing.T) {
-	w := newWorld(t)
-	p, q := w.mailbox(), w.mailbox()
-	if d := q.recv(); d.rc != 0 { // signs and keeps a pass
-		t.Fatalf("the first recv: %v", d)
-	}
-	l := p.line(q.addr, "00000000-0000-4000-8000-0000000000fb", "pay invoice 12 once", -64*time.Minute) // 59 minutes ahead of q's clock at its drain
-	ct := forge.Encrypt(t, w.srv, q.addr, l, p.sign(q.addr, l))
-	w.put(q, "", ct)
-	if d := (at{q, 5 * time.Minute}).recv(); d.rc != 0 || !slices.Equal(d.bodies(), []string{"pay invoice 12 once"}) {
-		t.Fatalf("the first delivery, 5 minutes on, under the kept pass: %v", d)
-	}
-	q.must(`rm "$DR/seen" "$DR/seen-keys"`)
-	(at{q, 6 * time.Minute}).must("dr_init --restore > /dev/null")
-	w.put(q, "", ct) // the server kept its copy
-	if d := (at{q, 6 * time.Minute}).recv(); len(d.messages) != 0 || d.refused("stale") != 1 {
-		t.Errorf("the server's copy a minute after the loss: %v; restore-floor %q", d, q.read("restore-floor"))
 	}
 }
 
@@ -329,7 +282,7 @@ func TestScriptAKeyUnderANameNoSerialDecryptsNothing(t *testing.T) {
 
 // A key that appears in prekeys/ during a drain, after dr_matched looked,
 // decrypts nothing in that drain; the next drain stops on it, and init
-// --restore names it and owes the floor, as in the Go client
+// --restore names it, after which it decrypts, as in the Go client
 // (TestAKeyMountedDuringADrainDecryptsNothingUntilAdopted).
 func TestScriptAKeyMountedDuringADrainDecryptsNothingUntilNamed(t *testing.T) {
 	w := newWorld(t)
@@ -369,8 +322,8 @@ func TestScriptAKeyMountedDuringADrainDecryptsNothingUntilNamed(t *testing.T) {
 		t.Fatalf("the next drain: %v", d)
 	}
 	q.must("dr_init --restore > /dev/null")
-	if d := q.recv(); len(d.messages) != 0 || d.refused("stale") != 1 || !q.has("restore-floor") {
-		t.Errorf("the drain after init --restore: %v", d)
+	if d := q.recv(); !slices.Equal(d.bodies(), []string{"pay invoice 11 once"}) {
+		t.Errorf("the drain after init --restore: %v, want the copy delivered again", d)
 	}
 }
 

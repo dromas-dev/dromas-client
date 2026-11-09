@@ -953,7 +953,7 @@ func TestRecvSaysItReplacedAnACL(t *testing.T) {
 // the state file is lost and the keys kept, in one line
 // after the drain and by its exit status; and status says so while refused/
 // keeps them.
-func TestRecvSaysItRefusedMessagesSentBeforeItAdoptedAKey(t *testing.T) {
+func TestALostStateStopsEveryCommandUntilInitRestore(t *testing.T) {
 	ctx := context.Background()
 	srv := fakeserver.New(t, time.Now)
 	b, err := client.Init(ctx, t.TempDir(), client.Options{Base: srv.URL})
@@ -1007,19 +1007,14 @@ func TestRecvSaysItRefusedMessagesSentBeforeItAdoptedAKey(t *testing.T) {
 	if err := do(ctx, "prekey renew", nil, nil, io.Discard, io.Discard); err != nil && !errors.As(err, &look) {
 		t.Fatalf("prekey renew after init --restore: %v", err)
 	}
+	// The copy the server kept is delivered again: the lost state's cost.
 	out.Reset()
 	errs.Reset()
-	if err := do(ctx, "recv", nil, nil, &out, &errs); !errors.As(err, &look) {
-		t.Fatalf("a refusal of a message sent before the adoption must give exit status 3, not %v; stdout %q", err, out.String())
+	if err := do(ctx, "recv", nil, nil, &out, &errs); err != nil {
+		t.Fatalf("the recv after init --restore: %v; stdout %q, stderr %q", err, out.String(), errs.String())
 	}
-	ls := printed(t, out.String())
-	if typesOf(ls) != "refused stale_after_restore" || ls[0]["code"] != protocol.RefusedStale || !strings.Contains(ls[0]["detail"].(string), "sent before this mailbox's restore") ||
-		ls[1]["count"] != json.Number("1") || ls[1]["detail"] != client.BeforeRestoreWords(1) || errs.Len() != 0 {
+	if typesOf(printed(t, out.String())) != "message" || errs.Len() != 0 {
 		t.Fatalf("stdout %q, stderr %q", out.String(), errs.String())
-	}
-	out.Reset()
-	if err := do(ctx, "status", nil, nil, &out, io.Discard); !errors.As(err, &look) || !strings.Contains(out.String(), client.BeforeRestoreWords(1)) {
-		t.Fatalf("status while refused/ keeps it: %v, %q", err, out.String())
 	}
 	// The next drain refuses nothing, and needs no look.
 	out.Reset()

@@ -185,17 +185,13 @@ func TestTheSeenFloor(t *testing.T) {
 	}
 }
 
-// A server that kept a message the mailbox delivered serves it again once the
-// state file is lost and the keys kept, which a restore supports: the new state
-// file names none of the keys, so recv stops before it lists anything, and
-// status says so, until dromas init --restore adopts them and renews, which sets
-// a floor at the renewal's confirmed time for the keys held at the restore, so
-// the copy is refused as stale, kept in refused/ with its signer, and said in
-// status while refused/ keeps it. A message to the new prekey is delivered at
-// once. Of a message a key held at the restore opens, every sent_at below that
-// confirmed time plus the skew allowance is stale, and one at it is delivered
-// (PROTOCOL.md §12.3 check 8, §15.9).
-func TestARestoreRefusesAMessageItDeliveredBeforeAsStale(t *testing.T) {
+// A state file lost with its prekeys kept is a failure, and its owner is told
+// once: the state names none of the keys, so recv stops before it lists
+// anything, and status says so, until dromas init --restore adopts them and
+// renews. The failure's cost is accepted: the copy the server kept of a message
+// the lost state delivered is delivered again, and the prune's floor is not
+// raised. A message to the new prekey is delivered (PROTOCOL.md §15.9).
+func TestALostStateStopsUntilAcknowledgedAndAcceptsItsCost(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	e := newEnv(t)
@@ -216,12 +212,7 @@ func TestARestoreRefusesAMessageItDeliveredBeforeAsStale(t *testing.T) {
 	if st, err := x.Status(ctx); err != nil || !slices.ContainsFunc(st.Attention, func(s string) bool { return strings.Contains(s, "dromas init --restore") }) {
 		t.Fatalf("status before the restore is acknowledged: %q, %v", st.Attention, err)
 	}
-	restoreAcknowledged(t, e, x, 1, true) // a new state counts no drain, and prekeys/generation one
-	// init --restore renewed before any drain: the renewal's confirmed time set
-	// the floor, and the prekey it published is no key the restore adopted.
-	if !has(x, "restore-floor") || has(x, "floor-owed") {
-		t.Fatal("init --restore renewed nothing: its floor waits on a drain")
-	}
+	restoreAcknowledged(t, e, x, 1)
 	if n := numberOf(t, x); slices.Contains(client.AdoptedKeys(t, x), n) {
 		t.Fatalf("init --restore published no prekey of its own: %d is the key it adopted", n)
 	}
@@ -229,61 +220,20 @@ func TestARestoreRefusesAMessageItDeliveredBeforeAsStale(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	refusedBeforeRestore(t, x, res, a, 1)
-	if got := inbox(t, x); len(got) != 1 {
-		t.Fatalf("inbox/ holds %q: the copy was delivered again", got)
-	}
-	words := client.BeforeRestoreWords(1)
-	st, err := x.Status(ctx)
-	if err != nil || !slices.Contains(st.Attention, words) {
-		t.Fatalf("status while refused/ keeps it: %q, %v", st.Attention, err)
-	}
-	if _, err := x.RemoveRefused(ctx, nil); err != nil {
-		t.Fatal(err)
-	}
-	if st, err := x.Status(ctx); err != nil || slices.Contains(st.Attention, words) {
-		t.Fatalf("status once refused/ is emptied: %q, %v", st.Attention, err)
-	}
-	// The floor is the restore's renewal's confirmed time plus the skew
-	// allowance, less the TTL, and it is the restore's own: the prune's floor
-	// is not raised.
-	raw, _ := stateOf(x, "restore-floor")
-	floor, err := strconv.ParseInt(string(raw), 10, 64)
-	if err != nil {
-		t.Fatalf("restore-floor %q: %v", raw, err)
-	}
+	waitedDelivered(t, res, a, 1)
 	if has(x, "seen-floor") {
 		t.Fatal("the restore raised the prune's floor, which holds every message")
 	}
-	send(t, a, x, "to the new prekey, at once")
+	send(t, a, x, "to the new prekey")
 	if res := receive(t, x); len(res.Delivered) != 1 || len(res.Refused) != 0 {
 		t.Fatalf("a message to the restore's new prekey: %+v, want it delivered", res)
 	}
-	// Every sender seals to the new prekey, so it is marked held at the
-	// restore here to try the floor's edge.
-	x.MarkRestored(t, numberOf(t, x))
-	edge := time.Unix(floor, 0).Add(protocol.TTL)
-	e.clock.Add(edge.Add(-time.Second).Sub(e.clock.Now()))
-	send(t, a, x, "a second before the floor's edge")
-	res, err = x.Receive(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(res.Delivered) != 0 || res.RefusedBeforeRestore() != 1 {
-		t.Fatalf("a message a second below the edge: %+v", res)
-	}
-	e.clock.Add(time.Second)
-	send(t, a, x, "at the floor's edge")
-	if res := receive(t, x); len(res.Delivered) != 1 || len(res.Refused) != 0 {
-		t.Fatalf("a message at the edge: %+v", res)
-	}
 }
 
-// A state file restored from a copy older than a renewal and a drain that
-// delivered, the prekeys left as they are, does not name the renewal's key and
-// is behind prekeys/generation, so recv stops before it lists anything until
-// dromas init --restore adopts that key and owes the floor: a message the lost
-// state delivered under that key is refused as stale (PROTOCOL.md §15.9).
+// A state file restored from a copy older than a renewal, the prekeys left as
+// they are, does not name the renewal's key, so recv stops before it lists
+// anything until dromas init --restore adopts that key: a message the lost
+// state delivered under that key is then delivered again (PROTOCOL.md §15.9).
 func TestAStateRestoredFromAnOlderCopyAdoptsTheNewerKey(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -316,10 +266,10 @@ func TestAStateRestoredFromAnOlderCopyAdoptsTheNewerKey(t *testing.T) {
 	if _, err := x.Receive(ctx); !client.NotTheKeys(err) || e.srv.Count(x.Address()) != 1 {
 		t.Fatalf("recv on the older copy: %v", err)
 	}
-	restoreAcknowledged(t, e, x, 1, true)
+	restoreAcknowledged(t, e, x, 1)
 	res, err := x.Receive(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	refusedBeforeRestore(t, x, res, a, 1)
+	waitedDelivered(t, res, a, 1)
 }

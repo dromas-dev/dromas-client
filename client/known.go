@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strconv"
 
 	"golang.org/x/crypto/ssh"
 
@@ -193,6 +194,12 @@ func (b *Mailbox) noteServed(o *own, served []byte) error {
 	if ours {
 		// One the mailbox signed and has since pruned: its own, whatever the
 		// order makes of it (readOwn).
+		return nil
+	}
+	// One whose key prekeys/ holds, under its serial, is the mailbox's own too:
+	// only the machine that made a prekey holds its key, and a state lost with
+	// prekeys/ kept no longer records the statement (matchKeys).
+	if key, err := ageRecipient(b.path("prekeys", strconv.FormatUint(o.statement.Serial, 10)+".agekey")); err == nil && key == o.statement.Key {
 		return nil
 	}
 	o.notMade = true

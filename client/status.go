@@ -254,9 +254,6 @@ func (b *Mailbox) status() (*Status, error) {
 	}
 	if s.Refused > 0 {
 		s.Attention = append(s.Attention, fmt.Sprintf("%d refused in refused/ (%s): each failed a check and was never delivered; dromas refused list says which, and dromas refused rm deletes them", s.Refused, b.refusedCodes()))
-		if n := b.refusedBeforeRestore(); n > 0 {
-			s.Attention = append(s.Attention, BeforeRestoreWords(n))
-		}
 	}
 	if s.Held > 0 {
 		s.Attention = append(s.Attention, fmt.Sprintf("%d held in held/ from senders this mailbox has not allowed: dromas held list lists them by sender; dromas peer allow <address> delivers a sender's to inbox/, and dromas peer block <address> deletes them", s.Held))
@@ -300,27 +297,6 @@ func (b *Mailbox) pastDeletion(signed []uint64, adopted []adoptedKey) int {
 		}
 	}
 	return n
-}
-
-// refusedBeforeRestore counts the messages in refused/ that the mailbox's state
-// keeps as refused for being sent before its restore
-// (Refusal.BeforeRestore): so status names them only while refused/ keeps them.
-func (b *Mailbox) refusedBeforeRestore() int {
-	qs, _ := b.refusedMessages()
-	n := 0
-	for _, q := range qs {
-		if q.BeforeRestore {
-			n++
-		}
-	}
-	return n
-}
-
-// BeforeRestoreWords says that n refused messages were sent before the mailbox's
-// restore (Options.Restore), where they are, and how to see each: recv's line
-// (Result.RefusedBeforeRestore) and status both say it.
-func BeforeRestoreWords(n int) string {
-	return fmt.Sprintf("%d refused as stale because each was sent before this mailbox's restore of its state (dromas init --restore), to a prekey it held then: such a prekey may open a message it delivered under a state it no longer holds, which its replay set cannot tell from one that waited. refused/ keeps each, and dromas refused list shows each and who signed it", n)
 }
 
 // refusedCodes lists the distinct codes of the messages in refused/, from

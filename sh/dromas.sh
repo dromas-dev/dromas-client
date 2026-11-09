@@ -9,7 +9,7 @@
 # Get it from https://github.com/dromas-dev/dromas-client at a commit you have read, never from the dromas.dev
 # server: a server that could hand you this script could hand you one without its checks.
 #
-#   bash dromas.sh init [--restore]                make and register this mailbox; prints its link, $DR_SERVER_URL/to/<address>. --restore acknowledges records that do not match prekeys/, as after seen and seen-keys are lost or put back from an older copy with prekeys/ kept, which every command but addr refuses until then: the next recv refuses as stale every message sent before its list's pass and the hour after
+#   bash dromas.sh init [--restore]                make and register this mailbox; prints its link, $DR_SERVER_URL/to/<address>. --restore acknowledges records that do not match prekeys/, as after seen and seen-keys are lost or put back from an older copy with prekeys/ kept, which every command but addr refuses until then: a failure, after which a message accepted before may be delivered again. It adopts those prekeys and renews
 #   bash dromas.sh addr                            print it again: give it to whoever should write to this mailbox
 #   bash dromas.sh send <link> [file]             one message (the body from stdin without a file); a link or an address. Posted now or not at all: nothing waits
 #   bash dromas.sh recv                            verified messages, a "message" line each; a refused one goes to refused/, with a "refused" line
@@ -224,7 +224,7 @@ dr_init(){ # [--restore] → creates this mailbox, or finishes a half-done init,
   [ -s "$DR/identity" ] || { rm -f "$DR/identity" "$DR/identity.pub"; ssh-keygen -q -t ed25519 -N '' -C '' -f "$DR/identity" < /dev/null; } || return 1      # an empty identity, as a crash before the sync below leaves one, is no key, and nothing was registered with it, so it is made again, as the Go client does
   if dr_held; then dr_identity && "$check"; else dr_lock "$check"; fi || return      # identity.doc and address made under the mailbox's lock, as every command that writes the mailbox makes them (dr_lock): a command beside init reads them. The records held to prekeys/ there too
   sync "$DR/identity" "$DR/identity.pub" "$DR" || return 1      # the identity on disk before it is registered
-  [ ! -s "$DR/serial" ] || { [ "${1-}" != --restore ] || [ ! -e "$DR/floor-owed" ] || dr_rekey || return; dr_addr; return; }      # registered already; a restore it acknowledged renews at once, so its senders seal to a key no lost replay set saw (dr_judge)
+  [ ! -s "$DR/serial" ] || { [ "${DR_ACKED-}" != true ] || dr_rekey || return; dr_addr; return; }      # registered already; a restore it acknowledged renews at once (dr_restore)
   local A n p h m; A=$(cat "$DR/address")
   n=$(ls "$DR/prekeys" | sed -n 's/\.agekey$//p; s/\.txt\.sig$//p' | sort -n | tail -n 1); [ -n "$n" ] || n=$(dr_now); [ "$n" -ge 1 ] || n=1; p="$DR/prekeys/$n"      # the mailbox's first prekey takes its number as every later one does, from this machine's clock in seconds (dr_renew). An attempt that got as far as a key keeps the number it took, so a registration whose answer was lost is sent again as it was
   if [ -s "$p.txt.sig" ] && ! { m=$(dr_time "$(cat "$p.made" 2> /dev/null)") && [ "$m" -le "$(dr_now)" ]; }; then      # a first statement an earlier attempt left, made while this machine's clock read ahead of where it reads now, or with no record of when: a server may not take it until the clock catches up, as a pass made then is not used either (PROTOCOL.md §12.4). The statement is made again; the prekey's own key stays, since a server may have taken a registration whose answer was lost, and then messages may be waiting that only this key opens
@@ -628,7 +628,7 @@ dr_drain(){ # stops at a transient error or a fault of this mailbox, leaving the
   while :; do
     [ $((pages += 1)) -le 100 ] || { dr_out more --arg detail "this run stopped at the most one drain takes: run recv again for the rest, which is still on the server"; return 0; }
     dr_owner GET "/v1/$B/messages${c:+?cursor=$c}" > "$DR/list.json" || { dr_own; return 1; }
-    [ "$pages" -gt 1 ] || { DR_LISTED=$(dr_taken) && dr_owed "$DR_LISTED" && dr_forget "$DR_LISTED"; } || return 1      # the replay set pruned by this clock only once the server has taken a pass dated by it, and by that pass's date (dr_taken): a drain that a clock far off would prune is stopped at its pass first. DR_LISTED tells dr_recv the same reading for the keys
+    [ "$pages" -gt 1 ] || { DR_LISTED=$(dr_taken) && dr_forget "$DR_LISTED"; } || return 1      # the replay set pruned by this clock only once the server has taken a pass dated by it, and by that pass's date (dr_taken): a drain that a clock far off would prune is stopped at its pass first. DR_LISTED tells dr_recv the same reading for the keys
     dr_shape "$DR/list.json" list && n=$(jq -r '.messages | length' "$DR/list.json") || { dr_err "the server's list of messages is not one this client reads: the messages stay on the server"; return 1; }
     for ((i = 0; i < n; i++)); do
       id=$(jq -r --argjson i "$i" '.messages[$i].id | strings | select(test("\\A[0-9a-f]{64}\\z"))' "$DR/list.json") && dr_hex "$id" || continue      # tested in jq: $(…) drops trailing LFs and every NUL
@@ -652,7 +652,7 @@ dr_one(){ # <me> <id> <its list entry> → 0 once the message is judged and its 
   if [ $rc -eq 0 ] || [ $rc -eq 2 ]; then [ "$h" = "$id" ] || { why="bad_id: the server's id for it is not the SHA-256 of its ciphertext"; rc=1; }; fi
   case $rc in
     0) A=$(jq -r .from "$m.P") && dr_putout "$DR/inbox/$h.json" dr_line "$m.P" && dr_seen "$A" "$m" "$h" || return 1      # stored, then seen, all on disk before the ack: a crash delivers again, never loses
-       printf '{"type":"message","id":"%s","envelope":' "$h" && cat "$DR/inbox/$h.json" && echo '}' && dr_count ;;      # counted once its line is said, and before the ack, so a fault at the count leaves it said      # the envelope the line inbox/ keeps, as its bytes are (jq would write the line breaks dr_line escaped), and only inside "envelope", so a member it gains later never meets the line's own (#356)
+       printf '{"type":"message","id":"%s","envelope":' "$h" && cat "$DR/inbox/$h.json" && echo '}' ;;      # the envelope the line inbox/ keeps, as its bytes are (jq would write the line breaks dr_line escaped), and only inside "envelope", so a member it gains later never meets the line's own (#356)
     2) dr_out duplicate --arg id "$h" --arg detail "a retry of a message already delivered: not delivered again" ;;
     3) dr_err "$why: nothing is judged or acked until this mailbox is fixed"; return 1 ;;
     4) dr_err "$why: the message stays on the server, and the next recv asks again"; return 1 ;;
@@ -664,19 +664,14 @@ dr_kept(){ # <message stem> <id> → the message as refused/ keeps it: the id th
   local rc; dr_b64 "$1.age" > "$1.b64" && jq -cj -n --rawfile c "$1.b64" --arg id "$2" '{id: $id, ciphertext: $c}'; rc=$?; rm -f "$1.b64"; return $rc      # base64 of the bytes, a file of ASCII, which jq carries as it is
 }
 dr_judge(){ # <me> <message stem> → 0 only if EVERY check passes, in this order; 2 for a resend of an accepted msg_id; 1 refused, with "<code>: <words>" on stdout, the words this script's own and never the message's; 3 a fault of this mailbox, no verdict; 4 no answer from the server on whether the sender is revoked, no verdict. Who the sender is, is never asked of the server, nor read from its list: the message carries what proves it. The one thing asked is whether a revocation of that sender, or of its certificates, exists, and the answer proves itself
-  local B=$1 m=$2 ids=() old=() k n h A c f t r=false
-  [ ! -e "$DR/floor-owed" ] || { echo "the floor this mailbox's restore owes is not set"; return 3; }      # dr_owed sets it at the drain's first list, before anything is judged
+  local B=$1 m=$2 ids=() k n h A c f t
   for k in "$DR"/prekeys/*.agekey; do [ -e "$k" ] || continue; n=$(basename "$k" .agekey); grep -qxF -e "$n" "$DR/seen-keys" 2> /dev/null || continue      # only a key seen-keys names: one it does not name opens nothing until dr_restore has named it, a file whose name is no serial or one that appears during the drain among them
     age-keygen -y "$k" > /dev/null 2>&1 || { echo "cannot read the prekey key $k"; return 3; }
-    if grep -qxF -e "$n" "$DR/restored-keys" 2> /dev/null; then old+=(-i "$k"); else ids+=(-i "$k"); fi; done      # a key file age cannot read is a fault of this mailbox, which stops the drain: never a message refused for it
-  [ $((${#ids[@]} + ${#old[@]})) -gt 0 ] || { echo "this mailbox has no prekeys"; return 3; }
-  if [ ${#ids[@]} -gt 0 ] && age -d "${ids[@]}" < "$m.age" > "$m.T" 2> /dev/null; then :
-  elif [ ${#old[@]} -gt 0 ] && age -d "${old[@]}" < "$m.age" > "$m.T" 2> /dev/null; then r=true      # opened by a key held at a restore (restored-keys), which may open a message a replay set it lost saw delivered
-  else echo "undecryptable: it does not decrypt with this mailbox's prekeys"; return 1; fi
+    ids+=(-i "$k"); done      # a key file age cannot read is a fault of this mailbox, which stops the drain: never a message refused for it
+  [ ${#ids[@]} -gt 0 ] || { echo "this mailbox has no prekeys"; return 3; }
+  age -d "${ids[@]}" < "$m.age" > "$m.T" 2> /dev/null || { echo "undecryptable: it does not decrypt with this mailbox's prekeys"; return 1; }
   A=$(dr_open "$B" "$m") || { echo "$A"; return 1; }      # the sender, proved by what was decrypted
   t=$(dr_time "$(jq -r .sent_at "$m.P")") || { echo "cannot read the sent_at of what was decrypted"; return 3; }
-  if [ $r = true ]; then f=$(dr_floor "$DR/restore-floor" 2> /dev/null) || { echo "$DR/restore-floor names no time"; return 3; }
-    [ "$f" -eq 0 ] || [ "$t" -ge $((f + 7*86400)) ] || { echo "stale: it was sent before this mailbox's restore, to a prekey it held then, which may open a message it delivered under the records it lost"; return 1; }; fi
   f=$(dr_floor 2> /dev/null) || { echo "$DR/seen-floor names no time"; return 3; }
   [ "$f" -eq 0 ] || [ "$t" -ge $((f + 7*86400)) ] || { echo "stale: sent_at is before this mailbox's replay set reaches back to: it was pruned"; return 1; }      # freshness has a floor too: a sent_at before the highest cutoff the replay set was pruned at may be a message whose line went, and so may one up to 7 days above it, a retry of such a message, dated afresh up to 7 days after its first copy (check 9 knows a retry by that copy's line). dr_open checked sent_at's grammar
   if ! grep -qxF -e "$A" "$DR/asked" 2> /dev/null; then      # the server is asked once for each sender in a drain, by a read of its revocations, which the server serves whether or not it holds the sender's mailbox. That it holds none is an answer; no answer is not, and the message then stays where it is
@@ -768,45 +763,18 @@ dr_unnamed(){ # → 0 where prekeys/ holds a key age reads that seen-keys does n
   done
   [ ${#DR_FOUND[@]} -gt 0 ]
 }
-dr_count(){ # → generation, this mailbox's count of the messages it accepted, raised by one, then prekeys/generation written with it, each on disk: for each message, once it is seen and before its ack. So prekeys/generation, which is never backed up, counts every message accepted, and records put back from a copy taken before one was seen are behind it, wherever in a drain the copy was taken (dr_matched); a crash between the two leaves the file behind, never ahead
-  local g; g=$(dr_gen "$DR/generation") || return 1
-  dr_putline "$DR/generation" $((g + 1)) && dr_putline "$DR/prekeys/generation" $((g + 1))
+dr_matched(){ # → 0 where this mailbox's records match its prekeys/: no key there that seen-keys does not name (dr_unnamed). Otherwise the error line, fatal, with the code state_not_the_keys, and 4, writing nothing: records lost or put back are a failure, and nothing is received, sent or renewed until its owner's init --restore (dr_restore)
+  dr_unnamed || return 0
+  jq -cn --arg m "REFUSED: this mailbox's records do not match its prekeys: prekeys/ holds ${#DR_FOUND[@]} prekeys seen-keys does not name, as after seen and seen-keys are lost, or put back from a copy older than a renewal, with prekeys/ kept. The mailbox receives, sends and renews nothing until its owner runs dromas.sh init --restore, which adopts those prekeys and renews. Records lost or put back have lost their replay set, so a message the mailbox accepted before may be delivered again" '{type:"error", fatal:true, code:"state_not_the_keys", detail:$m}' >&2
+  return 4
 }
-dr_gen(){ # <file> → the count it keeps, a number and a line feed, or 0 where it is missing; a file that keeps anything else is an error, never a count
-  local g; [ -e "$1" ] || { echo 0; return 0; }
-  g=$(cat "$1" 2> /dev/null) && [[ $g =~ ^(0|[1-9][0-9]{0,17})$ ]] && printf '%s\n' "$g" | cmp -s - "$1" && echo "$g" ||      # compared with itself rebuilt: $(…) drops line feeds and NULs
-    { dr_err "$1 keeps no count of the messages this mailbox accepted: it is a number and a line feed, written by recv"; return 1; }
-}
-dr_matched(){ # → 0 where this mailbox's records match its prekeys/: no key there that seen-keys does not name (dr_unnamed), and prekeys/generation at or behind generation, which it writes where it is missing or behind, since a missing file is a mailbox that has counted nothing yet. Otherwise the error line, fatal, with the code state_not_the_keys, and 4, writing nothing: such records cannot tell a message this mailbox delivered under records it lost from one that waited, so nothing is received, sent or renewed until init --restore (dr_restore)
-  local g f why=
-  g=$(dr_gen "$DR/generation") && f=$(dr_gen "$DR/prekeys/generation") || return 1
-  ! dr_unnamed || why="prekeys/ holds ${#DR_FOUND[@]} prekeys seen-keys does not name, as after seen and seen-keys are lost, or put back from a copy older than a renewal, with prekeys/ kept"
-  [ "$f" -le "$g" ] || why="${why:+$why; and }prekeys/generation counts more messages accepted than generation does, as after this mailbox's records are put back from a copy older than the mailbox"
-  if [ -n "$why" ]; then
-    jq -cn --arg m "REFUSED: this mailbox's records do not match its prekeys: $why. Such records cannot tell a message this mailbox delivered under the records it lost from one that waited, so the mailbox receives, sends and renews nothing, and acks nothing, until its owner runs dromas.sh init --restore, which renews its prekey: from then, a message that a prekey it holds now opens is refused as stale where it was sent before the pass of its next recv's list, or in the hour after, and a message to the new prekey is delivered" '{type:"error", fatal:true, code:"state_not_the_keys", detail:$m}' >&2
-    return 4
-  fi
-  [ -d "$DR/prekeys" ] || return 0      # a mailbox with no prekeys/ yet has nothing there to count beside
-  [ -e "$DR/prekeys/generation" ] && [ "$f" -eq "$g" ] || dr_putline "$DR/prekeys/generation" "$g"
-}
-dr_restore(){ # → init --restore's acknowledgement, under the lock: where this mailbox's records do not match its prekeys/ (dr_matched), the pass it kept dropped, which may be dated before the last message a lost replay set took, then the floor owed (floor-owed), then every key prekeys/ holds recorded as restored (restored-keys), then each key found named in seen-keys, then prekeys/generation's count taken, each on disk in that order; then a restore line of what it found. The next drain sets the restore's floor by its first list's pass, signed after this, before anything is judged (dr_owed). Where they match, it changes nothing
-  local g f n back=false ack=false said="this mailbox's records match its prekeys: nothing to acknowledge, and nothing changed"
-  g=$(dr_gen "$DR/generation") && f=$(dr_gen "$DR/prekeys/generation") || return 1
-  dr_unnamed
-  [ "$f" -le "$g" ] || back=true
-  if [ ${#DR_FOUND[@]} -gt 0 ] || [ $back = true ]; then
-    rm -f "$DR/pass" "$DR/pass-server" && dr_putline "$DR/floor-owed" 1 || return 1      # the floor owed before any key is named: a key named opens messages (dr_judge)
-    dr_putline "$DR/restored-keys" "$({ cat "$DR/restored-keys" 2> /dev/null; ls "$DR/prekeys" | sed -n 's/^\([1-9][0-9]*\)\.agekey$/\1/p'; } | sort -u)" || return 1      # every key prekeys/ holds now, which alone may open a message a lost replay set saw: held to the restore's floor (dr_judge)
+dr_restore(){ # → init --restore's acknowledgement, under the lock: each key prekeys/ holds that seen-keys does not name (dr_unnamed) named there, on disk, and DR_ACKED set, so init renews (dr_init); then a restore line of what it found
+  local n said="this mailbox's records match its prekeys: nothing to acknowledge, and nothing changed"; DR_ACKED=false
+  if dr_unnamed; then
     for n in "${DR_FOUND[@]}"; do dr_covered "$n" || return 1; done
-    [ $back = false ] || dr_putline "$DR/generation" "$f" || return 1
-    ack=true said="acknowledged the restore: adopted ${#DR_FOUND[@]} prekeys seen-keys did not name$([ $back = false ] || echo ", and found the records older than prekeys/generation"). From the renewal init makes now, recv refuses as stale a message that one of these prekeys opens, sent before the pass of its list or in the hour after, and delivers a message to the new prekey"
+    DR_ACKED=true said="acknowledged the restore: adopted ${#DR_FOUND[@]} prekeys seen-keys did not name, and init renews now. The lost records took their replay set with them, so a message this mailbox accepted before may be delivered again"
   fi
-  dr_matched > /dev/null || return
-  dr_out restore --argjson acknowledged $ack --arg detail "$said"
-}
-dr_owed(){ # <Unix time, one a server took (dr_taken) by the drain's first list> → where a restore owes the floor (floor-owed), the restore's floor (restore-floor) raised to that reading plus an hour, less 7 days, then the mark removed: only a key the replay set did not see every use of opens a ciphertext a replay set this mailbox no longer holds saw delivered, and a server may serve one again. So a message that a key held at the restore opens (restored-keys), sent before that reading and the hour after, which this clock's check may have taken before, is stale (PROTOCOL.md §12.3 check 8). dr_restore dropped the pass it kept, so the reading is of a pass signed since
-  [ -e "$DR/floor-owed" ] || return 0
-  dr_raise $(($1 + 3600 - 7*86400)) "$DR/restore-floor" && rm -f "$DR/floor-owed" && sync "$DR"      # the floor first: a crash leaves the mark, and the next drain raises it again
+  dr_out restore --argjson acknowledged "$DR_ACKED" --arg detail "$said"
 }
 dr_floor(){ # [file] → the floor that file keeps, or 0 when there is none. seen-floor, the default, keeps the highest cutoff a prune of the replay set has dropped a line at: a message sent before it, or less than 7 days after it, is stale whatever the clock now reads, since its line, or its first copy's, may be gone, as a Kerberos server that has lost its replay cache refuses until the window has passed (RFC 4120 §3.2.3). A file that names anything else is an error, never the default
   local p=${1:-$DR/seen-floor} f; [ -e "$p" ] || { echo 0; return 0; }

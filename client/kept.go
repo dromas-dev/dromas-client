@@ -133,13 +133,11 @@ type keptRefusal struct {
 // refusedRecord is what the mailbox's state keeps of a refused message, by
 // its id, beside the message refused/ keeps: the code it was refused for,
 // why, in this client's words, and what the checks established when they
-// judged it, and whether it was sent before the mailbox's restore
-// (Refusal.BeforeRestore), which status names.
+// judged it.
 type refusedRecord struct {
-	Code          string        `json:"code"`
-	Reason        string        `json:"reason"`
-	Judged        *keptFindings `json:"judged,omitempty"`
-	BeforeRestore bool          `json:"before_adoption,omitempty"`
+	Code   string        `json:"code"`
+	Reason string        `json:"reason"`
+	Judged *keptFindings `json:"judged,omitempty"`
 }
 
 // keptFindings is what this client's checks established about a refused
@@ -198,7 +196,7 @@ func (b *Mailbox) keepRefused(id string, m *protocol.MessageInfo, ct []byte, why
 		return err
 	}
 	step("refusal written")
-	rec, err := json.Marshal(refusedRecord{Code: why.Code, Reason: why.Reason, Judged: newKeptFindings(why.Findings), BeforeRestore: why.BeforeRestore})
+	rec, err := json.Marshal(refusedRecord{Code: why.Code, Reason: why.Reason, Judged: newKeptFindings(why.Findings)})
 	if err != nil {
 		return err
 	}
@@ -253,10 +251,6 @@ type RefusedMessage struct {
 	CertificateEnds   string `json:"certificate_ends,omitempty"`
 	SentAt            string `json:"sent_at,omitempty"`
 	MsgID             string `json:"msg_id,omitempty"`
-	// BeforeRestore is the mailbox's state's record that it was refused as sent
-	// before the mailbox's restore (Refusal.BeforeRestore), which status
-	// counts: no line prints it, since its detail says it.
-	BeforeRestore bool `json:"-"`
 }
 
 // RefusedMessages lists refused/, by id: each message it keeps, with what the
@@ -290,7 +284,7 @@ func (b *Mailbox) refusedMessages() ([]RefusedMessage, error) {
 				}
 			}
 			rec := refusedRecordOf(s, id)
-			q.Code, q.Reason, q.BeforeRestore = rec.Code, rec.Reason, rec.BeforeRestore
+			q.Code, q.Reason = rec.Code, rec.Reason
 			if j := rec.Judged; j != nil {
 				for _, v := range []struct {
 					kept string

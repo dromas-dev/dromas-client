@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"slices"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -52,7 +51,6 @@ func TestScriptInitOfAMailboxThatHoldsItsOwnRevocationSignsNothing(t *testing.T)
 	for _, cmd := range []string{"dr_init", "dr_renew"} {
 		out, err := bash(t, env, cmd)
 		stmts, _ := filepath.Glob(filepath.Join(dir, "prekeys", "*"))
-		stmts = slices.DeleteFunc(stmts, func(s string) bool { return filepath.Base(s) == "generation" }) // a count, which signs nothing
 		if err == nil || passes.Load() != 0 || len(stmts) != 0 {
 			t.Errorf("%s on a finished mailbox: %q, %v; %d requests with a pass; it made %v", cmd, out, err, passes.Load(), stmts)
 		}

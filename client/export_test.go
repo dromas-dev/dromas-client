@@ -283,10 +283,7 @@ func PutRevocations(ctx context.Context, opt Options, a protocol.Address, rec *p
 // "renewal" (the number of the renewal under way), "acl-read" (the read of
 // the server's ACL a renewal recv began owes), "adopt-acl" (a restore's
 // adoption of its server's ACL, begun), "renew-failed", "not-made",
-// "acl-another-writer", "acl-replaced", "floor-owed" (the floor an acknowledged
-// restore owes, not yet set), "generation" (the messages it counted as
-// accepted), "restore-floor" (the floor beginFloor set for the keys held at a
-// restore), "partial" (the message the
+// "acl-another-writer", "acl-replaced", "partial" (the message the
 // partial file is of, and how many of its bytes are synced) and "format"
 // (the mailbox's format, as it is recorded). So a test
 // reads and changes the mailbox's state as it did its files.
@@ -294,7 +291,7 @@ func (b *Mailbox) Records() (map[string][]byte, error) {
 	out := map[string][]byte{}
 	err := b.view(func(s store) error {
 		for _, r := range []struct{ key, name string }{
-			{"serial", "serial"}, {"pass", "pass"}, {"etag", "etag"}, {"seen-floor", "seen-floor"}, {"floor-owed", "floor-owed"}, {"restore-floor", "restore-floor"}, {"generation", "generation"},
+			{"serial", "serial"}, {"pass", "pass"}, {"etag", "etag"}, {"seen-floor", "seen-floor"},
 			{"acl", "acl.json"}, {"revoked", "revoked.sig"}, {"revoked-certs", "revoked-certs.json"},
 			{"renew-failed", "renew-failed"}, {"not-made", "not-made"}, {"acl-another-writer", "acl-another-writer"}, {"acl-replaced", "acl-replaced"}, {"partial", "partial"},
 			{"deprecation", "deprecation"}, {"sunset", "sunset"}, {"document-read", "document-read"}, {"latest", "latest"},
@@ -419,7 +416,7 @@ func (b *Mailbox) SetRecord(t *testing.T, name string, v []byte) {
 				}
 				return s.put(bucket, key, v)
 			}
-			for key, file := range map[string]string{"serial": "serial", "pass": "pass", "etag": "etag", "seen-floor": "seen-floor", "restore-floor": "restore-floor", "generation": "generation", "acl": "acl.json", "revoked": "revoked.sig", "revoked-certs": "revoked-certs.json", "renew-failed": "renew-failed", "not-made": "not-made", "acl-another-writer": "acl-another-writer", "acl-replaced": "acl-replaced"} {
+			for key, file := range map[string]string{"serial": "serial", "pass": "pass", "etag": "etag", "seen-floor": "seen-floor", "acl": "acl.json", "revoked": "revoked.sig", "revoked-certs": "revoked-certs.json", "renew-failed": "renew-failed", "not-made": "not-made", "acl-another-writer": "acl-another-writer", "acl-replaced": "acl-replaced"} {
 				if name == file {
 					return put(bucketMailbox, key, v)
 				}
@@ -580,18 +577,6 @@ func (b *Mailbox) Acknowledge(ctx context.Context) (*Restored, error) {
 	b.restoring = true
 	defer func() { b.restoring = false }()
 	return lockedFinished(ctx, b, func() (*Restored, error) { return b.restored, nil })
-}
-
-// MarkRestored records prekey n as held at a restore (bucketRestored), so a
-// test holds a message to the key every sender seals to against the restore's
-// floor.
-func (b *Mailbox) MarkRestored(t *testing.T, n uint64) {
-	t.Helper()
-	if err := b.lockedFinishedDo(context.Background(), func() error {
-		return b.update(func(s store) error { return s.put(bucketRestored, serialKey(n), []byte{}) })
-	}); err != nil {
-		t.Fatal(err)
-	}
 }
 
 // PauseAfter is how long the loop waits before the drain after res and err.
