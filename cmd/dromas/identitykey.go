@@ -164,12 +164,17 @@ func (e *cli) passphrase(file string) ([]byte, error) {
 	if !e.mayPrompt() {
 		return nil, client.ErrNoPassphrase
 	}
+	// An interrupt already: no prompt, which nothing would restore.
+	if err := e.ctx.Err(); err != nil {
+		return nil, err
+	}
 	in, out, err := openTerminal()
 	if err != nil {
 		return nil, client.ErrNoPassphrase
 	}
 	fd := int(in.Fd()) //nolint:gosec // a file descriptor
-	state, err := term.GetState(fd)
+	// Raw before the read starts, so an interrupt's restore comes after it.
+	state, err := term.MakeRaw(fd)
 	if err != nil {
 		closeTerminal(in, out)
 		return nil, client.ErrNoPassphrase
@@ -177,7 +182,7 @@ func (e *cli) passphrase(file string) ([]byte, error) {
 	_, _ = fmt.Fprintf(e.stderr, "%s\n", line("waiting", "for", "passphrase", "identity_file", file, "detail",
 		"waiting for the identity key's passphrase at the terminal: its key file has a passphrase, and the mailbox's agent holds no key of it"))
 	pass, err := askTerminal(e.ctx, e.interrupt,
-		func() ([]byte, error) { return readPassphrase(in, out, fd, prompt) },
+		func() ([]byte, error) { return readPassphrase(in, out, fd, state, prompt) },
 		func() error {
 			rerr := term.Restore(fd, state)
 			_, _ = io.WriteString(out, "\n")
@@ -196,15 +201,12 @@ func (e *cli) passphrase(file string) ([]byte, error) {
 var errInterrupted = errors.New("interrupted at the passphrase's prompt")
 
 // readPassphrase reads a passphrase at the terminal, in and out, whose
-// descriptor is fd, as ssh's readpassphrase(3) reads one: the prompt goes to
-// the terminal, the line is read with echo off, and the terminal's settings are
-// restored after. term.Terminal reads it, in raw mode, where ^D on an empty
-// line is the end of input and ^C a key, which it reads as errInterrupted.
-func readPassphrase(in io.Reader, out io.Writer, fd int, prompt string) ([]byte, error) {
-	state, err := term.MakeRaw(fd)
-	if err != nil {
-		return nil, err
-	}
+// descriptor is fd, already in raw mode, as ssh's readpassphrase(3) reads one:
+// the prompt goes to the terminal, the line is read with echo off, and the
+// terminal's settings, state, are restored after. term.Terminal reads it, in
+// raw mode, where ^D on an empty line is the end of input and ^C a key, which
+// it reads as errInterrupted.
+func readPassphrase(in io.Reader, out io.Writer, fd int, state *term.State, prompt string) ([]byte, error) {
 	keys := &keysRead{r: in}
 	t := term.NewTerminal(struct {
 		io.Reader
@@ -349,8 +351,9 @@ file can then keep a passphrase. After a reboot the agent holds no key, so the
 mailbox is locked until its owner runs dromas agent add again, or runs a
 command with --askpass or at a terminal. A command that needs the key and has
 it from none of these fails as "identity_locked". The agent's key is taken only
-where it matches the identity's public key: the key file's where the mailbox
-has one, and identity.pub's otherwise. The agent is stock ssh-agent, and dromas
+where it matches the identity's public key: the key file's where the file
+carries one, and identity.pub's otherwise. A key the agent lists is the key
+used, and the key file is not tried after it. The agent is stock ssh-agent, and dromas
 agent start and dromas agent add each print the command they run.`,
 		e.agentStartCmd(), e.agentAddCmd())
 }
@@ -401,13 +404,15 @@ func (e *cli) agentAddCmd() *cobra.Command {
 		`Run stock ssh-add on the identity key file, against the socket --agent names,
 with the command's stdin: SSH_AUTH_SOCK=<socket> ssh-add <identity-file>.
 Without --askpass, ssh-add asks for the key's passphrase at the terminal and
-runs no askpass program (SSH_ASKPASS_REQUIRE=never), and agent add fails as
-"identity_locked", before ssh-add runs, where stdin is no terminal or
---no-prompt is set. With --askpass, ssh-add runs that program through dromas
-(SSH_ASKPASS=<dromas> SSH_ASKPASS_REQUIRE=force DROMAS_ASKPASS=<program>),
-which gives ssh-add no passphrase after 3, as ssh's NumberOfPasswordPrompts
-does, and agent add then fails as "identity_locked". A revoked mailbox, which
-signs nothing more, is refused before ssh-add runs. Before ssh-add runs, an
+runs no askpass program (SSH_ASKPASS_REQUIRE=never). Where the key file has a
+passphrase, and stdin is no terminal or --no-prompt is set, agent add fails as
+"identity_locked" before ssh-add runs. With --askpass, ssh-add runs that
+program through dromas (SSH_ASKPASS=<dromas> SSH_ASKPASS_REQUIRE=force
+DROMAS_ASKPASS=<program>), which gives ssh-add no passphrase after 3, as ssh's
+NumberOfPasswordPrompts does; where no passphrase the program gave unlocked
+the key file, agent add fails as "identity_locked". Any other failure of
+ssh-add is said with what ssh-add wrote. A revoked mailbox, which signs
+nothing more, is refused before ssh-add runs. Before ssh-add runs, an
 "agent_add" line gives the command it runs. Once the agent holds the key, an
 "agent_added" line gives the mailbox's signer, as status names it.
 --lifetime is ssh-add -t: when it ends, the agent drops the key. While the
@@ -424,9 +429,11 @@ renews nothing, but in a command run with --askpass or at a terminal.`,
 				return err
 			}
 			// A revoked mailbox signs nothing more, so its key goes in no agent.
-			if st, err := b.Status(c.Context()); err != nil {
+			st, err := b.Status(c.Context())
+			if err != nil {
 				return err
-			} else if st.Revoked {
+			}
+			if st.Revoked {
 				return &client.RevokedError{Address: b.Address(), Own: true}
 			}
 			file := b.Path("identity")
@@ -435,8 +442,9 @@ renews nothing, but in a command run with --askpass or at a terminal.`,
 			if e.cfg.askpass == "" {
 				// Without --askpass, ssh-add reads the passphrase at the
 				// terminal alone, and never runs an askpass program that the
-				// environment names (SSH_ASKPASS, DISPLAY).
-				if !e.mayPrompt() {
+				// environment names (SSH_ASKPASS, DISPLAY). A key file with
+				// no passphrase asks nothing.
+				if st.IdentityKey == client.KeyPassphrase && !e.mayPrompt() {
 					return &client.IdentityLockedError{File: file, Agent: socket, Reason: "without --askpass, agent add runs ssh-add only where stdin is a terminal and no-prompt is not set, since ssh-add asks for the key file's passphrase at the terminal"}
 				}
 				env = append(env, "SSH_ASKPASS_REQUIRE=never")
@@ -466,19 +474,27 @@ renews nothing, but in a command run with --askpass or at a terminal.`,
 				return err
 			}
 			cmd := exec.CommandContext(c.Context(), "ssh-add", args...) //nolint:gosec // stock ssh-add on the mailbox's own key file
-			// ssh-add reads a passphrase from the terminal itself, and what it
-			// prints is its own: neither output stream is this client's. Its
-			// stdin is the command's, which ssh-add reads to choose between the
-			// terminal and an askpass program.
+			// ssh-add reads a passphrase from the terminal itself. Its stdout
+			// is its own, not this client's; what it writes to stderr is kept,
+			// to say in the error why it failed. Its stdin is the command's,
+			// which ssh-add reads to choose between the terminal and an
+			// askpass program.
+			var said bytes.Buffer
 			cmd.Stdin = e.stdin
+			cmd.Stderr = &said
 			cmd.Env = append(os.Environ(), env...)
 			if err := cmd.Run(); err != nil {
-				if tries != "" && askedTimes(tries) > askpassTries {
-					return &client.IdentityLockedError{File: file, Agent: socket, Reason: fmt.Sprintf("the askpass program gave a passphrase %d times, and none unlocked the key file", askpassTries)}
+				// An askpass program that ran, and a failure after it: no
+				// passphrase it gave, if any, unlocked the key file.
+				if tries != "" && askedTimes(tries) > 0 {
+					return &client.IdentityLockedError{File: file, Agent: socket, Reason: fmt.Sprintf("the askpass program gave no passphrase that unlocked the key file, in at most %d tries", askpassTries)}
 				}
-				return fmt.Errorf("ssh-add did not load the key: %w; run its line above to see why", err)
+				if why := strings.TrimSpace(said.String()); why != "" {
+					return fmt.Errorf("ssh-add did not load the key: %w: %s", err, why)
+				}
+				return fmt.Errorf("ssh-add did not load the key: %w", err)
 			}
-			st, err := b.Status(c.Context())
+			st, err = b.Status(c.Context())
 			if err != nil {
 				return err
 			}

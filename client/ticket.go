@@ -64,8 +64,9 @@ const resumeWithin = 24 * time.Hour
 // after the last full handshake: every connection that resumes, the tickets
 // that party issues included, keeps that time, and only a full handshake that
 // completed moves it (handshakeDone). The file keeps the time beside the
-// ticket, so a new process judges by it. A file that keeps no time gives no
-// session, and the next full handshake writes one. The time is the mailbox's
+// ticket, so a new process judges by it. A file that keeps no time, or one that
+// does not parse, gives no time: a process that knows none takes no session
+// from it, and the next full handshake writes one. The time is the mailbox's
 // clock's, and one ahead of the clock gives no session. Every connection of a
 // process shares the cache, a Hold's beside a command's, and the time is
 // under the cache's lock. A process writes the latest time it knows of, so a

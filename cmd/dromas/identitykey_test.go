@@ -265,7 +265,7 @@ func fakeSSHAdd(t *testing.T) string {
 	t.Helper()
 	bin := t.TempDir()
 	record := filepath.Join(t.TempDir(), "ran")
-	script := "#!/bin/sh\n{ echo \"SSH_ASKPASS_REQUIRE=${SSH_ASKPASS_REQUIRE-unset}\"; echo \"SSH_ASKPASS=${SSH_ASKPASS-unset}\"; echo \"args=$*\"; cat; } > " + shellQuote(record) + "\nexit 1\n"
+	script := "#!/bin/sh\n{ echo \"SSH_ASKPASS_REQUIRE=${SSH_ASKPASS_REQUIRE-unset}\"; echo \"SSH_ASKPASS=${SSH_ASKPASS-unset}\"; echo \"args=$*\"; cat; } > " + shellQuote(record) + "\necho 'fake ssh-add: refused' >&2\nexit 1\n"
 	if err := os.WriteFile(filepath.Join(bin, "ssh-add"), []byte(script), 0o700); err != nil { //nolint:gosec // a program the test runs
 		t.Fatal(err)
 	}
@@ -423,5 +423,33 @@ func TestAnAgentNotThereFailsNoCommandThatAddsTheKey(t *testing.T) {
 	}
 	if ls := printed(t, out.String()); typesOf(ls) != "agent_not_added prekey" || ls[0]["socket"] != socket {
 		t.Errorf("printed %s", out.String())
+	}
+}
+
+// No prompt opens once the command's context has ended: nothing would restore
+// the terminal it made raw (#803 item 2).
+func TestNoPromptOpensOnceTheCommandIsInterrupted(t *testing.T) {
+	terminalStdin(t)
+	ctx, interrupt := context.WithCancel(t.Context())
+	interrupt()
+	var errs bytes.Buffer
+	e := &cli{ctx: ctx, interrupt: interrupt, cfg: &config{}, stdin: os.Stdin, stderr: &errs}
+	if _, err := e.passphrase("identity"); !errors.Is(err, context.Canceled) || errs.Len() != 0 {
+		t.Errorf("the prompt after an interrupt: %v; said %q", err, errs.String())
+	}
+}
+
+// keysRead notes a ^C, which term.Terminal reads as the end of input, so the
+// prompt takes it as an interrupt, and a ^D as no passphrase (#803 item 10).
+func TestKeysReadNotesACtrlC(t *testing.T) {
+	t.Parallel()
+	for in, want := range map[string]bool{"pass\r": false, "pa\x03": true, "\x04": false} {
+		k := &keysRead{r: strings.NewReader(in)}
+		if _, err := io.ReadAll(k); err != nil {
+			t.Fatal(err)
+		}
+		if k.interrupted != want {
+			t.Errorf("%q: interrupted %v", in, k.interrupted)
+		}
 	}
 }

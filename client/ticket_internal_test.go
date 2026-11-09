@@ -19,6 +19,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -629,5 +630,60 @@ func TestATicketThatKeepsNoTimeGivesNoSession(t *testing.T) {
 	}
 	if _, resumed, err := call(aProcessAt(t, dir, srv.URL, pool, clk, "")); err != nil || !resumed {
 		t.Fatalf("the ticket the full handshake wrote: resumed %v, %v", resumed, err)
+	}
+}
+
+// ticketWithFull is the ticket file in dir with its dromas-full entry set to v,
+// or removed where v is nil.
+func ticketWithFull(t *testing.T, dir string, v []byte) {
+	t.Helper()
+	raw, err := os.ReadFile(ticketPath(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := tls.ParseSessionState(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state.Extra = slices.DeleteFunc(state.Extra, func(e []byte) bool { return bytes.HasPrefix(e, []byte(extraFull)) })
+	if v != nil {
+		state.Extra = append(state.Extra, append([]byte(extraFull), v...))
+	}
+	if raw, err = state.Bytes(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(ticketPath(dir), raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A ticket file whose time of a full handshake does not parse, or is ahead of
+// the clock, gives no session: the call makes a full handshake, whose time the
+// file then keeps (#797 item 1). The time as written resumes.
+func TestATicketWhoseTimeDoesNotParseOrIsAheadGivesNoSession(t *testing.T) {
+	t.Parallel()
+	for name, v := range map[string]func(time.Time) []byte{
+		"does not parse": func(time.Time) []byte { return []byte("not-a-number") },
+		"an hour ahead":  func(t0 time.Time) []byte { return []byte(strconv.FormatInt(t0.Add(time.Hour).Unix(), 10)) },
+	} {
+		srv := ticketServer(t, 0)
+		pool := x509.NewCertPool()
+		pool.AddCert(srv.Certificate())
+		t0 := time.Now().Truncate(time.Second)
+		clk := &ticketClock{t: t0}
+		dir := ticketDir(t)
+		if _, resumed, err := call(aProcessAt(t, dir, srv.URL, pool, clk, "")); err != nil || resumed {
+			t.Fatalf("%s: the first call: resumed %v, %v", name, resumed, err)
+		}
+		if _, resumed, err := call(aProcessAt(t, dir, srv.URL, pool, clk, "")); err != nil || !resumed {
+			t.Fatalf("%s: the time as written: resumed %v, %v", name, resumed, err)
+		}
+		ticketWithFull(t, dir, v(t0))
+		if _, resumed, err := call(aProcessAt(t, dir, srv.URL, pool, clk, "")); err != nil || resumed {
+			t.Errorf("%s: resumed %v, %v", name, resumed, err)
+		}
+		if got := keptFull(t, dir, srv.URL); !got.Equal(t0) {
+			t.Errorf("%s: the full handshake after kept %v, want %v", name, got, t0)
+		}
 	}
 }

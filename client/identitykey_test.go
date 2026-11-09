@@ -1,6 +1,7 @@
 package client_test
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -387,26 +388,32 @@ func (a signsNot) Sign(key ssh.PublicKey, data []byte) (*ssh.Signature, error) {
 
 // An agent that lists the identity's key and drops it before it signs, as one
 // whose key's lifetime ends between the two, leaves the identity locked: the
-// signature fails as identity_locked, and nothing is signed.
+// signature fails as identity_locked, and nothing is signed. A key the agent
+// lists is the key used, so the key file is not tried, one with no passphrase
+// included (#803 item 7).
 func TestAnAgentThatDropsTheKeyBeforeItSignsIsLocked(t *testing.T) {
 	t.Parallel()
-	e := newEnv(t)
-	b := e.mailbox()
-	before := numberOf(t, b)
-	kr := agent.NewKeyring()
-	if err := kr.Add(agent.AddedKey{PrivateKey: identityPrivate(t, b)}); err != nil {
-		t.Fatal(err)
-	}
-	encrypt(t, b, "correct horse")
-	opt := e.opts()
-	opt.Agent = serveAgent(t, signsNot{kr, func() { _ = kr.RemoveAll() }})
-	_, err := reopen(t, b, opt).Rekey(t.Context())
-	var locked *client.IdentityLockedError
-	if !errors.As(err, &locked) || locked.Agent != opt.Agent {
-		t.Errorf("a renewal whose agent dropped the key it listed: %v", err)
-	}
-	if numberOf(t, b) != before {
-		t.Errorf("a renewal with the key dropped renewed: %d, %d before", numberOf(t, b), before)
+	for _, passphrase := range []string{"correct horse", ""} {
+		e := newEnv(t)
+		b := e.mailbox()
+		before := numberOf(t, b)
+		kr := agent.NewKeyring()
+		if err := kr.Add(agent.AddedKey{PrivateKey: identityPrivate(t, b)}); err != nil {
+			t.Fatal(err)
+		}
+		if passphrase != "" {
+			encrypt(t, b, passphrase)
+		}
+		opt := e.opts()
+		opt.Agent = serveAgent(t, signsNot{kr, func() { _ = kr.RemoveAll() }})
+		_, err := reopen(t, b, opt).Rekey(t.Context())
+		var locked *client.IdentityLockedError
+		if !errors.As(err, &locked) || locked.Agent != opt.Agent {
+			t.Errorf("a renewal whose agent dropped the key it listed, passphrase %q: %v", passphrase, err)
+		}
+		if numberOf(t, b) != before {
+			t.Errorf("a renewal with the key dropped, passphrase %q, renewed: %d, %d before", passphrase, numberOf(t, b), before)
+		}
 	}
 }
 
@@ -748,5 +755,69 @@ func TestTheIdentitysPublicKeyIsTheKeyFilesWhereOneExists(t *testing.T) {
 	var locked *client.IdentityLockedError
 	if _, err := reopen(t, b, opt).Rekey(t.Context()); !errors.As(err, &locked) {
 		t.Errorf("a renewal whose agent holds identity.pub's key and not the key file's: %v", err)
+	}
+}
+
+// Init beside an identity that is a link to nothing, as on a volume not
+// mounted, makes no new identity: with the key in the agent it runs as the
+// mailbox identity.pub names, and with none it fails as identity_locked, the
+// link left as it was (#803 item 8).
+func TestInitBesideAnIdentityThatIsALinkToNothingMakesNoNewIdentity(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	made := e.mailbox()
+	socket, kr := testAgent(t)
+	if err := kr.Add(agent.AddedKey{PrivateKey: identityPrivate(t, made)}); err != nil {
+		t.Fatal(err)
+	}
+	pub, err := os.ReadFile(made.Path("identity.pub"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, withAgent := range []bool{true, false} {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "identity.pub"), pub, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		link := filepath.Join(dir, "identity")
+		if err := os.Symlink(filepath.Join(dir, "unmounted", "identity"), link); err != nil {
+			t.Fatal(err)
+		}
+		opt := e.opts()
+		if withAgent {
+			opt.Agent = socket
+		}
+		b, err := client.Init(t.Context(), dir, opt)
+		var locked *client.IdentityLockedError
+		switch {
+		case withAgent && (err != nil || b.Address() != made.Address()):
+			t.Errorf("init with the key in the agent: %v", err)
+		case !withAgent && !errors.As(err, &locked):
+			t.Errorf("init with no agent: %v", err)
+		}
+		if fi, err := os.Lstat(link); err != nil || fi.Mode()&os.ModeSymlink == 0 {
+			t.Errorf("the link was replaced, agent %v: %v", withAgent, err)
+		}
+	}
+}
+
+// A renewal that a ^C at the passphrase's prompt cut short is held to no hour:
+// the next Receive, a minute later, asks again and renews (#803 item 5).
+func TestARenewalInterruptedAtThePromptIsNotHeld(t *testing.T) {
+	e := newWorkEnv(t)
+	b := e.mailbox()
+	encrypt(t, b, "correct horse")
+	before := numberOf(t, b)
+	e.clock.Add(25 * time.Hour)
+	opt := e.opts()
+	ctx, interrupt := context.WithCancel(t.Context())
+	opt.Passphrase = func(string) ([]byte, error) { interrupt(); return nil, ctx.Err() }
+	_, _ = reopen(t, b, opt).Receive(ctx)
+	e.clock.Add(time.Minute)
+	asked := 0
+	opt.Passphrase = func(string) ([]byte, error) { asked++; return []byte("correct horse"), nil }
+	res, err := reopen(t, b, opt).Receive(t.Context())
+	if err != nil || asked == 0 || res.RenewErr != nil || numberOf(t, b) == before {
+		t.Errorf("the Receive after an interrupted renewal: asked %d, renewal %v, %v", asked, res.RenewErr, err)
 	}
 }

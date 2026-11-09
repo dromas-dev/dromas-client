@@ -144,6 +144,37 @@ func TestAWrongPassphraseFromAskpassEndsAgentAddAfterThreeTries(t *testing.T) {
 	if raw, err := os.ReadFile(runs); err != nil || bytes.Count(raw, []byte{'\n'}) != 3 { //nolint:gosec // the test's own
 		t.Errorf("the askpass program ran %d times, not 3: %v", bytes.Count(raw, []byte{'\n'}), err)
 	}
+	// A program that fails gives no passphrase, and agent add is
+	// identity_locked as for a wrong one (#803 item 3).
+	if fails, err := exec.LookPath("false"); err == nil {
+		err = do(bounded, "agent add", []string{"--askpass", fails}, nil, io.Discard, io.Discard)
+		if l := failed(t, err); l["code"] != client.IdentityLocked {
+			t.Errorf("agent add whose askpass program fails: %v", l)
+		}
+	}
+}
+
+// A key file with no passphrase asks nothing, so agent add runs ssh-add on it
+// whatever stdin is; and an ssh-add that fails is said with what it wrote
+// (#803 items 4 and 6).
+func TestAgentAddOfAKeyWithNoPassphraseRunsSSHAddAndSaysItsFailure(t *testing.T) {
+	cleanEnv(t)
+	srv := fakeserver.New(t, time.Now)
+	dir := t.TempDir()
+	t.Setenv("DROMAS_CONFIG", configFor(t, dir))
+	t.Setenv("DROMAS_SERVER_URL", srv.URL)
+	t.Setenv("DROMAS_AGENT", filepath.Join(shortDir(t), "s"))
+	if err := do(t.Context(), "init", nil, nil, io.Discard, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	record := fakeSSHAdd(t)
+	err := do(t.Context(), "agent add", nil, strings.NewReader(""), io.Discard, io.Discard)
+	if _, serr := os.Stat(record); serr != nil {
+		t.Fatalf("ssh-add did not run on a key file with no passphrase: %v", err)
+	}
+	if err == nil || !strings.Contains(err.Error(), "fake ssh-add: refused") {
+		t.Errorf("agent add whose ssh-add failed: %v", err)
+	}
 }
 
 // agent add refuses a revoked mailbox before ssh-add runs: it signs nothing

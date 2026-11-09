@@ -64,14 +64,15 @@ func (c *callbackEnv) recvCmdThatRemoves(program string, out, errs io.Writer) fu
 }
 
 // The binary's own recv --follow ends with exit status 0 at a SIGTERM, as a
-// service manager stops it, and at SIGINT.
+// service manager stops it, and at SIGINT, SIGHUP and SIGQUIT, each of which
+// restores a terminal the passphrase prompt holds raw (#803).
 func TestRecvFollowEndsCleanlyAtASignal(t *testing.T) {
 	ctx := context.Background()
 	bin := filepath.Join(t.TempDir(), "dromas")
 	if out, err := exec.CommandContext(ctx, "go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
 		t.Fatalf("go build: %v %s", err, out)
 	}
-	for _, sig := range []syscall.Signal{syscall.SIGTERM, syscall.SIGINT} {
+	for _, sig := range []syscall.Signal{syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP, syscall.SIGQUIT} {
 		srv := fakeserver.New(t, time.Now)
 		b, err := client.Init(ctx, t.TempDir(), client.Options{Base: srv.URL})
 		if err != nil {

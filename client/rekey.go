@@ -850,10 +850,11 @@ func (b *Mailbox) renewNow(ctx context.Context) (*protocol.Prekey, error) {
 		// A mailbox that holds its own revocation renews nothing again: there
 		// is nothing to try in an hour. A renewal that failed for want of the
 		// identity's key failed at no server, and the next Receive, which may
-		// have the key, tries it again.
+		// have the key, tries it again; so does one its own command's
+		// interrupt cut short, a ^C at the passphrase's prompt among them.
 		var gone *RevokedError
 		var locked *IdentityLockedError
-		if errors.As(err, &gone) || errors.As(err, &locked) {
+		if errors.As(err, &gone) || errors.As(err, &locked) || errors.Is(ctx.Err(), context.Canceled) {
 			return nil, err
 		}
 		return nil, errors.Join(err, b.holdRenewal(err))

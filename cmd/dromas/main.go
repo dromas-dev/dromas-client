@@ -102,9 +102,11 @@ func main() {
 	// net/http logs some of what a server sends after its answer through the
 	// standard logger, raw (#297): stderr has only this client's lines.
 	log.SetOutput(io.Discard)
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	// The first interrupt or SIGTERM ends the command's waits and calls; a
-	// second, with the handler gone, ends the process (#330).
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGQUIT)
+	// The first interrupt, SIGTERM, SIGHUP or SIGQUIT ends the command's waits
+	// and calls, and restores a terminal its passphrase prompt holds raw, as
+	// readpassphrase(3) does; a second, with the handler gone, ends the process
+	// (#330).
 	go func() { <-ctx.Done(); stop() }()
 	err := run(ctx, os.Args[1:], os.Stdin, os.Stdout, os.Stderr)
 	stop()
