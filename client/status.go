@@ -320,7 +320,7 @@ func (b *Mailbox) refusedBeforeRestore() int {
 // restore (Options.Restore), where they are, and how to see each: recv's line
 // (Result.RefusedBeforeRestore) and status both say it.
 func BeforeRestoreWords(n int) string {
-	return fmt.Sprintf("%d refused as stale because each was sent before this mailbox's restore of its state (dromas init --restore): its prekeys may open a message it delivered under a state it no longer holds, which its replay set cannot tell from one that waited. refused/ keeps each, and dromas refused list shows each and who signed it", n)
+	return fmt.Sprintf("%d refused as stale because each was sent before this mailbox's restore of its state (dromas init --restore), to a prekey it held then: such a prekey may open a message it delivered under a state it no longer holds, which its replay set cannot tell from one that waited. refused/ keeps each, and dromas refused list shows each and who signed it", n)
 }
 
 // refusedCodes lists the distinct codes of the messages in refused/, from
