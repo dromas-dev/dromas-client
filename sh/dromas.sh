@@ -783,7 +783,7 @@ dr_matched(){ # → 0 where this mailbox's records match its prekeys/: no key th
   ! dr_unnamed || why="prekeys/ holds ${#DR_FOUND[@]} prekeys seen-keys does not name, as after seen and seen-keys are lost, or put back from a copy older than a renewal, with prekeys/ kept"
   [ "$f" -le "$g" ] || why="${why:+$why; and }prekeys/generation counts more messages accepted than generation does, as after this mailbox's records are put back from a copy older than the mailbox"
   if [ -n "$why" ]; then
-    jq -cn --arg m "REFUSED: this mailbox's records do not match its prekeys: $why. Such records cannot tell a message this mailbox delivered under the records it lost from one that waited, so the mailbox receives, sends and renews nothing, and acks nothing, until its owner runs dromas.sh init --restore: from then, every message sent before the pass of its next recv's list, and in the hour after, is refused as stale" '{type:"error", fatal:true, code:"state_not_the_keys", detail:$m}' >&2
+    jq -cn --arg m "REFUSED: this mailbox's records do not match its prekeys: $why. Such records cannot tell a message this mailbox delivered under the records it lost from one that waited, so the mailbox receives, sends and renews nothing, and acks nothing, until its owner runs dromas.sh init --restore, which renews its prekey: from then, a message that a prekey it holds now opens is refused as stale where it was sent before the pass of its next recv's list, or in the hour after, and a message to the new prekey is delivered" '{type:"error", fatal:true, code:"state_not_the_keys", detail:$m}' >&2
     return 4
   fi
   [ -d "$DR/prekeys" ] || return 0      # a mailbox with no prekeys/ yet has nothing there to count beside
