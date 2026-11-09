@@ -1019,7 +1019,8 @@ func aboutAnother(err error) error {
 // pruneSeen drops the lines past protocol.SeenFor by the reading at, one a
 // server took. When it drops one, the floor rises to the cutoff in the same
 // transaction, so a clock that later reads further back than SeenFor allows
-// for still takes no message whose line went (seenFloor).
+// for still takes no message whose line went (seenFloor). A prune that drops
+// nothing writes nothing, the floor included.
 func (b *Mailbox) pruneSeen(at taken) error {
 	cutoff := at.At().Add(-protocol.SeenFor).Unix()
 	return b.update(func(s store) error {
