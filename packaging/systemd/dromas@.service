@@ -9,12 +9,11 @@ Description=Dromas mailbox %i: receive each message, and run the profile's callb
 Documentation=https://github.com/dromas-dev/dromas-client#run-it-as-a-service
 
 [Service]
-ExecStart=/usr/bin/dromas recv --follow --profile %i
-# recv's stdout has a line for each message, its body included, and the
-# journal is readable beyond the user: so stdout goes nowhere. inbox/ keeps
-# every message, the callback gets its line on stdin, and the error lines,
-# which carry none of a sender's text, go to the journal on stderr.
-StandardOutput=null
+# --headers: the journal, which others than the user can read, gets who
+# wrote each message and when, and none of the text a sender chose, as a mail
+# server's log does. inbox/ keeps each message, and the callback gets its
+# whole line.
+ExecStart=/usr/bin/dromas recv --follow --headers --profile %i
 # Exit status 2 is a wrong command line or config, and 4 a refusal that no
 # wait mends: a new start meets either again. Any other failure is started
 # again after RestartSec.

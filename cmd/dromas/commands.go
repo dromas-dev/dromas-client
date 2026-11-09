@@ -344,8 +344,9 @@ keeping it in held/.
 
 With --headers, a "message_headers" line takes each "message" line's place: its
 "envelope" has the fields this client checked with none of the text the
-sender chose, no body and no subject, and the line has the body's size. Each
-message is kept in inbox/ as ever, and dromas inbox show <id> prints its
+sender chose, no body and no subject, and the line has the body's size.
+--exec's program still gets each "message" line. Each message is kept in
+inbox/ as ever, and dromas inbox show <id> prints its
 "message" line, so a reader can decide by sender before it reads what the sender wrote.
 
 One drain runs for at most --drain-time, holding the mailbox's lock: there it
@@ -369,7 +370,7 @@ any other refusal of the server's or of this client's. Exit status 1 is any
 other failure.
 
 With --exec, recv runs a command for each message that lands in inbox/, with
-the message's line on stdin, as recv prints it. It takes --wait or --follow.
+the message's "message" line on stdin, as recv prints it without --headers. It takes --wait or --follow.
 --exec names the program, and the arguments after -- go to it one for one: no
 shell runs, and nothing is split or expanded. The config file's [recv] exec
 names the program and its arguments as one list, such as exec =

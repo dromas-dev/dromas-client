@@ -201,17 +201,22 @@ func TestExecGetsTheLineAndItsArgumentsAsGiven(t *testing.T) {
 	}
 }
 
-// With --headers the callback gets the message_headers line, as recv prints it,
-// with none of the text the sender chose.
-func TestExecWithHeadersGetsTheHeadersLine(t *testing.T) {
+// With --headers recv prints the message_headers line, with none of the text
+// the sender chose, and the callback still gets the message line: so a service
+// whose stdout is a log logs who wrote and when, and its callback reads the
+// message.
+func TestExecWithHeadersGetsTheMessageLineAndPrintsTheHeaders(t *testing.T) {
 	c := newCallback(t)
 	c.send("the words of the sender")
 	stdout, stderr, err := c.recv(context.Background(), append([]string{"--wait", "0s", "--headers"}, c.exec("exit", "0")...)...)
 	if err != nil {
 		t.Fatalf("recv: %v %s", err, stderr)
 	}
-	if got := c.recorded(); got != stdout || !strings.HasPrefix(got, `{"type":"message_headers"`) || strings.Contains(got, "the words") {
-		t.Fatalf("the callback read %q, recv printed %q", got, stdout)
+	if !strings.HasPrefix(stdout, `{"type":"message_headers"`) || strings.Contains(stdout, "the words") {
+		t.Fatalf("recv --headers printed %q", stdout)
+	}
+	if got := c.recorded(); !strings.HasPrefix(got, `{"type":"message"`) || !strings.Contains(got, "the words of the sender") {
+		t.Fatalf("the callback read %q, want the message line", got)
 	}
 }
 
