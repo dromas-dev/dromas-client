@@ -382,24 +382,11 @@ mv(){ printf '%s mv %s\n' "${FUNCNAME[1]}" "$*" >> "$LOG"; command mv "$@"; }
 		t.Errorf("dr_forget left the set %q under the floor %q", b.read("seen"), b.read("seen-floor"))
 	}
 
-	// A drain counts itself in its records first, then in prekeys/generation.
-	got = calls("dr_putline", "dr_count")
-	if want := []string{"sync generation.new", "mv generation.new generation", "sync .", "sync prekeys/generation.new", "mv prekeys/generation.new prekeys/generation", "sync prekeys"}; !slices.Equal(got, want) {
-		t.Errorf("dr_count's syncs and moves:\n%q\nwant\n%q", got, want)
-	}
-
-	// A restore owes the floor first, then records the keys it holds as
-	// restored, then names the keys seen-keys does not.
+	// A restore names the keys seen-keys does not, each synced.
 	b.must(`rm "$DR/seen-keys"`)
-	got = calls("dr_putline dr_covered", "dr_restore > /dev/null")
-	if want := []string{"sync floor-owed.new", "mv floor-owed.new floor-owed", "sync .", "sync restored-keys.new", "mv restored-keys.new restored-keys", "sync .", "sync seen-keys ."}; len(got) < len(want) || !slices.Equal(got[:len(want)], want) || slices.ContainsFunc(got[len(want):], func(c string) bool { return c != "sync seen-keys" }) {
-		t.Errorf("dr_restore's syncs and moves:\n%q\nwant\n%q, then one sync of seen-keys for each further key", got, want)
-	}
-
-	// The floor it owes is set first, then its mark goes.
-	got = calls("dr_owed dr_putline", "dr_owed "+strconv.FormatInt(now, 10))
-	if want := []string{"sync restore-floor.new", "mv restore-floor.new restore-floor", "sync .", "sync ."}; !slices.Equal(got, want) || b.has("floor-owed") {
-		t.Errorf("dr_owed's syncs and moves:\n%q\nwant\n%q", got, want)
+	got = calls("dr_covered", "dr_restore > /dev/null")
+	if len(got) == 0 || slices.ContainsFunc(got, func(c string) bool { return c != "sync seen-keys" && c != "sync seen-keys ." }) {
+		t.Errorf("dr_restore's syncs: %q, want one sync of seen-keys for each key", got)
 	}
 }
 

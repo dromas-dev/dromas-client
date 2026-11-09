@@ -178,16 +178,13 @@ it where only you can read it. On a mailbox already registered, init with
 --revocation-file writes the record and changes nothing else.
 
 A mailbox whose state does not match its prekeys/, as after state is lost or
-put back from an older copy with prekeys/ kept, receives, sends, delivers and
-renews nothing, init and peer allow among them, until init --restore
-acknowledges it: it adopts the prekeys the state does not name and renews.
-A drain then refuses as stale a message that a prekey held before that
-renewal opens, where it was sent before the renewal or in the hour after
-(stale_after_restore), since those keys may open a message the mailbox
-delivered already; a message to the new prekey is delivered at once. On a
-mailbox whose state matches, init --restore
-changes nothing, so it may run at every start. A mailbox restored from its
-identity alone needs no --restore.`,
+put back from an older copy with prekeys/ kept, is a failure: it receives,
+sends, delivers and renews nothing, init and peer allow among them, until
+init --restore acknowledges it. That adopts the prekeys the state does not
+name and renews. The lost state took its replay set with it, so a message
+the mailbox accepted before may be delivered again. On a mailbox whose state
+matches, init --restore changes nothing, so it may run at every start. A
+mailbox restored from its identity alone needs no --restore.`,
 		checked(nargs(0, 0), func(c *cobra.Command, _ []string) error {
 			if idType != "" && !slices.Contains(protocol.IdentityTypes(), idType) {
 				return wrong(c, "%s makes an identity of the key type %s, and %q is not one", c.CommandPath(), strings.Join(protocol.IdentityTypes(), " or "), idType)
@@ -250,14 +247,7 @@ func restoreWords(r client.Restored) string {
 	if !r.Acknowledged() {
 		return "this mailbox's state matches its prekeys: nothing to acknowledge, and nothing changed"
 	}
-	var found []string
-	if r.Adopted > 0 {
-		found = append(found, fmt.Sprintf("adopted %d prekeys the state did not name", r.Adopted))
-	}
-	if r.RolledBack {
-		found = append(found, "found the state older than prekeys/generation")
-	}
-	return "acknowledged the restore: " + strings.Join(found, ", and ") + ". From the renewal init makes now, a drain refuses as stale a message that one of these prekeys opens, where it was sent before that renewal or in the hour after (stale_after_restore), and delivers a message to the new prekey"
+	return fmt.Sprintf("acknowledged the restore: adopted %d prekeys the state did not name, and init renews now. The lost state took its replay set with it, so a message this mailbox accepted before may be delivered again", r.Adopted)
 }
 
 func (e *cli) addrCmd() *cobra.Command {

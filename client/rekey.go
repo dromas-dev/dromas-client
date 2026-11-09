@@ -996,9 +996,6 @@ func (b *Mailbox) removePrekey(n uint64) error {
 		if err := s.del(bucketAdopted, serialKey(n)); err != nil {
 			return err
 		}
-		if err := s.del(bucketRestored, serialKey(n)); err != nil {
-			return err
-		}
 		return s.del(bucketPrekeys, serialKey(n))
 	})
 }

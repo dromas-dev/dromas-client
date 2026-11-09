@@ -729,8 +729,7 @@ func TestARestoreKilledBeforeTheRecordOfItsFoldersFinishes(t *testing.T) {
 
 // An acknowledgement of a restore killed once it has adopted the keys a new state
 // file did not name: the next command reads the adoption and needs no other,
-// the mailbox is whole, and a message sealed to the adopted key decrypts,
-// refused as sent before the restore, with its signer.
+// the mailbox is whole, and a message sealed to the adopted key is delivered.
 func TestAnAdoptionKilledLeavesTheMailboxWhole(t *testing.T) {
 	t.Parallel()
 	for _, step := range client.Steps("keys") {
@@ -759,9 +758,9 @@ func TestAnAdoptionKilledLeavesTheMailboxWhole(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			refusedBeforeRestore(t, x, res, a, 1)
+			waitedDelivered(t, res, a, 1)
 			e.clock.Add(protocol.MaxSkew)
-			whole(t, e, x, a)
+			whole(t, e, x, a, "sealed to the key the state file named")
 		})
 	}
 }

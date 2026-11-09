@@ -95,12 +95,10 @@ type Options struct {
 	// one where something is, and one whose directory is not there
 	// (checkRevocationFile, writeRevocationFile).
 	RevocationFile string
-	// Restore has Init acknowledge a restore (dromas init --restore): where the
-	// state does not match prekeys/ (StateNotTheKeys), it adopts the keys the
-	// state names nowhere, owes the floor of the keys prekeys/ holds, takes
-	// prekeys/generation's count, and renews, so the mailbox runs again and
-	// takes its senders' messages to the new prekey at once; where it matches,
-	// it changes nothing ([Mailbox.Restored]). Without it, Init is refused on such a state, as every
+	// Restore has Init acknowledge a restore (dromas init --restore): where
+	// prekeys/ holds keys the state names nowhere (StateNotTheKeys), it adopts
+	// them and renews, so the mailbox runs again; where it holds none, it
+	// changes nothing ([Mailbox.Restored]). Without it, Init is refused on such a state, as every
 	// command that receives, sends or renews is. Only Init reads it, and only
 	// for its own call: Open ignores it, and no later method of the Mailbox that
 	// Init returns acknowledges a restore. Where Init fails after the
@@ -675,11 +673,7 @@ func (b *Mailbox) init(ctx context.Context) (*Mailbox, error) {
 		if b.restored == nil || !b.restored.Acknowledged() {
 			return b, nil
 		}
-		// An acknowledged restore renews at once, as dromas prekey renew does:
-		// the restore's floor holds only what a key held at it opens
-		// (restoreFloor), so its senders' messages to the new prekey are
-		// delivered, and the renewal's confirmed time sets that floor
-		// (beginFloor).
+		// An acknowledged restore renews at once, as dromas prekey renew does.
 		p, err := b.rekeyAdopting(ctx)
 		if p != nil {
 			err = errors.Join(err, b.forgetLost())
@@ -776,8 +770,8 @@ func (b *Mailbox) publish(ctx context.Context, path string, req any, n uint64) (
 // before it, unless a later one is under way; and pass, which is under the
 // certificate the server now holds this mailbox to, as the pass the mailbox keeps,
 // or with none given, no pass; and n on the record of a statement the mailbox
-// did not make, which its server took n above (NotMade.RenewedAbove); and the
-// replay floor an adoption owes (beginFloor). Then the working keys older than n go.
+// did not make, which its server took n above (NotMade.RenewedAbove). Then the
+// working keys older than n go.
 func (b *Mailbox) recordTaken(n uint64, pass string, at taken) error {
 	var rec []byte
 	if pass != "" {
@@ -791,9 +785,6 @@ func (b *Mailbox) recordTaken(n uint64, pass string, at taken) error {
 			return err
 		}
 		if err := recordAdoptedRenewal(s, at); err != nil {
-			return err
-		}
-		if err := b.beginFloor(s, at); err != nil {
 			return err
 		}
 		if err := b.recordPublished(s, n); err != nil {
@@ -1260,18 +1251,14 @@ func readAgeKeys(name string) ([]age.Identity, error) {
 // prekeyIdentities returns every retained prekey that the state file names (namedKeys),
 // to decrypt with once oneNative has taken the file (decrypt). A file in prekeys/
 // that the state file names nowhere decrypts nothing until its owner's
-// acknowledgement adopts it (matchKeys), which owes the replay floor: such a key
-// may open a message that a replay set now lost saw delivered (PROTOCOL.md
-// §12.3 check 8). A file whose name is no serial is never adopted, and one that
-// appears during a drain stops the next command until it is acknowledged. A
-// key held at a restore (bucketRestored) sets restored where it opens a file,
-// so judge holds that message to the restore's floor (restoreFloor).
-func (b *Mailbox) prekeyIdentities(restored *bool) ([]age.Identity, error) {
+// acknowledgement adopts it (matchKeys). A file whose name is no serial is never
+// adopted, and one that appears during a drain stops the next command until it
+// is acknowledged.
+func (b *Mailbox) prekeyIdentities() ([]age.Identity, error) {
 	names, err := matching(b.path("prekeys", "*.agekey"))
 	if err != nil {
 		return nil, err
 	}
-	held := map[uint64]bool{}
 	if err := b.view(func(s store) error {
 		named, err := namedKeys(s)
 		if err != nil {
@@ -1281,11 +1268,7 @@ func (b *Mailbox) prekeyIdentities(restored *bool) ([]age.Identity, error) {
 			n, ok := serialOfKeyFile(name)
 			return !ok || !named(n)
 		})
-		return s.each(bucketRestored, func(k, _ []byte) error {
-			n, err := keySerial(k)
-			held[n] = true
-			return err
-		})
+		return nil
 	}); err != nil {
 		return nil, err
 	}
@@ -1295,33 +1278,12 @@ func (b *Mailbox) prekeyIdentities(restored *bool) ([]age.Identity, error) {
 		if err != nil {
 			return nil, err
 		}
-		if n, _ := serialOfKeyFile(name); held[n] {
-			for i, id := range ids {
-				ids[i] = restoredKey{Identity: id, opened: restored}
-			}
-		}
 		all = append(all, ids...)
 	}
 	if len(all) == 0 {
 		return nil, errors.New("this mailbox holds no prekeys: publish a new one with dromas prekey renew")
 	}
 	return all, nil
-}
-
-// restoredKey is a prekey held at a restore (bucketRestored): one that unwraps
-// a file's key sets opened.
-type restoredKey struct {
-	age.Identity
-	opened *bool
-}
-
-// Unwrap implements age.Identity.
-func (k restoredKey) Unwrap(stanzas []*age.Stanza) ([]byte, error) {
-	key, err := k.Identity.Unwrap(stanzas)
-	if err == nil {
-		*k.opened = true
-	}
-	return key, err
 }
 
 // decrypt decrypts ct with ids, every retained prekey, once oneNative has
