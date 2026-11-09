@@ -32,8 +32,12 @@ import (
 // Either stops every command that receives, sends, renews or hands over a
 // message, before it lists, acks or renews anything (keysMatch), with the
 // refusal StateNotTheKeys, which no wait mends. Its owner's acknowledgement,
-// dromas init --restore (Options.Restore), adopts the keys found and owes the
-// replay floor as an adoption owes it (keyFloorOwed, beginFloor). That is how
+// dromas init --restore (Options.Restore), adopts the keys found, records
+// every key prekeys/ holds as restored (bucketRestored), and owes the
+// restore's floor (keyFloorOwed, beginFloor), which holds only a message a
+// restored key opens (restoreFloor): only such a key can open a message the
+// lost replay set saw delivered. Init then renews, so its senders seal to a key
+// no lost replay set saw, whose messages are delivered at once. That is how
 // ZFS refuses to import a pool another system last used until its owner runs
 // zpool import -f, and how an Active Directory domain controller that detects
 // a rollback of its update sequence numbers quarantines itself until its
@@ -110,7 +114,8 @@ func (b *Mailbox) keysMatch() error { return b.notKeys }
 // (hold) and after its folders, so a prekeys/ on a volume not mounted is
 // refused first and marks nothing. With a signal, it marks the command refused
 // (notKeys) and writes nothing; under Options.Restore it adopts each key it
-// found as a retired prekey that prune deletes, owes the replay floor, drops
+// found as a retired prekey that prune deletes, records every key prekeys/
+// holds as restored, owes the restore's floor, drops
 // the pass the state kept, which may be dated before the last message a lost
 // replay set took (beginFloor dates the floor by the next one a server takes),
 // and takes the file's generation, all in one transaction. Then, a signal or
@@ -134,9 +139,18 @@ func (b *Mailbox) matchKeys() error {
 			break
 		}
 		kept = max(kept, file)
+		held, err := b.keysHeld()
+		if err != nil {
+			return err
+		}
 		if err := b.update(func(s store) error {
 			for _, n := range found {
 				if err := s.put(bucketAdopted, serialKey(n), []byte{}); err != nil {
+					return err
+				}
+			}
+			for _, n := range held {
+				if err := s.put(bucketRestored, serialKey(n), []byte{}); err != nil {
 					return err
 				}
 			}
@@ -208,7 +222,24 @@ func notTheKeys(found int, ahead bool) error {
 	if ahead {
 		why = append(why, "prekeys/generation counts more messages accepted than the state does, as after the state is put back from a copy older than the mailbox")
 	}
-	return &RefusedError{Code: StateNotTheKeys, Reason: "this mailbox's state does not match its prekeys: " + strings.Join(why, "; and ") + ". Such a state cannot tell a message this mailbox delivered under the state it lost from one that waited, so the mailbox receives, sends, delivers and renews nothing, and acks nothing, until its owner runs dromas init --restore: from then, every message sent before its server next takes one of its calls, and in the hour after, is refused as stale (stale_after_restore)"}
+	return &RefusedError{Code: StateNotTheKeys, Reason: "this mailbox's state does not match its prekeys: " + strings.Join(why, "; and ") + ". Such a state cannot tell a message this mailbox delivered under the state it lost from one that waited, so the mailbox receives, sends, delivers and renews nothing, and acks nothing, until its owner runs dromas init --restore, which renews its prekey: from then, a message one of the prekeys it holds now opens is refused as stale where it was sent before that renewal, or in the hour after (stale_after_restore), and a message to the new prekey is delivered"}
+}
+
+// keysHeld is the serial of each key file in prekeys/ whose name is a serial:
+// every key that could open a message a lost replay set saw delivered, an
+// adopted key or one the state names, the renewal under way's among them.
+func (b *Mailbox) keysHeld() ([]uint64, error) {
+	names, err := matching(b.path("prekeys", "*.agekey"))
+	if err != nil {
+		return nil, err
+	}
+	var held []uint64
+	for _, name := range names {
+		if n, ok := serialOfKeyFile(name); ok {
+			held = append(held, n)
+		}
+	}
+	return held, nil
 }
 
 // unnamedKeys is each key file in prekeys/ that the state file names nowhere

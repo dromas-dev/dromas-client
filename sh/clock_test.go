@@ -224,12 +224,14 @@ func TestScriptKeepsItsReplaySetByItsClock(t *testing.T) {
 
 // A mailbox that loses seen and seen-keys, its prekeys kept, holds keys its
 // replay set does not cover: its next drain stops with exit 4 before it lists
-// anything, as the Go client's does, until init --restore names them and owes
-// the floor, which the next drain raises to its list's reading plus an hour,
-// less 7 days: a copy the server kept of a message it delivered is refused as
-// stale, a message dated a second below the floor's edge is refused, and one
-// at the edge is delivered (PROTOCOL.md §12.3 check 8). A mailbox the script
-// made covers its own keys, and owes no floor.
+// anything, as the Go client's does, until init --restore names them, renews
+// and owes the floor of the keys it held, which the next drain sets to its
+// list's reading plus an hour, less 7 days: a copy the server kept of a message
+// it delivered is refused as stale, and a message to the new prekey is
+// delivered at once. Of a message a key held at the restore opens, one dated a
+// second below the floor's edge is refused, and one at the edge is delivered
+// (PROTOCOL.md §12.3 check 8). A mailbox the script made covers its own keys,
+// and owes no floor.
 func TestScriptRefusesAReplayAfterItsStateIsLost(t *testing.T) {
 	w := newWorld(t)
 	p, q := w.mailbox(), w.mailbox()
@@ -244,16 +246,25 @@ func TestScriptRefusesAReplayAfterItsStateIsLost(t *testing.T) {
 	if d := q.recv(); d.rc != 4 || len(d.messages) != 0 || !strings.Contains(d.said, "state_not_the_keys") || w.srv.Count(q.addr) != 1 || q.has("seen-floor") {
 		t.Fatalf("the drain before init --restore: %v", d)
 	}
-	if out := q.must("dr_init --restore"); !strings.Contains(out, `"type":"restore","acknowledged":true`) {
-		t.Fatalf("init --restore: %q", out)
+	serial := q.read("serial")
+	if out := q.must("dr_init --restore"); !strings.Contains(out, `"type":"restore","acknowledged":true`) || q.read("serial") == serial {
+		t.Fatalf("init --restore: %q, serial %q from %q: it renewed nothing", out, q.read("serial"), serial)
 	}
-	if d := q.recv(); len(d.messages) != 0 || d.refused("stale") != 1 || !q.has("refused/"+id+".json") || !q.has("seen-floor") || q.has("floor-owed") {
+	if d := q.recv(); len(d.messages) != 0 || d.refused("stale") != 1 || !q.has("refused/"+id+".json") || !q.has("restore-floor") || q.has("seen-floor") || q.has("floor-owed") {
 		t.Fatalf("the server's copy after the state was lost: %v", d)
 	}
-	f, err := strconv.ParseInt(strings.TrimSpace(q.read("seen-floor")), 10, 64)
+	now := p.line(q.addr, "00000000-0000-4000-8000-0000000002fa", "to the new prekey, at once", 0)
+	w.inject(q, "", now, p.sign(q.addr, now))
+	if d := q.recv(); !slices.Equal(d.bodies(), []string{"to the new prekey, at once"}) {
+		t.Fatalf("a message to the restore's new prekey: %v", d)
+	}
+	f, err := strconv.ParseInt(strings.TrimSpace(q.read("restore-floor")), 10, 64)
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Every sender seals to the new prekey, so it is recorded as held at the
+	// restore here to try the floor's edge.
+	q.must(`cat "$DR/serial" >> "$DR/restored-keys"`)
 	edge := time.Unix(f, 0).Add(protocol.TTL)
 	below := p.line(q.addr, "00000000-0000-4000-8000-0000000000f7", "a second below the edge", time.Since(edge.Add(-time.Second)))
 	w.inject(q, "", below, p.sign(q.addr, below))
@@ -288,7 +299,7 @@ func TestScriptAFloorAfterALossIsDatedByAPassSignedSince(t *testing.T) {
 	(at{q, 6 * time.Minute}).must("dr_init --restore > /dev/null")
 	w.put(q, "", ct) // the server kept its copy
 	if d := (at{q, 6 * time.Minute}).recv(); len(d.messages) != 0 || d.refused("stale") != 1 {
-		t.Errorf("the server's copy a minute after the loss: %v; seen-floor %q", d, q.read("seen-floor"))
+		t.Errorf("the server's copy a minute after the loss: %v; restore-floor %q", d, q.read("restore-floor"))
 	}
 }
 
@@ -358,7 +369,7 @@ func TestScriptAKeyMountedDuringADrainDecryptsNothingUntilNamed(t *testing.T) {
 		t.Fatalf("the next drain: %v", d)
 	}
 	q.must("dr_init --restore > /dev/null")
-	if d := q.recv(); len(d.messages) != 0 || d.refused("stale") != 1 || !q.has("seen-floor") {
+	if d := q.recv(); len(d.messages) != 0 || d.refused("stale") != 1 || !q.has("restore-floor") {
 		t.Errorf("the drain after init --restore: %v", d)
 	}
 }

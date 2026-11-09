@@ -79,16 +79,18 @@ func TestScriptInitRestoreAcknowledgesAndTheFloorHolds(t *testing.T) {
 			}
 			q.must(s.make)
 			w.put(q, "", ct) // the server kept its copy
-			if out := q.must("dr_init --restore"); !strings.Contains(out, `"type":"restore","acknowledged":true`) || !q.has("floor-owed") || q.has("pass") {
-				t.Fatalf("init --restore: %q", out)
+			pass := q.read("pass")
+			if out := q.must("dr_init --restore"); !strings.Contains(out, `"type":"restore","acknowledged":true`) || !q.has("floor-owed") || q.read("pass") == pass {
+				t.Fatalf("init --restore: %q, with the pass the records kept still kept", out)
 			}
 			if d := q.recv(); len(d.messages) != 0 || d.refused("stale") != 1 || q.has("floor-owed") || q.read("generation") != q.read("prekeys/generation") {
 				t.Fatalf("the server's copy after init --restore: %v", d)
 			}
-			f, err := strconv.ParseInt(strings.TrimSpace(q.read("seen-floor")), 10, 64)
+			f, err := strconv.ParseInt(strings.TrimSpace(q.read("restore-floor")), 10, 64)
 			if err != nil {
 				t.Fatal(err)
 			}
+			q.must(`cat "$DR/serial" >> "$DR/restored-keys"`) // the key every sender seals to, held at the restore to try the edge
 			edge := time.Unix(f, 0).Add(protocol.TTL)
 			at := p.line(q.addr, "00000000-0000-4000-8000-0000000000e3", "at the floor's edge", time.Since(edge))
 			w.inject(q, "", at, p.sign(q.addr, at))

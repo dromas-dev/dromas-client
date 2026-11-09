@@ -180,11 +180,12 @@ it where only you can read it. On a mailbox already registered, init with
 A mailbox whose state does not match its prekeys/, as after state is lost or
 put back from an older copy with prekeys/ kept, receives, sends, delivers and
 renews nothing, init and peer allow among them, until init --restore
-acknowledges it: it adopts the
-prekeys the state does not name, and the next drain refuses as stale every
-message sent before the server next takes one of the mailbox's calls, and in
-the hour after (stale_after_restore), since those keys may open a message the
-mailbox delivered already. On a mailbox whose state matches, init --restore
+acknowledges it: it adopts the prekeys the state does not name and renews.
+A drain then refuses as stale a message that a prekey held before that
+renewal opens, where it was sent before the renewal or in the hour after
+(stale_after_restore), since those keys may open a message the mailbox
+delivered already; a message to the new prekey is delivered at once. On a
+mailbox whose state matches, init --restore
 changes nothing, so it may run at every start. A mailbox restored from its
 identity alone needs no --restore.`,
 		checked(nargs(0, 0), func(c *cobra.Command, _ []string) error {
@@ -256,7 +257,7 @@ func restoreWords(r client.Restored) string {
 	if r.RolledBack {
 		found = append(found, "found the state older than prekeys/generation")
 	}
-	return "acknowledged the restore: " + strings.Join(found, ", and ") + ". The next drain refuses as stale every message sent before the server next takes one of this mailbox's calls, and in the hour after (stale_after_restore)"
+	return "acknowledged the restore: " + strings.Join(found, ", and ") + ". From the renewal init makes now, a drain refuses as stale a message that one of these prekeys opens, where it was sent before that renewal or in the hour after (stale_after_restore), and delivers a message to the new prekey"
 }
 
 func (e *cli) addrCmd() *cobra.Command {

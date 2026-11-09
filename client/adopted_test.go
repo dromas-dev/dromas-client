@@ -560,6 +560,35 @@ func restoreAcknowledged(t *testing.T, e *env, x *client.Mailbox, adopted int, r
 	}
 }
 
+// A restore of a mailbox whose state still records its renewal, with a key in
+// prekeys/ the state names nowhere, renews at once: the floor is set by that
+// renewal, the prekey published is a new one, and a message to it is delivered
+// with no wait (Options.Restore).
+func TestARestoreOfARegisteredMailboxRenewsAtOnce(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	a, b := e.mailbox(), e.mailbox()
+	before := numberOf(t, b)
+	key, err := os.ReadFile(prekeyFile(b, before, ".agekey"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(prekeyFile(b, before-1, ".agekey"), key, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	restoreAcknowledged(t, e, b, 1, false)
+	if n := numberOf(t, b); n == before || slices.Contains(client.AdoptedKeys(t, b), n) {
+		t.Fatalf("init --restore left prekey %d published, from %d before it: it renewed nothing", n, before)
+	}
+	if !has(b, "restore-floor") || has(b, "floor-owed") {
+		t.Fatal("init --restore set no floor of its own renewal")
+	}
+	send(t, a, b, "to the new prekey, at once")
+	if res := receive(t, b); len(res.Delivered) != 1 || len(res.Refused) != 0 {
+		t.Fatalf("a message to the restore's new prekey: %+v, want it delivered", res)
+	}
+}
+
 // A key file whose name is no serial is never adopted, so it decrypts nothing:
 // with the state file lost, the copy the server kept of a message the lost state
 // delivered, which only that key opens, is refused as undecryptable, never
@@ -681,10 +710,10 @@ func TestAKeyMountedDuringADrainDecryptsNothingUntilAdopted(t *testing.T) {
 	refusedBeforeRestore(t, x, res, a, 1)
 }
 
-// No adoption and no prune lowers the replay floor, and an adoption whose floor
-// is already higher records no beginning of its own: what that floor refuses is
-// stale by the floor's own reason, never as sent before the adoption
-// (PROTOCOL.md §12.3 check 8).
+// No adoption and no prune lowers the replay floor, and an adoption's floor is
+// its own: what the prune's floor refuses of a message to a key made since is
+// stale by that floor's reason, never as sent before the adoption (PROTOCOL.md
+// §12.3 check 8).
 func TestNothingLowersTheFloor(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
@@ -723,8 +752,8 @@ func TestNothingLowersTheFloor(t *testing.T) {
 	if raw, _ := stateOf(b, "seen-floor"); string(raw) != floor {
 		t.Fatalf("seen-floor %q after the adoption and the prune, want %s, which neither lowers", raw, floor)
 	}
-	if has(b, "seen-began") || has(b, "floor-owed") {
-		t.Fatal("an adoption whose floor did not rise recorded its beginning, or left the floor owed")
+	if !has(b, "restore-floor") || has(b, "floor-owed") {
+		t.Fatal("the drain set no floor for the adoption, or left it owed")
 	}
 	send(t, e.mailbox(), b, "below the floor")
 	res := receive(t, b)
@@ -733,30 +762,35 @@ func TestNothingLowersTheFloor(t *testing.T) {
 	}
 }
 
-// Only a refusal below the floor an adoption raised, under the adoption's
-// confirmed time plus the skew allowance, is said as sent before the adoption: one
-// below a prune's floor alone, or below a prune's floor past that edge, is stale
-// by the floor's own reason (Refusal.BeforeRestore).
-func TestOnlyARefusalBelowAnAdoptionsEdgeIsSaidAsSentBeforeIt(t *testing.T) {
+// Only a message that a key held at a restore opens, below that restore's floor,
+// is refused as sent before the restore: one below a prune's floor alone is
+// stale by that floor's own reason, and one to a key made since the restore is
+// held to the prune's floor alone (Refusal.BeforeRestore).
+func TestOnlyAKeyHeldAtARestoreIsHeldToItsFloor(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
 	a, b := e.mailbox(), e.mailbox()
 	now := e.clock.Now().Unix()
 	for _, c := range []struct {
-		name   string
-		began  []byte
-		before int
+		name               string
+		seen, restore      []byte
+		restored           bool
+		delivered, refused int
+		before             int
 	}{
-		{"a prune's floor alone", nil, 0},
-		{"a prune's floor past the adoption's edge", strconv.AppendInt(nil, now-2*int64(protocol.MaxSkew/time.Second), 10), 0},
-		{"below the adoption's edge", strconv.AppendInt(nil, now, 10), 1},
+		{"a prune's floor alone", strconv.AppendInt(nil, now, 10), nil, false, 0, 1, 0},
+		{"a key made since the restore, below its floor", nil, strconv.AppendInt(nil, now, 10), false, 1, 0, 0},
+		{"a key held at the restore, below its floor", nil, strconv.AppendInt(nil, now, 10), true, 0, 1, 1},
 	} {
-		b.SetRecord(t, "seen-floor", strconv.AppendInt(nil, now, 10))
-		b.SetRecord(t, "seen-began", c.began)
+		b.SetRecord(t, "seen-floor", c.seen)
+		b.SetRecord(t, "restore-floor", c.restore)
+		if c.restored {
+			b.MarkRestored(t, numberOf(t, b))
+		}
 		send(t, a, b, c.name)
 		res := receive(t, b)
-		if len(res.Delivered) != 0 || len(res.Refused) != 1 || res.Refused[0].Code != protocol.RefusedStale || res.RefusedBeforeRestore() != c.before {
-			t.Fatalf("%s: %+v, want it stale, %d of it as sent before an adoption", c.name, res, c.before)
+		if len(res.Delivered) != c.delivered || len(res.Refused) != c.refused || c.refused > 0 && res.Refused[0].Code != protocol.RefusedStale || res.RefusedBeforeRestore() != c.before {
+			t.Fatalf("%s: %+v, want %d delivered, %d stale, %d of them as sent before the restore", c.name, res, c.delivered, c.refused, c.before)
 		}
 	}
 	qs, err := b.RefusedMessages(t.Context())
@@ -766,8 +800,8 @@ func TestOnlyARefusalBelowAnAdoptionsEdgeIsSaidAsSentBeforeIt(t *testing.T) {
 			before++
 		}
 	}
-	if err != nil || len(qs) != 3 || before != 1 {
-		t.Fatalf("refused/: %+v, %v, want 3, 1 of them as sent before an adoption", qs, err)
+	if err != nil || len(qs) != 2 || before != 1 {
+		t.Fatalf("refused/: %+v, %v, want 2, 1 of them as sent before the restore", qs, err)
 	}
 }
 

@@ -97,9 +97,10 @@ type Options struct {
 	RevocationFile string
 	// Restore has Init acknowledge a restore (dromas init --restore): where the
 	// state does not match prekeys/ (StateNotTheKeys), it adopts the keys the
-	// state names nowhere, owes the replay floor, and takes prekeys/generation's
-	// count, so the mailbox runs again; where it matches, it changes nothing
-	// ([Mailbox.Restored]). Without it, Init is refused on such a state, as every
+	// state names nowhere, owes the floor of the keys prekeys/ holds, takes
+	// prekeys/generation's count, and renews, so the mailbox runs again and
+	// takes its senders' messages to the new prekey at once; where it matches,
+	// it changes nothing ([Mailbox.Restored]). Without it, Init is refused on such a state, as every
 	// command that receives, sends or renews is. Only Init reads it, and only
 	// for its own call: Open ignores it, and no later method of the Mailbox that
 	// Init returns acknowledges a restore. Where Init fails after the
@@ -671,7 +672,19 @@ func (b *Mailbox) init(ctx context.Context) (*Mailbox, error) {
 		} else if b.workingKey && !certified {
 			return nil, refuse("this mailbox is registered, and its identity signs: dromas cert switch, with its address in full, renews it under a certificate")
 		}
-		return b, nil
+		if b.restored == nil || !b.restored.Acknowledged() {
+			return b, nil
+		}
+		// An acknowledged restore renews at once, as dromas prekey renew does:
+		// the restore's floor holds only what a key held at it opens
+		// (restoreFloor), so its senders' messages to the new prekey are
+		// delivered, and the renewal's confirmed time sets that floor
+		// (beginFloor).
+		p, err := b.rekeyAdopting(ctx)
+		if p != nil {
+			err = errors.Join(err, b.forgetLost())
+		}
+		return b, err
 	}
 	// A certificate runs for the longest the server takes, which may leave
 	// none to sign messages under: refused before anything is published.
@@ -1250,12 +1263,15 @@ func readAgeKeys(name string) ([]age.Identity, error) {
 // acknowledgement adopts it (matchKeys), which owes the replay floor: such a key
 // may open a message that a replay set now lost saw delivered (PROTOCOL.md
 // §12.3 check 8). A file whose name is no serial is never adopted, and one that
-// appears during a drain stops the next command until it is acknowledged.
-func (b *Mailbox) prekeyIdentities() ([]age.Identity, error) {
+// appears during a drain stops the next command until it is acknowledged. A
+// key held at a restore (bucketRestored) sets restored where it opens a file,
+// so judge holds that message to the restore's floor (restoreFloor).
+func (b *Mailbox) prekeyIdentities(restored *bool) ([]age.Identity, error) {
 	names, err := matching(b.path("prekeys", "*.agekey"))
 	if err != nil {
 		return nil, err
 	}
+	held := map[uint64]bool{}
 	if err := b.view(func(s store) error {
 		named, err := namedKeys(s)
 		if err != nil {
@@ -1265,15 +1281,24 @@ func (b *Mailbox) prekeyIdentities() ([]age.Identity, error) {
 			n, ok := serialOfKeyFile(name)
 			return !ok || !named(n)
 		})
-		return nil
+		return s.each(bucketRestored, func(k, _ []byte) error {
+			n, err := keySerial(k)
+			held[n] = true
+			return err
+		})
 	}); err != nil {
 		return nil, err
 	}
 	var all []age.Identity
-	for _, n := range names {
-		ids, err := readAgeKeys(n)
+	for _, name := range names {
+		ids, err := readAgeKeys(name)
 		if err != nil {
 			return nil, err
+		}
+		if n, _ := serialOfKeyFile(name); held[n] {
+			for i, id := range ids {
+				ids[i] = restoredKey{Identity: id, opened: restored}
+			}
 		}
 		all = append(all, ids...)
 	}
@@ -1281,6 +1306,22 @@ func (b *Mailbox) prekeyIdentities() ([]age.Identity, error) {
 		return nil, errors.New("this mailbox holds no prekeys: publish a new one with dromas prekey renew")
 	}
 	return all, nil
+}
+
+// restoredKey is a prekey held at a restore (bucketRestored): one that unwraps
+// a file's key sets opened.
+type restoredKey struct {
+	age.Identity
+	opened *bool
+}
+
+// Unwrap implements age.Identity.
+func (k restoredKey) Unwrap(stanzas []*age.Stanza) ([]byte, error) {
+	key, err := k.Identity.Unwrap(stanzas)
+	if err == nil {
+		*k.opened = true
+	}
+	return key, err
 }
 
 // decrypt decrypts ct with ids, every retained prekey, once oneNative has

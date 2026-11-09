@@ -374,7 +374,7 @@ mv(){ printf '%s mv %s\n' "${FUNCNAME[1]}" "$*" >> "$LOG"; command mv "$@"; }
 	if err := os.WriteFile(b.file("seen"), []byte("aa 100 x y\nbb "+strconv.FormatInt(now, 10)+" x z\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	got = calls("dr_forget dr_raise", "dr_forget "+strconv.FormatInt(now, 10))
+	got = calls("dr_forget dr_putline", "dr_forget "+strconv.FormatInt(now, 10))
 	if want := []string{"sync seen-floor.new", "mv seen-floor.new seen-floor", "sync .", "sync seen.new", "mv seen.new seen", "sync ."}; !slices.Equal(got, want) {
 		t.Errorf("dr_forget's syncs and moves:\n%q\nwant\n%q", got, want)
 	}
@@ -388,16 +388,17 @@ mv(){ printf '%s mv %s\n' "${FUNCNAME[1]}" "$*" >> "$LOG"; command mv "$@"; }
 		t.Errorf("dr_count's syncs and moves:\n%q\nwant\n%q", got, want)
 	}
 
-	// A restore owes the floor first, then names the keys seen-keys does not.
+	// A restore owes the floor first, then records the keys it holds as
+	// restored, then names the keys seen-keys does not.
 	b.must(`rm "$DR/seen-keys"`)
 	got = calls("dr_putline dr_covered", "dr_restore > /dev/null")
-	if want := []string{"sync floor-owed.new", "mv floor-owed.new floor-owed", "sync .", "sync seen-keys ."}; len(got) < len(want) || !slices.Equal(got[:len(want)], want) || slices.ContainsFunc(got[len(want):], func(c string) bool { return c != "sync seen-keys" }) {
+	if want := []string{"sync floor-owed.new", "mv floor-owed.new floor-owed", "sync .", "sync restored-keys.new", "mv restored-keys.new restored-keys", "sync .", "sync seen-keys ."}; len(got) < len(want) || !slices.Equal(got[:len(want)], want) || slices.ContainsFunc(got[len(want):], func(c string) bool { return c != "sync seen-keys" }) {
 		t.Errorf("dr_restore's syncs and moves:\n%q\nwant\n%q, then one sync of seen-keys for each further key", got, want)
 	}
 
-	// The floor it owes is raised first, then its mark goes.
-	got = calls("dr_owed dr_raise", "dr_owed "+strconv.FormatInt(now, 10))
-	if want := []string{"sync seen-floor.new", "mv seen-floor.new seen-floor", "sync .", "sync ."}; !slices.Equal(got, want) || b.has("floor-owed") {
+	// The floor it owes is set first, then its mark goes.
+	got = calls("dr_owed dr_putline", "dr_owed "+strconv.FormatInt(now, 10))
+	if want := []string{"sync restore-floor.new", "mv restore-floor.new restore-floor", "sync .", "sync ."}; !slices.Equal(got, want) || b.has("floor-owed") {
 		t.Errorf("dr_owed's syncs and moves:\n%q\nwant\n%q", got, want)
 	}
 }
