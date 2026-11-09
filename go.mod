@@ -6,10 +6,10 @@ require (
 	filippo.io/age v1.3.2
 	filippo.io/edwards25519 v1.2.0
 	github.com/BurntSushi/toml v1.6.0
-	github.com/pb33f/libopenapi v0.41.8
-	github.com/pb33f/libopenapi-validator v0.16.1
+	github.com/pb33f/libopenapi v0.42.3
+	github.com/pb33f/libopenapi-validator v0.16.2
 	github.com/spf13/cobra v1.10.2
-	github.com/spf13/pflag v1.0.10
+	github.com/spf13/pflag v1.1.0
 	go.etcd.io/bbolt v1.5.0
 	golang.org/x/crypto v0.58.0
 	golang.org/x/sys v0.49.0
