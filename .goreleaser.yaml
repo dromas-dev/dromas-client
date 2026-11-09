@@ -71,6 +71,10 @@ nfpms:
     license: Apache-2.0
     section: net
     mtime: "{{ .CommitDate }}"
+    # An rpm's header names the host that built it, nFPM's own hostname by
+    # default: one name for every build, so the rebuild matches.
+    rpm:
+      buildhost: localhost
     contents:
       - src: packaging/systemd/dromas@.service
         dst: /usr/lib/systemd/user/dromas@.service
