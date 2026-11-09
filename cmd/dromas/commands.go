@@ -127,7 +127,8 @@ help, and dromas <group> help a group's.`,
 func (e *cli) versionCmd() *cobra.Command {
 	return command("version", "print this client's version, commit, Go release and platform",
 		`Print one line: the version this client was built at (a release's tag, or
-Go's pseudo-version for a build between releases), the commit when the build
+Go's pseudo-version for a build between releases, or the release a build from
+its source archive was given at link time), the commit when the build
 recorded it, the Go release that built it, and the system and architecture it
 was built for. It reads no mailbox.`,
 		nargs(0, 0), func(*cobra.Command, []string) error { return e.version() })
@@ -144,6 +145,9 @@ func (e *cli) version() error {
 				commit = s.Value
 			}
 		}
+	}
+	if client.LinkedVersion != "" {
+		version = client.LinkedVersion
 	}
 	return e.out(line("version", "version", orNil(version), "commit", orNil(commit),
 		"go", runtime.Version(), "platform", runtime.GOOS+"/"+runtime.GOARCH))

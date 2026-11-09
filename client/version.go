@@ -20,6 +20,15 @@ const Module = "github.com/dromas-dev/dromas-client"
 // information. A pre-release of 0.0.0, it is below every release.
 const DevelVersion = "0.0.0-devel"
 
+// LinkedVersion is the release a build of this module's source names where
+// its build information records none, as a package manager's build from a
+// release's source archive does: it is set at link time, as age's
+// main.Version is (go build -ldflags "-X
+// github.com/dromas-dev/dromas-client/client.LinkedVersion=v0.5.3"
+// ./cmd/dromas). It looks like "v1.2.3". Where it is set, it is the version
+// [Version] reads, and the version the dromas command prints.
+var LinkedVersion string
+
 // Version is the version this binary names in every request's
 // Dromas-Version (PROTOCOL.md §11.17): the version of Module in its build
 // information (runtime/debug), the binary's own module's where Module is the
@@ -27,8 +36,12 @@ const DevelVersion = "0.0.0-devel"
 // program that imports this library), without its "v" and without build
 // metadata (Go's "+dirty", "+incompatible"). A Go pseudo-version is then a
 // SemVer pre-release of the patch after the release it follows. A build that
-// records none of these is DevelVersion.
+// records none of these is DevelVersion. [LinkedVersion], where it is set,
+// comes before all of them.
 func Version() string {
+	if LinkedVersion != "" {
+		return asRequestVersion(LinkedVersion)
+	}
 	bi, ok := debug.ReadBuildInfo()
 	if !ok {
 		return DevelVersion
