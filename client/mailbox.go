@@ -784,9 +784,6 @@ func (b *Mailbox) recordTaken(n uint64, pass string, at taken) error {
 		if err := b.recordTakenAt(s, n, at); err != nil {
 			return err
 		}
-		if err := recordAdoptedRenewal(s, at); err != nil {
-			return err
-		}
 		if err := b.recordPublished(s, n); err != nil {
 			return err
 		}

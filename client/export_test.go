@@ -553,11 +553,7 @@ func AdoptedKeys(t *testing.T, b *Mailbox) []uint64 {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var ns []uint64
-	for _, k := range keys {
-		ns = append(ns, k.serial)
-	}
-	return ns
+	return keys
 }
 
 // Statements is the serial of every statement b's state file records.

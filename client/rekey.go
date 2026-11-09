@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -441,7 +442,7 @@ func (b *Mailbox) nextNumber(st *ownRead, unused bool) (uint64, *protocol.Prekey
 		return 0, nil, err
 	}
 	for _, k := range adopted {
-		known = max(known, k.serial)
+		known = max(known, k)
 	}
 	// A number an earlier attempt took, and that nothing has passed since,
 	// is kept: its statement is the one sent again, and a key made for it
@@ -917,7 +918,9 @@ func (b *Mailbox) renewDue() bool {
 // retiredGrace after that take. Where the mailbox does not know that take, the
 // newest retired prekey may be one never taken, signed and passed over, so the
 // one below it stayed current until the renewal above: every retired prekey is
-// kept, for the next renewal the server takes, and prune's bound.
+// kept, for the next renewal the server takes, and prune's bound. A key the
+// state file adopted is a retired prekey here as any other is, one whose take
+// the mailbox does not know.
 // After this, a message encrypted to a deleted prekey is unrecoverable from
 // the mailbox's keys. dromas.sh does not do this; it keeps every retired
 // prekey until prune's deletion time.
@@ -930,12 +933,17 @@ func (b *Mailbox) dropRetired(at taken) error {
 	if err != nil {
 		return err
 	}
+	adopted, err := b.adopted()
+	if err != nil {
+		return err
+	}
 	var retired []uint64
-	for _, n := range signed {
+	for _, n := range slices.Concat(signed, adopted) {
 		if n < cur {
 			retired = append(retired, n)
 		}
 	}
+	slices.Sort(retired)
 	if len(retired) == 0 {
 		return nil
 	}
@@ -1031,28 +1039,34 @@ func (b *Mailbox) finishGoing() error {
 // drain's list taken, and a renewal taken, each run it, by the date of the
 // pass that call carried: a clock far ahead is stopped at that pass, and one
 // that moves while the call is in flight deletes nothing by where it went.
-// It first finishes a removal a crash left, then deletes each adopted key whose
-// time has come by at (adoptedKey.ends).
+// It first finishes a removal a crash left. A key the state file adopted is a
+// retired prekey of the renewal above it, which init --restore makes at once,
+// and goes by that renewal's deletion time: what was sealed to it reached the
+// server before that renewal was taken, or by its own not_after.
 func (b *Mailbox) prune(at taken) error {
 	if !at.None() {
 		if err := b.finishGoing(); err != nil {
 			return err
 		}
 	}
+	signed, err := b.prekeys()
+	if err != nil || len(signed) == 0 {
+		return err
+	}
 	adopted, err := b.adopted()
 	if err != nil {
 		return err
 	}
 	for _, k := range adopted {
-		if !k.ends.IsZero() && !at.At().Before(k.ends) {
-			if err := b.removePrekey(k.serial); err != nil {
+		i, _ := slices.BinarySearch(signed, k)
+		if i == len(signed) {
+			continue
+		}
+		if p, err := b.prekeyStatement(signed[i]); err == nil && !at.At().Before(p.NotAfter.Add(protocol.TTL)) {
+			if err := b.removePrekey(k); err != nil {
 				return err
 			}
 		}
-	}
-	signed, err := b.prekeys()
-	if err != nil || len(signed) == 0 {
-		return err
 	}
 	cur, err := b.publishedSerial()
 	if err != nil {
@@ -1107,52 +1121,17 @@ func serialOfKeyFile(name string) (uint64, bool) {
 	return n, true
 }
 
-// adoptedKey is a key the state file adopted.
-type adoptedKey struct {
-	serial uint64
-	// ends is its deletion time: the confirmed time of the first renewal after its
-	// adoption, plus protocol.TTL and retiredGrace, or the zero time until one is
-	// confirmed. A mailbox with a new state file publishes nothing until it renews,
-	// and a server refuses a send to a statement that renewal replaced. So what
-	// was sealed to the key is stored within retiredGrace, and has expired by then.
-	ends time.Time
-}
-
-// adopted is every key the state file adopted, lowest first.
-func (b *Mailbox) adopted() (keys []adoptedKey, err error) {
+// adopted is the serial of every key the state file adopted, lowest first.
+func (b *Mailbox) adopted() (keys []uint64, err error) {
 	err = b.view(func(s store) error {
-		return s.each(bucketAdopted, func(k, v []byte) error {
+		return s.each(bucketAdopted, func(k, _ []byte) error {
 			n, err := keySerial(k)
 			if err != nil {
 				return err
 			}
-			key := adoptedKey{serial: n}
-			if len(v) > 0 {
-				took, err := protocol.ParseTime(string(v))
-				if err != nil {
-					return fmt.Errorf("the mailbox's state file keeps no time for adopted prekey %d it can read: %w", n, err)
-				}
-				key.ends = took.Add(protocol.TTL + retiredGrace)
-			}
-			keys = append(keys, key)
+			keys = append(keys, n)
 			return nil
 		})
 	})
 	return keys, err
-}
-
-// recordAdoptedRenewal keeps at, the reading a server took a renewal at, for each
-// adopted key that keeps none, inside recordTaken's transaction: so the first
-// renewal confirmed after adoption times each. A renewal taken with no reading
-// times none, and a later one that has a reading does, which is later and so safe.
-func recordAdoptedRenewal(s store, at taken) error {
-	if at.None() {
-		return nil
-	}
-	return s.each(bucketAdopted, func(k, v []byte) error {
-		if len(v) > 0 {
-			return nil
-		}
-		return s.put(bucketAdopted, string(k), []byte(at.At().UTC().Format(protocol.TimeLayout)))
-	})
 }
