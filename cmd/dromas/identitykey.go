@@ -404,14 +404,15 @@ func (e *cli) agentAddCmd() *cobra.Command {
 		`Run stock ssh-add on the identity key file, against the socket --agent names,
 with the command's stdin: SSH_AUTH_SOCK=<socket> ssh-add <identity-file>.
 Without --askpass, ssh-add asks for the key's passphrase at the terminal and
-runs no askpass program (SSH_ASKPASS_REQUIRE=never). Where the key file has a
-passphrase, and stdin is no terminal or --no-prompt is set, agent add fails as
-"identity_locked" before ssh-add runs. With --askpass, ssh-add runs that
+runs no askpass program (SSH_ASKPASS_REQUIRE=never); where the key file has a
+passphrase that ssh-add could not ask for, since stdin is no terminal or
+--no-prompt is set, agent add fails as "identity_locked" before ssh-add runs.
+With --askpass, ssh-add runs that
 program through dromas (SSH_ASKPASS=<dromas> SSH_ASKPASS_REQUIRE=force
 DROMAS_ASKPASS=<program>), which gives ssh-add no passphrase after 3, as ssh's
-NumberOfPasswordPrompts does; where no passphrase the program gave unlocked
-the key file, agent add fails as "identity_locked". Any other failure of
-ssh-add is said with what ssh-add wrote. A revoked mailbox, which signs
+NumberOfPasswordPrompts does; where no passphrase the askpass program gave
+unlocked the key file, agent add fails as "identity_locked". Any other failure
+of ssh-add is said with what ssh-add wrote to stderr. A revoked mailbox, which signs
 nothing more, is refused before ssh-add runs. Before ssh-add runs, an
 "agent_add" line gives the command it runs. Once the agent holds the key, an
 "agent_added" line gives the mailbox's signer, as status names it.

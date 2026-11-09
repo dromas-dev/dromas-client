@@ -608,12 +608,13 @@ func (b *Mailbox) init(ctx context.Context) (*Mailbox, error) {
 	if err := CheckLayout(b.dir, b.layout); err != nil {
 		return nil, err
 	}
-	// A mailbox with identity.pub and no key file has its key in an agent. Each
-	// is there where a name is, as Lstat finds it: a link to nothing, or a file
-	// that does not read, is never no identity, so a volume not mounted makes no
-	// new address. An identity.pub init cannot read is refused; beside it, an
-	// identity key it cannot read leaves the key to the agent, as no key file
-	// does, and init signs only where the agent holds it.
+	// A mailbox with identity.pub and no key file has its key in an agent. A
+	// name counts as there where Lstat finds it, so a link to nothing, or a file
+	// that cannot be read, never counts as no identity, and a volume not mounted
+	// makes no new address. An identity.pub that cannot be read is refused. A key
+	// file that cannot be read, beside a readable identity.pub, is not used: the
+	// key must come from the agent, and init fails as identity_locked where the
+	// agent does not hold it.
 	key, err := present(b.path("identity"))
 	if err != nil {
 		return nil, err
