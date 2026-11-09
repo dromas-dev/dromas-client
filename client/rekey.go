@@ -30,9 +30,7 @@ import (
 // encrypted to for longer than its lifetime, at most protocol.PrekeyLifetime
 // or the mailbox's shorter one, whatever the server does with what it was sent. It needs only the identity, so it also
 // recovers a mailbox that lost its prekeys or its working key, and such a mailbox
-// needs no record of the numbers the lost machine used; one that lost its
-// allowed and blocked files too takes them from the ACL its server
-// holds (adoptPending). The upload carries a pass by the statement's signer,
+// needs no record of the numbers the lost machine used. The upload carries a pass by the statement's signer,
 // and the server then takes no pass by an older one.
 // [Mailbox.Receive] renews the prekey once it is more than a day old, or
 // sooner for a lifetime too short for that (renewAt), so a mailbox received at
@@ -51,7 +49,7 @@ func (b *Mailbox) Rekey(ctx context.Context) (*protocol.Prekey, error) {
 		if err := b.keysMatch(); err != nil {
 			return nil, err
 		}
-		p, err := b.rekeyAdopting(ctx)
+		p, err := b.rekey(ctx, true)
 		if p != nil {
 			err = errors.Join(err, b.forgetLost())
 		}
@@ -75,19 +73,6 @@ func (b *Mailbox) forgetLost() error {
 		}
 	}
 	return nil
-}
-
-// rekeyAdopting is rekey, after which a restore adopts the ACL its server
-// holds once its renewal is taken (adoptPending; #366): Rekey and Init's
-// restore from an identity alone. Receive's renewal adopts it where it reads
-// the server's ACL (checkACL).
-func (b *Mailbox) rekeyAdopting(ctx context.Context) (*protocol.Prekey, error) {
-	p, err := b.rekey(ctx, true)
-	if p == nil || err != nil {
-		return p, err
-	}
-	_, err = b.adoptPending(ctx)
-	return p, err
 }
 
 // rekey is Rekey with the lock held. It returns the prekey once the server
@@ -232,12 +217,9 @@ type renewal struct {
 //
 // A server that holds no mailbox holds no ACL of it, and a mailbox registered anew
 // has none there, so what this mailbox kept of the last one the server took goes
-// before the registration is sent, and with it any mark that another writer
-// put it (keepHeld): whatever becomes of the answer, a fault after it or a
-// process ended before it is recorded, the next send or recv sends the ACL
-// again (#324), and reports no ACL another writer put replaced, since the
-// server dropped it with the mailbox. So does a restore's adoption of it, which
-// has nothing to adopt (#366). It returns the clock read once the server took
+// before the registration is sent: whatever becomes of the answer, a fault
+// after it or a process ended before it is recorded, the next send or recv
+// sends the ACL again (#324). It returns the clock read once the server took
 // it, as publish does.
 func (b *Mailbox) sendRenewal(ctx context.Context, r renewal, n uint64) (time.Time, error) {
 	if !r.forgotten {
@@ -253,14 +235,7 @@ func (b *Mailbox) sendRenewal(ctx context.Context, r renewal, n uint64) (time.Ti
 			return at, err
 		}
 	}
-	if err := b.update(func(s store) error {
-		for _, k := range []string{"acl", "acl-another-writer"} {
-			if err := s.del(bucketMailbox, k); err != nil {
-				return err
-			}
-		}
-		return s.del(bucketIntent, "adopt-acl")
-	}); err != nil {
+	if err := b.update(func(s store) error { return s.del(bucketMailbox, "acl") }); err != nil {
 		return time.Time{}, err
 	}
 	reg := protocol.RegisterRequest{Identity: b.id.Document(), Prekey: r.req.Prekey, PrekeySignature: r.req.PrekeySignature, SenderKeyTypes: r.req.SenderKeyTypes}
@@ -317,14 +292,6 @@ func (b *Mailbox) readOwn(ctx context.Context, unused, past bool) (*ownRead, err
 		return nil, err
 	}
 	out.forgotten = o.at == atNone
-	// A restore from the identity alone adopts its server's ACL once a
-	// renewal is taken: marked before anything is signed (#366). A server
-	// that holds no mailbox holds no ACL of it, so a registration adopts none.
-	if !out.forgotten {
-		if err := b.beginAdoption(); err != nil {
-			return nil, err
-		}
-	}
 	if o.err != nil {
 		if !unused || ctx.Err() != nil {
 			return nil, o.err
@@ -836,13 +803,6 @@ func (b *Mailbox) renewNow(ctx context.Context) (*protocol.Prekey, error) {
 		if since := b.now().Sub(at); since >= 0 && since < retry {
 			return nil, &renewalHeld{fmt.Sprintf("the renewal at %s did not go through, and recv tries it again from %s: %s", last.At, at.Add(retry).Format(protocol.TimeLayout), last.Error), last.Transient}
 		}
-	}
-	// The renewal recv makes is followed by a read of the ACL its server
-	// holds (checkACL), owed from here, before anything is signed, until it
-	// is made: a process that ends once the server has taken the renewal,
-	// whatever records it then, leaves the read to the next Receive (#377).
-	if err := b.oweACLRead(); err != nil {
-		return nil, err
 	}
 	p, err := b.rekey(ctx, false)
 	if p == nil && err != nil {

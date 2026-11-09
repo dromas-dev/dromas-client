@@ -226,6 +226,13 @@ mailbox restored from its identity alone needs no --restore.`,
 					return err
 				}
 			}
+			if b.RestoredWithoutLists() {
+				words := "WARNING: this mailbox was restored without its allowed and blocked files, so the first renewal recv makes replaces the ACL its server holds with the open one they make, and a sender it blocked reaches held/ again. Put them back from the backup before the next recv."
+				if w, ok := warning.(string); ok {
+					words = w + " " + words
+				}
+				warning = words
+			}
 			if inGit := b.KeysInGit(); len(inGit) > 0 {
 				words := strings.Join(inGit, "; ")
 				if w, ok := warning.(string); ok {

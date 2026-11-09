@@ -565,27 +565,16 @@ func (b *Mailbox) aclPending() (bool, error) {
 
 // aclWhy says, in this client's words, what changed where the ACL the mailbox's
 // files say is not the one its server last took, as the mailbox knows it: its
-// server held one another writer put there, at the mailbox's last read of it
-// (keepHeld); its server holds none this mailbox sent, having taken none or none
-// since it registered the mailbox anew (sendRenewal); a restore adopted one that
-// holds what no file of the mailbox says (adoptPending); or the mailbox's own lists
+// server holds none this mailbox sent, having taken none or none since it
+// registered the mailbox anew (sendRenewal); or the mailbox's own lists
 // changed.
 func (b *Mailbox) aclWhy() (string, error) {
 	took, err := b.tookACL()
 	if err != nil {
 		return "", err
 	}
-	var other bool
-	if err := b.view(func(s store) error { other = s.get(bucketMailbox, "acl-another-writer") != nil; return nil }); err != nil {
-		return "", err
-	}
-	switch {
-	case other:
-		return "this mailbox's server held an ACL another writer put there, at the mailbox's last read of it", nil
-	case took == nil:
+	if took == nil {
 		return "this mailbox's server holds no ACL this mailbox sent: it has taken none, or none since it registered the mailbox anew", nil
-	case unsaid(took):
-		return "the ACL this mailbox adopted from its server when it was restored holds what no file of the mailbox says", nil
 	}
 	return "this mailbox's lists have changed since its server last took its ACL", nil
 }
@@ -600,19 +589,13 @@ func (b *Mailbox) aclWhy() (string, error) {
 // to end the same way. One the server answers mailbox_changed (the mailbox changed
 // while it handled the request) is sent again as it is, once. The server's
 // answer must be the ACL sent, and is kept in the mailbox's state. It reads
-// nothing of the server first, but for a restore's adoption of its server's
-// ACL (adoptPending), so it does not see an ACL another writer put there
-// since: [Mailbox.Receive] reads that at each renewal (checkACL).
+// nothing of the server first, so it does not see an ACL another writer put
+// there since: [Mailbox.Receive] reads that at each renewal it makes (checkACL).
 func (b *Mailbox) SyncACL(ctx context.Context) error {
 	return b.lockedDo(ctx, func() error { return b.syncACL(ctx) })
 }
 
 func (b *Mailbox) syncACL(ctx context.Context) error {
-	// A restore that has yet to adopt its server's ACL adopts it before
-	// anything is compared or sent.
-	if _, err := b.adoptPending(ctx); err != nil {
-		return err
-	}
 	want, err := b.wantACL()
 	if err != nil {
 		return err
@@ -624,96 +607,47 @@ func (b *Mailbox) syncACL(ctx context.Context) error {
 	if want.SameLists(took) {
 		return nil
 	}
-	// An ACL kept as taken that holds what no file of the mailbox says was
-	// adopted from its server, and one marked as another writer's was kept
-	// by checkACL before a PUT not taken: replacing either drops what
-	// another writer put there, which the next Receive reports, as the heal
-	// reports one (keepTook).
-	return b.sendACL(ctx, want, unsaid(took))
-}
-
-// unsaid reports whether acl holds what no file of a mailbox says, so what no
-// mailbox sends: a deny of AnyAddress, or addresses beside an allow of it. A mailbox
-// keeps such an ACL as taken only by adopting it from its server
-// (adoptPending), and only another writer can have put it there.
-func unsaid(acl *protocol.ACL) bool {
-	return acl != nil && (acl.Deny.Any || acl.Allow.Any && len(acl.Allow.Addrs) > 0)
-}
-
-// replacedNote reports, and clears, a replacement syncACL made since the
-// last Receive of an ACL that held what no file of the mailbox says.
-func (b *Mailbox) replacedNote() (bool, error) {
-	var noted bool
-	if err := b.view(func(s store) error { noted = s.get(bucketMailbox, "acl-replaced") != nil; return nil }); err != nil || !noted {
-		return false, err
-	}
-	return true, b.update(func(s store) error { return s.del(bucketMailbox, "acl-replaced") })
+	return b.sendACL(ctx, want)
 }
 
 // checkACL is syncACL with the ACL the mailbox's server holds read first, as
-// Receive does after each renewal it makes, about once a day: another
-// writer may have put one since this mailbox last sent its own, another machine
-// of the mailbox, whoever holds its pass (PROTOCOL.md §15.5) or the server
-// itself, and syncACL,
-// which compares the mailbox's files with what it last sent, would never see
-// it. It reads GET …/acl and compares the lists with those the mailbox's files
-// make, never a tag, whose making is the server's own; where they differ it
-// sends the mailbox's own, as syncACL does, with no If-Match. It reports whether
-// the server held an ACL other than the one this mailbox last sent, which this
-// mailbox has now replaced with its own. What the server holds is kept as the
-// ACL it took before the mailbox's own is sent, marked as another writer's where
-// it is not the one this mailbox last sent (keepHeld; #377): a PUT the server
-// does not take, or a process that ends before its answer is kept, leaves
-// the mailbox's own pending, which status says and the next send or recv sends,
-// and that sync reports the replacement. It reports too whether the read is
-// made: the server's ACL answered, and what it showed kept where the mailbox
-// keeps it, whatever the PUT after it met. A read that fails is no answer:
-// the mailbox sends what syncACL would, and the read is not made, nor is it where
-// the mailbox's own lists cannot be read or a fault of the mailbox comes before what
-// the read showed is kept; aclAt keeps it owed for the next Receive. The read
-// is the one call it adds, to a renewal and to the Receives after one until
-// the read is made.
-func (b *Mailbox) checkACL(ctx context.Context) (replaced, made bool, err error) {
-	// A restore that has yet to adopt its server's ACL adopts it first, and
-	// compares with what it read.
-	held, err := b.adoptPending(ctx)
+// Receive does after each renewal it makes, about once a day: another writer
+// may have put one since this mailbox last sent its own, another machine of
+// the mailbox, whoever holds its pass (PROTOCOL.md §15.5) or the server
+// itself, and syncACL, which compares the mailbox's files with what it last
+// sent, would never see it. It reads GET …/acl and compares the lists with
+// those the mailbox's files make, never a tag, whose making is the server's
+// own; where they differ it sends the mailbox's own, as syncACL does, with no
+// If-Match, and reports whether the server held an ACL other than the one
+// this mailbox last sent. A read that fails is no answer: the mailbox sends
+// what syncACL would. A heal that did not happen, the read or the put
+// failed, is made at the next renewal, so another writer's ACL can last a day
+// more: a failure's cost (#832).
+func (b *Mailbox) checkACL(ctx context.Context) (replaced bool, err error) {
+	held, err := b.heldACL(ctx)
 	if err != nil {
-		return false, false, err
+		return false, b.syncACL(ctx)
 	}
 	want, err := b.wantACL()
 	if err != nil {
-		return false, false, err
+		return false, err
 	}
 	took, err := b.tookACL()
 	if err != nil {
-		return false, false, err
-	}
-	if held == nil {
-		if held, err = b.heldACL(ctx); err != nil {
-			return false, false, b.syncACL(ctx)
-		}
+		return false, err
 	}
 	switch {
 	case !want.SameLists(held):
-		other := !held.SameLists(took)
-		if other {
-			if err := b.keepHeld(held); err != nil {
-				return false, false, err
-			}
-			step("held ACL kept")
+		if err := b.sendACL(ctx, want); err != nil {
+			return false, err
 		}
-		if err := b.sendACL(ctx, want, false); err != nil {
-			return false, true, err
-		}
-		// What no file says is another writer's, adopted or not.
-		return other || unsaid(held), true, nil
+		return !held.SameLists(took), nil
 	case !want.SameLists(took):
 		// The server already holds what the mailbox's files say: it is kept as
 		// taken, and nothing is sent.
-		err := b.keepTook(held, false)
-		return false, err == nil, err
+		return false, b.keepTook(held)
 	}
-	return false, true, nil
+	return false, nil
 }
 
 // heldACL reads the ACL the mailbox's server holds: one allowing everyone and
@@ -727,9 +661,8 @@ func (b *Mailbox) heldACL(ctx context.Context) (*protocol.ACL, error) {
 }
 
 // sendACL sends the mailbox's ACL, want, and keeps the server's answer as the
-// ACL it took: once more after a mailbox_changed, as it is. With replaced set,
-// what it replaced is noted for the next Receive to report (keepTook).
-func (b *Mailbox) sendACL(ctx context.Context, want *protocol.ACL, replaced bool) error {
+// ACL it took: once more after a mailbox_changed, as it is.
+func (b *Mailbox) sendACL(ctx context.Context, want *protocol.ACL) error {
 	got, err := b.putACL(ctx, want)
 	if code(err) == protocol.CodeMailboxChanged {
 		got, err = b.putACL(ctx, want)
@@ -741,128 +674,16 @@ func (b *Mailbox) sendACL(ctx context.Context, want *protocol.ACL, replaced bool
 		}
 		return fmt.Errorf("the server did not take this mailbox's ACL, sent where %s: %w", why, err)
 	}
-	return b.keepTook(got, replaced)
+	return b.keepTook(got)
 }
 
-// keepTook keeps acl as the ACL the mailbox's server last took, and in the same
-// transaction the note that it replaced one this mailbox did not write
-// (replacedNote): with replaced set, or where the ACL kept before it is
-// marked as another writer's (keepHeld), whose mark goes.
-func (b *Mailbox) keepTook(acl *protocol.ACL, replaced bool) error {
+// keepTook keeps acl as the ACL the mailbox's server last took.
+func (b *Mailbox) keepTook(acl *protocol.ACL) error {
 	data, err := json.Marshal(acl.Document())
 	if err != nil {
 		return err
 	}
-	return b.update(func(s store) error {
-		other := s.get(bucketMailbox, "acl-another-writer") != nil
-		if err := s.put(bucketMailbox, "acl", data); err != nil {
-			return err
-		}
-		if err := s.del(bucketMailbox, "acl-another-writer"); err != nil || !replaced && !other {
-			return err
-		}
-		return s.put(bucketMailbox, "acl-replaced", []byte("1"))
-	})
-}
-
-// keepHeld keeps acl, read from the mailbox's server, as the ACL it last took,
-// with the mark that another writer put it there, in one transaction: the ACL
-// the server takes next from this mailbox replaced it (keepTook).
-func (b *Mailbox) keepHeld(acl *protocol.ACL) error {
-	data, err := json.Marshal(acl.Document())
-	if err != nil {
-		return err
-	}
-	return b.update(func(s store) error {
-		if err := s.put(bucketMailbox, "acl", data); err != nil {
-			return err
-		}
-		return s.put(bucketMailbox, "acl-another-writer", []byte("1"))
-	})
-}
-
-// A mailbox restored from its identity alone has none of its owner's lists:
-// they went with the lost machine. The open ACL its empty files make would
-// replace, at its first renewal (checkACL), whatever its server holds, every
-// block in it. So a restore adopts the ACL its server holds, and the heal
-// applies from then on (#366).
-//
-// A renewal of a mailbox that has published nothing, and that has none of its
-// allowed and blocked files, marks the adoption as begun before it
-// signs anything (beginAdoption, in readOwn). Once a renewal is taken, which
-// gives the mailbox a pass, the mailbox reads GET …/acl and writes its lists from it
-// (adoptPending): Init's restore and Rekey do at once, and syncACL and
-// checkACL do first while the mark stands, so no ACL is compared or sent
-// before it. A mailbox restored with any of those files, as the README says to
-// back them up, adopts nothing: its files are its ACL, as ever.
-//
-// What a hostile server gains by lying there, once: an allow entry it adds
-// lands that sender's messages in inbox/ and not in held/, once its signature
-// verifies; a deny entry it adds, or an allow list that puts the mailbox under
-// "server allowed", has messages dropped or refused that the server could drop
-// anyway. Each stays in the mailbox's files until its owner edits them. It
-// forges no sender.
-
-// beginAdoption marks the adoption of its server's ACL as begun, on a mailbox
-// that has published nothing and has none of its owner's lists.
-func (b *Mailbox) beginAdoption() error {
-	published, err := b.publishedSerial()
-	if err != nil || published > 0 {
-		return err
-	}
-	for _, name := range []string{"allowed", "blocked"} {
-		if _, err := os.Lstat(b.path(name)); !errors.Is(err, fs.ErrNotExist) {
-			return err
-		}
-	}
-	return b.update(func(s store) error { return s.put(bucketIntent, "adopt-acl", []byte("begun")) })
-}
-
-// adoptPending adopts the ACL the mailbox's server holds, when a restore marked
-// the adoption as begun: it reads GET …/acl and adds its entries to the
-// mailbox's lists, a deny's to blocked and an allow list's to allowed, and with
-// an allow list records the policy "server allowed", which what its owner set
-// (Options.Policy) stands over. Then, in one transaction, the ACL read is kept as the one the server
-// last took, and the mark goes. Run again after a crash, it adds nothing
-// twice. What no file of the mailbox says, a deny of AnyAddress or addresses
-// beside an allow of AnyAddress (unsaid), is not adopted: the mailbox's next ACL
-// replaces it, and that is reported as the heal's is (syncACL, checkACL). It
-// returns the ACL it read, or nil when no adoption was pending.
-func (b *Mailbox) adoptPending(ctx context.Context) (*protocol.ACL, error) {
-	var pending bool
-	if err := b.view(func(s store) error { pending = s.get(bucketIntent, "adopt-acl") != nil; return nil }); err != nil || !pending {
-		return nil, err
-	}
-	held, err := b.heldACL(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("this mailbox was restored from its identity alone, and the ACL its server holds, whose lists it takes as its own, could not be read: the next recv, send, allow or block reads it again before it sends any: %w", err)
-	}
-	if _, err := b.addAll("blocked", held.Deny.Addrs); err != nil {
-		return nil, err
-	}
-	if !held.Allow.Any {
-		if _, err := b.addAll("allowed", held.Allow.Addrs); err != nil {
-			return nil, err
-		}
-		if err := b.recordPolicy(Policy{Unknown: LandHeld, Server: AdmitAllowed}); err != nil {
-			return nil, err
-		}
-	}
-	step("lists adopted")
-	data, err := json.Marshal(held.Document())
-	if err != nil {
-		return nil, err
-	}
-	if err := b.update(func(s store) error {
-		if err := s.put(bucketMailbox, "acl", data); err != nil {
-			return err
-		}
-		return s.del(bucketIntent, "adopt-acl")
-	}); err != nil {
-		return nil, err
-	}
-	step("adoption recorded")
-	return held, nil
+	return b.update(func(s store) error { return s.put(bucketMailbox, "acl", data) })
 }
 
 // putACL sends an ACL, and returns the server's answer, which must be that
