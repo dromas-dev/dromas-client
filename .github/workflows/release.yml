@@ -3,13 +3,14 @@
 #   with git verify-tag as Caddy checks its own;
 # - ci: the whole of ci.yml runs on the tagged commit;
 # - release: GoReleaser builds it (.goreleaser.yaml) and publishes the
-#   archives, an SBOM of each and checksums.txt, signed with cosign, as the
+#   archives and Linux packages, an SBOM of each archive and checksums.txt, signed with cosign, as the
 #   tag's GitHub release, and every file the checksums name is attested;
 # - verify: the published release is checked as README § Install has a user
 #   check it, as GoReleaser checks its own;
 # - rebuild: the release is built again from its tag on another image, and
-#   each archive must come out as the release job made it, which verify has
-#   checked against what was published.
+#   each archive and package must come out as the release job made it, which
+#   verify has checked against what was published; the .deb is installed and
+#   its systemd unit verified.
 # By hand (workflow_dispatch), all of it but the tag and verify, on main as a
 # snapshot published nowhere: so a release's every build and test runs
 # before any tag is made. Actions are
@@ -187,11 +188,20 @@ jobs:
         with:
           name: checksums
           path: published
-      - name: each archive, as the release job made it
+      - name: each archive and package, as the release job made it
         # The SBOMs are left out: syft writes a new document name and time
         # each run.
         run: |
-          grep -E '\.(tar\.gz|zip)$' published/checksums.txt | sort > published.sums
-          grep -E '\.(tar\.gz|zip)$' dist/checksums.txt | sort > rebuilt.sums
+          grep -E '\.(tar\.gz|zip|deb|rpm|apk)$' published/checksums.txt | sort > published.sums
+          grep -E '\.(tar\.gz|zip|deb|rpm|apk)$' dist/checksums.txt | sort > rebuilt.sums
           cat rebuilt.sums
           diff published.sums rebuilt.sums
+      - name: the .deb installs, and its systemd unit verifies
+        # systemd-analyze verify exits 0 on a key it does not know or a value
+        # it cannot parse, and prints a line for each: so any output fails.
+        run: |
+          sudo apt-get install -y ./dist/dromas_*_amd64.deb
+          dromas version
+          out=$(systemd-analyze verify /usr/lib/systemd/user/dromas@.service 2>&1)
+          printf '%s\n' "$out"
+          test -z "$out"
