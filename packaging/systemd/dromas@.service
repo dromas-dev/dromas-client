@@ -1,0 +1,24 @@
+# The resident recv of one mailbox, as a systemd user service: the instance
+# is the mailbox's profile, so dromas@default.service runs the default one.
+#   systemctl --user enable --now dromas@<profile>
+# The profile's config file names the program recv runs for each message
+# ([recv] exec). A user service runs only while its user is logged in, and
+# from boot once loginctl enable-linger <user> has been run.
+[Unit]
+Description=Dromas mailbox %i: receive each message, and run the profile's callback
+Documentation=https://github.com/dromas-dev/dromas-client#run-it-as-a-service
+
+[Service]
+ExecStart=/usr/bin/dromas recv --follow --profile %i
+# Exit status 2 is a wrong command line or config, and 4 a refusal that no
+# wait mends: a new start meets either again. Any other failure is started
+# again after RestartSec.
+Restart=on-failure
+RestartSec=30s
+RestartPreventExitStatus=2 4
+# Exit status 3 is done with something for the owner to look at, which
+# dromas status lists.
+SuccessExitStatus=3
+
+[Install]
+WantedBy=default.target

@@ -587,3 +587,92 @@ func TestExecUsageErrors(t *testing.T) {
 
 // jsonInt is n as a printed line carries it, read back (printed).
 func jsonInt(n int) any { return json.Number(strconv.Itoa(n)) }
+
+// execConfig points the commands at a config file for c's mailbox whose [recv]
+// holds exec, the callback in mode, and the lines more.
+func (c *callbackEnv) execConfig(mode string, more ...string) {
+	c.t.Helper()
+	dir := c.b.Dir()
+	list := []string{tomlString(os.Args[0]), tomlString(callbackWord), tomlString(c.record), tomlString(mode)}
+	body := "base-dir = " + tomlString(dir) + "\nmail-dir = " + tomlString(filepath.Join(dir, "mail")) +
+		"\n[recv]\nexec = [" + strings.Join(list, ", ") + "]\n" + strings.Join(more, "\n") + "\n"
+	c.t.Setenv("DROMAS_CONFIG", writeConfig(c.t, body))
+}
+
+// The config file's [recv] exec is the callback of a recv that waits and names
+// no --exec, so a service manager's unit names only the profile: its program,
+// then its arguments, with its exec-timeout. A recv that does not wait runs
+// nothing, and --exec on the command line takes its place.
+func TestTheConfigsExecIsTheCallbackOfARecvThatWaits(t *testing.T) {
+	c := newCallback(t)
+	c.execConfig("args")
+	c.send("one")
+	if _, stderr, err := c.recv(context.Background(), "--wait", "0s"); err != nil {
+		t.Fatalf("recv: %v %s", err, stderr)
+	}
+	if got, want := c.recorded(), fmt.Sprintf("%q\n", []string{}); got != want {
+		t.Fatalf("the config's callback recorded %q, want %q", got, want)
+	}
+
+	c = newCallback(t)
+	c.execConfig("args")
+	c.send("one")
+	if _, stderr, err := c.recv(context.Background()); err != nil {
+		t.Fatalf("recv: %v %s", err, stderr)
+	}
+	if got := c.recorded(); got != "" {
+		t.Fatalf("a recv that does not wait ran the callback: %q", got)
+	}
+
+	c = newCallback(t)
+	c.execConfig("args")
+	c.send("one")
+	other := filepath.Join(t.TempDir(), "other")
+	if _, stderr, err := c.recv(context.Background(), "--wait", "0s", "--exec", os.Args[0], "--", callbackWord, other, "args", "flag"); err != nil {
+		t.Fatalf("recv: %v %s", err, stderr)
+	}
+	if got := c.recorded(); got != "" {
+		t.Fatalf("the config's callback ran beside --exec: %q", got)
+	}
+	if raw, err := os.ReadFile(other); err != nil || string(raw) != fmt.Sprintf("%q\n", []string{"flag"}) { //nolint:gosec // the test's own file
+		t.Fatalf("--exec's callback recorded %q, %v", raw, err)
+	}
+
+	if testing.Short() {
+		return // the timeout below runs three tries of a second each
+	}
+	c = newCallback(t)
+	c.execConfig("hang", `exec-timeout = "1s"`)
+	c.send("hangs")
+	stdout, stderr, err := c.recv(context.Background(), "--wait", "0s")
+	if status := report(err, io.Discard); status != 3 || len(ofType(t, stdout, "exec_gave_up")) != 1 {
+		t.Fatalf("recv: exit %d, %v %s %s", status, err, stdout, stderr)
+	}
+}
+
+// A [recv] exec that names no program, or one that is not there, and an
+// exec-timeout with no exec or of zero, are the config's error, and take
+// nothing from the server.
+func TestAWrongExecInTheConfigIsTheConfigsError(t *testing.T) {
+	c := newCallback(t)
+	c.send("waits")
+	dir := c.b.Dir()
+	good := "base-dir = " + tomlString(dir) + "\nmail-dir = " + tomlString(filepath.Join(dir, "mail")) + "\n[recv]\n"
+	for name, body := range map[string]string{
+		"an empty list":                "exec = []",
+		"an empty program":             `exec = [""]`,
+		"a program that is not there":  "exec = [" + tomlString(filepath.Join(t.TempDir(), "no-such-program")) + "]",
+		"an exec-timeout with no exec": `exec-timeout = "1m"`,
+		"an exec-timeout of zero":      "exec = [" + tomlString(os.Args[0]) + "]\n" + `exec-timeout = "0s"`,
+	} {
+		t.Setenv("DROMAS_CONFIG", writeConfig(t, good+body+"\n"))
+		_, _, err := c.recv(context.Background(), "--wait", "0s")
+		var bad *configError
+		if !errors.As(err, &bad) || !strings.HasPrefix(bad.key, "recv.exec") {
+			t.Errorf("%s: %#v, want the config's error at recv.exec", name, err)
+		}
+	}
+	if n := c.srv.Count(c.b.Address()); n != 1 {
+		t.Errorf("%d messages left on the server, want the one none of them took", n)
+	}
+}

@@ -58,8 +58,6 @@ func (o *recvOptions) check(c *cobra.Command, program string, args []string) err
 		return wrong(c, "%s --exec takes a program", path)
 	case program == "" && len(args) > 0:
 		return wrong(c, "%s takes arguments only after --, for --exec", path)
-	case program == "" && c.Flags().Changed("exec-timeout"):
-		return wrong(c, "%s --exec-timeout goes with --exec", path)
 	case program == "":
 		return nil
 	case !o.follow && !c.Flags().Changed("wait"):
@@ -71,6 +69,23 @@ func (o *recvOptions) check(c *cobra.Command, program string, args []string) err
 		return wrong(c, "%s --exec: %v", path, err)
 	}
 	return nil
+}
+
+// fromConfig takes the config file's [recv] exec where the command line names
+// no --exec and recv waits: the program, then its arguments. So a service
+// manager's unit names only the profile. --exec-timeout goes with a program
+// from either.
+func (o *recvOptions) fromConfig(c *cobra.Command, cfg *config, program string, args []string) (string, []string, error) {
+	if program == "" && cfg.exec != nil && (o.follow || c.Flags().Changed("wait")) {
+		program, args = cfg.exec[0], cfg.exec[1:]
+		if _, err := exec.LookPath(program); err != nil {
+			return "", nil, &configError{file: cfg.file, key: "recv.exec", msg: fmt.Sprintf("%s: recv.exec: %v", cfg.file, err)}
+		}
+	}
+	if program == "" && c.Flags().Changed("exec-timeout") {
+		return "", nil, wrong(c, "%s --exec-timeout goes with --exec, or with recv.exec in the config file", c.CommandPath())
+	}
+	return program, args, nil
 }
 
 // fatalEnd is a recv that ended on a refusal no wait mends (client.Fatal): exit

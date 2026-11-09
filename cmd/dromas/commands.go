@@ -367,7 +367,12 @@ other failure.
 With --exec, recv runs a command for each message that lands in inbox/, with
 the message's line on stdin, as recv prints it. It takes --wait or --follow.
 --exec names the program, and the arguments after -- go to it one for one: no
-shell runs, and nothing is split or expanded. On Windows, cmd.exe runs a .bat
+shell runs, and nothing is split or expanded. The config file's [recv] exec
+names the program and its arguments as one list, such as exec =
+["/usr/local/bin/notify", "--quiet"]. recv runs that program only with
+--wait or --follow, and only where the command line gives no --exec, which
+replaces it. The file's [recv] exec-timeout is --exec-timeout's default, and
+the file sets it only beside exec. On Windows, cmd.exe runs a .bat
 or .cmd program, and cmd.exe splits and expands those arguments. Nothing of a
 message is ever on the command line. The program's stdout and stderr
 are discarded. The commands run one at a time, in delivery order, with the
@@ -394,12 +399,16 @@ may run twice: it should take the "id" as the message's name.`, formatTime(clien
 			return o.check(c, program, args)
 		}), func(c *cobra.Command, args []string) error {
 			e.opt.DrainTime = drain
+			run, args, err := o.fromConfig(c, e.cfg, program, args)
+			if err != nil {
+				return err
+			}
 			b, err := e.mailbox()
 			if err != nil {
 				return err
 			}
-			if program != "" {
-				o.exec = append([]string{program}, args...)
+			if run != "" {
+				o.exec = append([]string{run}, args...)
 			}
 			if o.follow && !c.Flags().Changed("wait") {
 				o.endless = true

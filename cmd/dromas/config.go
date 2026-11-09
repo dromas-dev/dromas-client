@@ -89,9 +89,11 @@ type fileConfig struct {
 		Server  string `toml:"server"`
 	} `toml:"policy"`
 	Recv struct {
-		Wait      string `toml:"wait"`
-		DrainTime string `toml:"drain-time"`
-		Headers   *bool  `toml:"headers"`
+		Wait        string   `toml:"wait"`
+		DrainTime   string   `toml:"drain-time"`
+		Headers     *bool    `toml:"headers"`
+		Exec        []string `toml:"exec"`
+		ExecTimeout string   `toml:"exec-timeout"`
 	} `toml:"recv"`
 	Inbox struct {
 		List struct {
@@ -129,6 +131,9 @@ type config struct {
 	unsafeInbox, unsafeState bool
 	agentLife                time.Duration
 	policy                   client.Policy
+	// exec is [recv] exec: the program a recv that waits runs for each message,
+	// then its arguments, where the command line gives no --exec.
+	exec []string
 	// flagged is each table's settings, by the command that takes them.
 	flagged map[string]map[string]string
 	values  map[string]setting
@@ -534,6 +539,26 @@ func (cfg *config) resolve(g *globals, fc *fileConfig, rel string, noMailbox boo
 			return bad("recv.drain-time", "recv.drain-time takes a duration above zero, such as 15m, and %.40q is not", v)
 		}
 		table("recv", "drain-time", v)
+	}
+	if v := fc.Recv.Exec; v != nil {
+		if len(v) == 0 || v[0] == "" {
+			return bad("recv.exec", `recv.exec names a program, then its arguments, such as ["/usr/local/bin/notify", "--quiet"]`)
+		}
+		cfg.exec = v
+		named, err := json.Marshal(v)
+		if err != nil {
+			return err
+		}
+		cfg.values["recv.exec"] = setting{string(named), "file"}
+	}
+	if v := fc.Recv.ExecTimeout; v != "" {
+		if d, err := time.ParseDuration(v); err != nil || d <= 0 {
+			return bad("recv.exec-timeout", "recv.exec-timeout takes a duration above zero, such as 5m, and %.40q is not", v)
+		}
+		if cfg.exec == nil {
+			return bad("recv.exec-timeout", "recv.exec-timeout goes with recv.exec")
+		}
+		table("recv", "exec-timeout", v)
 	}
 	headers := func(command string, v *bool) {
 		if v != nil {
