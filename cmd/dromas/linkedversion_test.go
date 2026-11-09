@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -29,6 +30,9 @@ func TestABuildFromSourceNamesTheVersionItWasLinkedWith(t *testing.T) {
 	} {
 		ctx := context.Background()
 		bin := filepath.Join(t.TempDir(), "dromas")
+		if runtime.GOOS == "windows" {
+			bin += ".exe" // Windows runs a program by its extension
+		}
 		build := []string{"build", "-buildvcs=false", "-o", bin}
 		if c.linked != "" {
 			build = append(build, "-ldflags", "-X github.com/dromas-dev/dromas-client/client.LinkedVersion="+c.linked)
