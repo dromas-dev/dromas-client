@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/dromas-dev/dromas-client/client"
-	"github.com/dromas-dev/dromas-client/internal/forge"
 	"github.com/dromas-dev/dromas-client/protocol"
 )
 
@@ -208,62 +207,6 @@ func TestAMailboxWhoseClockGoesBackFetchesNothing(t *testing.T) {
 	off = 0
 	if res := receive(t, b); len(res.Delivered) != 1 || len(res.Refused) != 0 {
 		t.Fatalf("on time again: %+v", res)
-	}
-}
-
-// An envelope dated ahead of this machine's clock is not posted, whether its
-// first post was refused or never made. It was written while the clock read
-// ahead of where it reads now, a server would take it, and its reader would
-// refuse it as future and ack it. It waits in the outbox, as its envelope
-// alone, until the clock passes that time, and then goes.
-func TestAnEnvelopeDatedAheadWaitsInTheOutbox(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	for _, c := range []struct {
-		name     string
-		off      time.Duration
-		unsealed bool
-	}{
-		{"posted while the clock was two hours fast, and refused", 2 * time.Hour, false},
-		{"written while the clock was 55 minutes fast, and never sealed", 55 * time.Minute, true},
-	} {
-		e := newEnv(t)
-		var off time.Duration
-		a, err := client.Init(ctx, t.TempDir(), e.skewed(&off))
-		if err != nil {
-			t.Fatal(err)
-		}
-		b := e.mailbox()
-		off = c.off
-		if c.unsealed {
-			forge.FailOnce(e.srv, http.MethodGet, mailboxPath(b)) // the entry is written and cannot be sealed
-		}
-		if _, err := a.Send(ctx, b.Address(), "dated ahead"); err == nil {
-			t.Fatalf("%s: sent", c.name)
-		} else if c.unsealed && !strings.Contains(err.Error(), "could not be read") {
-			t.Fatalf("%s: sealed and posted: %v", c.name, err)
-		}
-		e.srv.SetMiddle(nil)
-		if kept, _ := filepath.Glob(filepath.Join(a.Dir(), "outbox", "*.*")); len(kept) != 1 || !strings.HasSuffix(kept[0], ".P") {
-			t.Fatalf("%s: the outbox keeps %v, where it keeps the envelope alone", c.name, kept)
-		}
-		off = 0 // the clock is set right
-		if rs, err := a.Flush(ctx); len(rs) != 0 || err == nil || !strings.Contains(err.Error(), "ahead of this machine's clock") {
-			t.Fatalf("%s: flushed with the clock right: %v, %v", c.name, rs, err)
-		}
-		if res := receive(t, b); len(res.Delivered)+len(res.Refused) != 0 {
-			t.Fatalf("%s: the reader got %+v", c.name, res)
-		}
-		if left, _ := filepath.Glob(filepath.Join(a.Dir(), "outbox", "*.P")); len(left) != 1 {
-			t.Fatalf("%s: the entry is not in the outbox: %v", c.name, left)
-		}
-		e.clock.Add(c.off) // the time it is dated comes
-		if rs, err := a.Flush(ctx); len(rs) != 1 || err != nil {
-			t.Fatalf("%s: flushed once its time came: %v, %v", c.name, rs, err)
-		}
-		if res := receive(t, b); len(res.Delivered) != 1 || len(res.Refused) != 0 {
-			t.Fatalf("%s: the reader got %+v", c.name, res)
-		}
 	}
 }
 

@@ -64,10 +64,11 @@ func waitedDelivered(t *testing.T, res *client.Result, from *client.Mailbox, n i
 	}
 }
 
-// adoptedEnd is an adopted key's deletion time, by the confirmed time of the first
-// renewal after its adoption, as the design states it.
-func adoptedEnd(took time.Time) time.Time {
-	return took.Add(protocol.TTL + 2*time.Hour)
+// pastItsRenewal sets e's clock a minute past the deletion time of p, the
+// renewal that retired the keys a restore adopted: its not_after plus the TTL,
+// as prune deletes any retired prekey.
+func pastItsRenewal(e *env, p *protocol.Prekey) {
+	e.clock.Add(p.NotAfter.Add(protocol.TTL + time.Minute).Sub(e.clock.Now()))
 }
 
 // refusePrekeyUploads has e's server refuse every renewal, while it answers the rest.
@@ -81,11 +82,10 @@ func refusePrekeyUploads(e *env) {
 	})
 }
 
-// State deleted and keys kept: the old key stays until a reading a server confirmed
-// reaches the first renewal's confirmed time plus the TTL and two hours. Later
-// renewals do not move that time, and the first such reading past it deletes the
-// key.
-func TestAnAdoptedKeyGoesByAConfirmedReadingPastItsRenewal(t *testing.T) {
+// State deleted and keys kept: an adopted key is a retired prekey of the renewal
+// above it, and goes by that renewal's deletion time, as prune deletes any
+// retired prekey. A renewal after that one does not move the time.
+func TestAnAdoptedKeyGoesByTheRenewalAboveIt(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	e := newEnv(t)
@@ -97,60 +97,36 @@ func TestAnAdoptedKeyGoesByAConfirmedReadingPastItsRenewal(t *testing.T) {
 		t.Fatalf("adopted %v, want %d", got, old)
 	}
 	e.clock.Add(2 * time.Second)
-	took := e.clock.Now()
+	p, err := x.Rekey(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.clock.Add(time.Hour)
+	if _, err := x.Rekey(ctx); err != nil {
+		t.Fatal(err)
+	}
+	e.clock.Add(p.NotAfter.Add(protocol.TTL - time.Minute).Sub(e.clock.Now()))
 	if _, err := x.Rekey(ctx); err != nil {
 		t.Fatal(err)
 	}
 	if !exists(file) {
-		t.Fatal("the renewal after the state file was lost deleted the key")
+		t.Fatal("a renewal before its time deleted the key")
 	}
-	e.clock.Add(adoptedEnd(took).Add(-time.Minute).Sub(e.clock.Now()))
+	pastItsRenewal(e, p)
 	if _, err := x.Rekey(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if !exists(file) {
-		t.Fatal("a reading a minute before its time deleted the key")
-	}
-	e.clock.Add(2 * time.Minute)
-	if _, err := x.Rekey(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if exists(file) {
-		t.Fatal("a reading past its time left the key")
-	}
-	if got := client.AdoptedKeys(t, x); len(got) != 0 {
-		t.Fatalf("still adopted: %v", got)
-	}
-}
-
-// A drain's list is a confirmed reading as a renewal is, and deletes the key too.
-func TestADrainsListDeletesAnAdoptedKeyPastItsTime(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	e := newEnv(t)
-	b := e.mailbox()
-	old := numberOf(t, b)
-	x := lostState(t, e, b)
-	e.clock.Add(2 * time.Second)
-	took := e.clock.Now()
-	if _, err := x.Rekey(ctx); err != nil {
-		t.Fatal(err)
-	}
-	e.clock.Add(adoptedEnd(took).Add(time.Minute).Sub(e.clock.Now()))
-	refusePrekeyUploads(e) // the list alone is left to confirm a reading
-	if res, err := x.Receive(ctx); err != nil || res.RenewErr == nil {
-		t.Fatalf("recv: %+v, %v", res, err)
-	}
-	if exists(prekeyFile(b, old, ".agekey")) {
-		t.Fatal("a drain past its time left the key")
+	if exists(file) || len(client.AdoptedKeys(t, x)) != 0 {
+		t.Fatalf("a renewal past its time left the key, adopted %v", client.AdoptedKeys(t, x))
 	}
 }
 
 // A message sealed to the key before the state file is lost, and one sealed to it
-// after that and before the renewal, decrypt with the key, and are refused as
-// stale with their signer, as sent before the adoption; an emptying
-// drain leaves the key: dropRetired reads statements alone.
-func TestAMessageSealedToAnAdoptedKeyIsRefusedWithItsSigner(t *testing.T) {
+// after that and before the renewal, decrypt with the key and are delivered, the
+// failure's cost (PROTOCOL.md §15.9). A drain that empties the mailbox more than
+// an hour after the server took the renewal deletes the key, as it deletes any
+// retired prekey (dropRetired).
+func TestAnEmptyingDrainDeletesAnAdoptedKey(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	e := newEnv(t)
@@ -168,134 +144,16 @@ func TestAMessageSealedToAnAdoptedKeyIsRefusedWithItsSigner(t *testing.T) {
 		t.Fatalf("recv after the state file was lost: %v", err)
 	}
 	waitedDelivered(t, res, a, 2)
+	if !exists(prekeyFile(b, old, ".agekey")) {
+		t.Fatal("a drain within an hour of the renewal deleted the key")
+	}
 	e.clock.Add(3 * time.Hour)
 	if _, err := x.Receive(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if !exists(prekeyFile(b, old, ".agekey")) {
-		t.Fatal("an emptying drain deleted an adopted key")
+	if exists(prekeyFile(b, old, ".agekey")) || len(client.AdoptedKeys(t, x)) != 0 {
+		t.Fatal("an emptying drain past an hour left the adopted key")
 	}
-}
-
-// A renewal never confirmed deletes nothing, whatever the readings after it, and
-// across a further lost state file: the first renewal confirmed then starts the time.
-func TestARenewalNeverConfirmedDeletesNoAdoptedKey(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	e := newEnv(t)
-	b := e.mailbox()
-	old := numberOf(t, b)
-	file := prekeyFile(b, old, ".agekey")
-	x := lostState(t, e, b)
-	e.clock.Add(2 * time.Second)
-	// The server takes this one, and the mailbox never has the answer.
-	crash(t, e, x, "rekey", "renewal taken", protocol.Address{})
-	y, err := client.Open(b.Dir(), e.opts())
-	if err != nil {
-		t.Fatal(err)
-	}
-	e.clock.Add(protocol.TTL + 3*time.Hour)
-	refusePrekeyUploads(e)
-	// Its read records the take with no reading, and its list is a confirmed
-	// reading well past any time that take could have given.
-	res, err := y.Receive(ctx)
-	if err != nil || res.RenewErr == nil || numberOf(t, y) == 0 {
-		t.Fatalf("recv with every renewal refused: %+v, %v", res, err)
-	}
-	if !exists(file) {
-		t.Fatal("a reading deleted the key, and no renewal is confirmed")
-	}
-	z := lostState(t, e, b)
-	e.srv.SetMiddle(nil)
-	if got := client.AdoptedKeys(t, z); !slices.Contains(got, old) {
-		t.Fatalf("the next state file adopted %v", got)
-	}
-	e.clock.Add(2 * time.Second)
-	took := e.clock.Now()
-	if _, err := z.Rekey(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if !exists(file) {
-		t.Fatal("the first renewal confirmed deleted the key")
-	}
-	e.clock.Add(adoptedEnd(took).Add(time.Minute).Sub(e.clock.Now()))
-	if _, err := z.Rekey(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if exists(file) {
-		t.Fatal("a reading past that renewal's time left the key")
-	}
-}
-
-// A clock that jumps past the time after the server took the renewal deletes no
-// adopted key, and the renewal is timed by the reading the server took: the message
-// that waits decrypts once the clock is right, refused as sent before the new
-// replay set began, with its signer.
-func TestAClockThatJumpsDuringARenewalDeletesNoAdoptedKey(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	e := newEnv(t)
-	a, b := e.mailbox(), e.mailbox()
-	send(t, a, b, "waits")
-	old := numberOf(t, b)
-	x := lostState(t, e, b)
-	e.clock.Add(2 * time.Second)
-	var off time.Duration
-	o := e.skewed(&off)
-	o.HTTPClient = &http.Client{Transport: jumpAtRenewal{&off, 70 * 24 * time.Hour}}
-	jumpy, err := client.Open(x.Dir(), o)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := jumpy.Rekey(ctx); err != nil {
-		t.Logf("the renewal: %v", err)
-	}
-	if !exists(prekeyFile(b, old, ".agekey")) {
-		t.Fatal("a clock that jumped after the take deleted the key")
-	}
-	right, err := client.Open(x.Dir(), e.opts())
-	if err != nil {
-		t.Fatal(err)
-	}
-	res, err := right.Receive(ctx)
-	if err != nil {
-		t.Fatalf("once the clock is right: %v", err)
-	}
-	waitedDelivered(t, res, a, 1)
-}
-
-// A clock past the time that no server takes deletes nothing, and the message that
-// waits decrypts once the clock is right, refused as sent before the new replay
-// set began, with its signer.
-func TestAnUnconfirmedClockDeletesNoAdoptedKey(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	e := newEnv(t)
-	a, b := e.mailbox(), e.mailbox()
-	send(t, a, b, "waits")
-	old := numberOf(t, b)
-	x := lostState(t, e, b)
-	e.clock.Add(2 * time.Second)
-	if _, err := x.Rekey(ctx); err != nil {
-		t.Fatal(err)
-	}
-	off := 70 * 24 * time.Hour
-	fast, err := client.Open(b.Dir(), e.skewed(&off))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := fast.Receive(ctx); err == nil {
-		t.Fatal("a drain at a clock 70 days ahead went through")
-	}
-	if !exists(prekeyFile(b, old, ".agekey")) {
-		t.Fatal("a clock no server took deleted the key")
-	}
-	off = 0
-	res, err := fast.Receive(ctx)
-	if err != nil {
-		t.Fatalf("once the clock is right: %v", err)
-	}
-	waitedDelivered(t, res, a, 1)
 }
 
 // A number by the clock that lands on a file adopted takes no old key for a new
@@ -355,28 +213,6 @@ func TestTheNewestAdoptedKeyIsNotThePublishedOne(t *testing.T) {
 	}
 }
 
-// Status counts an adopted key past its time, which no server has confirmed.
-func TestStatusCountsAnAdoptedKeyPastItsTime(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	e := newEnv(t)
-	b := e.mailbox()
-	x := lostState(t, e, b)
-	e.clock.Add(2 * time.Second)
-	took := e.clock.Now()
-	if _, err := x.Rekey(ctx); err != nil {
-		t.Fatal(err)
-	}
-	e.clock.Add(adoptedEnd(took).Add(time.Minute).Sub(e.clock.Now()))
-	st, err := x.Status(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !slices.ContainsFunc(st.Attention, func(s string) bool { return strings.Contains(s, ": 1.") }) {
-		t.Fatalf("status: %q", st.Attention)
-	}
-}
-
 // A state file that records its folders made refuses a prekeys/ gone missing
 // before the match of the state and prekeys/ reads it, so a volume not mounted
 // marks nothing, and a key it holds that the state file does not record stops
@@ -432,11 +268,11 @@ func TestAKeyFileWithNoSerialStays(t *testing.T) {
 		t.Fatalf("adopted %v, want %d alone", got, old)
 	}
 	e.clock.Add(2 * time.Second)
-	took := e.clock.Now()
-	if _, err := x.Rekey(ctx); err != nil {
+	p, err := x.Rekey(ctx)
+	if err != nil {
 		t.Fatal(err)
 	}
-	e.clock.Add(adoptedEnd(took).Add(time.Minute).Sub(e.clock.Now()))
+	pastItsRenewal(e, p)
 	if _, err := x.Rekey(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -699,50 +535,4 @@ func TestAKeyMountedDuringADrainDecryptsNothingUntilAdopted(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitedDelivered(t, res, a, 1)
-}
-
-// No adoption and no prune lowers the replay floor: a message below it is
-// stale (PROTOCOL.md §12.3 check 8).
-func TestNothingLowersTheFloor(t *testing.T) {
-	t.Parallel()
-	e := newEnv(t)
-	a, b := e.mailbox(), e.mailbox()
-	send(t, a, b, "delivered, its line pruned later")
-	if res := receive(t, b); len(res.Delivered) != 1 {
-		t.Fatalf("the first delivery: %+v", res)
-	}
-	seen, _ := stateOf(b, "seen")
-	// Above the cutoff the prune drops that line at.
-	floor := strconv.FormatInt(e.clock.Now().Add(protocol.SeenFor+24*time.Hour).Unix(), 10)
-	b.SetRecord(t, "seen-floor", []byte(floor))
-	// A key the state names nowhere, which the acknowledgement adopts.
-	key, err := os.ReadFile(prekeyFile(b, numberOf(t, b), ".agekey"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	found := numberOf(t, b) - 1
-	if err := os.WriteFile(prekeyFile(b, found, ".agekey"), key, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := b.Acknowledge(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	e.clock.Add(protocol.SeenFor + time.Second)
-	if res := receive(t, b); res.Renewed == nil {
-		t.Fatalf("the drain past the line's time: %+v", res)
-	}
-	if got := client.AdoptedKeys(t, b); !slices.Contains(got, found) {
-		t.Fatalf("adopted %v, want %d among them", got, found)
-	}
-	if after, _ := stateOf(b, "seen"); bytes.Equal(after, seen) {
-		t.Fatal("the prune dropped no line")
-	}
-	if raw, _ := stateOf(b, "seen-floor"); string(raw) != floor {
-		t.Fatalf("seen-floor %q after the adoption and the prune, want %s, which neither lowers", raw, floor)
-	}
-	send(t, e.mailbox(), b, "below the floor")
-	res := receive(t, b)
-	if len(res.Delivered) != 0 || len(res.Refused) != 1 || res.Refused[0].Code != protocol.RefusedStale {
-		t.Fatalf("a message below the floor: %+v, want it stale", res)
-	}
 }

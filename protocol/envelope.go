@@ -45,8 +45,8 @@ const (
 	// still be posted, dated afresh, since an outbox posts an entry until it
 	// was written TTL ago; the TTL that retry is fresh for; and MaxSkew, so a
 	// clock that steps back by as much as two clocks a server takes are apart
-	// reopens nothing (PROTOCOL.md §12.3 check 8). A step further back is the
-	// floor's (client: seen-floor).
+	// reopens nothing (PROTOCOL.md §12.3 check 8). A step further back is a
+	// clock already wrong, and its cost is stated (PROTOCOL.md §15.7).
 	SeenFor = 2*TTL + MaxSkew
 )
 

@@ -1,7 +1,6 @@
 package sh_test
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -116,98 +115,6 @@ func staleProblem(w http.ResponseWriter) {
 	_ = json.NewEncoder(w).Encode(protocol.Problem{Type: code.TypeURI(), Title: code.Title(), Status: int64(code.Status()), Code: code, Detail: "a newer prekey"})
 }
 
-// The script reading, the Go client sending: the retry above the floor of
-// client/replay_retry_test.go. The owner renews the script mailbox by hand
-// two hours before the TTL and two hours before twice the TTL; the server
-// takes one dr_recv 1h32m ahead.
-func TestTheScriptTakesARetryAboveTheFloor(t *testing.T) {
-	t.Parallel()
-	need(t, append(scriptTools, "curl")...)
-	ctx := context.Background()
-	for _, c := range []struct {
-		name  string
-		ahead time.Duration
-	}{
-		{"one dr_recv 1h32m ahead, then right", 92 * time.Minute},
-		{"control: never ahead", 0},
-	} {
-		t.Run(c.name, func(t *testing.T) {
-			clk := &shifted{}
-			srv := fakeserver.New(t, clk.Now)
-			dir := t.TempDir()
-			sh := func(at time.Duration, cmd string) (string, error) {
-				return bash(t, []string{"DR_HOME=" + dir, "DR_SERVER_URL=" + srv.URL}, igNow(at)+cmd)
-			}
-			if _, err := sh(0, "dr_init"); err != nil {
-				t.Fatal(err)
-			}
-			to := mustAddress(t, dir)
-			s, err := client.Init(ctx, t.TempDir(), client.Options{Base: srv.URL, Now: clk.Now})
-			if err != nil {
-				t.Fatal(err)
-			}
-			path := "/v1/" + to.String() + "/messages"
-			var retry []byte
-			var phase atomic.Value
-			phase.Store("lose")
-			srv.SetMiddle(func(w http.ResponseWriter, q *http.Request, next http.Handler) {
-				if q.Method == http.MethodPost && q.URL.Path == path {
-					switch phase.Load() {
-					case "lose":
-						next.ServeHTTP(httptest.NewRecorder(), q)
-						http.Error(w, "lost", http.StatusServiceUnavailable)
-						return
-					case "keep":
-						retry, _ = io.ReadAll(q.Body)
-						http.Error(w, "down", http.StatusServiceUnavailable)
-						return
-					}
-				}
-				next.ServeHTTP(w, q)
-			})
-			if _, err := s.Send(ctx, to, "pay invoice 7 once"); err == nil {
-				t.Fatal("the first post's answer was not lost")
-			}
-			out, err := sh(0, "dr_recv")
-			if err != nil || strings.Count(out, `"type":"message"`) != 1 {
-				t.Fatalf("the first copy: %q, %v", out, err)
-			}
-			clk.Set(protocol.TTL - 2*time.Hour) // the owner renews by hand: the script never renews on its own
-			if _, err := sh(protocol.TTL-2*time.Hour, "dr_rekey"); err != nil {
-				t.Fatal(err)
-			}
-			clk.Set(protocol.TTL - 30*time.Minute)
-			if _, err := s.Receive(ctx); err != nil { // renews, so its certificate outlasts what it signs
-				t.Fatal(err)
-			}
-			phase.Store("keep")
-			if _, err := s.Flush(ctx); err == nil || retry == nil {
-				t.Fatalf("the retry: %v, kept %d bytes", err, len(retry))
-			}
-			phase.Store("")
-			clk.Set(2*protocol.TTL - 2*time.Hour)
-			if _, err := sh(2*protocol.TTL-2*time.Hour, "dr_rekey"); err != nil {
-				t.Fatal(err)
-			}
-			at := 2*protocol.TTL - 31*time.Minute
-			if c.ahead > 0 {
-				clk.Set(at + c.ahead) // a hostile server takes the pass
-				out, err := sh(at+c.ahead, "dr_recv")
-				t.Logf("dr_recv %v ahead: %q, %v", c.ahead, out, err)
-			}
-			clk.Set(at)
-			floor, _ := sh(at, "cat $DR/seen-floor 2> /dev/null")
-			id := sha256.Sum256(retry)
-			srv.Inject(to, hex.EncodeToString(id[:]), retry)
-			out, err = sh(at, "dr_recv")
-			t.Logf("the retry listed at twice the TTL less 31 minutes (floor %q): %q, %v", strings.TrimSpace(floor), out, err)
-			if strings.Contains(out, `"type":"message"`) {
-				t.Error("the script delivered a message already delivered")
-			}
-		})
-	}
-}
-
 // The script reading a Go sender's retry that the server stretched past the
 // outbox's TTL (59s on the mailbox read, 59s on a post answered 409
 // stale_prekey), with every pass one an honest server takes: the script's
@@ -312,43 +219,6 @@ func TestTheScriptTakesAStretchedRetryAtHonestClocks(t *testing.T) {
 				t.Error("the script delivered a message already delivered, at clocks an honest server takes")
 			}
 		})
-	}
-}
-
-// The script's twin of TestAClockThatJumpsDuringADrainPrunesNoLine: dr_drain
-// prunes the replay set by the date of the pass its list carried (dr_taken),
-// which the server took, so a clock that jumps 70 days once the list is
-// answered drops no line and raises no floor.
-func TestScriptAClockThatJumpsDuringADrainPrunesNoLine(t *testing.T) {
-	t.Parallel()
-	need(t, append(scriptTools, "curl")...)
-	ctx := context.Background()
-	srv := fakeserver.New(t, time.Now)
-	dir := t.TempDir()
-	env := []string{"DR_HOME=" + dir, "DR_SERVER_URL=" + srv.URL}
-	if out, err := bash(t, env, "dr_init"); err != nil {
-		t.Fatalf("init: %q, %v", out, err)
-	}
-	g, err := client.Init(ctx, t.TempDir(), client.Options{Base: srv.URL})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := g.Send(ctx, mustAddress(t, dir), "delivered once"); err != nil {
-		t.Fatal(err)
-	}
-	if out, err := bash(t, env, "dr_recv"); err != nil || !strings.Contains(out, `"type":"message"`) {
-		t.Fatalf("the first drain: %q, %v", out, err)
-	}
-	before := mustRead(t, filepath.Join(dir, "seen"))
-	jump := `dr_now(){ if [ -e "$DR/.jumped" ]; then echo $(($(date -u +%s) + 70*86400)); else date -u +%s; fi; }
-eval "orig_$(declare -f dr_api)"
-dr_api(){ orig_ig_api "$@"; local rc=$?; case "$1 $2" in "GET /v1/"*/messages | "GET /v1/"*"/messages?"*) : > "$DR/.jumped" ;; esac; return $rc; }
-`
-	out, err := bash(t, env, jump+"dr_recv")
-	t.Logf("the drain whose clock jumped once its list was answered: %q, %v", out, err)
-	after := mustRead(t, filepath.Join(dir, "seen"))
-	if _, ferr := os.Stat(filepath.Join(dir, "seen-floor")); !bytes.Equal(before, after) || ferr == nil {
-		t.Errorf("a clock that jumped after the server took the list pruned the replay set by where it went: %q, then %q", before, after)
 	}
 }
 

@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"os"
 	"path/filepath"
-	"strconv"
 	"testing"
 	"time"
 
@@ -210,11 +209,6 @@ func TestARefusalNamesNoSignerTheMailboxHoldsRevoked(t *testing.T) {
 		{"an envelope of another version", protocol.RefusedEnvelope, func(t *testing.T, e *env, a, b, _ *client.Mailbox) sent {
 			env := `{"v":2,"from":"` + a.Address().String() + `","to":"` + b.Address().String() + `","identity":"` + base64.StdEncoding.EncodeToString(a.Identity().Document()) + `","sent_at":"` + e.clock.Now().Format(protocol.TimeLayout) + `","msg_id":"77777777-2222-4333-8444-555555555555","body":"x"}`
 			return sent{message(t, e, a, b, env), numberOf(t, a)}
-		}},
-		{"sent_at below the replay set's floor", protocol.RefusedStale, func(t *testing.T, e *env, a, b, _ *client.Mailbox) sent {
-			b.SetRecord(t, "seen-floor", []byte(strconv.FormatInt(e.clock.Now().Unix(), 10)))
-			line := e.line(a.Identity().Document(), a.Address(), b.Address(), "below the floor")
-			return sent{signed(e, b, worker(t, a), line), numberOf(t, a)}
 		}},
 		{"good in every other way", "", func(t *testing.T, e *env, a, b, _ *client.Mailbox) sent {
 			line := e.line(a.Identity().Document(), a.Address(), b.Address(), "good message")

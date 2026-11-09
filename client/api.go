@@ -17,7 +17,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	tk "github.com/dromas-dev/dromas-client/client/internal/taken"
 	"github.com/dromas-dev/dromas-client/protocol"
 )
 
@@ -481,18 +480,10 @@ func (b *Mailbox) owner(ctx context.Context, method, path string, in, out any) (
 
 // ownerWith is owner, with the request's headers hdr beside the pass.
 func (b *Mailbox) ownerWith(ctx context.Context, method, path string, hdr http.Header, in, out any) (*http.Response, error) {
-	resp, _, err := b.ownerTaken(ctx, method, path, hdr, in, out)
-	return resp, err
-}
-
-// ownerTaken is ownerWith, and, once the server has answered, the reading
-// of this mailbox's clock it took: the date of the pass the answered call
-// carried.
-func (b *Mailbox) ownerTaken(ctx context.Context, method, path string, hdr http.Header, in, out any) (*http.Response, taken, error) {
 	for attempt := 0; ; attempt++ {
 		pass, err := b.pass()
 		if err != nil {
-			return nil, taken{}, err
+			return nil, err
 		}
 		h := hdr.Clone()
 		if h == nil {
@@ -501,27 +492,18 @@ func (b *Mailbox) ownerTaken(ctx context.Context, method, path string, hdr http.
 		h.Set("Authorization", pass)
 		resp, err := b.call(ctx, method, path, in, h, out)
 		if attempt > 0 || !passRefused(code(err)) {
-			if err != nil {
-				return resp, taken{}, err
-			}
-			at, err := tk.By(pass)
-			return resp, at, err
+			return resp, err
 		}
 		if code(err) == protocol.CodeCertificateNotCurrent {
 			if _, err := b.known(ctx); err != nil {
-				return nil, taken{}, err
+				return nil, err
 			}
 		}
 		if err := b.dropPass(); err != nil {
-			return nil, taken{}, err
+			return nil, err
 		}
 	}
 }
-
-// taken is a reading of this mailbox's clock that a server took, which every
-// deletion by the clock is by: a pass is the only way to one
-// (client/internal/taken).
-type taken = tk.Reading
 
 // lookup GETs mailbox a from this mailbox's server (GET /v1/<a>), with no pass: the
 // read is public, and a server reads no pass on it (PROTOCOL.md §11.8).

@@ -1,7 +1,6 @@
 package client_test
 
 import (
-	"bytes"
 	"context"
 	"net/http"
 	"path/filepath"
@@ -14,99 +13,6 @@ import (
 	"github.com/dromas-dev/dromas-client/internal/forge"
 	"github.com/dromas-dev/dromas-client/protocol"
 )
-
-// jumpAtRenewal moves a mailbox's clock by `by` once its server has answered
-// the renewal's PUT …/prekey: the server took the renewal at the reading
-// before the jump.
-type jumpAtRenewal struct {
-	off *time.Duration
-	by  time.Duration
-}
-
-func (j jumpAtRenewal) RoundTrip(r *http.Request) (*http.Response, error) {
-	resp, err := http.DefaultTransport.RoundTrip(r)
-	if r.Method == http.MethodPut && strings.HasSuffix(r.URL.Path, "/prekey") {
-		*j.off = j.by
-	}
-	return resp, err
-}
-
-// The renewal's twin of TestAClockThatJumpsDuringADrainDeletesNoKey (#209):
-// a clock that jumps 70 days ahead after the server took the renewal deletes
-// no prekey, since keys are deleted by the reading the server took
-// (AGENTS.md, decided on #200; PROTOCOL.md §12.4). The message waiting for the
-// retired key is delivered once the clock is right.
-func TestAClockThatJumpsDuringARenewalDeletesNoKey(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	e := newEnv(t)
-	a, b := e.mailbox(), e.mailbox()
-	send(t, a, b, "first, sealed to the prekey about to retire")
-	send(t, a, b, "second, sealed to it too")
-	e.clock.Add(2 * time.Second)
-	keys, _ := filepath.Glob(filepath.Join(b.Dir(), "keys", "prekeys", "*.agekey"))
-	var off time.Duration
-	o := e.skewed(&off)
-	o.HTTPClient = &http.Client{Transport: jumpAtRenewal{&off, 70 * 24 * time.Hour}}
-	jumpy, err := client.Open(b.Dir(), o)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, rerr := jumpy.Rekey(ctx)
-	after, _ := filepath.Glob(filepath.Join(b.Dir(), "keys", "prekeys", "*.agekey"))
-	t.Logf("renewal: %v; prekey keys %d before, %d after (the new one among them)", rerr, len(keys), len(after))
-	right, err := client.Open(b.Dir(), e.opts())
-	if err != nil {
-		t.Fatal(err)
-	}
-	res, err := right.Receive(ctx)
-	if res == nil {
-		res = &client.Result{}
-	}
-	t.Logf("once the clock is right: delivered %d, refused %d, %v", len(res.Delivered), len(res.Refused), err)
-	for _, r := range res.Refused {
-		t.Logf("  refused: %s %s", r.Code, r.Reason)
-	}
-	if len(after) < len(keys)+1 || len(res.Delivered) != 2 {
-		t.Errorf("a clock that jumped after the server took the renewal deleted the key the waiting message needs")
-	}
-}
-
-// The same through the remedy (cert revoke-earlier), whose renewal is taken
-// before the jump. The two messages were sealed to the prekey it retires and
-// signed under the sender's certificate, which the remedy does not revoke.
-func TestAClockThatJumpsDuringTheRemedyDeletesNoKey(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	e := newWorkEnv(t)
-	a, b := e.mailbox(), e.mailbox()
-	send(t, a, b, "first, sealed to the prekey about to retire")
-	send(t, a, b, "second, sealed to it too")
-	e.clock.Add(2 * time.Second)
-	keys, _ := filepath.Glob(filepath.Join(b.Dir(), "keys", "prekeys", "*.agekey"))
-	var off time.Duration
-	o := e.skewed(&off)
-	o.HTTPClient = &http.Client{Transport: jumpAtRenewal{&off, 70 * 24 * time.Hour}}
-	jumpy, err := client.Open(b.Dir(), o)
-	if err != nil {
-		t.Fatal(err)
-	}
-	r, rerr := jumpy.RenewAndRevoke(ctx)
-	after, _ := filepath.Glob(filepath.Join(b.Dir(), "keys", "prekeys", "*.agekey"))
-	t.Logf("remedy: %+v, %v; prekey keys %d before, %d after (the new one among them)", r, rerr, len(keys), len(after))
-	right, err := client.Open(b.Dir(), e.opts())
-	if err != nil {
-		t.Fatal(err)
-	}
-	res, err := right.Receive(ctx)
-	if res == nil {
-		res = &client.Result{}
-	}
-	t.Logf("once the clock is right: delivered %d, refused %d, %v", len(res.Delivered), len(res.Refused), err)
-	if len(after) < len(keys)+1 || len(res.Delivered) != 2 {
-		t.Errorf("a clock that jumped after the server took the remedy's renewal deleted the key the waiting message needs")
-	}
-}
 
 // rightAtFirstCall sets a mailbox's clock right (off = 0) as its first request
 // goes out: a clock that read ahead when the command began and was stepped
@@ -200,52 +106,10 @@ func TestDropRetiredDeletesByNoReadingLaterThanTheLists(t *testing.T) {
 	}
 }
 
-// A drain deletes by the date of its first list, which it read before anything
-// else: a later page's pass, dated by a clock that moved on, deletes nothing. The
-// next drain's first list carries the later date, and that one deletes the key.
-func TestADrainDeletesByTheDateOfItsFirstList(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	e := newEnv(t)
-	off := -9 * time.Minute // the mailbox's clock, apart from the server's
-	b, err := client.Init(ctx, t.TempDir(), e.skewed(&off))
-	if err != nil {
-		t.Fatal(err)
-	}
-	landAll(t, b)
-	a := e.mailbox()
-	retired := numberOf(t, b)
-	e.clock.Add(2 * time.Second)
-	if _, err := b.Rekey(ctx); err != nil {
-		t.Fatal(err)
-	}
-	send(t, a, b, "one")
-	send(t, a, b, "two")
-	e.srv.SetPage(1)
-	list := "/v1/" + b.Address().String() + "/messages"
-	var moved atomic.Bool
-	e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
-		next.ServeHTTP(w, r)
-		if r.Method == http.MethodGet && r.URL.Path == list && moved.CompareAndSwap(false, true) {
-			e.clock.Add(3 * time.Hour)
-		}
-	})
-	if res := receive(t, b); len(res.Delivered) != 2 {
-		t.Fatalf("the drain over two pages: %+v", res)
-	}
-	if !exists(prekeyFile(b, retired, ".agekey")) {
-		t.Error("the date of the last page's pass deleted a retired prekey that the first list's date keeps")
-	}
-	receive(t, b)
-	if exists(prekeyFile(b, retired, ".agekey")) {
-		t.Error("the next drain's first list, three hours after the renewal, left the retired prekey")
-	}
-}
-
 // A drain mended part way deletes by the first list of the drain after the renewal,
 // which is the drain that emptied the mailbox, and never by the date of the drain
 // the server refused. That list is three hours after the server took the newest
-// retired prekey, so the prekey older than it goes. It is under two hours after the
+// retired prekey, so the prekey older than it goes. It is under an hour after the
 // server took the renewal, so the newest retired prekey stays.
 func TestADrainMendedPartWayDeletesByTheListOfTheDrainAfterIt(t *testing.T) {
 	t.Parallel()
@@ -285,7 +149,7 @@ func TestADrainMendedPartWayDeletesByTheListOfTheDrainAfterIt(t *testing.T) {
 		t.Error("the date of the refused drain kept a prekey the drain after the renewal deletes")
 	}
 	if !exists(prekeyFile(b, newest, ".agekey")) {
-		t.Error("the newest retired prekey went within two hours of the renewal that retired it")
+		t.Error("the newest retired prekey went within an hour of the renewal that retired it")
 	}
 }
 
@@ -373,49 +237,5 @@ func TestARenewalAtRecvWithinWhoseReadTakesSeconds(t *testing.T) {
 				t.Error("a sender whose clock a server takes was refused at RecvWithin's cadence")
 			}
 		})
-	}
-}
-
-// jumpAtList moves a mailbox's clock by `by` once its server has answered a
-// drain's list: the server took the list at the reading before the jump.
-type jumpAtList struct {
-	off *time.Duration
-	by  time.Duration
-}
-
-func (j jumpAtList) RoundTrip(r *http.Request) (*http.Response, error) {
-	resp, err := http.DefaultTransport.RoundTrip(r)
-	if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/messages") {
-		*j.off = j.by
-	}
-	return resp, err
-}
-
-// The replay set is pruned by the date of the pass the drain's list carried,
-// which the server took (PROTOCOL.md §12.4): a clock that jumps 70 days
-// once the list is answered drops no line and raises no floor, so the messages
-// it would have let go stay known.
-func TestAClockThatJumpsDuringADrainPrunesNoLine(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	e := newEnv(t)
-	a, b := e.mailbox(), e.mailbox()
-	send(t, a, b, "delivered once")
-	if res := receive(t, b); len(res.Delivered) != 1 {
-		t.Fatalf("delivered %d", len(res.Delivered))
-	}
-	before, _ := stateOf(b, "seen")
-	var off time.Duration
-	o := e.skewed(&off)
-	o.HTTPClient = &http.Client{Transport: jumpAtList{&off, 70 * 24 * time.Hour}}
-	jumpy, err := client.Open(b.Dir(), o)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, rerr := jumpy.Receive(ctx)
-	after, _ := stateOf(b, "seen")
-	t.Logf("the drain whose clock jumped once its list was answered: %v", rerr)
-	if !bytes.Equal(before, after) || has(b, "seen-floor") {
-		t.Errorf("a clock that jumped after the server took the list pruned the replay set by where it went: %q, then %q", before, after)
 	}
 }

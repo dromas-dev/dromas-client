@@ -119,9 +119,6 @@ dr_owner(){ # <METHOD> <PATH> [body file] [curl args…] → dr_api as this mail
   rm -f "$DR/pass" "$DR/pass-server"; p=$(dr_pass) && dr_authed "$p" "$@" && return 0
   dr_clock; return 1
 }
-dr_taken(){ # → the reading of this machine's clock a server took, in Unix time: the date of the pass in $DR/pass, which the call dr_owner made, or the renewal dr_renew sent, carried once the server answered it: its not_after less the ten minutes a pass is signed for. Every deletion by the clock is by one, never by a reading of the clock (PROTOCOL.md §12.4): a clock far off is stopped at its pass, and one that jumps or steps back while a call is in flight deletes nothing by where it went
-  local na; na=$(dr_time "$(sed -n 's/.* not_after="\([^"]*\)".*/\1/p' "$DR/pass" 2> /dev/null)") && echo $((na - 600))
-}
 dr_look(){ # <address> → dr_api GET of a mailbox from this mailbox's server (GET /v1/<address>), with no pass: the read is public, and a server reads none on it (PROTOCOL.md §11.8)
   dr_api GET "/v1/$1"
 }
@@ -618,7 +615,7 @@ dr_sent(){ # <address> → sent/<address>.<msg_id>.json, one line, {"envelope":�
 # recipe: receive
 dr_recv(){ # drains the mailbox, every page up to a drain's limits. ACCEPT → inbox/ and a message line on stdout. REFUSED → refused/, never delivered, and a refused line on stdout. Both are acked
   dr_held || { dr_lock dr_recv "$@"; return; }
-  DR_LISTED=; dr_drain; local rc=$?; [ -z "$DR_LISTED" ] || dr_prune "$DR_LISTED"; return $rc      # keys deleted by this clock only once the server has answered the list, so has taken a pass dated by it, and by that pass's date: a clock far ahead is stopped at its pass, one that moves while the list is in flight deletes nothing by where it went, and the keys that messages wait for stay (PROTOCOL.md §12.4)
+  DR_LISTED=; dr_drain; local rc=$?; [ -z "$DR_LISTED" ] || dr_prune "$DR_LISTED"; return $rc      # keys deleted only once the server has answered the list, by the clock read then: a clock far ahead is stopped at its pass (PROTOCOL.md §12.4)
 }
 dr_drain(){ # stops at a transient error or a fault of this mailbox, leaving the rest on the server for the next drain. And at a number of messages and of pages (below): a server that lists messages without end costs one run that much
   local B c="" n i id k=0 pages=0; B=$(cat "$DR/address") || return 1
@@ -628,7 +625,7 @@ dr_drain(){ # stops at a transient error or a fault of this mailbox, leaving the
   while :; do
     [ $((pages += 1)) -le 100 ] || { dr_out more --arg detail "this run stopped at the most one drain takes: run recv again for the rest, which is still on the server"; return 0; }
     dr_owner GET "/v1/$B/messages${c:+?cursor=$c}" > "$DR/list.json" || { dr_own; return 1; }
-    [ "$pages" -gt 1 ] || { DR_LISTED=$(dr_taken) && dr_forget "$DR_LISTED"; } || return 1      # the replay set pruned by this clock only once the server has taken a pass dated by it, and by that pass's date (dr_taken): a drain that a clock far off would prune is stopped at its pass first. DR_LISTED tells dr_recv the same reading for the keys
+    [ "$pages" -gt 1 ] || { DR_LISTED=$(dr_now) && dr_forget "$DR_LISTED"; } || return 1      # the replay set pruned only once the server has answered the list, by the clock read then: a clock far off is stopped at its pass first. DR_LISTED tells dr_recv the same reading for the keys
     dr_shape "$DR/list.json" list && n=$(jq -r '.messages | length' "$DR/list.json") || { dr_err "the server's list of messages is not one this client reads: the messages stay on the server"; return 1; }
     for ((i = 0; i < n; i++)); do
       id=$(jq -r --argjson i "$i" '.messages[$i].id | strings | select(test("\\A[0-9a-f]{64}\\z"))' "$DR/list.json") && dr_hex "$id" || continue      # tested in jq: $(…) drops trailing LFs and every NUL
@@ -672,8 +669,6 @@ dr_judge(){ # <me> <message stem> → 0 only if EVERY check passes, in this orde
   age -d "${ids[@]}" < "$m.age" > "$m.T" 2> /dev/null || { echo "undecryptable: it does not decrypt with this mailbox's prekeys"; return 1; }
   A=$(dr_open "$B" "$m") || { echo "$A"; return 1; }      # the sender, proved by what was decrypted
   t=$(dr_time "$(jq -r .sent_at "$m.P")") || { echo "cannot read the sent_at of what was decrypted"; return 3; }
-  f=$(dr_floor 2> /dev/null) || { echo "$DR/seen-floor names no time"; return 3; }
-  [ "$f" -eq 0 ] || [ "$t" -ge $((f + 7*86400)) ] || { echo "stale: sent_at is before this mailbox's replay set reaches back to: it was pruned"; return 1; }      # freshness has a floor too: a sent_at before the highest cutoff the replay set was pruned at may be a message whose line went, and so may one up to 7 days above it, a retry of such a message, dated afresh up to 7 days after its first copy (check 9 knows a retry by that copy's line). dr_open checked sent_at's grammar
   if ! grep -qxF -e "$A" "$DR/asked" 2> /dev/null; then      # the server is asked once for each sender in a drain, by a read of its revocations, which the server serves whether or not it holds the sender's mailbox. That it holds none is an answer; no answer is not, and the message then stays where it is
     dr_revocations "$A" >> "$DR/said"; case $? in 0) ;; 1) printf '%s\n' "$A" >> "$DR/asked" ;; 3) echo "what this mailbox keeps of its sender's revocations does not verify, or cannot be written"; return 3 ;; *) echo "whether its sender is revoked could not be asked"; return 4 ;; esac
   fi
@@ -738,16 +733,11 @@ dr_line(){ # <checked envelope> [receipt] → the one line delivered: built from
     def dr_esc: if . > 65535 then (. - 65536) as $v | "\\u" + ((55296 + ($v / 1024 | floor)) | h4) + "\\u" + ((56320 + $v % 1024) | h4) else "\\u" + h4 end;      # a code point as JSON escapes it, lowercase, as Go writes it: a surrogate pair above U+FFFF
     ({v: 1, from, to, sent_at, msg_id, body} + ([{subject}, {in_reply_to}, {supersedes}] | map(select(.[] | . != null and . != "")) | add // {})) as $e | ($r[0] | if . then {envelope: $e, receipt: {id, received_at, expires_at}} else $e end) | tojson | gsub("(?<c>[\\x{7F}-\\x{9F}\\x{2028}\\x{2029}\\x{AD}\\x{34F}\\x{61C}\\x{115F}-\\x{1160}\\x{17B4}-\\x{17B5}\\x{180B}-\\x{180F}\\x{200B}-\\x{200F}\\x{202A}-\\x{202E}\\x{2060}-\\x{206F}\\x{3164}\\x{FE00}-\\x{FE0F}\\x{FEFF}\\x{FFA0}\\x{FFF0}-\\x{FFF8}\\x{FFF9}-\\x{FFFB}\\x{1BCA0}-\\x{1BCA3}\\x{1D173}-\\x{1D17A}\\x{E0000}-\\x{E0FFF}])"; .c | explode[0] | dr_esc)' "$1"
 }
-dr_forget(){ # <Unix time, one a server took (dr_taken)> → the replay set without the lines past 14 days and an hour from their sent_at by that reading: a retry, dated afresh, may be posted up to 7 days after a first copy that was delivered, and read up to 7 days after that, and an hour covers a clock that steps back as far as two clocks a server takes are apart. When it drops one, the floor rises to the cutoff first, so a clock that later reads further back still takes no message whose line went (dr_floor)
+dr_forget(){ # <Unix time, read once a server answered the list> → the replay set without the lines past 14 days and an hour from their sent_at by that reading: a retry, dated afresh, may be posted up to 7 days after a first copy that was delivered, and read up to 7 days after that, and an hour covers a clock that steps back as far as two clocks a server takes are apart. A clock stepped back further after a prune takes a pruned message again: a cost of a clock already wrong (PROTOCOL.md §15.7)
   local c=$(($1 - 14*86400 - 3600)); [ -e "$DR/seen" ] || return 0
   awk -v c="$c" '$2 >= c' "$DR/seen" > "$DR/seen.new" || return 1
   cmp -s "$DR/seen" "$DR/seen.new" && { rm -f "$DR/seen.new"; return 0; }      # nothing dropped: nothing written
-  dr_raise "$c" || return 1      # on disk before any line goes
   sync "$DR/seen.new" && mv "$DR/seen.new" "$DR/seen" && sync "$DR"      # on disk before it replaces the old one: a crash leaves the old set or the new, never an empty one
-}
-dr_raise(){ # <Unix time> [file] → the floor in file, seen-floor by default, raised to it, on disk, unless it is already that high
-  local p=${2:-$DR/seen-floor} f; f=$(dr_floor "$p") || return 1
-  [ "$f" -ge "$1" ] || dr_putline "$p" "$1"
 }
 dr_covered(){ # <serial> → seen-keys names it, on disk: a prekey this mailbox made, whose messages its replay set saw
   grep -qxF -e "$1" "$DR/seen-keys" 2> /dev/null && return 0
@@ -775,11 +765,6 @@ dr_restore(){ # → init --restore's acknowledgement, under the lock: each key p
     DR_ACKED=true said="acknowledged the restore: adopted ${#DR_FOUND[@]} prekeys seen-keys did not name, and init renews now. The lost records took their replay set with them, so a message this mailbox accepted before may be delivered again"
   fi
   dr_out restore --argjson acknowledged "$DR_ACKED" --arg detail "$said"
-}
-dr_floor(){ # [file] → the floor that file keeps, or 0 when there is none. seen-floor, the default, keeps the highest cutoff a prune of the replay set has dropped a line at: a message sent before it, or less than 7 days after it, is stale whatever the clock now reads, since its line, or its first copy's, may be gone, as a Kerberos server that has lost its replay cache refuses until the window has passed (RFC 4120 §3.2.3). A file that names anything else is an error, never the default
-  local p=${1:-$DR/seen-floor} f; [ -e "$p" ] || { echo 0; return 0; }
-  f=$(cat "$p" 2> /dev/null) && [[ $f =~ ^(0|[1-9][0-9]{0,17})$ ]] && printf '%s\n' "$f" | cmp -s - "$p" && echo "$f" ||      # compared with itself rebuilt: $(…) drops line feeds and NULs
-    { dr_err "$p names no time: it is a number of seconds and a line feed, written by recv"; return 1; }
 }
 dr_seen(){ # <sender> <message stem> <hash> → the message, in the replay set and on disk
   local new=; [ -e "$DR/seen" ] || new=$DR
@@ -833,9 +818,9 @@ dr_renew(){ # → what dr_rekey does, the lock held. A serial is signed ONCE
   h=$(dr_pass new) && dr_authed "$h" PUT "$u" "$DR/rekey.json" > /dev/null || { dr_clock; dr_own; return 1; }      # a new pass, dated as the renewal is sent
   [ "$s" -le "$(cat "$DR/serial" 2> /dev/null || echo 0)" ] || dr_putline "$DR/serial" "$s" || return 1
   dr_keeppass || return 1
-  at=$(dr_taken) && dr_prune "$at" && dr_out prekey --argjson serial "$s" --arg not_after "$(sed -n 6p "$DR/prekeys/$s.txt")"      # by the reading the server took the renewal at: the date of its pass, now $DR/pass
+  at=$(dr_now) && dr_prune "$at" && dr_out prekey --argjson serial "$s" --arg not_after "$(sed -n 6p "$DR/prekeys/$s.txt")"      # by the clock read once the server took the renewal
 }
-dr_prune(){ # <Unix time, one a server took (dr_taken)> → deletes every retired prekey past its deletion time by that reading of this machine's clock: its not_after + the 7 days a message is kept. dr_recv gives the date of the pass its list carried, dr_renew that of the renewal's: a clock a server took, never a later reading. After that, a message encrypted to it is unrecoverable. (The Go client also deletes them sooner.)
+dr_prune(){ # <Unix time, read once a server answered> → deletes every retired prekey past its deletion time by that reading of this machine's clock: its not_after + the 7 days a message is kept. dr_recv gives the reading once its list was answered, dr_renew the one once the renewal was taken. After that, a message encrypted to it is unrecoverable. (The Go client also deletes them sooner.)
   local f n top na; top=$(ls "$DR/prekeys" | sed -n 's/\.agekey$//p' | sort -n | tail -n 1); [ -n "$top" ] || return 0
   for f in "$DR"/prekeys/*.txt; do
     [ -e "$f" ] || continue

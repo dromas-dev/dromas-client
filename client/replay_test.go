@@ -10,7 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -95,9 +94,7 @@ func TestAReplayIsRefusedAfterTheClockStepsBack(t *testing.T) {
 				t.Error("a message already delivered was delivered again, or the replay was not judged")
 			}
 			// Past what the replay set reaches back over, the prekey it was
-			// sealed to is gone too, and it is refused as undecryptable: the
-			// floor's own refusal, for a key kept longer than that, is
-			// TestTheSeenFloor's.
+			// sealed to is gone too, and it is refused as undecryptable.
 			if c.serverToo && len(res.Refused) != 1 {
 				t.Errorf("the replay after a step back of 62 days: refused %v, want one refusal", res.Refused)
 			}
@@ -134,54 +131,6 @@ func TestARefusedDrainPrunesNothing(t *testing.T) {
 	}
 	if has(r, "seen-floor") {
 		t.Error("a refused drain raised the floor")
-	}
-}
-
-// The floor rises only when a prune drops a line, to the cutoff it dropped
-// it at; a message sent before it is refused as stale, and one after is taken.
-// A floor that names no time stops the drain, with the message left on the
-// server.
-func TestTheSeenFloor(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	e := newEnv(t)
-	r := e.mailbox()
-	s := e.mailbox()
-	send(t, s, r, "first")
-	receive(t, r)
-	if has(r, "seen-floor") {
-		t.Fatal("a floor before any line was dropped")
-	}
-	e.clock.Add(protocol.SeenFor + time.Second)
-	receive(t, r) // prunes the line, and renews the prekey that ran out
-	raw, _ := stateOf(r, "seen-floor")
-	if want := strconv.FormatInt(e.clock.Now().Add(-protocol.SeenFor).Unix(), 10); string(raw) != want {
-		t.Fatalf("the floor after a prune dropped a line: %q; want the cutoff it dropped it at, %q", raw, want)
-	}
-
-	s = e.mailbox() // a sender whose certificate is valid now
-	send(t, s, r, "second")
-	if res := receive(t, r); len(res.Delivered) != 1 {
-		t.Fatalf("delivered %d after the prune, want 1", len(res.Delivered))
-	}
-
-	// A message sent before the floor is stale, whatever the clock reads.
-	r.SetRecord(t, "seen-floor", []byte("9999999999"))
-	send(t, s, r, "third")
-	res := receive(t, r)
-	if len(res.Delivered) != 0 || len(res.Refused) != 1 || res.Refused[0].Code != protocol.RefusedStale {
-		t.Errorf("a message sent before the floor: delivered %d, refused %v, want one stale", len(res.Delivered), res.Refused)
-	}
-
-	// A floor that names no time is an error, and the message stays.
-	r.SetRecord(t, "seen-floor", []byte("soon"))
-	send(t, s, r, "fourth")
-	if _, err := r.Receive(ctx); err == nil || !strings.Contains(err.Error(), "seen-floor") {
-		t.Errorf("a drain with a floor that names no time: %v, want an error naming it", err)
-	}
-	r.SetRecord(t, "seen-floor", nil)
-	if res := receive(t, r); len(res.Delivered) != 1 {
-		t.Errorf("the message left on the server: delivered %d once the floor was removed, want 1", len(res.Delivered))
 	}
 }
 

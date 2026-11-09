@@ -472,10 +472,6 @@ func TestLocalFaultLeavesTheMessage(t *testing.T) {
 		name         string
 		breakMailbox func(t *testing.T, b *client.Mailbox, a protocol.Address) (fix func())
 	}{
-		{"the replay set's floor unreadable", func(t *testing.T, b *client.Mailbox, _ protocol.Address) func() {
-			b.SetRecord(t, "seen-floor", []byte("soon"))
-			return func() { b.SetRecord(t, "seen-floor", nil) }
-		}},
 		{"a prekey file unreadable", func(t *testing.T, b *client.Mailbox, _ protocol.Address) func() {
 			k := prekeyFile(b, numberOf(t, b), ".agekey")
 			key, err := os.ReadFile(k)

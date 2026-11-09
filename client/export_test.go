@@ -118,7 +118,7 @@ func SetAgentPatience(t *testing.T, d time.Duration) {
 // PruneByNoReading runs prune under the mailbox's lock with no reading, taken's
 // zero value, for a test.
 func (b *Mailbox) PruneByNoReading(ctx context.Context) error {
-	_, err := locked(ctx, b, func() (struct{}, error) { return struct{}{}, b.prune(taken{}) })
+	_, err := locked(ctx, b, func() (struct{}, error) { return struct{}{}, b.prune(time.Time{}) })
 	return err
 }
 
@@ -553,11 +553,7 @@ func AdoptedKeys(t *testing.T, b *Mailbox) []uint64 {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var ns []uint64
-	for _, k := range keys {
-		ns = append(ns, k.serial)
-	}
-	return ns
+	return keys
 }
 
 // Statements is the serial of every statement b's state file records.

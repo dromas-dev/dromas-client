@@ -28,7 +28,6 @@ import (
 
 	"filippo.io/age"
 	"github.com/dromas-dev/dromas-client/client/internal/sign"
-	tk "github.com/dromas-dev/dromas-client/client/internal/taken"
 	"github.com/dromas-dev/dromas-client/protocol"
 	bolt "go.etcd.io/bbolt"
 	"golang.org/x/crypto/ssh"
@@ -739,40 +738,36 @@ func (b *Mailbox) restore(ctx context.Context) error {
 // brings, which is how a mailbox gets a certificate on record (PROTOCOL.md
 // §8). Once the server has taken it, n is the prekey this mailbox published
 // last, its signer is the one in use, and older working keys go. It returns
-// the reading the server took, the pass's date, once the server has
-// answered: an error beside it is a fault of this mailbox after the server
-// took the call (#110).
-func (b *Mailbox) publish(ctx context.Context, path string, req any, n uint64) (taken, error) {
+// the clock read once the server has answered: an error beside it is a fault
+// of this mailbox after the server took the call (#110).
+func (b *Mailbox) publish(ctx context.Context, path string, req any, n uint64) (time.Time, error) {
 	by, _, err := b.signerOf(n)
 	if err != nil {
-		return taken{}, err
+		return time.Time{}, err
 	}
 	pass, err := b.signPass(by)
 	if err != nil {
-		return taken{}, err
+		return time.Time{}, err
 	}
 	if _, err := b.call(ctx, http.MethodPut, path, req, http.Header{"Authorization": {pass}}, nil); err != nil {
-		return taken{}, err
+		return time.Time{}, err
 	}
-	at, err := tk.By(pass)
-	if err != nil {
-		return taken{}, err
-	}
+	at := b.now()
 	step("renewal taken")
 	return at, b.recordTaken(n, pass, at)
 }
 
 // recordTaken records statement n as one the server took, before anything
 // else is done, in one transaction: n as the prekey this mailbox published last,
-// unless a higher one is, and with it at, the reading the server took it at,
-// in n's record, where at is one (the early deletion of retired prekeys times
+// unless a higher one is, and with it at, the clock read once the server took
+// it, in n's record, where at is not zero (the early deletion of retired prekeys times
 // itself by it: dropRetired); the renewal under way done, with any that failed
 // before it, unless a later one is under way; and pass, which is under the
 // certificate the server now holds this mailbox to, as the pass the mailbox keeps,
 // or with none given, no pass; and n on the record of a statement the mailbox
 // did not make, which its server took n above (NotMade.RenewedAbove). Then the
 // working keys older than n go.
-func (b *Mailbox) recordTaken(n uint64, pass string, at taken) error {
+func (b *Mailbox) recordTaken(n uint64, pass string, at time.Time) error {
 	var rec []byte
 	if pass != "" {
 		var err error
@@ -782,9 +777,6 @@ func (b *Mailbox) recordTaken(n uint64, pass string, at taken) error {
 	}
 	if err := b.update(func(s store) error {
 		if err := b.recordTakenAt(s, n, at); err != nil {
-			return err
-		}
-		if err := recordAdoptedRenewal(s, at); err != nil {
 			return err
 		}
 		if err := b.recordPublished(s, n); err != nil {
@@ -1005,9 +997,8 @@ func (b *Mailbox) loadIdentity() error {
 // keeps it by its serial: the statement, its signature, and when it was
 // signed, which is what the mailbox times its renewals by ([Mailbox.made];
 // PROTOCOL.md §12.4), in one value, so the three are never out of line (#192);
-// and once its server took it as this
-// mailbox's newest, the reading it took it at, by the pass that upload carried
-// (recordTaken), or nothing where the mailbox learnt of the take from a read of
+// and once its server took it as this mailbox's newest, the clock read once
+// that upload was answered (recordTaken), or nothing where the mailbox learnt of the take from a read of
 // itself (noteServed). Its key is prekeys/<serial>.agekey.
 type prekeyRecord struct {
 	Statement protocol.Bytes `json:"statement"`
@@ -1019,21 +1010,21 @@ type prekeyRecord struct {
 	Going bool `json:"going,omitempty"`
 }
 
-// recordTakenAt writes at, the reading the server took statement n at, into
+// recordTakenAt writes at, the clock read once the server took statement n, into
 // n's record, inside recordTaken's transaction and before n is recorded
 // published: only for a statement above the one published last, the first
-// take of it, and only where at is a reading and the mailbox keeps n's record.
-func (b *Mailbox) recordTakenAt(s store, n uint64, at taken) error {
+// take of it, and only where at is not zero and the mailbox keeps n's record.
+func (b *Mailbox) recordTakenAt(s store, n uint64, at time.Time) error {
 	cur, err := decimal(s.get(bucketMailbox, "serial"), "serial")
 	raw := s.get(bucketPrekeys, serialKey(n))
-	if err != nil || n <= cur || at.None() || raw == nil {
+	if err != nil || n <= cur || at.IsZero() || raw == nil {
 		return err
 	}
 	var rec prekeyRecord
 	if err := protocol.Unmarshal(raw, &rec); err != nil {
 		return fmt.Errorf("the mailbox's state file keeps no statement of prekey %d it can read: %w", n, err)
 	}
-	rec.Taken = at.At().UTC().Format(protocol.TimeLayout)
+	rec.Taken = at.UTC().Format(protocol.TimeLayout)
 	if raw, err = json.Marshal(rec); err != nil {
 		return err
 	}

@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -173,9 +172,9 @@ func TestScriptKeepsItsPassForItsServer(t *testing.T) {
 	}
 }
 
-// The replay set: pruned by the mailbox's clock only once the server has taken a
-// pass dated by it, a line kept twice the TTL and an hour from its sent_at (protocol.SeenFor), and a
-// floor below which a message is stale whatever the clock reads.
+// The replay set: pruned only once the server has answered the list, by the
+// mailbox's clock read then, a line kept twice the TTL and an hour from its
+// sent_at (protocol.SeenFor), and no floor.
 func TestScriptKeepsItsReplaySetByItsClock(t *testing.T) {
 	w := newWorld(t)
 	p, q := w.mailbox(), w.mailbox()
@@ -198,27 +197,9 @@ func TestScriptKeepsItsReplaySetByItsClock(t *testing.T) {
 	}
 	old := fmt.Sprintf("%064d", 7)
 	q.must(fmt.Sprintf(`printf '%%s %%s %%s %%s\n' %s %d %s 00000000-0000-4000-8000-0000000000f3 >> "$DR/seen"`, old, time.Now().Add(-protocol.SeenFor-24*time.Hour).Unix(), p.addr))
-	t0 := time.Now().Add(-protocol.SeenFor).Unix()
 	q.recv()
-	f, err := strconv.ParseInt(strings.TrimSpace(q.read("seen-floor")), 10, 64)
-	if err != nil || f < t0 || f > t0+5 || strings.Contains(q.read("seen"), old+" ") || !strings.Contains(q.read("seen"), oid+" ") {
-		t.Errorf("the floor after a prune: %q, the cutoff %d", q.read("seen-floor"), t0)
-	}
-	writeFile(t, q.file("seen-floor"), fmt.Appendf(nil, "%d\n", time.Now().Unix()+100))
-	under := p.line(q.addr, "00000000-0000-4000-8000-0000000000f4", "under the floor", 0)
-	w.inject(q, "", under, p.sign(q.addr, under))
-	if d := q.recv(); len(d.messages) != 0 || !strings.Contains(d.said, "stale: sent_at is before this mailbox's replay set reaches back to") {
-		t.Errorf("a message under the floor: %v", d)
-	}
-	writeFile(t, q.file("seen-floor"), []byte("soon\n"))
-	none := p.line(q.addr, "00000000-0000-4000-8000-0000000000f5", "a floor that names no time", 0)
-	w.inject(q, "", none, p.sign(q.addr, none))
-	if d := q.recv(); d.rc == 0 || len(d.messages) != 0 || !strings.Contains(d.said, "seen-floor names no time") || w.srv.Count(q.addr) != 1 {
-		t.Errorf("a seen-floor that names no time: %v", d)
-	}
-	q.must(`rm "$DR/seen-floor"`)
-	if d := q.recv(); !slices.Equal(d.bodies(), []string{"a floor that names no time"}) {
-		t.Errorf("the drain once the floor is gone: %v", d)
+	if strings.Contains(q.read("seen"), old+" ") || !strings.Contains(q.read("seen"), oid+" ") || q.has("seen-floor") {
+		t.Errorf("the replay set after a prune: %q", q.read("seen"))
 	}
 }
 

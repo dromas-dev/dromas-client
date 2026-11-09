@@ -331,10 +331,9 @@ func TestAnInitCrashedBeforeItsIdentityIsSyncedRegisters(t *testing.T) {
 // The script syncs in the order its crash safety rests on, as a sync and an
 // mv that log each call read it (#444 item 2): dr_prekey puts the prekey, its
 // statement, when it was made and its signature on disk in one call, before
-// any upload publishes the statement; dr_forget puts a raised floor on
-// disk and in place before it syncs the new replay set and moves it into
-// place, so a crash leaves the old set or the new one, never an empty one,
-// under a floor at least as high (#240).
+// any upload publishes the statement; dr_forget syncs the new replay set
+// before it moves it into place, so a crash leaves the old set or the new
+// one, never an empty one (#240).
 func TestTheScriptSyncsInItsOrder(t *testing.T) {
 	w := newWorld(t)
 	b := w.mailbox()
@@ -375,11 +374,11 @@ mv(){ printf '%s mv %s\n' "${FUNCNAME[1]}" "$*" >> "$LOG"; command mv "$@"; }
 		t.Fatal(err)
 	}
 	got = calls("dr_forget dr_putline", "dr_forget "+strconv.FormatInt(now, 10))
-	if want := []string{"sync seen-floor.new", "mv seen-floor.new seen-floor", "sync .", "sync seen.new", "mv seen.new seen", "sync ."}; !slices.Equal(got, want) {
+	if want := []string{"sync seen.new", "mv seen.new seen", "sync ."}; !slices.Equal(got, want) {
 		t.Errorf("dr_forget's syncs and moves:\n%q\nwant\n%q", got, want)
 	}
-	if !strings.HasPrefix(b.read("seen"), "bb ") || strings.Count(b.read("seen"), "\n") != 1 || b.read("seen-floor") == "" {
-		t.Errorf("dr_forget left the set %q under the floor %q", b.read("seen"), b.read("seen-floor"))
+	if !strings.HasPrefix(b.read("seen"), "bb ") || strings.Count(b.read("seen"), "\n") != 1 || b.has("seen-floor") {
+		t.Errorf("dr_forget left the set %q", b.read("seen"))
 	}
 
 	// A restore names the keys seen-keys does not, each synced.

@@ -201,8 +201,8 @@ func TestAnAdoptedKeyMissingStopsNoDrain(t *testing.T) {
 	old := numberOf(t, b)
 	x := lostState(t, e, b)
 	e.clock.Add(2 * time.Second)
-	took := e.clock.Now()
-	if _, err := x.Rekey(ctx); err != nil {
+	p, err := x.Rekey(ctx)
+	if err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Remove(prekeyFile(b, old, ".agekey")); err != nil {
@@ -211,7 +211,7 @@ func TestAnAdoptedKeyMissingStopsNoDrain(t *testing.T) {
 	if _, err := x.Receive(ctx); err != nil {
 		t.Fatalf("recv with an adopted key's file gone: %v", err)
 	}
-	e.clock.Add(adoptedEnd(took).Add(time.Minute).Sub(e.clock.Now()))
+	pastItsRenewal(e, p)
 	if _, err := x.Rekey(ctx); err != nil {
 		t.Fatal(err)
 	}
