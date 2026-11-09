@@ -369,7 +369,7 @@ func TestScriptAKeyMountedDuringADrainDecryptsNothingUntilNamed(t *testing.T) {
 		t.Fatalf("the next drain: %v", d)
 	}
 	q.must("dr_init --restore > /dev/null")
-	if d := q.recv(); len(d.messages) != 0 || d.refused("stale") != 1 || !q.has("seen-floor") {
+	if d := q.recv(); len(d.messages) != 0 || d.refused("stale") != 1 || !q.has("restore-floor") {
 		t.Errorf("the drain after init --restore: %v", d)
 	}
 }
