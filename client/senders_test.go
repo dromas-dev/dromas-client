@@ -2,7 +2,6 @@ package client_test
 
 import (
 	"context"
-	"crypto/sha512"
 	"errors"
 	"fmt"
 	"net/http"
@@ -12,7 +11,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"testing"
 	"time"
 
@@ -345,115 +343,15 @@ func TestARenewalReplacesAnACLAnotherWriterPut(t *testing.T) {
 	}
 }
 
-// A renewal that reads another writer's ACL and whose PUT of the mailbox's own
-// the server does not take keeps what the server holds as the ACL it took
-// (#377): status says the mailbox's ACL is pending, a reply is judged against
-// the ACL the server holds, and the next recv, with no renewal, sends the
-// mailbox's own and says it replaced another writer's, once. So for a pause and
-// for a deny list of addresses, which the mailbox's files could say, and which
-// recv reports by the mark checkACL keeps beside it. Control: the PUT taken,
-// replaced and reported at the renewal.
-func TestARenewalWhosePUTIsNotTakenLeavesTheMailboxsACLPending(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	for _, other := range []struct {
-		name string
-		acl  func(d protocol.Address) *protocol.ACL
-	}{
-		{"a pause", func(protocol.Address) *protocol.ACL { return &protocol.ACL{Deny: protocol.ACLList{Any: true}} }},
-		{"a deny list", func(d protocol.Address) *protocol.ACL {
-			return &protocol.ACL{Allow: protocol.ACLList{Any: true}, Deny: protocol.NewACLList(false, []protocol.Address{d})}
-		}},
-	} {
-		for _, fail := range []bool{false, true} {
-			t.Run(fmt.Sprintf("%s, the PUT not taken %v", other.name, fail), func(t *testing.T) {
-				e := newEnv(t)
-				a, b, c, d := e.heldMailbox(), e.heldMailbox(), e.heldMailbox(), e.heldMailbox()
-				if _, err := b.Block(ctx, c.Address()); err != nil {
-					t.Fatal(err)
-				}
-				own, theirs := e.srv.ACL(b.Address()), other.acl(d.Address())
-				e.srv.PutACL(b.Address(), theirs)
-				var mu sync.Mutex
-				failing := fail
-				var calls []string
-				e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
-					if !strings.HasSuffix(r.URL.Path, "/acl") {
-						next.ServeHTTP(w, r)
-						return
-					}
-					mu.Lock()
-					calls = append(calls, r.Method)
-					refuse := failing && r.Method == http.MethodPut
-					mu.Unlock()
-					if refuse {
-						fakeserver.WriteJSON(w, protocol.CodeUnavailable.Status(), protocol.Problem{Type: protocol.CodeUnavailable.TypeURI(), Code: protocol.CodeUnavailable, Status: int64(protocol.CodeUnavailable.Status())})
-						return
-					}
-					next.ServeHTTP(w, r)
-				})
-				took := func() []string {
-					mu.Lock()
-					defer mu.Unlock()
-					out := calls
-					calls = nil
-					return out
-				}
-				e.clock.Add(25 * time.Hour)
-				res := receive(t, b)
-				if got := took(); res.Renewed == nil || strings.Join(got, " ") != "GET PUT" {
-					t.Fatalf("the renewal: %+v, calls %v", res, got)
-				}
-				if !fail {
-					if !res.ACLReplaced || res.ACLErr != nil || !e.srv.ACL(b.Address()).SameLists(own) {
-						t.Fatalf("control: the renewal's PUT taken: %+v; the server holds %+v", res, e.srv.ACL(b.Address()))
-					}
-					return
-				}
-				pending, perr := b.ACLPending(ctx)
-				st, serr := b.Status(ctx)
-				const what = "this mailbox's server held an ACL another writer put there"
-				if res.ACLReplaced || res.ACLErr == nil || !strings.Contains(res.ACLErr.Error(), what) || !pending || perr != nil || serr != nil || !strings.Contains(strings.Join(st.Attention, "\n"), what) {
-					t.Fatalf("the renewal whose PUT was refused: replaced %v, its error %v; pending %v (%v); attention %q (%v)", res.ACLReplaced, res.ACLErr, pending, perr, st.Attention, serr)
-				}
-				// A reply is judged against the ACL the server holds: under
-				// the pause none is admitted, and the send waits for the ACL.
-				_, sendErr := b.Send(ctx, a.Address(), "while the server holds another writer's ACL")
-				if waits := sendErr != nil; waits != (other.name == "a pause") {
-					t.Fatalf("a send while the PUT is refused: %v", sendErr)
-				}
-				took()
-				mu.Lock()
-				failing = false // the server takes PUTs again
-				mu.Unlock()
-				again := receive(t, b)
-				if got := took(); again.Renewed != nil || !again.ACLReplaced || again.ACLErr != nil || strings.Join(got, " ") != "PUT" || !e.srv.ACL(b.Address()).SameLists(own) {
-					t.Fatalf("the next recv: %+v, calls %v; the server holds %+v, the mailbox's own is %+v", again, got, e.srv.ACL(b.Address()), own)
-				}
-				if pending, _ := b.ACLPending(ctx); pending {
-					t.Fatal("the mailbox's ACL is pending after the server took it")
-				}
-				if res := receive(t, b); res.ACLReplaced || len(took()) != 0 {
-					t.Fatalf("the replacement is reported again: %+v", res)
-				}
-			})
-		}
-	}
-}
-
 // Where the ACL a mailbox's files say is not the one its server last took, the
-// error of the sync that did not send it and status say what changed, never
-// that the mailbox's ACL changed where its server's did: another writer's ACL a
-// renewal's read found (TestARenewalWhosePUTIsNotTakenLeavesTheMailboxsACLPending),
-// none taken from the mailbox, the mailbox's own lists changed, or an ACL a restore
-// adopted that holds what no file of the mailbox says.
+// error of the sync that did not send it and status say what changed: none
+// taken from the mailbox, or the mailbox's own lists changed.
 func TestWhatChangedInAnACLNotTakenIsSaid(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	for _, c := range []struct{ name, what string }{
 		{"none taken", "this mailbox's server holds no ACL this mailbox sent"},
 		{"its lists changed", "this mailbox's lists have changed since its server last took its ACL"},
-		{"an adopted ACL holding what no file says", "the ACL this mailbox adopted from its server when it was restored holds what no file of the mailbox says"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			e := newEnv(t)
@@ -467,364 +365,18 @@ func TestWhatChangedInAnACLNotTakenIsSaid(t *testing.T) {
 				next.ServeHTTP(w, r)
 			})
 			mailbox := b
-			switch c.name {
-			case "its lists changed":
+			if c.name == "its lists changed" {
 				if _, err := b.Block(ctx, d.Address()); err != nil {
-					t.Fatal(err)
-				}
-			case "an adopted ACL holding what no file says":
-				e.srv.PutACL(b.Address(), &protocol.ACL{Allow: protocol.ACLList{Any: true}, Deny: protocol.NewACLList(true, []protocol.Address{d.Address()})})
-				mailbox = restore(t, e, b)
-				e.clock.Add(time.Minute)
-				if _, err := mailbox.Rekey(ctx); err != nil {
 					t.Fatal(err)
 				}
 			}
 			refusing.Store(true)
-			var err error
-			if c.name == "an adopted ACL holding what no file says" {
-				err = mailbox.SyncACL(ctx)
-			} else {
-				_, err = mailbox.Block(ctx, x.Address())
-			}
+			_, err := mailbox.Block(ctx, x.Address())
 			st, serr := mailbox.Status(ctx)
 			if err == nil || !strings.Contains(err.Error(), c.what) || serr != nil || !strings.Contains(strings.Join(st.Attention, "\n"), c.what) {
 				t.Fatalf("the sync not taken: %v; status %q, %v; want each to say %q", err, st.Attention, serr, c.what)
 			}
 		})
-	}
-}
-
-// The read of its server's ACL that a renewal owes is made only once the
-// server's ACL is answered and what it showed is kept: a list of the mailbox's
-// that cannot be read, a read the server does not answer, or a fault of the
-// mailbox at the keep after it leave the read owed, and the next recv, with no
-// renewal due, makes it, once, replaces another writer's ACL and says so. A
-// restore's adoption read that fails leaves it owed too, and its own mark
-// has the next sync read the server's ACL either way.
-func TestAnACLReadNotMadeIsOwedToTheNextRecv(t *testing.T) {
-	ctx := context.Background()
-	full := &os.PathError{Op: "write", Path: "state", Err: syscall.ENOSPC}
-	for _, fault := range []string{"a list that cannot be read", "no answer to the read", "a fault of the mailbox at the keep", "no answer to a restore's adoption read"} {
-		t.Run(fault, func(t *testing.T) {
-			e := newEnv(t)
-			b, c, d := e.heldMailbox(), e.heldMailbox(), e.heldMailbox()
-			if _, err := b.Block(ctx, c.Address()); err != nil {
-				t.Fatal(err)
-			}
-			own := e.srv.ACL(b.Address())
-			x := b
-			if fault == "no answer to a restore's adoption read" {
-				x = restore(t, e, b)
-				e.clock.Add(time.Minute) // a restore's first recv renews
-			} else {
-				e.srv.PutACL(b.Address(), &protocol.ACL{Allow: protocol.ACLList{Any: true}, Deny: protocol.NewACLList(false, []protocol.Address{d.Address()})})
-				e.clock.Add(25 * time.Hour)
-			}
-			var armed atomic.Bool
-			client.SetWriteFault(t, func() error {
-				if armed.CompareAndSwap(true, false) {
-					return full
-				}
-				return nil
-			})
-			var mu sync.Mutex
-			failing := true
-			var calls []string
-			e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
-				if r.URL.Path != mailboxPath(b)+"/acl" {
-					next.ServeHTTP(w, r)
-					return
-				}
-				mu.Lock()
-				calls = append(calls, r.Method)
-				refuse := failing && r.Method == http.MethodGet && (fault == "no answer to the read" || fault == "no answer to a restore's adoption read")
-				keep := failing && r.Method == http.MethodGet && fault == "a fault of the mailbox at the keep"
-				mu.Unlock()
-				if refuse {
-					fakeserver.WriteJSON(w, protocol.CodeUnavailable.Status(), protocol.Problem{Type: protocol.CodeUnavailable.TypeURI(), Code: protocol.CodeUnavailable, Status: int64(protocol.CodeUnavailable.Status())})
-					return
-				}
-				next.ServeHTTP(w, r)
-				armed.Store(keep) // the mailbox's next write keeps what this read showed
-			})
-			took := func() string {
-				mu.Lock()
-				defer mu.Unlock()
-				s := strings.Join(calls, " ")
-				calls = nil
-				return s
-			}
-			blocked := filepath.Join(x.Dir(), "blocked")
-			if fault == "a list that cannot be read" {
-				if err := os.WriteFile(blocked, []byte("not an address\n"), 0o600); err != nil {
-					t.Fatal(err)
-				}
-			}
-			res, err := x.Receive(ctx)
-			if res == nil || res.Renewed == nil {
-				t.Fatalf("the recv whose renewal's read was not made: %+v, %v", res, err)
-			}
-			t.Logf("the recv at the renewal: ACL %v, %v; calls %q", res.ACLErr, err, took())
-			mu.Lock()
-			failing = false
-			mu.Unlock()
-			if fault == "a list that cannot be read" {
-				if err := os.WriteFile(blocked, []byte(c.Address().String()+"\n"), 0o600); err != nil {
-					t.Fatal(err)
-				}
-			}
-			e.clock.Add(time.Minute)
-			again := receive(t, x)
-			want, replaced := "GET PUT", true
-			if fault == "no answer to a restore's adoption read" {
-				want, replaced = "GET", false // its lists are the server's: nothing to send
-			}
-			if got := took(); again.Renewed != nil || got != want || again.ACLReplaced != replaced || again.ACLErr != nil || !e.srv.ACL(b.Address()).SameLists(own) {
-				t.Fatalf("the next recv: renewed %v, calls %q, want %q; replaced %v, its ACL's error %v; the server holds %+v, the mailbox's own is %+v", again.Renewed != nil, got, want, again.ACLReplaced, again.ACLErr, e.srv.ACL(b.Address()), own)
-			}
-			if res := receive(t, x); res.ACLReplaced || took() != "" {
-				t.Fatalf("the recv after it: %+v", res)
-			}
-		})
-	}
-}
-
-// A mailbox whose renewal's PUT was not taken, and which its server then forgot,
-// with the ACL another writer put there, says it replaced nothing when the
-// registration that brings it back sends its own: the server held no ACL by
-// then, and the registration drops the mark with the ACL kept (sendRenewal;
-// #377).
-func TestARegistrationDropsTheMarkOfAnotherWritersACL(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	e := newEnv(t)
-	b, c, d := e.heldMailbox(), e.heldMailbox(), e.heldMailbox()
-	if _, err := b.Block(ctx, c.Address()); err != nil {
-		t.Fatal(err)
-	}
-	own := e.srv.ACL(b.Address())
-	e.srv.PutACL(b.Address(), &protocol.ACL{Allow: protocol.ACLList{Any: true}, Deny: protocol.NewACLList(false, []protocol.Address{d.Address()})})
-	var failing atomic.Bool
-	failing.Store(true)
-	e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
-		if failing.Load() && r.Method == http.MethodPut && strings.HasSuffix(r.URL.Path, "/acl") {
-			fakeserver.WriteJSON(w, protocol.CodeUnavailable.Status(), protocol.Problem{Type: protocol.CodeUnavailable.TypeURI(), Code: protocol.CodeUnavailable, Status: int64(protocol.CodeUnavailable.Status())})
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-	e.clock.Add(25 * time.Hour)
-	if res := receive(t, b); res.Renewed == nil || res.ACLErr == nil {
-		t.Fatalf("the renewal whose PUT was refused: %+v", res)
-	}
-	failing.Store(false)
-	e.srv.Forget(b.Address())
-	e.clock.Add(time.Minute)
-	res := receive(t, b)
-	if res.Renewed == nil || res.ACLErr != nil || res.ACLReplaced || !e.srv.ACL(b.Address()).SameLists(own) {
-		t.Fatalf("the recv that registered the mailbox again: renewed %v, its ACL's error %v, replaced %v; the server holds %+v, the mailbox's own is %+v", res.Renewed != nil, res.ACLErr, res.ACLReplaced, e.srv.ACL(b.Address()), own)
-	}
-}
-
-// A restore adopts at most protocol.MaxACLEntries of its server's entries
-// (PROTOCOL.md §11.14; #440): an ACL answer with more is one that breaks its
-// form, so the mailbox adopts nothing, writes none of its lists, and reads again
-// at its next command. The server holds the most there may be, then one
-// more.
-func TestARestoreAdoptsABoundedACL(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	for _, n := range []int{protocol.MaxACLEntries, protocol.MaxACLEntries + 1} {
-		t.Run(fmt.Sprint(n), func(t *testing.T) {
-			t.Parallel()
-			e := newEnv(t)
-			b := e.heldMailbox()
-			addrs := make([]protocol.Address, n-1) // and the allow list's *
-			for i := range addrs {
-				addrs[i] = protocol.Address(sha512.Sum384(fmt.Append(nil, i)))
-			}
-			e.srv.PutACL(b.Address(), &protocol.ACL{Allow: protocol.ACLList{Any: true}, Deny: protocol.NewACLList(false, addrs)})
-			r := restore(t, e, b)
-			e.clock.Add(time.Minute)
-			_, err := r.Rekey(ctx)
-			blocked, _ := r.Blocked(t.Context())
-			if n <= protocol.MaxACLEntries {
-				if err != nil || len(blocked) != n-1 {
-					t.Fatalf("a restore against %d entries: %v, %d blocked", n, err, len(blocked))
-				}
-				return
-			}
-			if err == nil || len(blocked) != 0 {
-				t.Fatalf("a restore against %d entries: %v, %d blocked; want refused, none", n, err, len(blocked))
-			}
-			if _, err := os.Lstat(filepath.Join(r.Dir(), "blocked")); !errors.Is(err, os.ErrNotExist) {
-				t.Fatalf("a refused adoption wrote blocked: %v", err)
-			}
-		})
-	}
-}
-
-// A mailbox restored from its identity alone adopts the ACL its server holds, by
-// each way a restore goes (init, prekey renew, and a recv that renews), so its
-// first renewal finds the two alike and the server's blocks stay; the heal
-// still replaces an ACL another writer puts there after (#366). A mailbox
-// restored with one of its lists beside the identity adopts nothing: its
-// files are its ACL, and its first renewal puts it.
-func TestARestoredMailboxAdoptsItsServersACL(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	lost := func(t *testing.T, e *env) (b, blocked, allowed *client.Mailbox, own *protocol.ACL) {
-		t.Helper()
-		a, b, c := e.heldMailbox(), e.heldMailbox(), e.heldMailbox()
-		if _, err := b.Block(ctx, a.Address()); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := b.Allow(ctx, c.Address()); err != nil {
-			t.Fatal(err)
-		}
-		if err := b.SetPolicy(ctx, client.Policy{Unknown: client.LandHeld, Server: client.AdmitAllowed}); err != nil {
-			t.Fatal(err)
-		}
-		if err := b.SyncACL(ctx); err != nil {
-			t.Fatal(err)
-		}
-		own = e.srv.ACL(b.Address())
-		if own == nil || own.Allow.Any || !own.Allow.Has(c.Address()) || !own.Deny.Has(a.Address()) {
-			t.Fatalf("the lost mailbox's ACL: %+v", own)
-		}
-		return b, a, c, own
-	}
-	for _, how := range []string{"init", "prekey renew", "recv"} {
-		t.Run(how, func(t *testing.T) {
-			e := newEnv(t)
-			b, a, c, own := lost(t, e)
-			r := restore(t, e, b)
-			e.clock.Add(time.Minute)
-			var err error
-			switch how {
-			case "init":
-				_, err = client.Init(ctx, r.Dir(), e.opts())
-			case "prekey renew":
-				_, err = r.Rekey(ctx)
-			case "recv":
-				var res *client.Result
-				res, err = r.Receive(ctx)
-				if err == nil && (res.Renewed == nil || res.ACLReplaced || res.ACLErr != nil) {
-					t.Fatalf("the recv that restored the mailbox: %+v", res)
-				}
-			}
-			if err != nil {
-				t.Fatalf("the restore: %v", err)
-			}
-			e.clock.Add(25 * time.Hour)
-			if res := receive(t, r); res.Renewed == nil || res.ACLReplaced || res.ACLErr != nil || !e.srv.ACL(b.Address()).SameLists(own) {
-				t.Fatalf("the restored mailbox's first renewal: %+v; the server holds %+v, the lost mailbox's was %+v", res, e.srv.ACL(b.Address()), own)
-			}
-			blocked, _ := r.Blocked(t.Context())
-			allowed, _ := r.Allowed(t.Context())
-			policy, _ := r.Policy(t.Context())
-			if !slices.Equal(blocked, []protocol.Address{a.Address()}) || !slices.Equal(allowed, []protocol.Address{c.Address()}) || policy != (client.Policy{Unknown: client.LandHeld, Server: client.AdmitAllowed}) {
-				t.Fatalf("the restored mailbox's lists: blocked %v, allowed %v, %+v", blocked, allowed, policy)
-			}
-
-			// Another writer pauses the mailbox: the next renewal replaces it.
-			e.srv.PutACL(b.Address(), &protocol.ACL{Deny: protocol.ACLList{Any: true}})
-			e.clock.Add(25 * time.Hour)
-			if res := receive(t, r); res.Renewed == nil || !res.ACLReplaced || !e.srv.ACL(b.Address()).SameLists(own) {
-				t.Fatalf("the renewal after another writer's ACL: %+v; the server holds %+v", res, e.srv.ACL(b.Address()))
-			}
-		})
-	}
-
-	// Each of the three files alone, as the lost mailbox wrote it (#441 item 2),
-	// and the ACL it makes: under the default policy, which admits all,
-	// allowed changes nothing; policy alone admits only the allowed, who are
-	// none.
-	for _, kept := range []struct {
-		file string
-		want func(own *protocol.ACL) *protocol.ACL
-	}{
-		{"allowed", func(*protocol.ACL) *protocol.ACL { return &protocol.ACL{Allow: protocol.ACLList{Any: true}} }},
-		{"blocked", func(own *protocol.ACL) *protocol.ACL {
-			return &protocol.ACL{Allow: protocol.ACLList{Any: true}, Deny: own.Deny}
-		}},
-	} {
-		t.Run("with its "+kept.file+" file", func(t *testing.T) {
-			e := newEnv(t)
-			b, _, _, own := lost(t, e)
-			r := restore(t, e, b)
-			data, err := os.ReadFile(filepath.Join(b.Dir(), kept.file))
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := os.WriteFile(filepath.Join(r.Dir(), kept.file), data, 0o600); err != nil {
-				t.Fatal(err)
-			}
-			e.clock.Add(time.Minute)
-			if _, err := r.Rekey(ctx); err != nil {
-				t.Fatal(err)
-			}
-			for _, f := range []string{"allowed", "blocked"} {
-				if _, err := os.Stat(filepath.Join(r.Dir(), f)); f != kept.file && !errors.Is(err, os.ErrNotExist) {
-					t.Errorf("a mailbox restored with its %s file wrote %s: %v", kept.file, f, err)
-				}
-			}
-			e.clock.Add(25 * time.Hour)
-			if res := receive(t, r); res.Renewed == nil || !res.ACLReplaced || !e.srv.ACL(b.Address()).SameLists(kept.want(own)) {
-				t.Fatalf("the first renewal of a mailbox restored with its %s file: %+v; the server holds %+v", kept.file, res, e.srv.ACL(b.Address()))
-			}
-		})
-	}
-}
-
-// What a restored mailbox adopts and no file of it says, a pause (a deny of
-// AnyAddress) or addresses beside an allow of AnyAddress, goes with the first
-// ACL the mailbox sends, and recv reports that as the heal's acl_replaced, once:
-// whether a later recv's sync sends it, a send's sync, or the renewal of the
-// recv that restored the mailbox (#366).
-func TestARestoredMailboxReportsWhatItDidNotAdopt(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	for _, held := range []struct {
-		name string
-		acl  func(a, c protocol.Address) *protocol.ACL
-	}{
-		{"a pause", func(a, _ protocol.Address) *protocol.ACL {
-			return &protocol.ACL{Allow: protocol.ACLList{Any: true}, Deny: protocol.NewACLList(true, []protocol.Address{a})}
-		}},
-		{"an address beside allow *", func(a, c protocol.Address) *protocol.ACL {
-			return &protocol.ACL{Allow: protocol.NewACLList(true, []protocol.Address{c}), Deny: protocol.NewACLList(false, []protocol.Address{a})}
-		}},
-	} {
-		for _, how := range []string{"recv after prekey renew", "send after prekey renew", "recv"} {
-			t.Run(held.name+", "+how, func(t *testing.T) {
-				e := newEnv(t)
-				a, b, c := e.heldMailbox(), e.heldMailbox(), e.heldMailbox()
-				e.srv.PutACL(b.Address(), held.acl(a.Address(), c.Address()))
-				r := restore(t, e, b)
-				e.clock.Add(time.Minute)
-				if how != "recv" {
-					if _, err := r.Rekey(ctx); err != nil {
-						t.Fatal(err)
-					}
-				}
-				if how == "send after prekey renew" {
-					send(t, r, c, "a send whose sync replaces the adopted ACL")
-				}
-				res := receive(t, r)
-				own := &protocol.ACL{Allow: protocol.ACLList{Any: true}, Deny: protocol.NewACLList(false, []protocol.Address{a.Address()})}
-				if !res.ACLReplaced || res.ACLErr != nil || !e.srv.ACL(b.Address()).SameLists(own) {
-					t.Fatalf("the recv after the restore: %+v; the server holds %+v", res, e.srv.ACL(b.Address()))
-				}
-				if blocked, _ := r.Blocked(t.Context()); !slices.Equal(blocked, []protocol.Address{a.Address()}) {
-					t.Fatalf("the restored mailbox blocks %v", blocked)
-				}
-				if res := receive(t, r); res.ACLReplaced {
-					t.Fatalf("the replacement is reported again: %+v", res)
-				}
-			})
-		}
 	}
 }
 
@@ -994,5 +546,56 @@ func TestACommentInTheAddressListsStopsNothing(t *testing.T) {
 	}
 	if _, err := b.Blocked(t.Context()); err == nil {
 		t.Fatal("an address with a comment after it was read as an address")
+	}
+}
+
+// A mailbox restored from its identity alone, with none of its allowed and
+// blocked files, is a failure, said once: Init reports it, and the first
+// renewal recv makes replaces the ACL its server holds with the open one the
+// empty lists make, so the sender it blocked is no longer denied there (#832).
+// Control: restored with its blocked file, it reports nothing, and the block
+// stays.
+func TestARestoreWithoutItsListsIsSaidAndReplacesItsServersACL(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	for _, withLists := range []bool{false, true} {
+		t.Run(fmt.Sprintf("with its lists %v", withLists), func(t *testing.T) {
+			e := newEnv(t)
+			b, d := e.mailbox(), e.mailbox()
+			if _, err := b.Block(ctx, d.Address()); err != nil {
+				t.Fatal(err)
+			}
+			dir := t.TempDir()
+			files := []string{"identity"}
+			if withLists {
+				files = append(files, "blocked")
+			}
+			for _, name := range files {
+				data, err := os.ReadFile(filepath.Join(b.Dir(), name))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(dir, name), data, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			e.clock.Add(time.Minute)
+			r, err := client.Init(ctx, dir, e.opts())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if r.RestoredWithoutLists() == withLists {
+				t.Fatalf("restored without its lists: %v, with them %v", r.RestoredWithoutLists(), withLists)
+			}
+			e.clock.Add(25 * time.Hour)
+			res, err := r.Receive(ctx)
+			if err != nil || res.Renewed == nil {
+				t.Fatalf("the first recv a day on: %+v, %v", res, err)
+			}
+			denied := e.srv.ACL(b.Address()) != nil && e.srv.ACL(b.Address()).Deny.Has(d.Address())
+			if denied != withLists || res.ACLReplaced == withLists {
+				t.Fatalf("the server still denies the blocked sender: %v, replaced %v; with its lists %v", denied, res.ACLReplaced, withLists)
+			}
+		})
 	}
 }

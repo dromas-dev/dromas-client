@@ -232,10 +232,8 @@ func (b *Mailbox) keepRevocation(id *protocol.Identity, sig []byte) error {
 		if err := s.put(bucketMailbox, "revoked", sig); err != nil {
 			return err
 		}
-		for _, k := range []struct{ bucket, key string }{{bucketMailbox, "renew-failed"}, {bucketIntent, "acl-read"}} {
-			if err := s.del(k.bucket, k.key); err != nil {
-				return err
-			}
+		if err := s.del(bucketMailbox, "renew-failed"); err != nil {
+			return err
 		}
 		return s.del(bucketMailbox, "pass")
 	}); err != nil {

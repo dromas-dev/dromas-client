@@ -185,10 +185,6 @@ func (b *Mailbox) RenewUnderCertificate(ctx context.Context) (*protocol.Prekey, 
 		if err != nil {
 			return p, err
 		}
-		if err := b.prune(at); err != nil {
-			return p, err
-		}
-		_, err = b.adoptPending(ctx)
-		return p, err
+		return p, b.prune(at)
 	})
 }

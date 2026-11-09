@@ -211,6 +211,9 @@ type Mailbox struct {
 	restoring bool
 	restored  *Restored
 	notKeys   error
+	// noLists is set by an Init that restored the mailbox with none of its
+	// allowed and blocked files ([Mailbox.RestoredWithoutLists]).
+	noLists bool
 	// lifetime is how long a certificate this mailbox makes runs, read from its
 	// server's document once a command (certificateLifetime); zero until then.
 	lifetime time.Duration
@@ -673,7 +676,7 @@ func (b *Mailbox) init(ctx context.Context) (*Mailbox, error) {
 			return b, nil
 		}
 		// An acknowledged restore renews at once, as dromas prekey renew does.
-		p, err := b.rekeyAdopting(ctx)
+		p, err := b.rekey(ctx, true)
 		if p != nil {
 			err = errors.Join(err, b.forgetLost())
 		}
@@ -712,8 +715,7 @@ func (b *Mailbox) init(ctx context.Context) (*Mailbox, error) {
 // identity alone or with its state lost. It reads itself at its server first
 // (readOwn), keeping what verifies of its revocations, and renews under a new
 // certificate where its server serves a statement under one or it was told
-// to (Options.WorkingKey), and by its identity otherwise. Once its renewal is
-// taken it adopts the ACL its server holds (adoptPending).
+// to (Options.WorkingKey), and by its identity otherwise.
 func (b *Mailbox) restore(ctx context.Context) error {
 	st, err := b.readOwn(ctx, false, false)
 	if err != nil {
@@ -724,14 +726,32 @@ func (b *Mailbox) restore(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if err := b.prune(at); err != nil {
-		return err
-	}
 	if p != nil {
-		_, err = b.adoptPending(ctx)
+		b.noLists, err = b.withoutLists()
+		if err != nil {
+			return err
+		}
 	}
-	return err
+	return b.prune(at)
 }
+
+// withoutLists reports whether the mailbox has none of its owner's allowed
+// and blocked files.
+func (b *Mailbox) withoutLists() (bool, error) {
+	for _, name := range []string{"allowed", "blocked"} {
+		if _, err := os.Lstat(b.path(name)); !errors.Is(err, fs.ErrNotExist) {
+			return false, err
+		}
+	}
+	return true, nil
+}
+
+// RestoredWithoutLists reports whether Init restored the mailbox from its
+// identity alone with none of its allowed and blocked files, as the README
+// says to back up: its first renewal by recv replaces the ACL its server
+// holds with the open one those empty lists make, so a sender it blocked
+// reaches held/ again. A failure's cost, said once by init (#832).
+func (b *Mailbox) RestoredWithoutLists() bool { return b.noLists }
 
 // publish sends a registration or a new prekey, statement n, with a pass by
 // its signer: the server takes a pass by the signer of the statement a call

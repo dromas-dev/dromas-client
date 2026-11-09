@@ -1619,7 +1619,6 @@ Dromas protects a message's content from everyone but the message's recipient. D
   - act as a mailbox toward itself;
   - refuse every pass from a mailbox, which keeps the mailbox's prekeys on the mailbox's disk for as long as the server refuses (Section 15.3);
   - accept messages that a mailbox's ACL refuses, which the mailbox's client still judges, or refuse messages that the ACL admits, which the server could drop anyway;
-  - lie once in the ACL that a mailbox adopts when the mailbox is restored without its own lists, so that a verified sender's messages land as allowed, or so that messages the server could drop anyway are dropped;
   - write anything in an error's words, which a client never shows, or in a receipt, an account id or a cursor, which a client checks against the value's form before using the value (Section 11.3);
   - serve altered instructions to an agent that runs anything it is served.
 - **Against a client that verifies and gates, a hostile server cannot:**
