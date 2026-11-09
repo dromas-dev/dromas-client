@@ -418,7 +418,7 @@ func TestARestoreFromTheIdentityAloneNeedsNoAcknowledgement(t *testing.T) {
 		t.Fatalf("init from the identity alone: %v", err)
 	}
 	landAll(t, x)
-	if has(x, "floor-owed") || has(x, "seen-floor") || has(x, "seen-began") || len(client.AdoptedKeys(t, x)) != 0 {
+	if has(x, "floor-owed") || has(x, "seen-floor") || has(x, "restore-floor") || len(client.AdoptedKeys(t, x)) != 0 {
 		t.Fatal("a restore from the identity alone owes a floor")
 	}
 	send(t, a, x, "sent since")
