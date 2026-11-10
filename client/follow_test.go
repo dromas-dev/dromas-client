@@ -251,8 +251,8 @@ func TestFatalTellsARefusalNoWaitMendsFromARetry(t *testing.T) {
 	apiError := func(status int, c protocol.Code) error {
 		return &client.APIError{Status: status, Problem: protocol.Problem{Code: c}}
 	}
-	// A pass_expired is a clock behind ([client.NotReady]) only where the
-	// server dates its answer later than this machine's clock reads.
+	// A pass_expired the server dates later than this machine's clock reads
+	// is a clock behind, which no wait mends either.
 	now := time.Date(2026, 11, 8, 12, 0, 0, 0, time.UTC)
 	passExpired := func(dated, read time.Time) error {
 		return &client.APIError{Status: http.StatusUnauthorized, Problem: protocol.Problem{Code: protocol.CodePassExpired}, Dated: dated, Read: read}
@@ -272,7 +272,7 @@ func TestFatalTellsARefusalNoWaitMendsFromARetry(t *testing.T) {
 		{"a rate limit", apiError(http.StatusTooManyRequests, protocol.CodeRateLimited), false, true},
 		{"the lock", client.ErrLocked, false, true},
 		{"a fault of the disk", errors.New("no space left on device"), false, false},
-		{"pass_expired, dated later than the clock", passExpired(now, now.Add(-time.Second)), false, true},
+		{"pass_expired, dated later than the clock", passExpired(now, now.Add(-time.Second)), true, false},
 		{"pass_expired, dated the clock's second", passExpired(now, now), true, false},
 		{"pass_expired, dated earlier than the clock", passExpired(now, now.Add(time.Hour)), true, false},
 		{"pass_expired, with no Date", passExpired(time.Time{}, now), true, false},
@@ -838,93 +838,50 @@ func TestANoSuchMailboxWhoseRegistrationIsRefusedIsFatal(t *testing.T) {
 	}
 }
 
-// A folder of the mailbox missing, as on a volume not yet mounted, is NotReady:
-// the loop tries again ReceiveEvery after each refusal, and drains once the
-// folder is back. Await, which meets it at a hold, waits until it returns for a
-// Receive (#775 item 2).
-func TestAFolderNotYetMountedIsTriedAgainEveryHour(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		e := newMemEnv(t)
-		a, b := e.mailbox(), e.mailbox()
-		receive(t, b)
-		send(t, a, b, "waits for the mount")
-		inbox := b.Path("inbox")
-		if err := os.Rename(inbox, inbox+".unmounted"); err != nil {
-			t.Fatal(err)
-		}
-		start := time.Now()
-		var at []time.Duration
-		var got []string
-		err := b.Follow(context.Background(), client.FollowOptions{}, func(_ context.Context, ev client.Event) error {
-			switch ev.Kind {
-			case client.EventRetry:
-				if !client.NotReady(ev.Err) || !client.Transient(ev.Err) || client.Fatal(ev.Err) || !strings.Contains(ev.Err.Error(), inbox) {
-					t.Errorf("retried %v; NotReady %v", ev.Err, client.NotReady(ev.Err))
-				}
-				if at = append(at, time.Since(start)); len(at) == 2 {
-					if err := os.Rename(inbox+".unmounted", inbox); err != nil {
-						t.Error(err)
-					}
-				}
-			case client.EventDelivery:
-				got = append(got, bodyOf(t, *ev.Delivery))
-				return client.ErrStop
-			}
-			return nil
-		})
-		if err != nil || !slices.Equal(got, []string{"waits for the mount"}) || time.Since(start) != 2*client.ReceiveEvery {
-			t.Fatalf("Follow: %v, delivering %q after %s", err, got, time.Since(start))
-		}
-		if want := []time.Duration{0, client.ReceiveEvery}; !slices.Equal(at, want) {
-			t.Fatalf("tried at %v, want %v", at, want)
-		}
-		if err := os.Rename(inbox, inbox+".unmounted"); err != nil {
-			t.Fatal(err)
-		}
-		start = time.Now()
-		retries := 0
-		err = b.Await(context.Background(), start.Add(3*client.ReceiveEvery), func(_ context.Context, ev client.Event) error {
-			if ev.Kind == client.EventRetry {
-				retries++
-			}
-			return nil
-		})
-		if err != nil || retries != 1 || time.Since(start) != client.ReceiveEvery {
-			t.Fatalf("Await: %v after %s, having retried %d", err, time.Since(start), retries)
-		}
-	})
-}
-
-// A one-shot drain that meets a folder missing ends with the refusal, which is
-// NotReady and not Fatal.
-func TestAOneShotDrainOfAFolderNotMountedIsNotFatal(t *testing.T) {
+// A folder of the mailbox missing, as on a volume not mounted, is a refusal no
+// wait mends: Follow, a one-shot drain and Await each end on it, with nothing
+// acked, and once the folder is back the next loop delivers what waited.
+func TestAFolderNotMountedEndsTheLoopWithNothingLost(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
-	b := e.mailbox()
+	a, b := e.mailbox(), e.mailbox()
 	receive(t, b)
-	keys := filepath.Join(b.Dir(), "keys")
-	if err := os.Rename(keys, keys+".unmounted"); err != nil {
+	send(t, a, b, "waits for the mount")
+	inbox := b.Path("inbox")
+	if err := os.Rename(inbox, inbox+".unmounted"); err != nil {
 		t.Fatal(err)
 	}
-	err := b.Follow(context.Background(), oneDrain(false), nil)
-	if err == nil || !client.NotReady(err) || client.Fatal(err) {
-		t.Fatalf("Follow with keys/ not mounted: %v", err)
+	for name, run := range map[string]func() error{
+		"Follow":    func() error { return b.Follow(context.Background(), client.FollowOptions{}, nil) },
+		"one drain": func() error { return b.Follow(context.Background(), oneDrain(false), nil) },
+		"Await":     func() error { return b.Await(context.Background(), time.Now().Add(time.Hour), nil) },
+	} {
+		if err := run(); err == nil || !client.Fatal(err) || client.Transient(err) || !strings.Contains(err.Error(), inbox) {
+			t.Errorf("%s with inbox/ not mounted: %v", name, err)
+		}
 	}
-	if err := os.Rename(keys+".unmounted", keys); err != nil {
+	if err := os.Rename(inbox+".unmounted", inbox); err != nil {
 		t.Fatal(err)
 	}
-	if err := b.Follow(context.Background(), oneDrain(false), nil); err != nil {
-		t.Fatalf("Follow once mounted: %v", err)
+	var got []string
+	if err := b.Follow(context.Background(), client.FollowOptions{}, func(_ context.Context, ev client.Event) error {
+		if ev.Kind == client.EventDelivery {
+			got = append(got, bodyOf(t, *ev.Delivery))
+			return client.ErrStop
+		}
+		return nil
+	}); err != nil || !slices.Equal(got, []string{"waits for the mount"}) {
+		t.Fatalf("Follow once mounted: %v, delivering %q", err, got)
 	}
 }
 
-// A clock three hours behind, as at a boot before a time source sets it, is
-// NotReady: for a mailbox whose identity signs, its server refuses the pass as
-// pass_expired and dates its answer later than the clock reads; under a
-// certificate, the certificate has not begun. Either is an EventRetry the loop
-// makes again ReceiveEvery later, and once the clock is right the loop drains.
-// The mailbox's clock and the server's are two clocks (#775 item 2).
-func TestAClockBehindIsTriedAgainEveryHour(t *testing.T) {
+// A clock three hours behind, as at a boot before a time source sets it, is a
+// refusal no wait mends: for a mailbox whose identity signs, its server refuses
+// the pass as pass_expired and dates its answer later than the clock reads;
+// under a certificate, the certificate has not begun. Either ends the loop,
+// and once the clock is right the next loop drains. The mailbox's clock and the
+// server's are two clocks.
+func TestAClockBehindEndsTheLoop(t *testing.T) {
 	for _, working := range []bool{false, true} {
 		t.Run(fmt.Sprintf("working key %v", working), func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
@@ -943,26 +900,12 @@ func TestAClockBehindIsTriedAgainEveryHour(t *testing.T) {
 				}
 				x := mustOpen(t, b.Dir(), o)
 				client.Bounded(x)
-				start := time.Now()
-				var at []time.Duration
-				err := x.Follow(context.Background(), client.FollowOptions{}, func(_ context.Context, ev client.Event) error {
-					switch ev.Kind {
-					case client.EventRetry:
-						if !client.NotReady(ev.Err) || client.Fatal(ev.Err) {
-							t.Errorf("retried %v; NotReady %v", ev.Err, client.NotReady(ev.Err))
-						}
-						if at = append(at, time.Since(start)); len(at) == 2 {
-							behind.Store(false)
-						}
-					case client.EventDrained:
-						if len(at) == 2 {
-							return client.ErrStop
-						}
-					}
-					return nil
-				})
-				if want := []time.Duration{0, client.ReceiveEvery}; err != nil || !slices.Equal(at, want) {
-					t.Fatalf("Follow: %v, having tried at %v; want nil, at %v", err, at, want)
+				if err := x.Follow(context.Background(), client.FollowOptions{}, nil); err == nil || !client.Fatal(err) || client.Transient(err) {
+					t.Fatalf("Follow with the clock behind: %v", err)
+				}
+				behind.Store(false)
+				if err := x.Follow(context.Background(), oneDrain(false), nil); err != nil {
+					t.Fatalf("Follow with the clock right: %v", err)
 				}
 			})
 		})
@@ -1117,104 +1060,88 @@ func TestRevokeEarlierWhileTheLoopHoldsIsRenewedByTheLoop(t *testing.T) {
 }
 
 // Under FollowOptions.Owed, a folder of the mailbox missing as the loop
-// begins, as on a volume not yet mounted, is tried again ReceiveEvery after
-// each refusal, as a drain's is, and the loop delivers once the folder is back
-// (#801).
-func TestAnOwedHandoverRidesOutAFolderNotYetMounted(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		e := newMemEnv(t)
-		a, b := e.mailbox(), e.mailbox()
-		receive(t, b)
-		send(t, a, b, "waits for the mount")
-		inbox := b.Path("inbox")
-		if err := os.Rename(inbox, inbox+".unmounted"); err != nil {
-			t.Fatal(err)
+// begins, as on a volume not mounted, ends the loop with nothing handed over,
+// and once the folder is back the next loop delivers.
+func TestAnOwedLoopEndsOnAFolderNotMountedAndTheNextDelivers(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	a, b := e.mailbox(), e.mailbox()
+	receive(t, b)
+	send(t, a, b, "waits for the mount")
+	inbox := b.Path("inbox")
+	if err := os.Rename(inbox, inbox+".unmounted"); err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	collect := func(_ context.Context, ev client.Event) error {
+		if ev.Kind == client.EventDelivery {
+			got = append(got, bodyOf(t, *ev.Delivery))
+			return client.ErrStop
 		}
-		start := time.Now()
-		var at []time.Duration
-		var got []string
-		err := b.Follow(context.Background(), client.FollowOptions{Owed: true}, func(_ context.Context, ev client.Event) error {
-			switch ev.Kind {
-			case client.EventRetry:
-				if !client.NotReady(ev.Err) || client.Fatal(ev.Err) {
-					t.Errorf("retried %v; NotReady %v", ev.Err, client.NotReady(ev.Err))
-				}
-				if at = append(at, time.Since(start)); len(at) == 2 {
-					if err := os.Rename(inbox+".unmounted", inbox); err != nil {
-						t.Error(err)
-					}
-				}
-			case client.EventDelivery:
-				got = append(got, bodyOf(t, *ev.Delivery))
-				return client.ErrStop
-			}
-			return nil
-		})
-		if err != nil || !slices.Equal(got, []string{"waits for the mount"}) {
-			t.Fatalf("Follow: %v, delivering %q after %s", err, got, time.Since(start))
-		}
-		if want := []time.Duration{0, client.ReceiveEvery}; !slices.Equal(at, want) {
-			t.Fatalf("tried at %v, want %v", at, want)
-		}
-	})
+		return nil
+	}
+	if err := b.Follow(context.Background(), client.FollowOptions{Owed: true}, collect); err == nil || !client.Fatal(err) || len(got) != 0 {
+		t.Fatalf("Follow with inbox/ not mounted: %v, delivering %q", err, got)
+	}
+	if err := os.Rename(inbox+".unmounted", inbox); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Follow(context.Background(), client.FollowOptions{Owed: true}, collect); err != nil || !slices.Equal(got, []string{"waits for the mount"}) {
+		t.Fatalf("Follow once mounted: %v, delivering %q", err, got)
+	}
 }
 
 // Under FollowOptions.Owed, a folder that goes missing while the handler runs
-// leaves the message owed, and the drain's deliveries after it are not handed
-// over: the loop tries again ReceiveEvery after, hands each over once the
-// folder is back, in delivery order, and clears them then (#801).
+// ends the loop with the message owed, and the drain's deliveries after it not
+// handed over; the next loop, once the folder is back, hands each over, in
+// delivery order, and clears them.
 func TestAFolderGoneDuringAnOwedHandlingHandsTheMessageOverAgain(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		e := newMemEnv(t)
-		a, b := e.mailbox(), e.mailbox()
-		receive(t, b)
-		send(t, a, b, "one")
-		send(t, a, b, "two")
-		inbox := b.Path("inbox")
-		start := time.Now()
-		var at []time.Duration
-		var got []string
-		err := b.Follow(context.Background(), client.FollowOptions{Owed: true}, func(_ context.Context, ev client.Event) error {
-			switch ev.Kind {
-			case client.EventDelivery:
-				switch got = append(got, bodyOf(t, *ev.Delivery)); len(got) {
-				case 1:
-					if err := os.Rename(inbox, inbox+".unmounted"); err != nil {
-						t.Error(err)
-					}
-				case 3:
-					return client.ErrStop
-				}
-			case client.EventRetry:
-				if !client.NotReady(ev.Err) || client.Fatal(ev.Err) {
-					t.Errorf("retried %v; NotReady %v", ev.Err, client.NotReady(ev.Err))
-				}
-				if at = append(at, time.Since(start)); len(at) == 2 {
-					if err := os.Rename(inbox+".unmounted", inbox); err != nil {
-						t.Error(err)
-					}
-				}
+	t.Parallel()
+	e := newEnv(t)
+	a, b := e.mailbox(), e.mailbox()
+	receive(t, b)
+	send(t, a, b, "one")
+	send(t, a, b, "two")
+	inbox := b.Path("inbox")
+	var got []string
+	err := b.Follow(context.Background(), client.FollowOptions{Owed: true}, func(_ context.Context, ev client.Event) error {
+		if ev.Kind == client.EventDelivery {
+			got = append(got, bodyOf(t, *ev.Delivery))
+			if err := os.Rename(inbox, inbox+".unmounted"); err != nil {
+				t.Error(err)
 			}
-			return nil
-		})
-		// The first delivery is handed over again, and the one after it, which
-		// the fault left owed, only once the folder is back, in delivery order.
-		if err != nil || len(got) != 3 || got[0] != got[1] || got[2] == got[0] || !slices.Equal(slices.Sorted(slices.Values(got[1:])), []string{"one", "two"}) {
-			t.Fatalf("Follow: %v, handing over %q after %s", err, got, time.Since(start))
 		}
-		if want := []time.Duration{0, client.ReceiveEvery}; !slices.Equal(at, want) {
-			t.Fatalf("tried at %v, want %v", at, want)
-		}
-		owed := 0
-		if err := b.Follow(context.Background(), client.FollowOptions{Owed: true, Until: time.Now()}, func(_ context.Context, ev client.Event) error {
-			if ev.Kind == client.EventDelivery {
-				owed++
-			}
-			return nil
-		}); err != nil || owed != 0 {
-			t.Fatalf("the loop after: %v, handing over %d", err, owed)
-		}
+		return nil
 	})
+	if err == nil || !client.Fatal(err) || len(got) != 1 {
+		t.Fatalf("Follow, inbox/ gone during the handling: %v, handing over %q", err, got)
+	}
+	if err := os.Rename(inbox+".unmounted", inbox); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Follow(context.Background(), client.FollowOptions{Owed: true}, func(_ context.Context, ev client.Event) error {
+		if ev.Kind == client.EventDelivery {
+			if got = append(got, bodyOf(t, *ev.Delivery)); len(got) == 3 {
+				return client.ErrStop
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("Follow once the folder is back: %v", err)
+	}
+	// The first delivery is handed over again, then the one the fault left owed.
+	if len(got) != 3 || got[0] != got[1] || got[2] == got[0] || !slices.Equal(slices.Sorted(slices.Values(got[1:])), []string{"one", "two"}) {
+		t.Fatalf("handed over %q", got)
+	}
+	owed := 0
+	if err := b.Follow(context.Background(), client.FollowOptions{Owed: true, Until: time.Now()}, func(_ context.Context, ev client.Event) error {
+		if ev.Kind == client.EventDelivery {
+			owed++
+		}
+		return nil
+	}); err != nil || owed != 0 {
+		t.Fatalf("the loop after: %v, handing over %d", err, owed)
+	}
 }
 
 // A read of a sender's revocations answered with a wait (a 429 with its
@@ -1268,54 +1195,47 @@ func TestAWaitAboutASenderIsTheLoopsRetry(t *testing.T) {
 }
 
 // Under FollowOptions.Owed, a folder that goes missing while the handler runs
-// on a message owed from an earlier loop leaves it owed: the loop tries again
-// ReceiveEvery after, and hands it over again once the folder is back (#801).
+// on a message owed from an earlier loop ends the loop with it still owed, and
+// the next loop, once the folder is back, hands it over again.
 func TestAFolderGoneDuringTheHandoverOfWhatIsOwedHandsItOverAgain(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		e := newMemEnv(t)
-		a, b := e.mailbox(), e.mailbox()
-		receive(t, b)
-		send(t, a, b, "owed")
-		failed := errors.New("the handler failed")
-		if err := b.Follow(context.Background(), client.FollowOptions{Owed: true}, func(_ context.Context, ev client.Event) error {
-			if ev.Kind == client.EventDelivery {
-				return failed
+	t.Parallel()
+	e := newEnv(t)
+	a, b := e.mailbox(), e.mailbox()
+	receive(t, b)
+	send(t, a, b, "owed")
+	failed := errors.New("the handler failed")
+	if err := b.Follow(context.Background(), client.FollowOptions{Owed: true}, func(_ context.Context, ev client.Event) error {
+		if ev.Kind == client.EventDelivery {
+			return failed
+		}
+		return nil
+	}); !errors.Is(err, failed) {
+		t.Fatalf("the loop that left it owed: %v", err)
+	}
+	inbox := b.Path("inbox")
+	var got []string
+	err := b.Follow(context.Background(), client.FollowOptions{Owed: true}, func(_ context.Context, ev client.Event) error {
+		if ev.Kind == client.EventDelivery {
+			got = append(got, bodyOf(t, *ev.Delivery))
+			if err := os.Rename(inbox, inbox+".unmounted"); err != nil {
+				t.Error(err)
 			}
-			return nil
-		}); !errors.Is(err, failed) {
-			t.Fatalf("the loop that left it owed: %v", err)
 		}
-		inbox := b.Path("inbox")
-		start := time.Now()
-		var at []time.Duration
-		var got []string
-		err := b.Follow(context.Background(), client.FollowOptions{Owed: true}, func(_ context.Context, ev client.Event) error {
-			switch ev.Kind {
-			case client.EventDelivery:
-				if got = append(got, bodyOf(t, *ev.Delivery)); len(got) == 1 {
-					if err := os.Rename(inbox, inbox+".unmounted"); err != nil {
-						t.Error(err)
-					}
-					return nil
-				}
-				return client.ErrStop
-			case client.EventRetry:
-				if !client.NotReady(ev.Err) || client.Fatal(ev.Err) {
-					t.Errorf("retried %v; NotReady %v", ev.Err, client.NotReady(ev.Err))
-				}
-				if at = append(at, time.Since(start)); len(at) == 2 {
-					if err := os.Rename(inbox+".unmounted", inbox); err != nil {
-						t.Error(err)
-					}
-				}
-			}
-			return nil
-		})
-		if err != nil || !slices.Equal(got, []string{"owed", "owed"}) {
-			t.Fatalf("Follow: %v, handing over %q after %s", err, got, time.Since(start))
-		}
-		if want := []time.Duration{0, client.ReceiveEvery}; !slices.Equal(at, want) {
-			t.Fatalf("tried at %v, want %v", at, want)
-		}
+		return nil
 	})
+	if err == nil || !client.Fatal(err) || !slices.Equal(got, []string{"owed"}) {
+		t.Fatalf("Follow, inbox/ gone during the handover: %v, handing over %q", err, got)
+	}
+	if err := os.Rename(inbox+".unmounted", inbox); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Follow(context.Background(), client.FollowOptions{Owed: true}, func(_ context.Context, ev client.Event) error {
+		if ev.Kind == client.EventDelivery {
+			got = append(got, bodyOf(t, *ev.Delivery))
+			return client.ErrStop
+		}
+		return nil
+	}); err != nil || !slices.Equal(got, []string{"owed", "owed"}) {
+		t.Fatalf("Follow once the folder is back: %v, handing over %q", err, got)
+	}
 }

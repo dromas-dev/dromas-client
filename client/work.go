@@ -104,7 +104,7 @@ func (b *Mailbox) worker(n uint64) (*sign.Work, *protocol.Certificate, error) {
 	}
 	cert, err := protocol.CheckCertificate(b.id, key, b.now())
 	if errors.Is(err, protocol.ErrCertificateNotBegun) {
-		return nil, nil, refuseNotReady("this mailbox's certificate has not begun, by this machine's clock: the clock reads earlier than when the certificate was made. Check this machine's clock against a time source you trust. If the clock is right now and was ahead then, dromas prekey renew makes a new working key, certificate and prekey")
+		return nil, nil, refuse("this mailbox's certificate has not begun, by this machine's clock: the clock reads earlier than when the certificate was made. Check this machine's clock against a time source you trust. If the clock is right now and was ahead then, dromas prekey renew makes a new working key, certificate and prekey")
 	}
 	if errors.Is(err, protocol.ErrCertificateTime) {
 		return nil, nil, refuse("this mailbox's certificate has ended: dromas prekey renew makes a new working key, certificate and prekey")

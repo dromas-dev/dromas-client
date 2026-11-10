@@ -130,11 +130,12 @@ type FollowOptions struct {
 // a drain refused for what a renewal mends among them where that renewal failed
 // so ([Mailbox.Receive]), and the loop drains again after the error's
 // Retry-After, or the later of the server's poll interval and its pace, or a
-// minute, or [ReceiveEvery] after a refusal this machine puts right without its
-// owner ([NotReady]). Under [FollowOptions.Owed] so is a handover of what is
-// owed that such a fault cuts short, at reading the records or at clearing
-// one: what is left stays owed, and is handed over again, in order, before the
-// next drain. Where the retry lands past Until the error ends the loop, as any
+// minute. Under [FollowOptions.Owed] so is a handover of what is owed that
+// such a fault cuts short, at reading the records or at clearing one: what is
+// left stays owed, and is handed over again, in order, before the next drain.
+// A folder of the mailbox missing, or a clock behind, ends the loop as any
+// refusal no wait mends does ([Fatal]), and what is owed stays owed for the
+// next loop. Where the retry lands past Until the error ends the loop, as any
 // other drain's error does. Follow returns that error, the handler's, ctx's
 // when ctx ended, and nil for [ErrStop] or at Until.
 func (b *Mailbox) Follow(ctx context.Context, o FollowOptions, h Handler) error {
@@ -215,13 +216,8 @@ func ended(err error) error {
 	return err
 }
 
-// pauseAfter is how long the loop waits before the drain after res and err:
-// ReceiveEvery after a refusal this machine puts right ([NotReady]), the
-// longest the loop otherwise goes between drains.
+// pauseAfter is how long the loop waits before the drain after res and err.
 func pauseAfter(res *Result, err error) time.Duration {
-	if NotReady(err) {
-		return ReceiveEvery
-	}
 	pause := time.Minute
 	if res != nil && res.Again() > 0 {
 		pause = res.Again()

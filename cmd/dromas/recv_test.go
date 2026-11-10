@@ -266,54 +266,33 @@ func TestRecvOfAForgottenMailboxWhoseRegistrationFailsForNowExits1(t *testing.T)
 	}
 }
 
-// recv --follow rides out a folder missing, as on a volume not yet mounted,
-// with an "error" line each hourly try and no "fatal", and so does recv
-// --follow --exec, which hands over what is owed first; a bare recv ends on it
-// with exit status 1 (#775 item 2, #801).
-func TestRecvRidesOutAFolderNotYetMounted(t *testing.T) {
+// A folder missing, as on a volume not mounted, ends recv as a refusal no
+// wait mends: exit status 4 and "fatal", for a bare recv, recv --follow and
+// recv --follow --exec, which hands over what is owed first, so a service
+// manager leaves the service failed.
+func TestRecvEndsOnAFolderNotMounted(t *testing.T) {
 	prog, err := exec.LookPath("true")
 	if err != nil {
 		t.Skip("no true(1)")
 	}
-	synctest.Test(t, func(t *testing.T) {
-		srv := fakeserver.NewInMemory(t, time.Now)
-		opt := client.Options{Base: srv.URL, HTTPClient: srv.Client()}
-		b, err := client.Init(context.Background(), t.TempDir(), opt)
-		if err != nil {
-			t.Fatal(err)
-		}
-		inbox := b.Path("inbox")
-		if err := os.Rename(inbox, inbox+".unmounted"); err != nil {
-			t.Fatal(err)
-		}
-		useMailbox(t, b.Dir())
-		t.Setenv("DROMAS_SERVER_URL", srv.URL)
+	srv := fakeserver.NewInMemory(t, time.Now)
+	opt := client.Options{Base: srv.URL, HTTPClient: srv.Client()}
+	b, err := client.Init(context.Background(), t.TempDir(), opt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inbox := b.Path("inbox")
+	if err := os.Rename(inbox, inbox+".unmounted"); err != nil {
+		t.Fatal(err)
+	}
+	useMailbox(t, b.Dir())
+	t.Setenv("DROMAS_SERVER_URL", srv.URL)
+	for _, args := range [][]string{nil, {"--follow"}, {"--follow", "--exec", prog}} {
 		var out, errs bytes.Buffer
-		err = doWith(context.Background(), opt, "recv", nil, strings.NewReader(""), &out, &errs)
+		err := doWith(context.Background(), opt, "recv", args, strings.NewReader(""), &out, &errs)
 		var rep bytes.Buffer
-		if st := report(err, &rep); st != 1 || strings.Contains(rep.String(), `"fatal"`) || !strings.Contains(rep.String(), "may not be mounted") {
-			t.Fatalf("a bare recv: exit %d, %s", st, rep.String())
+		if st := report(err, &rep); st != 4 || !strings.Contains(rep.String(), `"fatal"`) || !strings.Contains(rep.String(), "may not be mounted") || !strings.Contains(rep.String(), inbox) {
+			t.Fatalf("recv %v: exit %d, %s", args, st, rep.String())
 		}
-		for _, args := range [][]string{{"--follow"}, {"--follow", "--exec", prog}} {
-			errs.Reset()
-			ctx, cancel := context.WithCancel(context.Background())
-			ended := make(chan error, 1)
-			go func() { ended <- doWith(ctx, opt, "recv", args, strings.NewReader(""), &out, &errs) }()
-			time.Sleep(150 * time.Minute)
-			synctest.Wait()
-			cancel()
-			if err := <-ended; err != nil {
-				t.Fatalf("recv %v, its context ended: %v %s", args, err, errs.String())
-			}
-			lines := printed(t, errs.String())
-			if len(lines) != 3 {
-				t.Fatalf("recv %v: %d lines on stderr, want 3: %s", args, len(lines), errs.String())
-			}
-			for _, l := range lines {
-				if l["type"] != "error" || l["fatal"] != nil || !strings.Contains(l["detail"].(string), inbox) {
-					t.Fatalf("recv %v said %v", args, l)
-				}
-			}
-		}
-	})
+	}
 }

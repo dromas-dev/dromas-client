@@ -247,9 +247,9 @@ func timedOut(err error) bool {
 // again may get past: no answer, a server error, a rate limit or a request
 // timeout. So is a lock another command held for as long as a command waits for
 // it, a renewal held back until renewRetry after one that failed so, a drain
-// refused for what a renewal mends whose renewal failed so ([Mailbox.Receive]),
-// and a refusal that this machine puts right without its owner ([NotReady]).
-// A refusal no wait mends is not: [Fatal] names those.
+// refused for what a renewal mends whose renewal failed so ([Mailbox.Receive]).
+// A refusal no wait mends is not: [Fatal] names those, a folder of the mailbox
+// missing and a clock behind among them.
 func Transient(err error) bool {
 	var ae *APIError
 	var re *RevokedError
@@ -258,7 +258,7 @@ func Transient(err error) bool {
 	switch {
 	case err == nil, errors.As(err, &re):
 		return false
-	case errors.Is(err, errLocked), errors.As(err, &ro), NotReady(err):
+	case errors.Is(err, errLocked), errors.As(err, &ro):
 		return true
 	case errors.As(err, &rh):
 		return rh.transient
@@ -424,8 +424,7 @@ const ReceiveEvery = time.Hour
 // a zero until is no deadline, as for a mailbox that waits for messages for as long
 // as it runs. A call that holding again may get past (no answer, a server
 // error, a rate limit) is held again, after its Retry-After where it gives
-// one, and a refusal this machine puts right ([NotReady]) after ReceiveEvery or
-// at until; a refusal no wait mends ([Fatal]) ends it, as its error. h, when not
+// one; a refusal no wait mends ([Fatal]) ends it, as its error. h, when not
 // nil, is handed an [EventRetry] for each held request that failed and an
 // [EventConnectionDropped] for each connection that dropped, and an error from
 // h ends Await as that error. Await returns by until, its waits for a turn to
@@ -454,10 +453,7 @@ func (b *Mailbox) Await(ctx context.Context, until time.Time, h Handler) error {
 				return herr
 			}
 			var pause time.Duration
-			switch {
-			case NotReady(err):
-				pause = ReceiveEvery
-			case errors.As(err, &ae):
+			if errors.As(err, &ae) {
 				pause = ae.RetryAfter
 			}
 			if pause > 0 {

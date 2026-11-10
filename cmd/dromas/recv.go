@@ -210,14 +210,7 @@ func (r *recvRun) handle(ctx context.Context, ev client.Event) error {
 			return client.ErrStop
 		}
 	case client.EventRetry:
-		// A refusal this machine puts right by itself is an error until it
-		// does, tried again client.ReceiveEvery later; the rest wait for the
-		// server.
-		if client.NotReady(ev.Err) {
-			r.say(line("error", failure(ev.Err)...))
-		} else {
-			r.say(line("waiting", append([]any{"reason", "server"}, failure(ev.Err)...)...))
-		}
+		r.say(line("waiting", append([]any{"reason", "server"}, failure(ev.Err)...)...))
 	case client.EventConnectionDropped:
 		r.say(line("waiting", "reason", "connection", "held_seconds", seconds(ev.Hold.After), "wait_seconds", seconds(ev.Hold.Wait), "keep_alive_seconds", seconds(ev.Hold.KeepAlive),
 			"detail", "the connection dropped while the list was held: the next one keeps alive, and the wait shortens only if that one drops too"))
