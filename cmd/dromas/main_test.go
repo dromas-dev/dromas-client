@@ -1794,7 +1794,8 @@ func TestHelpIsReadAsAnyFlag(t *testing.T) {
 }
 
 // Help and a wrong line are answered before the environment or the mailbox is
-// read (#223). With no $HOME, or with a mailbox directory that holds no mailbox,
+// read (#223). With no home directory ($HOME, and %USERPROFILE% on Windows), or
+// with a mailbox directory that holds no mailbox,
 // every command in the tree gives its help to --help, and is
 // a usage error for a flag it does not take; the values a command refuses
 // are usage errors too, with nothing written in the mailbox's directory; and a
@@ -1816,7 +1817,7 @@ func TestHelpAndAWrongLineComeBeforeTheEnvironment(t *testing.T) {
 	walk((&cli{}).tree())
 	dir := t.TempDir()
 	for _, env := range []map[string]string{
-		{"HOME": "", "DROMAS_CONFIG": "", "XDG_CONFIG_HOME": ""},
+		{"HOME": "", "USERPROFILE": "", "DROMAS_CONFIG": "", "XDG_CONFIG_HOME": ""},
 		{"DROMAS_CONFIG": configFor(t, dir)},
 	} {
 		for k, v := range env {
