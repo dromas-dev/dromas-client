@@ -567,6 +567,12 @@ None was a flaw in the layout: each was a verifier that read an object different
 
 **The precedent** (read 2026-11-07; § Sources). Linux names each pointer that `%p` prints by SipHash under a random key made at boot: "default is to _not_ leak addresses, so hash before printing" (`lib/vsprintf.c`, `ptr_to_id` and `__ptr_to_hashval`, at `d48723711b`). Plausible names a visitor by a hash under a daily salt, which "is rotated and deleted every 24 hours" (plausible.io, Data policy). **Where ours differs:** the key is replaced on a day of the process's own clock, and a restart replaces the key too, because nothing writes the key down.
 
+## 5. Bodies on disk: a data directory, an hour of bodies a directory
+
+**Ours** (dromas-server's `ARCHITECTURE.md` § The sweep): with `--data-dir` in place of a bucket, dromas-server keeps each body at `bodies/<hour>/<key>` in that directory. The sweep removes an hour whole once all of it is past the message TTL, and an ack's delete takes the directories it leaves empty, up to its hour's.
+
+**The precedent** (read 2026-11-10; § Sources). For the flag's name: etcd's `--data-dir`, "Path to the data directory." (`server/embed/config.go` at `e6b7e73d6f`); Consul's `-data-dir`, "Path to a data directory to store agent state." (`agent/config/flags.go` at `02e8de99fe`); and Nomad's `-data-dir`, "The data directory used to store state and other persistent data." (`command/agent/command.go` at `aba089c4fa`). For expiry by whole time ranges: Prometheus keeps its samples "grouped into two-hour blocks", each a directory, and "Blocks must be fully expired before they are removed." (`docs/storage.md` at `5ee21818d8`). For the directories after a delete: MinIO's `deleteFile` deletes a file, then goes up the tree "deleting empty parent directories until it finds one with files in it" (`cmd/xl-storage.go` at `b8631cf531`). **Where ours differs:** an hour is never merged into a longer range, as Prometheus compacts its blocks, because a body is written once and removed at its ack or with its hour.
+
 ---
 
 # Sources
@@ -589,6 +595,7 @@ For rows marked `review 2026-10-10`, and for Part 3. A row of Part 2 marked `rea
 - Part 3 § 1: [Go 1.27.3, `src/database/sql/driver/driver.go`](https://github.com/golang/go/blob/go1.27.3/src/database/sql/driver/driver.go) · the MongoDB Go driver at `v2.9.2`: [`x/mongo/driver/errors.go`](https://github.com/mongodb/mongo-go-driver/blob/v2.9.2/x/mongo/driver/errors.go), [`x/mongo/driver/operation.go`](https://github.com/mongodb/mongo-go-driver/blob/v2.9.2/x/mongo/driver/operation.go), [`mongo/session.go`](https://github.com/mongodb/mongo-go-driver/blob/v2.9.2/mongo/session.go)
 - Part 3 § 3: [`tdlib/telegram-bot-api`, `telegram-bot-api/Client.cpp` at `e3e9dd8e5b`](https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp) (`Client::abort_long_poll`, `Client::fail_query_conflict`)
 - Part 3 § 4: [Linux `lib/vsprintf.c` at `d48723711b`](https://github.com/torvalds/linux/blob/d48723711bae9b8cdc56719c448ba42fef28cbee/lib/vsprintf.c) · [Plausible — Data policy](https://plausible.io/data-policy)
+- Part 3 § 5: [etcd `server/embed/config.go` at `e6b7e73d6f`](https://github.com/etcd-io/etcd/blob/e6b7e73d6f0759f3aacb5d6a6fbd9598ee413441/server/embed/config.go) · [Consul `agent/config/flags.go` at `02e8de99fe`](https://github.com/hashicorp/consul/blob/02e8de99fe0ed8362431358a0b185f4b15095796/agent/config/flags.go) · [Nomad `command/agent/command.go` at `aba089c4fa`](https://github.com/hashicorp/nomad/blob/aba089c4fa1c57b4caa4b362582ab6e1185509fe/command/agent/command.go) · [Prometheus `docs/storage.md` at `5ee21818d8`](https://github.com/prometheus/prometheus/blob/5ee21818d8abd5677381d9d0e7bca27352e4f46b/docs/storage.md) · [MinIO `cmd/xl-storage.go` at `b8631cf531`](https://github.com/minio/minio/blob/b8631cf5316c613fa08f4c38334de19870facf2f/cmd/xl-storage.go) (`deleteFile`)
 
 # Open in this file
 
