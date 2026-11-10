@@ -69,6 +69,10 @@ jobs:
     if: ${{ !failure() && !cancelled() }}
     runs-on: ubuntu-26.04
     timeout-minutes: 30
+    # The environment winget holds WINGET_GITHUB_TOKEN and deploys from a v*
+    # tag alone, so no branch, hand-run or pull request reads it; a hand-run
+    # takes no environment.
+    environment: ${{ github.ref_type == 'tag' && 'winget' || '' }}
     permissions:
       contents: write
       id-token: write
@@ -104,8 +108,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           # The classic token that opens the winget pull request
-          # (.goreleaser.yaml § winget), on a tag alone: a hand-run's snapshot
-          # publishes nothing and is given none.
+          # (.goreleaser.yaml § winget), the environment winget's secret, on a
+          # tag alone: a hand-run's snapshot publishes nothing and is given none.
           WINGET_GITHUB_TOKEN: ${{ github.ref_type == 'tag' && secrets.WINGET_GITHUB_TOKEN || '' }}
       - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         if: github.ref_type == 'tag'
