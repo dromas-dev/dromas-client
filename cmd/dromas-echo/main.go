@@ -155,6 +155,28 @@ type echo struct {
 	refused []string // the ids of the drain under way's refusals
 }
 
+// writeKey writes the identity's copy to name in dir as a file its owner's alone
+// from its making (client.NewPrivateTemp), then moves it into place, as OpenSSH
+// writes a key file: on Windows, os.WriteFile keeps only the read-only bit of a
+// mode, so the copy would take the access list dir passes down.
+func writeKey(dir, name string, key []byte) error {
+	f, err := client.NewPrivateTemp(dir)
+	if err != nil {
+		return err
+	}
+	_, err = f.Write(key)
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err == nil {
+		err = os.Rename(f.Name(), name)
+	}
+	if err != nil {
+		os.Remove(f.Name()) //nolint:errcheck,gosec // the write's error wins
+	}
+	return err
+}
+
 // start copies the identity into dir and publishes a new prekey, or at the
 // first start registers the mailbox.
 func start(ctx context.Context, dir, identity string, opt client.Options, l *log.Logger) (*echo, error) {
@@ -172,7 +194,7 @@ func start(ctx context.Context, dir, identity string, opt client.Options, l *log
 	case err != nil && !errors.Is(err, fs.ErrNotExist):
 		return nil, err
 	case err != nil:
-		if err := os.WriteFile(mine, key, 0o600); err != nil { //nolint:gosec // inside the state directory the operator named
+		if err := writeKey(dir, mine, key); err != nil {
 			return nil, err
 		}
 	}
