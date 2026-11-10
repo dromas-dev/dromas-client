@@ -163,8 +163,8 @@ dr_pass(){ # [new] → the Authorization value of a call as this mailbox, signed
 dr_keeppass(){ # → the pass in $DR/pass.new, and its server, kept as this mailbox's pass
   mv "$DR/pass.new-server" "$DR/pass-server" && mv "$DR/pass.new" "$DR/pass"
 }
-dr_lock(){ # <command> [args] → runs that dr_ command with $DR/lock, the mailbox's lock, held, once the mailbox's directories and identity files are made (dr_dirs, dr_identity), as the Go client's Open makes them: so a mailbox restored from its identity alone runs. Every command that writes the mailbox runs so, from start to end, so one runs at a time and none reads a file another is writing. While another holds it, says so once and waits up to $DR_LOCK_WAIT seconds. If the command dies, the shell's EXIT trap removes it; a kill -9 leaves it behind
-  local end=$((SECONDS + DR_LOCK_WAIT)) said= me=$DR outer=${DR_HELD-} trap rc
+dr_lock(){ # <command> [args] → runs that dr_ command with $DR/lock, the mailbox's lock, held, once the mailbox's directories and identity files are made (dr_dirs, dr_identity), as the Go client's Open makes them: so a mailbox restored from its identity alone runs. Every command that writes the mailbox runs so, from start to end, so one runs at a time and none reads a file another is writing. While another holds it, says so once and waits up to $DR_LOCK_WAIT seconds. If the command dies, the shell's EXIT trap removes it; a kill -9 leaves it behind. A TERM, INT or HUP ends the shell by a trap, which bash runs only once the foreground command it waits for has ended (bash(1), SIGNALS), so the lock goes only after the command's own child has ended
+  local end=$((SECONDS + DR_LOCK_WAIT)) said= me=$DR outer=${DR_HELD-} trap sigs rc
   [ -s "$DR/identity" ] || { dr_refuse "no mailbox in $DR: run init first"; return 1; }
   dr_ownmailbox && dr_ours || return 1
   until mkdir "$me/lock" 2> /dev/null; do
@@ -172,9 +172,10 @@ dr_lock(){ # <command> [args] → runs that dr_ command with $DR/lock, the mailb
     [ "$SECONDS" -lt "$end" ] || { dr_refuse "another command of this mailbox held its lock, $me/lock, for as long as a command waits for it. If none is running, one that crashed left it behind: remove it"; return 1; }
     sleep 1
   done
-  trap=$(trap -p EXIT); DR_HELD=$me; trap 'rmdir "$DR_HELD/lock" 2> /dev/null' EXIT
+  trap=$(trap -p EXIT); sigs=$(trap -p TERM INT HUP); DR_HELD=$me; trap 'rmdir "$DR_HELD/lock" 2> /dev/null' EXIT
+  trap 'exit 143' TERM; trap 'exit 130' INT; trap 'exit 129' HUP      # the statuses a shell gives a command the signal ended
   dr_dirs && dr_identity && "$@"; rc=$?
-  rmdir "$me/lock"; DR_HELD=$outer; eval "${trap:-trap - EXIT}"; return $rc      # and the caller's own EXIT trap back
+  rmdir "$me/lock"; DR_HELD=$outer; eval "${trap:-trap - EXIT}"; trap - TERM INT HUP; eval "$sigs"; return $rc      # and the caller's own traps back
 }
 dr_ours(){ # [uid] → 0 only where $DR is this user's alone, as the Go client holds a mailbox's files and kept directories (checkPrivateFileAs, checkKeptDirAs in client/keyfile_unix.go): $DR and every directory in it owned by this user (or the uid given) or root, and writable by neither group nor others, and every other file in it owned so, with no permission for group or others but on identity.pub and identity.doc, which are public. Whoever can write there could rewrite seen and seen-floor, after which this mailbox takes a replay. One find walk, by -user and -perm, which POSIX defines, where stat -c is GNU's alone. A walk find could not finish is refused too
   local me=${1:-$UID} bad
@@ -219,7 +220,8 @@ dr_init(){ # [--restore] → creates this mailbox, or finishes a half-done init,
   dr_ownmailbox || return 1
   dr_dirs || return 1
   [ -s "$DR/identity" ] || { rm -f "$DR/identity" "$DR/identity.pub"; ssh-keygen -q -t ed25519 -N '' -C '' -f "$DR/identity" < /dev/null; } || return 1      # an empty identity, as a crash before the sync below leaves one, is no key, and nothing was registered with it, so it is made again, as the Go client does
-  if dr_held; then dr_identity && "$check"; else dr_lock "$check"; fi || return      # identity.doc and address made under the mailbox's lock, as every command that writes the mailbox makes them (dr_lock): a command beside init reads them. The records held to prekeys/ there too
+  dr_held || { dr_lock dr_init "$@"; return; }      # the rest under the mailbox's lock, from the records' check to the registration's writes, as every command that writes the mailbox runs (dr_lock): a command beside init reads identity.doc and address, and a renewal beside it would sign beside the first statement
+  dr_identity && "$check" || return      # identity.doc and address made, and the records held to prekeys/
   sync "$DR/identity" "$DR/identity.pub" "$DR" || return 1      # the identity on disk before it is registered
   [ ! -s "$DR/serial" ] || { [ "${DR_ACKED-}" != true ] || dr_rekey || return; dr_addr; return; }      # registered already; a restore it acknowledged renews at once (dr_restore)
   local A n p h m; A=$(cat "$DR/address")
