@@ -113,10 +113,10 @@ paths:
           $ref: '#/components/responses/HeadTooManyRequests'
         '503':
           $ref: '#/components/responses/HeadUnavailable'
-  /v1/{addr}:
+  /v1/{address}:
     parameters:
       - $ref: '#/components/parameters/DromasVersion'
-      - $ref: '#/components/parameters/addr'
+      - $ref: '#/components/parameters/address'
     get:
       tags: [mailbox]
       operationId: getMailbox
@@ -304,7 +304,7 @@ paths:
           $ref: '#/components/responses/HeadUnavailable'
     put:
       tags: [mailbox]
-      operationId: register
+      operationId: registerMailbox
       summary: Register a mailbox
       description: |
         Registers a mailbox (`PROTOCOL.md` §11.7): `201` for a new mailbox, `200` for
@@ -343,13 +343,13 @@ paths:
         '503':
           $ref: '#/components/responses/Unavailable'
 
-  /v1/{addr}/prekey:
+  /v1/{address}/prekey:
     parameters:
       - $ref: '#/components/parameters/DromasVersion'
-      - $ref: '#/components/parameters/addr'
+      - $ref: '#/components/parameters/address'
     put:
       tags: [owner]
-      operationId: renew
+      operationId: renewPrekey
       summary: Publish a new prekey
       description: |
         Publishes a new prekey statement (`PROTOCOL.md` §11.9). The pass is
@@ -388,13 +388,13 @@ paths:
         '503':
           $ref: '#/components/responses/Unavailable'
 
-  /v1/{addr}/revocations:
+  /v1/{address}/revocation:
     parameters:
       - $ref: '#/components/parameters/DromasVersion'
-      - $ref: '#/components/parameters/addr'
+      - $ref: '#/components/parameters/address'
     get:
       tags: [revocation]
-      operationId: revocations
+      operationId: getRevocation
       summary: Read the revocations held
       description: |
         The revocation record the server holds of the address, with a mailbox
@@ -464,7 +464,7 @@ paths:
           $ref: '#/components/responses/Unavailable'
     head:
       tags: [revocation]
-      operationId: headRevocations
+      operationId: headRevocation
       summary: The read of the revocations held, without content
       description: 'The `GET` beside it, answered without content (RFC 9110 §9.3.2; `PROTOCOL.md` §11.2).'
       security: []
@@ -528,7 +528,7 @@ paths:
           $ref: '#/components/responses/HeadUnavailable'
     put:
       tags: [revocation]
-      operationId: revoke
+      operationId: putRevocation
       summary: Publish a revocation
       description: |
         Publishes a revocation record (`PROTOCOL.md` §11.15): `201` for one
@@ -566,10 +566,10 @@ paths:
         '503':
           $ref: '#/components/responses/Unavailable'
 
-  /v1/{addr}/acl:
+  /v1/{address}/acl:
     parameters:
       - $ref: '#/components/parameters/DromasVersion'
-      - $ref: '#/components/parameters/addr'
+      - $ref: '#/components/parameters/address'
     put:
       tags: [owner]
       operationId: putACL
@@ -759,14 +759,14 @@ paths:
           $ref: '#/components/responses/HeadTooManyRequests'
         '503':
           $ref: '#/components/responses/HeadUnavailable'
-  /v1/{addr}/account:
+  /v1/{address}/account:
     description: Optional. A server without accounts does not offer this path, and answers it as a route it does not offer (`PROTOCOL.md` §11.2, §11.16).
     parameters:
       - $ref: '#/components/parameters/DromasVersion'
-      - $ref: '#/components/parameters/addr'
+      - $ref: '#/components/parameters/address'
     put:
       tags: [owner]
-      operationId: adopt
+      operationId: joinAccount
       summary: Join an account with an adopt key
       description: 'Joins the account the adopt key in the body is for (`PROTOCOL.md` §11.16).'
       requestBody:
@@ -828,7 +828,7 @@ paths:
           $ref: '#/components/responses/Unavailable'
     delete:
       tags: [owner]
-      operationId: leave
+      operationId: leaveAccount
       summary: Leave the mailbox's account
       description: 'Leaves the mailbox''s account (`PROTOCOL.md` §11.16): `204`, in an account or not.'
       parameters:
@@ -854,31 +854,31 @@ paths:
         '503':
           $ref: '#/components/responses/Unavailable'
 
-  /v1/{addr}/messages:
+  /v1/{address}/messages:
     parameters:
       - $ref: '#/components/parameters/DromasVersion'
-      - $ref: '#/components/parameters/addr'
+      - $ref: '#/components/parameters/address'
     post:
       tags: [messages]
-      operationId: send
+      operationId: sendMessage
       summary: Send a message to the mailbox
       description: |
-        Sends a message (`PROTOCOL.md` §11.10): `addr` is the recipient, and
+        Sends a message (`PROTOCOL.md` §11.10): `address` is the recipient, and
         the sender is the mailbox whose pass the call carries.
       parameters:
-        - name: statement
+        - name: prekey_sha256
           in: query
           required: true
           description: The prekey statement the file is sealed to, by the SHA-256 of its bytes as the read of the mailbox served them, never of its signature (`PROTOCOL.md` §11.10).
           schema:
-            $ref: '#/components/schemas/StatementHash'
+            $ref: '#/components/schemas/PrekeySha256'
         - $ref: '#/components/parameters/IfMatch'
         - $ref: '#/components/parameters/IfNoneMatch'
       requestBody:
         required: true
         description: The age file's exact bytes, binary, not armored (`PROTOCOL.md` §9.4), of at most 16 MiB (§11.10). A server reads it as bytes whatever its `Content-Type` says.
         content:
-          application/octet-stream: {}
+          application/vnd.age: {}
       responses:
         '200':
           description: The mailbox holds this ciphertext, unacked, whoever sent it; the receipt is the one it holds (`PROTOCOL.md` §11.10, step 6).
@@ -956,11 +956,11 @@ paths:
           $ref: '#/components/responses/Unavailable'
     get:
       tags: [messages]
-      operationId: list
+      operationId: listMessages
       summary: List the mailbox's messages
       description: |
         One page of the mailbox's messages (`PROTOCOL.md` §11.11). An empty mailbox is
-        `{"count":0,"messages":[],"next_cursor":null}`.
+        `{"total_count":0,"messages":[],"next_cursor":null}`.
       parameters:
         - name: cursor
           in: query
@@ -1061,7 +1061,7 @@ paths:
 
     head:
       tags: [messages]
-      operationId: headList
+      operationId: headMessages
       summary: The mailbox's list, without content
       description: |
         The `GET` beside it, answered without content (RFC 9110 §9.3.2;
@@ -1159,14 +1159,14 @@ paths:
           $ref: '#/components/responses/HeadTooManyRequests'
         '503':
           $ref: '#/components/responses/HeadUnavailable'
-  /v1/{addr}/messages/{id}:
+  /v1/{address}/messages/{id}:
     parameters:
       - $ref: '#/components/parameters/DromasVersion'
-      - $ref: '#/components/parameters/addr'
+      - $ref: '#/components/parameters/address'
       - $ref: '#/components/parameters/id'
     get:
       tags: [messages]
-      operationId: fetch
+      operationId: getMessage
       summary: Fetch a message
       description: |
         A message's ciphertext, and nothing else (`PROTOCOL.md` §11.12). No
@@ -1209,7 +1209,7 @@ paths:
             Cross-Origin-Opener-Policy:
               $ref: '#/components/headers/Cross-Origin-Opener-Policy'
           content:
-            application/octet-stream: {}
+            application/vnd.age: {}
         '206':
           description: The bytes of the age file from the range's first to its end, to a fetch whose `Range` is `bytes=N-` with N below its length (RFC 9110 §15.3.7.1).
           headers:
@@ -1238,7 +1238,7 @@ paths:
                 type: string
                 pattern: '^bytes (0|[1-9][0-9]*)-(0|[1-9][0-9]*)/[1-9][0-9]*$'
           content:
-            application/octet-stream: {}
+            application/vnd.age: {}
         '304':
           description: The target is the one `If-None-Match` named, `*` naming any that exists, and the answer has no content (RFC 9110 §15.4.5).
           headers:
@@ -1357,7 +1357,7 @@ paths:
           $ref: '#/components/responses/HeadUnavailable'
     delete:
       tags: [messages]
-      operationId: ack
+      operationId: ackMessage
       summary: Ack a message
       description: |
         Deletes the message, and the server keeps nothing of it (`PROTOCOL.md` §11.13).
@@ -1382,9 +1382,9 @@ paths:
         '503':
           $ref: '#/components/responses/Unavailable'
 
-  /to/{addr}:
+  /to/{address}:
     parameters:
-      - name: addr
+      - name: address
         in: path
         required: true
         description: A mailbox's address, `d_` and 64 characters of base64url. Any other path is `404`.
@@ -1392,7 +1392,7 @@ paths:
           $ref: '#/components/schemas/Address'
     get:
       tags: [link]
-      operationId: link
+      operationId: getLink
       summary: The page a mailbox's link opens
       description: |
         The page at a mailbox's link (`PROTOCOL.md` §4.3): fixed text, the address
@@ -1568,8 +1568,8 @@ components:
       description: The version of the client that makes the request, SemVer's `MAJOR.MINOR.PATCH` and an optional pre-release, with no `v` and no build metadata (`PROTOCOL.md` §11.17). Every client sends it; a request without it, or with a value of another form, is read as `0.0.0`.
       schema:
         type: string
-    addr:
-      name: addr
+    address:
+      name: address
       in: path
       required: true
       description: A mailbox's address, `d_` and 64 characters of base64url (`PROTOCOL.md` §4.2). Any other form, another form's name among them, is `400 invalid_address`.
@@ -1792,10 +1792,10 @@ components:
     BadRequest:
       description: |
         Not a request this call takes: `invalid_request` (naming what is wrong in
-        `member`, where it is a member or a query parameter) · `invalid_address` ·
+        `param`, where it is a member or a query parameter) · `invalid_address` ·
         `identity_mismatch` · `unsupported_key_type` (with the server's
         `key_types`) · `invalid_key` · `prekey_already_used` · `invalid_validity_period` ·
-        `certificate_lifetime_too_long` (with the server's `max_certificate_lifetime`) ·
+        `certificate_lifetime_too_long` (with the server's `max_certificate_lifetime_seconds`) ·
         `invalid_recipients` · `invalid_revocation`. `PROTOCOL.md` §11.3 has what
         each means.
       headers:
@@ -1936,7 +1936,7 @@ components:
       description: |
         `mailbox_already_exists` · `serial_too_low` (with `prekey_serial`, and
         `certificate_serial` where the current signer is a certificate, or
-        `through`, as the call has one) · `concurrent_modification` · `prekey_superseded` · `prekey_expired`.
+        `revocation_serial`, as the call has one) · `concurrent_modification` · `prekey_superseded` · `prekey_expired`.
         `PROTOCOL.md` §11.3 has what each means.
       headers:
         Date:
@@ -2132,7 +2132,7 @@ components:
       description: |
         Past a limit: `rate_limited` (with `subject`, whom it was counted
         against, and `quota_id`, which limit, from a closed set; a limit
-        counted by the day also with its `limit`) · `fetch_rate_limited` ·
+        counted by the day also with its `quota_value`) · `fetch_rate_limited` ·
         `mailbox_full` · `mailbox_rate_limited`.
         `PROTOCOL.md` §11.3 and §11.5 have what each means.
       headers:
@@ -2297,15 +2297,15 @@ components:
       type: string
       pattern: '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(\.(0|[1-9][0-9]*))?$'
     Scheduled:
-      description: A deprecation or a sunset of the versions `below` or `version` names, exactly one of the two, from `at` (`PROTOCOL.md` §11.17, §11.18).
+      description: A deprecation or a sunset of the versions `below` or `version` names, exactly one of the two, from `effective_at` (`PROTOCOL.md` §11.17, §11.18).
       type: object
-      required: [at]
+      required: [effective_at]
       properties:
         below:
           $ref: '#/components/schemas/PolicyVersion'
         version:
           $ref: '#/components/schemas/PolicyVersion'
-        at:
+        effective_at:
           $ref: '#/components/schemas/Time'
       oneOf:
         - required: [below]
@@ -2321,9 +2321,9 @@ components:
     ServerDocument:
       description: The server's version policy and the capabilities it serves (`PROTOCOL.md` §11.18).
       type: object
-      required: [deprecations, sunsets, capabilities, max_certificate_lifetime]
+      required: [deprecations, sunsets, capabilities, max_certificate_lifetime_seconds]
       properties:
-        max_certificate_lifetime:
+        max_certificate_lifetime_seconds:
           description: The longest a certificate this server takes may run, `valid before` less `valid after`, in seconds (`PROTOCOL.md` §11.7, §11.18).
           type: integer
           minimum: 1
@@ -2461,7 +2461,7 @@ components:
           anyOf:
             - $ref: '#/components/schemas/Bytes'
             - type: 'null'
-    StatementHash:
+    PrekeySha256:
       description: The lowercase hex SHA-256 of a prekey statement's bytes (`PROTOCOL.md` §11.10).
       type: string
       pattern: '^[0-9a-f]{64}$'
@@ -2487,9 +2487,9 @@ components:
           $ref: '#/components/schemas/Time'
     MessageList:
       type: object
-      required: [count, messages, next_cursor]
+      required: [total_count, messages, next_cursor]
       properties:
-        count:
+        total_count:
           description: Every live message in the mailbox.
           $ref: '#/components/schemas/Integer'
         messages:
@@ -2665,7 +2665,7 @@ components:
           description: The fix as a client command, never a raw shell line.
           type: [string, 'null']
         limit:
-          description: '`content_too_large`: the most bytes a body or a ciphertext may hold, or entries an ACL. `rate_limited` with a quota counted by the day: how many a day it takes.'
+          description: '`content_too_large`: the most bytes a body or a ciphertext may hold, or entries an ACL.'
           anyOf:
             - $ref: '#/components/schemas/Integer'
             - type: 'null'
@@ -2677,6 +2677,11 @@ components:
           description: '`rate_limited`: whom the limit counted the call against, the mailbox or the IP address it came from (`PROTOCOL.md` §11.5).'
           type: [string, 'null']
           enum: [mailbox, ip, null]
+        quota_value:
+          description: '`rate_limited` with a quota counted by the day: how many a day it takes, as Google''s QuotaFailure carries it.'
+          anyOf:
+            - $ref: '#/components/schemas/Integer'
+            - type: 'null'
         prekey_serial:
           description: '`serial_too_low` on a prekey: the serial a new one must be above.'
           anyOf:
@@ -2687,13 +2692,13 @@ components:
           anyOf:
             - $ref: '#/components/schemas/Integer'
             - type: 'null'
-        max_certificate_lifetime:
+        max_certificate_lifetime_seconds:
           description: '`certificate_lifetime_too_long`: the longest a certificate the server takes may run, in seconds, as its document gives it (`PROTOCOL.md` §11.18).'
           anyOf:
             - $ref: '#/components/schemas/Integer'
             - type: 'null'
-        through:
-          description: '`serial_too_low` on a revocation of certificates: the serial the one held runs through.'
+        revocation_serial:
+          description: '`serial_too_low` on a revocation of certificates: the revocation serial of the one held, the serial it runs through.'
           anyOf:
             - $ref: '#/components/schemas/Integer'
             - type: 'null'
@@ -2705,7 +2710,7 @@ components:
         key_type:
           description: '`unsupported_sender_key_type`: the sender''s key type, an optional one the mailbox did not declare.'
           type: [string, 'null']
-        member:
+        param:
           description: '`invalid_request`: the request member or query parameter that is missing, unknown or given twice, or holds a value its call does not take, a byte member not base64 in its one encoding among them. A send''s body that is not an age file names none.'
           type: [string, 'null']
         min_version:
@@ -2737,14 +2742,14 @@ components:
               quota_id:
                 enum: [sends, renewals, certificates, certificate_revocations]
           then:
-            required: [limit]
+            required: [quota_value]
         - if:
             required: [code]
             properties:
               code:
                 const: certificate_lifetime_too_long
           then:
-            required: [max_certificate_lifetime]
+            required: [max_certificate_lifetime_seconds]
         - if:
             required: [code]
             properties:

@@ -51,7 +51,7 @@ func TestLookupsCarryNoPass(t *testing.T) {
 		t.Fatalf("delivered %d", len(res.Delivered))
 	}
 	got := seen()
-	for _, p := range []string{mailboxPath(b), mailboxPath(a) + "/revocations"} {
+	for _, p := range []string{mailboxPath(b), mailboxPath(a) + "/revocation"} {
 		if carried, asked := got[p]; !asked || carried {
 			t.Errorf("GET %s: asked %v, with a pass %v", p, asked, carried)
 		}
@@ -77,7 +77,7 @@ func TestARevocationPublishedToARevokedMailbox(t *testing.T) {
 	if _, err := client.Revoke(ctx, e.opts(), rec); err != nil {
 		t.Fatalf("published again to a server that holds it: %v", err)
 	}
-	says(e, protocol.CodeMailboxRevoked, http.MethodPut, "/revocations")
+	says(e, protocol.CodeMailboxRevoked, http.MethodPut, "/revocation")
 	b := e.mailbox()
 	other, err := b.Revocation(t.Context())
 	if err != nil {

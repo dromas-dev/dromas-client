@@ -247,8 +247,8 @@ type RefusedMalformedMessage struct {
 	SignedBy          string `json:"signed_by,omitempty"`
 	ClaimsIdentity    string `json:"claims_identity,omitempty"`
 	CertificateSerial uint64 `json:"certificate_serial,omitempty"`
-	CertificateBegan  string `json:"certificate_began,omitempty"`
-	CertificateEnds   string `json:"certificate_ends,omitempty"`
+	CertificateBegan  string `json:"certificate_not_before,omitempty"`
+	CertificateEnds   string `json:"certificate_not_after,omitempty"`
 	SentAt            string `json:"sent_at,omitempty"`
 	MsgID             string `json:"msg_id,omitempty"`
 }

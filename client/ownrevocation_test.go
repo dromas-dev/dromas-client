@@ -179,7 +179,7 @@ func TestTheRemedyAsksAgainAfterItsServerAnswersConflict(t *testing.T) {
 	publishAt(t, e.srv.URL, ownRevocation(t, a, T))
 	reads, puts := 0, 0
 	e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
-		if r.Method == http.MethodPut && strings.HasSuffix(r.URL.Path, "/revocations") {
+		if r.Method == http.MethodPut && strings.HasSuffix(r.URL.Path, "/revocation") {
 			puts++
 		}
 		if r.Method == http.MethodGet && r.URL.Path == mailboxPath(a) && reads == 0 {
@@ -207,7 +207,7 @@ func TestTheRemedyStopsAtAConflictThatShowsNothing(t *testing.T) {
 	var puts, renewals atomic.Int32
 	e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
 		switch {
-		case r.Method == http.MethodPut && strings.HasSuffix(r.URL.Path, "/revocations"):
+		case r.Method == http.MethodPut && strings.HasSuffix(r.URL.Path, "/revocation"):
 			puts.Add(1)
 		case r.Method == http.MethodPut && strings.HasSuffix(r.URL.Path, "/prekey"):
 			renewals.Add(1)
@@ -236,7 +236,7 @@ func TestTheRemedyStopsAtAConflictThatShowsALowerRecord(t *testing.T) {
 	var renewals atomic.Int32
 	e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
 		switch {
-		case r.Method == http.MethodPut && strings.HasSuffix(r.URL.Path, "/revocations"):
+		case r.Method == http.MethodPut && strings.HasSuffix(r.URL.Path, "/revocation"):
 			forge.Refuse(w, protocol.CodeSerialTooLow)
 			return
 		case r.Method == http.MethodPut && strings.HasSuffix(r.URL.Path, "/prekey"):
@@ -378,7 +378,7 @@ func TestAMailboxThatKeepsItsOwnRevocationSignsNothingMore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	says(e, protocol.CodeUnavailable, http.MethodPut, "/revocations")
+	says(e, protocol.CodeUnavailable, http.MethodPut, "/revocation")
 	if _, err := a.Revoke(ctx, rec); err == nil {
 		t.Fatal("the revocation was taken by a server that is down")
 	}
@@ -648,7 +648,7 @@ func TestASendInTheRemedysWindowWaitsForTheRenewal(t *testing.T) {
 	inUse := numberOf(t, a)
 	watch(e, func(w http.ResponseWriter, r *http.Request) bool {
 		switch {
-		case r.Method == http.MethodPut && r.URL.Path == mailboxPath(a)+"/revocations":
+		case r.Method == http.MethodPut && r.URL.Path == mailboxPath(a)+"/revocation":
 			fakeserver.WriteJSON(w, http.StatusOK, struct{}{})
 			return true
 		case r.Method == http.MethodPut && r.URL.Path == mailboxPath(a)+"/prekey":
@@ -749,7 +749,7 @@ func TestARevocationsReadAnsweredOutOfFormIsNoAnswer(t *testing.T) {
 	e := newEnv(t)
 	a := e.mailbox()
 	e.srv.Forget(a.Address())
-	says(e, protocol.CodeMailboxNotFound, http.MethodGet, "/revocations")
+	says(e, protocol.CodeMailboxNotFound, http.MethodGet, "/revocation")
 	if held, err := a.Ask(ctx, a.Address()); err == nil {
 		t.Fatalf("a revocations read answered mailbox_not_found was taken as an answer: %+v", held)
 	}

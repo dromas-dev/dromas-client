@@ -113,8 +113,8 @@ func TestAnAPIErrorPrintsNoneOfTheServersWords(t *testing.T) {
 		return ae.Error()
 	}
 	twenty := uint64(20)
-	honest := answer(429, protocol.Problem{Type: protocol.CodeRateLimited.TypeURI(), Code: protocol.CodeRateLimited, Status: 429, Limit: &twenty, QuotaID: protocol.QuotaSends, Subject: protocol.SubjectMailbox, Detail: "this mailbox has sent its 20 messages a day", Hint: "wait for Retry-After"})
-	if want := "ERROR 429 rate_limited: the mailbox has sent as many messages as the server takes for now (20 a day): an account can lift a mailbox's limits (dromas account adopt); the server asks to wait 3600 seconds"; honest != want {
+	honest := answer(429, protocol.Problem{Type: protocol.CodeRateLimited.TypeURI(), Code: protocol.CodeRateLimited, Status: 429, QuotaValue: &twenty, QuotaID: protocol.QuotaSends, Subject: protocol.SubjectMailbox, Detail: "this mailbox has sent its 20 messages a day", Hint: "wait for Retry-After"})
+	if want := "ERROR 429 rate_limited: the mailbox has sent as many messages as the server takes for now (20 a day): an account can lift a mailbox's limits (dromas account join); the server asks to wait 3600 seconds"; honest != want {
 		t.Errorf("an honest error prints %q, want %q", honest, want)
 	}
 

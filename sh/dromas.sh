@@ -53,7 +53,7 @@ dr_time(){ # <timestamp> → its Unix time, only for exactly YYYY-MM-DDTHH:MM:SS
 }
 dr_api(){ # <METHOD> <PATH> [body file] [curl args…] → the body on stdout, as curl -o wrote it. The body file is sent as it is: a message's ciphertext, POSTed to …/messages, as application/octet-stream (PROTOCOL.md §11.10), and any other body as JSON. Any non-2xx: an error line with its status, its code (dr_code) and the wait its Retry-After asks for, and nothing the server wrote: its detail, hint and title are for a person reading the body (PROTOCOL.md §11.3). No answer at all: an error line with curl's words. Keeps the answer in $DR/error.json and what curl read of it in $DR/error.meta (dr_status), returns 1
   local m=$1 p=$2 f=${3-} t=application/json s c w v; local -a np=(); shift 2; [ $# -gt 0 ] && shift
-  [[ "$m $p" == "POST /v1/"*"/messages?"* ]] && t=application/octet-stream
+  [[ "$m $p" == "POST /v1/"*"/messages?"* ]] && t=application/vnd.age
   dr_tls "$DR_SERVER_URL" || return 1
   dr_here "$DR_SERVER_URL" localhost && np=(--noproxy '*')      # a server on this machine is called directly, whatever proxy the environment names, as Go's ProxyFromEnvironment never proxies localhost or a loopback address
   rm -f "$DR/error.json" "$DR/error.meta" "$DR/response.body" "$DR/response.meta"
@@ -82,8 +82,8 @@ dr_met(){ # <curl meta> → keeps the earliest Deprecation and Sunset an answer 
 dr_earliest(){ [ -s "$1" ] && [ "$(cat "$1")" -le "$2" ] || printf '%s\n' "$2" > "$1"; }      # <file> <Unix time> → the file holds the earlier of the two
 dr_said(){ # → the lines the Go client prints at a command's end of what its answers said of this client's version (dr_met): a "deprecated" line and a "sunset" line, each with the date, in this script's own words. Neither changes the exit status: this script has no "needs a look" status. It reads no server's document, so it says nothing of an upgrade
   local t at
-  if t=$(cat "$DR/met.deprecation" 2> /dev/null) && at=$(jq -nr --argjson t "$t" '$t | todate' 2> /dev/null); then dr_out deprecated --arg version "$DR_VERSION" --arg at "$at" --arg detail "the server deems this client's version, $DR_VERSION, deprecated from $at, by the Deprecation its last answer carried: it still takes it, and an upgrade of this client is due"; fi
-  if t=$(cat "$DR/met.sunset" 2> /dev/null) && at=$(jq -nr --argjson t "$t" '$t | todate' 2> /dev/null); then dr_out sunset --arg version "$DR_VERSION" --arg at "$at" --arg detail "the server stops taking this client's version, $DR_VERSION, from $at, by the Sunset its last answer carried: upgrade this client, whose calls it refuses as client_version_unsupported from then on"; fi
+  if t=$(cat "$DR/met.deprecation" 2> /dev/null) && at=$(jq -nr --argjson t "$t" '$t | todate' 2> /dev/null); then dr_out deprecated --arg version "$DR_VERSION" --arg deprecated_at "$at" --arg detail "the server deems this client's version, $DR_VERSION, deprecated from $at, by the Deprecation its last answer carried: it still takes it, and an upgrade of this client is due"; fi
+  if t=$(cat "$DR/met.sunset" 2> /dev/null) && at=$(jq -nr --argjson t "$t" '$t | todate' 2> /dev/null); then dr_out sunset --arg version "$DR_VERSION" --arg sunset_at "$at" --arg detail "the server stops taking this client's version, $DR_VERSION, from $at, by the Sunset its last answer carried: upgrade this client, whose calls it refuses as client_version_unsupported from then on"; fi
   rm -f "$DR/met.deprecation" "$DR/met.sunset"
 }
 dr_member(){ jq -r --arg m "$1" --argjson known "$2" '.[$m] | strings | select(. as $v | $known | index([$v])) ' "$DR/error.json" 2> /dev/null; }      # <member> <known values, a JSON array> → the last API error's string member, only when it is one of them: a client shows no value it does not know (PROTOCOL.md §11.3)
@@ -168,7 +168,7 @@ dr_lock(){ # <command> [args] → runs that dr_ command with $DR/lock, the mailb
   [ -s "$DR/identity" ] || { dr_refuse "no mailbox in $DR: run init first"; return 1; }
   dr_ownmailbox && dr_ours || return 1
   until mkdir "$me/lock" 2> /dev/null; do
-    [ -n "$said" ] || { jq -cn '{type:"waiting", for:"lock", detail:"waiting for this mailbox'"'"'s lock: another command of this mailbox is running, and a mailbox'"'"'s commands write its files one at a time"}' >&2; said=1; }
+    [ -n "$said" ] || { jq -cn '{type:"waiting", reason:"lock", detail:"waiting for this mailbox'"'"'s lock: another command of this mailbox is running, and a mailbox'"'"'s commands write its files one at a time"}' >&2; said=1; }
     [ "$SECONDS" -lt "$end" ] || { dr_refuse "another command of this mailbox held its lock, $me/lock, for as long as a command waits for it. If none is running, one that crashed left it behind: remove it"; return 1; }
     sleep 1
   done
@@ -499,10 +499,10 @@ dr_lookup(){ # <address> → reads the address's mailbox from this mailbox's ser
     *) cat "$DR/read.err" >&2; return 2 ;; esac; fi      # no answer: its error line, the status, the code and the wait, and none of the server's words
   return 1
 }
-dr_revocations(){ # <address> → reads the address's revocations from this mailbox's server (GET /v1/<address>/revocations), which a server keeps with a mailbox there or none (PROTOCOL.md §11.15), and keeps what verifies: dr_lookup's answer. dr_judge's, for each sender in a drain (PROTOCOL.md §12.3 check 7), and dr_renew's, for a mailbox its server holds no more. A revocation of the address this mailbox keeps answers with no call. A record served and revocation_not_found are answers, and anything else is none: a record that is no record, and revoked with nothing that verifies, among them (PROTOCOL.md §12.3 check 7)
+dr_revocations(){ # <address> → reads the address's revocations from this mailbox's server (GET /v1/<address>/revocation), which a server keeps with a mailbox there or none (PROTOCOL.md §11.15), and keeps what verifies: dr_lookup's answer. dr_judge's, for each sender in a drain (PROTOCOL.md §12.3 check 7), and dr_renew's, for a mailbox its server holds no more. A revocation of the address this mailbox keeps answers with no call. A record served and revocation_not_found are answers, and anything else is none: a record that is no record, and revoked with nothing that verifies, among them (PROTOCOL.md §12.3 check 7)
   local r w=$1; [ "$1" != "$(cat "$DR/address" 2> /dev/null)" ] || w="this mailbox"
   dr_gone "$1"; case $? in 0) return 0 ;; 3) return 3 ;; esac
-  if dr_api GET "/v1/$1/revocations" > "$DR/rev.json" 2> "$DR/read.err"; then
+  if dr_api GET "/v1/$1/revocation" > "$DR/rev.json" 2> "$DR/read.err"; then
     [ "$(sed -n 1p "$DR/response.meta")" = 200 ] && dr_isrecord "$DR/rev.json" && jq -e '(.identity | strings | length > 0) and ([.revocation_signature, .revoked_certificates] | any(strings | length > 0))' "$DR/rev.json" > /dev/null 2>&1 ||
       { dr_refuse "the server's answer for $w's revocations is not one this client reads: a 200 with a record that holds the identity and at least one revocation, each byte field base64"; return 2; }      # another 2xx, or a 2xx that is no record, is no answer, as one that is no JSON is (PROTOCOL.md §10.3, §12.3 check 7)
     dr_take "$1"; return
@@ -572,7 +572,7 @@ dr_seal(){ # <address> <envelope stem> [the mailbox dr_lookup read] → what to 
   read -r f t <<< "$(dr_padding $(($(wc -c < "$s.P") + $(wc -c < "$s.sig"))) "$k")" && [ -n "$t" ] || return 1
   { cat "$s.P" "$s.sig" && head -c "$f" /dev/zero | tr '\0' .; } | age -r "$k" > "$s.age" || return 1
   [ "$(wc -c < "$s.age")" -eq "$t" ] || { rm -f "$s.age"; dr_refuse "the encrypted message is not the $t bytes its padding was made for: it is not sent at a size that tells its length"; return 1; }
-  printf 'statement=%s\n' "$ph" > "$s.query"      # the prekey statement is named by the SHA-256 of its bytes as served, in lowercase hex (dr_resolve; PROTOCOL.md §11.10). The body is the age file as it is, and no signature is beside it: the server knows the sender from the pass the post carries
+  printf 'prekey_sha256=%s\n' "$ph" > "$s.query"      # the prekey statement is named by the SHA-256 of its bytes as served, in lowercase hex (dr_resolve; PROTOCOL.md §11.10). The body is the age file as it is, and no signature is beside it: the server knows the sender from the pass the post carries
 }
 dr_post(){ # <address> <envelope stem> → seals it and POSTs it; on 409 prekey_superseded, seals the SAME envelope again, once, to the mailbox read again. Before each seal, the recipient's mailbox is read (dr_lookup), and the seal is made to what this mailbox then holds, dated after that read. A post that fails is told, and nothing is kept
   local B=$1 o=$2 c try

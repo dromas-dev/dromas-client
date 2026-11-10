@@ -40,7 +40,7 @@ func putRecord(t *testing.T, next http.Handler, a protocol.Address, rec *protoco
 	if err != nil {
 		t.Fatal(err)
 	}
-	req := httptest.NewRequest(http.MethodPut, "/v1/"+a.String()+"/revocations", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPut, "/v1/"+a.String()+"/revocation", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
 	next.ServeHTTP(rr, req)
@@ -115,7 +115,7 @@ func TestEveryCommandShownItsOwnRevocationAtEachCall(t *testing.T) {
 			honest := partwayHonest(t, c)
 			for n, call := range honest {
 				for _, v := range partwayVariants {
-					if v == partwayRead && !(call.method == http.MethodGet && strings.HasSuffix(call.path, "/revocations")) {
+					if v == partwayRead && !(call.method == http.MethodGet && strings.HasSuffix(call.path, "/revocation")) {
 						continue
 					}
 					t.Run(fmt.Sprintf("call %d %s %s/%s", n+1, call.method, call.short, v), func(t *testing.T) {
@@ -252,7 +252,7 @@ func partwayShows(r *http.Request, got *httptest.ResponseRecorder, a protocol.Ad
 			return false
 		}
 		rec = p.Record
-	case got.Code == http.StatusOK && r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/revocations"):
+	case got.Code == http.StatusOK && r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/revocation"):
 		rec = &protocol.Revocations{}
 		if protocol.Unmarshal(got.Body.Bytes(), rec) != nil {
 			return false
@@ -275,7 +275,7 @@ func partwayNames(path string, a protocol.Address) bool {
 // revocations, which carries no pass.
 func partwayIsRead(c partwayCall) bool {
 	rest, _ := strings.CutPrefix(c.path, "/v1/")
-	return c.method == http.MethodGet && (!strings.Contains(rest, "/") || strings.HasSuffix(rest, "/revocations"))
+	return c.method == http.MethodGet && (!strings.Contains(rest, "/") || strings.HasSuffix(rest, "/revocation"))
 }
 
 // partwayMustLearn reports whether the mailbox must hold its revocation after
@@ -403,7 +403,7 @@ func partwayAt(t *testing.T, c partwayCase, n int, v string) {
 	}
 	if partwayProved(at, v, s.a.Address()) {
 		for _, c := range l.calls[n:l.event] {
-			if c.method != http.MethodGet || c.short != "/v1/own" && c.short != "/v1/own/revocations" {
+			if c.method != http.MethodGet || c.short != "/v1/own" && c.short != "/v1/own/revocation" {
 				t.Errorf("asked between the answer to prove and the proof: %s; calls %v", c, l.calls)
 			}
 		}
@@ -475,7 +475,7 @@ func recvSaysItAlone(t *testing.T, w *partwayRun) {
 // server took anything from it (#326, #379).
 func remedySaysItAlone(t *testing.T, w *partwayRun) {
 	for _, c := range w.calls[:w.event] {
-		if c.method == http.MethodPut && c.short == "/v1/own/revocations" && (c.status < 300 || c.status == http.StatusConflict) {
+		if c.method == http.MethodPut && c.short == "/v1/own/revocation" && (c.status < 300 || c.status == http.StatusConflict) {
 			return
 		}
 	}
@@ -716,7 +716,7 @@ func partwayCases() []partwayCase {
 			serverAllowed(t, a)
 			return partwaySet{dir: a.Dir(), a: a, run: func(ctx context.Context) (any, error) { return nil, a.SyncACL(ctx) }}
 		}},
-		{"account adopt", func(t *testing.T, e *env) partwaySet {
+		{"account join", func(t *testing.T, e *env) partwaySet {
 			a := e.mailbox()
 			key := e.srv.AdoptKey("acct")
 			return partwaySet{dir: a.Dir(), a: a, run: func(ctx context.Context) (any, error) { return a.Adopt(ctx, key) }}

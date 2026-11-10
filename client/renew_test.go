@@ -106,11 +106,11 @@ func TestARenewalWhoseUploadMeetsAMailboxForgottenSinceItsReadRegistersIt(t *tes
 		before    bool
 		calls     string
 	}{
-		{"control: prekey renew of a mailbox forgotten before its read", "prekey renew", true, "GET /v1/own, GET /v1/own/revocations, PUT /v1/own +pass"},
-		{"prekey renew", "prekey renew", false, "GET /v1/own, PUT /v1/own/prekey +pass, GET /v1/own, GET /v1/own/revocations, PUT /v1/own +pass"},
-		{"recv", "recv", false, "GET /v1/own, PUT /v1/own/prekey +pass, GET /v1/own, GET /v1/own/revocations, PUT /v1/own +pass, GET /v1/own/acl +pass, PUT /v1/own/acl +pass, GET /v1/own/messages +pass"},
-		{"control: cert revoke-earlier of a mailbox forgotten before its read", "cert revoke-earlier", true, "GET /v1/own, GET /v1/own/revocations, PUT /v1/own/revocations, GET /v1/, PUT /v1/own +pass"},
-		{"cert revoke-earlier", "cert revoke-earlier", false, "GET /v1/own, PUT /v1/own/revocations, GET /v1/, PUT /v1/own/prekey +pass, GET /v1/own, GET /v1/own/revocations, PUT /v1/own +pass"},
+		{"control: prekey renew of a mailbox forgotten before its read", "prekey renew", true, "GET /v1/own, GET /v1/own/revocation, PUT /v1/own +pass"},
+		{"prekey renew", "prekey renew", false, "GET /v1/own, PUT /v1/own/prekey +pass, GET /v1/own, GET /v1/own/revocation, PUT /v1/own +pass"},
+		{"recv", "recv", false, "GET /v1/own, PUT /v1/own/prekey +pass, GET /v1/own, GET /v1/own/revocation, PUT /v1/own +pass, GET /v1/own/acl +pass, PUT /v1/own/acl +pass, GET /v1/own/messages +pass"},
+		{"control: cert revoke-earlier of a mailbox forgotten before its read", "cert revoke-earlier", true, "GET /v1/own, GET /v1/own/revocation, PUT /v1/own/revocation, GET /v1/, PUT /v1/own +pass"},
+		{"cert revoke-earlier", "cert revoke-earlier", false, "GET /v1/own, PUT /v1/own/revocation, GET /v1/, PUT /v1/own/prekey +pass, GET /v1/own, GET /v1/own/revocation, PUT /v1/own +pass"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			e := newEnv(t)
@@ -211,7 +211,7 @@ func TestARenewalWhoseUploadIs404RegistersOnlyOnAReadThatShowsNoMailbox(t *testi
 		}, "GET /v1/own, PUT /v1/own/prekey +pass, GET /v1/own"},
 		{"no mailbox shown, and no answer about its revocations", func(w http.ResponseWriter, _ *http.Request, _ http.Handler) {
 			forge.Refuse(w, protocol.CodeMailboxNotFound)
-		}, "GET /v1/own, PUT /v1/own/prekey +pass, GET /v1/own, GET /v1/own/revocations"},
+		}, "GET /v1/own, PUT /v1/own/prekey +pass, GET /v1/own, GET /v1/own/revocation"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			e := newEnv(t)
@@ -225,7 +225,7 @@ func TestARenewalWhoseUploadIs404RegistersOnlyOnAReadThatShowsNoMailbox(t *testi
 					forge.Refuse(w, protocol.CodeMailboxNotFound) // the mailbox is still held
 				case r.Method == http.MethodGet && r.URL.Path == mailboxPath(b) && reads.Add(1) > 1:
 					c.again(w, r, next)
-				case r.Method == http.MethodGet && r.URL.Path == mailboxPath(b)+"/revocations":
+				case r.Method == http.MethodGet && r.URL.Path == mailboxPath(b)+"/revocation":
 					forge.Refuse(w, protocol.CodeUnavailable)
 				default:
 					next.ServeHTTP(w, r)
@@ -400,7 +400,7 @@ func TestARenewalWhoseReadAgainEndsSendsNoRegistration(t *testing.T) {
 						putRecord(t, next, b.Address(), rec)
 					}
 					return
-				case r.Method == http.MethodGet && r.URL.Path == mailboxPath(b)+"/revocations":
+				case r.Method == http.MethodGet && r.URL.Path == mailboxPath(b)+"/revocation":
 					// The mailbox's next write is the keep of what this read shows.
 					keys = keysOf(b.Dir())
 					armed.Store(c == "a fault of the mailbox")
@@ -421,7 +421,7 @@ func TestARenewalWhoseReadAgainEndsSendsNoRegistration(t *testing.T) {
 			}
 			// A new certificate runs for the longest its
 			// server takes, which its document names (GET /v1/).
-			if want := "GET /v1/own, GET /v1/, PUT /v1/own/prekey +pass, GET /v1/own, GET /v1/own/revocations"; strings.Join(calls, ", ") != want {
+			if want := "GET /v1/own, GET /v1/, PUT /v1/own/prekey +pass, GET /v1/own, GET /v1/own/revocation"; strings.Join(calls, ", ") != want {
 				t.Fatalf("calls %q, want %q", calls, want)
 			}
 			if got := keysOf(b.Dir()); !slices.Equal(got, keys) {
@@ -1085,7 +1085,7 @@ func TestARenewalThatMendsNothingWaitsAnHour(t *testing.T) {
 		switch {
 		case r.Method == http.MethodGet && (r.URL.Path == own || r.URL.Path == own+"/messages"):
 			forge.Refuse(w, protocol.CodeMailboxNotFound)
-		case r.Method == http.MethodGet && r.URL.Path == own+"/revocations":
+		case r.Method == http.MethodGet && r.URL.Path == own+"/revocation":
 			forge.Refuse(w, protocol.CodeRevocationNotFound)
 		case r.Method == http.MethodPut && r.URL.Path == own:
 			registrations++

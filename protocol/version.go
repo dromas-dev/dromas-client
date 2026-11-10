@@ -238,7 +238,7 @@ type ServerDocument struct {
 	// MaxCertificateLifetime is the longest a certificate the server takes may
 	// run, valid-before less valid-after, in seconds (PROTOCOL.md §11.7): from
 	// 1 to MaxInteger.
-	MaxCertificateLifetime uint64 `json:"max_certificate_lifetime"`
+	MaxCertificateLifetime uint64 `json:"max_certificate_lifetime_seconds"`
 	// Server is the implementation that answers, nil where the server names
 	// none: informational ([Implementation]).
 	Server *Implementation `json:"server,omitempty"`
@@ -269,7 +269,7 @@ var implementationText = regexp.MustCompile(`\A[\x21-\x7e]{1,128}\z`)
 type Scheduled struct {
 	Below   string `json:"below,omitempty"`
 	Version string `json:"version,omitempty"`
-	At      string `json:"at"`
+	At      string `json:"effective_at"`
 }
 
 // Capability is one capability of version 1 the server serves, by its name.
@@ -316,7 +316,7 @@ func (d *ServerDocument) Check() error {
 		return &memberError{name: "capabilities", known: true}
 	}
 	if d.MaxCertificateLifetime == 0 || d.MaxCertificateLifetime > MaxInteger {
-		return &memberError{name: "max_certificate_lifetime", known: true}
+		return &memberError{name: "max_certificate_lifetime_seconds", known: true}
 	}
 	for _, c := range d.Capabilities {
 		if !capabilityGrammar.MatchString(c.Name) {
@@ -355,7 +355,7 @@ func (s Scheduled) parse() (PolicyVersion, time.Time, error) {
 	}
 	at, err := ParseTime(s.At)
 	if err != nil {
-		return PolicyVersion{}, time.Time{}, &memberError{name: "at", known: true}
+		return PolicyVersion{}, time.Time{}, &memberError{name: "effective_at", known: true}
 	}
 	return p, at, nil
 }

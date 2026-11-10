@@ -28,7 +28,7 @@ const (
 	CodeInvalidKey                 Code = "invalid_key"                   // an identity key, certificate or prekey statement that is malformed or does not verify
 	CodePrekeyAlreadyUsed          Code = "prekey_already_used"           // the prekey was published before: every prekey is a new key
 	CodeInvalidValidityPeriod      Code = "invalid_validity_period"       // the statement or its certificate is not valid at the server's clock: not begun, or ended
-	CodeCertificateLifetimeTooLong Code = "certificate_lifetime_too_long" // the certificate runs longer than the server's maximum: max_certificate_lifetime
+	CodeCertificateLifetimeTooLong Code = "certificate_lifetime_too_long" // the certificate runs longer than the server's maximum: max_certificate_lifetime_seconds
 	CodeUnsupportedKeyType         Code = "unsupported_key_type"          // an identity of a key type this server does not register
 	CodeInvalidRecipients          Code = "invalid_recipients"            // not exactly one stanza of a live prekey type
 	CodeInvalidRevocation          Code = "invalid_revocation"            // not a revocation of the address: the document does not hash to it, or the signature is not its identity's own
@@ -168,34 +168,38 @@ type Problem struct {
 	Code   Code   `json:"code"`
 	Hint   string `json:"hint,omitempty"`
 
-	// Limit is the limit hit: the most bytes a body or a ciphertext may
-	// hold, or entries an ACL (content_too_large); how many a day a limit counted by
-	// the day takes (rate_limited with QuotaSends, QuotaRenewals,
-	// QuotaCertificates or QuotaCertificateRevocations).
+	// Limit is the limit hit by a content_too_large: the most bytes a body
+	// or a ciphertext may hold, or entries an ACL.
 	Limit *uint64 `json:"limit,omitempty"`
 	// QuotaID is the limit a rate_limited names, and Subject whom it was
 	// counted against (Google's QuotaFailure.Violation). A client shows each
 	// only once it knows the value.
 	QuotaID Quota   `json:"quota_id,omitempty"`
 	Subject Subject `json:"subject,omitempty"`
+	// QuotaValue is how many a day a rate_limited's limit takes, for one
+	// counted by the day (QuotaSends, QuotaRenewals, QuotaCertificates,
+	// QuotaCertificateRevocations): Google's QuotaFailure carries it as
+	// quota_value beside quota_id.
+	QuotaValue *uint64 `json:"quota_value,omitempty"`
 	// PrekeySerial and CertificateSerial are serials of a prekey and of a
 	// certificate: which ones each code names is PROTOCOL.md §11.3's.
 	PrekeySerial      *uint64 `json:"prekey_serial,omitempty"`
 	CertificateSerial *uint64 `json:"certificate_serial,omitempty"`
 	// MaxCertificateLifetime is the longest a certificate the server takes may
 	// run, valid-before less valid-after, in seconds (certificate_lifetime_too_long).
-	MaxCertificateLifetime *uint64 `json:"max_certificate_lifetime,omitempty"`
-	// Through is the serial a revocation of certificates held runs through
-	// (serial_too_low).
-	Through *uint64 `json:"through,omitempty"`
+	MaxCertificateLifetime *uint64 `json:"max_certificate_lifetime_seconds,omitempty"`
+	// Through is the revocation serial of the revocation of certificates
+	// held: the serial it runs through (serial_too_low).
+	Through *uint64 `json:"revocation_serial,omitempty"`
 	// KeyTypes are the identity key types a server registers
 	// (unsupported_key_type), and KeyType the one a mailbox's client does not
 	// verify (unsupported_sender_key_type).
 	KeyTypes []string `json:"key_types,omitempty"`
 	KeyType  string   `json:"key_type,omitempty"`
 	// Member is the request member or query parameter that is missing,
-	// unknown, given twice or not of its form (invalid_request).
-	Member string `json:"member,omitempty"`
+	// unknown, given twice or not of its form (invalid_request): Stripe's
+	// param.
+	Member string `json:"param,omitempty"`
 	// MinVersion is the lowest version a server that retired the request's
 	// takes, where it sets a floor (client_version_unsupported): a policy's version
 	// (ParsePolicyVersion), which a client shows only once it has that form.

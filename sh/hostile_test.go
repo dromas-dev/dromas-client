@@ -79,7 +79,7 @@ func TestScriptRefusesInItsOwnWords(t *testing.T) {
 		b.recv()
 	}
 	for _, c := range w.calls(n) {
-		if rest, ok := strings.CutPrefix(c, "GET /v1/"); ok && (!strings.Contains(rest, "/") || strings.HasSuffix(rest, "/revocations")) {
+		if rest, ok := strings.CutPrefix(c, "GET /v1/"); ok && (!strings.Contains(rest, "/") || strings.HasSuffix(rest, "/revocation")) {
 			t.Errorf("the server was asked about a sender it made up: %s", c)
 		}
 	}

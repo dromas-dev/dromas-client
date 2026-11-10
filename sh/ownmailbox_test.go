@@ -99,7 +99,7 @@ func putRevocation(t *testing.T, next http.Handler, rec *protocol.Revocations) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	req := httptest.NewRequest(http.MethodPut, "/v1/"+id.Address().String()+"/revocations", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPut, "/v1/"+id.Address().String()+"/revocation", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
 	next.ServeHTTP(rr, req)

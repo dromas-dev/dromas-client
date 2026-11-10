@@ -187,7 +187,7 @@ func TestRecvFollowRidesOutAServerErrorAndEndsWithItsContext(t *testing.T) {
 		if err := <-ended; err != nil {
 			t.Fatalf("recv --follow, its context ended: %v %s", err, errs.String())
 		}
-		if n := strings.Count(errs.String(), `"for":"server"`); n != 3 {
+		if n := strings.Count(errs.String(), `"reason":"server"`); n != 3 {
 			t.Fatalf("%d waiting lines, want 3: %s", n, errs.String())
 		}
 	})

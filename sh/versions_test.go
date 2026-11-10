@@ -30,8 +30,8 @@ func TestTheScriptNamesItsVersionAndSaysASunset(t *testing.T) {
 		Sunsets:      []protocol.Scheduled{{Version: "0.5", At: sun.Format(protocol.TimeLayout)}},
 	})
 	r := b.sh("bash " + script + " recv")
-	if r.rc != 0 || !strings.Contains(r.out, `{"type":"deprecated","version":"0.5.0","at":"`+dep.Format(protocol.TimeLayout)+`","detail":"`) ||
-		!strings.Contains(r.out, `{"type":"sunset","version":"0.5.0","at":"`+sun.Format(protocol.TimeLayout)+`","detail":"`) {
+	if r.rc != 0 || !strings.Contains(r.out, `{"type":"deprecated","version":"0.5.0","deprecated_at":"`+dep.Format(protocol.TimeLayout)+`","detail":"`) ||
+		!strings.Contains(r.out, `{"type":"sunset","version":"0.5.0","sunset_at":"`+sun.Format(protocol.TimeLayout)+`","detail":"`) {
 		t.Fatalf("recv: %v", r)
 	}
 	for _, q := range w.srv.Requests() {
@@ -67,7 +67,7 @@ func TestTheScriptNamesItsVersionAndSaysASunset(t *testing.T) {
 	w.srv.SetMiddle(func(rw http.ResponseWriter, req *http.Request, next http.Handler) {
 		next.ServeHTTP(&forged{ResponseWriter: rw, set: map[string]string{protocol.DeprecationHeader: "@1", protocol.SunsetHeader: "Sat, 02 Jan 2027 03:04:05 GMT"}}, req)
 	})
-	if r := b.sh("bash " + script + " recv"); r.rc != 0 || !strings.Contains(r.out, `"type":"deprecated","version":"0.5.0","at":"1970-01-01T00:00:01Z"`) || !strings.Contains(r.out, `"type":"sunset","version":"0.5.0","at":"2027-01-02T03:04:05Z"`) {
+	if r := b.sh("bash " + script + " recv"); r.rc != 0 || !strings.Contains(r.out, `"type":"deprecated","version":"0.5.0","deprecated_at":"1970-01-01T00:00:01Z"`) || !strings.Contains(r.out, `"type":"sunset","version":"0.5.0","sunset_at":"2027-01-02T03:04:05Z"`) {
 		t.Fatalf("the control: %v", r)
 	}
 }

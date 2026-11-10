@@ -138,7 +138,7 @@ const CertificateLifetimeRule = "a certificate lifetime is more than 7 days and 
 // certificateLifetime is how long a certificate this mailbox makes runs: the
 // least of protocol.MaxCertificateLifetime, which every verifier holds a
 // certificate to (PROTOCOL.md §5.2), the longest its server takes,
-// max_certificate_lifetime in its document (§11.18), read once a command, and
+// max_certificate_lifetime_seconds in its document (§11.18), read once a command, and
 // the owner's Options.CertificateLifetime, and never past protocol.LastDate.
 // A server that serves more than protocol.MaxCertificateLifetime gets no more.
 // A maximum that leaves no room to sign messages, the TTL and the hour a

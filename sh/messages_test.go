@@ -265,11 +265,11 @@ func TestScriptSendsAndReads(t *testing.T) {
 	}
 	var reads []string
 	for _, c := range w.calls(n) {
-		if rest, ok := strings.CutPrefix(c, "GET /v1/"); ok && (!strings.Contains(rest, "/") || strings.HasSuffix(rest, "/revocations")) {
+		if rest, ok := strings.CutPrefix(c, "GET /v1/"); ok && (!strings.Contains(rest, "/") || strings.HasSuffix(rest, "/revocation")) {
 			reads = append(reads, c)
 		}
 	}
-	if !slices.Equal(reads, []string{"GET /v1/" + a.addr.String() + "/revocations"}) || b.read("peers/"+a.addr.String()+"/identity.doc") != a.read("identity.doc") {
+	if !slices.Equal(reads, []string{"GET /v1/" + a.addr.String() + "/revocation"}) || b.read("peers/"+a.addr.String()+"/identity.doc") != a.read("identity.doc") {
 		t.Errorf("B asked about a sender it never met other than by one read of its revocations, or pinned another identity: %q", reads)
 	}
 	if strings.Contains(strings.Join(d.messages, ""), `"identity"`) {

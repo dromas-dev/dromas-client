@@ -42,7 +42,7 @@ func (b *shMailbox) revoke() {
 	b.w.t.Helper()
 	rec := filepath.Join(b.w.work, "own.rev.json")
 	writeFile(b.w.t, rec, b.revocation("own"))
-	b.must(`dr_api PUT "/v1/$(cat "$DR/address")/revocations" ` + rec + ` > /dev/null && cp "$W/own.rev.sig" "$DR/revoked.sig"`)
+	b.must(`dr_api PUT "/v1/$(cat "$DR/address")/revocation" ` + rec + ` > /dev/null && cp "$W/own.rev.sig" "$DR/revoked.sig"`)
 }
 
 // certs is a revocation of b's certificates through serial, signed with the
@@ -224,7 +224,7 @@ jq -cn --arg i "$(dr_b64 "$DR/identity.doc")" --arg s "$(dr_b64 "$W/wk.sig")" '{
 	}
 	n := len(w.srv.Requests())
 	reads := func(a protocol.Address, since int) int {
-		return len(slices.DeleteFunc(w.calls(since), func(c string) bool { return c != "GET /v1/"+a.String()+"/revocations" }))
+		return len(slices.DeleteFunc(w.calls(since), func(c string) bool { return c != "GET /v1/"+a.String()+"/revocation" }))
 	}
 	if d := ra.recv(); len(d.messages) != 0 || d.refused("sender_revoked") != 2 || reads(rd.addr, n) != 1 || !ra.has("peers/"+rd.addr.String()+"/revoke.sig") || w.srv.Count(ra.addr) != 0 {
 		t.Errorf("messages from a mailbox revoked since: %v, %d reads of its revocations", d, reads(rd.addr, n))
@@ -359,7 +359,7 @@ echo '{}' > "$d/revoked-certs.json"; dr_certrevoked %[1]s 2; echo "$?"`, va, vec
 // lowercase hex (PROTOCOL.md §11.10).
 func hashQuery(s stmt) string {
 	h := sha256.Sum256(s.st)
-	return "statement=" + hex.EncodeToString(h[:])
+	return "prekey_sha256=" + hex.EncodeToString(h[:])
 }
 
 // lastQuery is the query of the last post to mailbox to the server was sent.
@@ -472,7 +472,7 @@ dr_api PUT "/v1/$A/prekey" "$W/top.json" -H "Authorization: dromas-pass address=
 	}
 	n := len(w.srv.Requests())
 	reads := func() int {
-		return len(slices.DeleteFunc(w.calls(n), func(c string) bool { return c != "GET /v1/"+cb.addr.String()+"/revocations" }))
+		return len(slices.DeleteFunc(w.calls(n), func(c string) bool { return c != "GET /v1/"+cb.addr.String()+"/revocation" }))
 	}
 	if d := ca.recv(); !slices.Equal(d.bodies(), []string{"under the new certificate"}) || d.refused("certificate_revoked") != 1 || reads() != 1 ||
 		ca.keptCerts(cb.addr) != string(certs.Statement()) || strings.Count(ca.read(peer+"revoked-certs.json"), "\n") != 1 || ca.has(peer+"revoke.sig") {
@@ -530,7 +530,7 @@ dr_api PUT "/v1/$A/prekey" "$W/top.json" -H "Authorization: dromas-pass address=
 	d := cf.recv()
 	asked := slices.DeleteFunc(w.calls(since), func(c string) bool { return !strings.HasPrefix(c, "GET /v1/"+cb.addr.String()) })
 	if len(d.messages) != 0 || d.refused("certificate_revoked") != 1 || cf.keptCerts(cb.addr) != string(certs.Statement()) ||
-		!slices.Equal(asked, []string{"GET /v1/" + cb.addr.String() + "/revocations"}) {
+		!slices.Equal(asked, []string{"GET /v1/" + cb.addr.String() + "/revocation"}) {
 		t.Errorf("a message under a revoked certificate, from a sender whose mailbox the server forgot: %v, %q", d, asked)
 	}
 }

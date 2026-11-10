@@ -35,10 +35,10 @@ func ReadOf(r *http.Request) (protocol.Address, bool) {
 }
 
 // RevocationsOf reports whether r is a read of an address's revocations, GET
-// /v1/<address>/revocations, and of which address.
+// /v1/<address>/revocation, and of which address.
 func RevocationsOf(r *http.Request) (protocol.Address, bool) {
 	rest, ok := strings.CutPrefix(r.URL.Path, "/v1/")
-	addr, ok2 := strings.CutSuffix(rest, "/revocations")
+	addr, ok2 := strings.CutSuffix(rest, "/revocation")
 	if !ok || !ok2 || r.Method != http.MethodGet || strings.Contains(addr, "/") {
 		return protocol.Address{}, false
 	}

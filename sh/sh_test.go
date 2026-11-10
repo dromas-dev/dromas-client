@@ -2321,7 +2321,7 @@ func TestA3xxIsNoAnswerWhateverItsLines(t *testing.T) {
 	if _, err := bash(t, env, "dr_init"); err != nil {
 		t.Fatal(err)
 	}
-	list := `{"messages":[],"count":0}`
+	list := `{"messages":[],"total_count":0}`
 	for _, c := range []struct{ name, status, raw string }{
 		{"a header line", "303", "HTTP/1.1 303 See Other\r\nLocation: /x\r\nRetry-After: 5\r\nHTTP/2 201: x\r\nContent-Length: " + strconv.Itoa(len(list)) + "\r\nConnection: close\r\n\r\n" + list},
 		{"a trailer", "307", "HTTP/1.1 307 Temporary Redirect\r\nLocation: /x\r\nRetry-After: 5\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n" + strconv.FormatInt(int64(len(list)), 16) + "\r\n" + list + "\r\n0\r\nHTTP/1.1 200 OK: x\r\n\r\n"},

@@ -24,7 +24,7 @@ func TestTheClientSaysMessageAndMailbox(t *testing.T) {
 			t.Fatalf("the reading misses %q", s)
 		}
 	}
-	for _, s := range []string{"mailbox_unread", "inbox", "outbox", "message_headers"} {
+	for _, s := range []string{"lookup_failed", "inbox", "outbox", "message_headers"} {
 		if oldWords.MatchString(s) {
 			t.Fatalf("the reading matches %q", s)
 		}

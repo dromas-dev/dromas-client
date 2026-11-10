@@ -280,9 +280,9 @@ func rateLimited(p *protocol.Problem) string {
 	if s, ok := quotaWords[p.QuotaID]; ok {
 		switch p.QuotaID {
 		case protocol.QuotaSends:
-			return s + limit(p, " (%d a day)") + ": an account can lift a mailbox's limits (dromas account adopt)"
+			return s + quotaValue(p, " (%d a day)") + ": an account can lift a mailbox's limits (dromas account join)"
 		case protocol.QuotaRenewals, protocol.QuotaCertificates, protocol.QuotaCertificateRevocations:
-			return s + limit(p, " (%d a day)")
+			return s + quotaValue(p, " (%d a day)")
 		}
 		return s
 	}
@@ -293,6 +293,15 @@ func rateLimited(p *protocol.Problem) string {
 		return "the server takes no more calls of this kind from this machine's IP address for now"
 	}
 	return "the server takes no more calls of this kind for now"
+}
+
+// quotaValue is format with the quota value p carries, or "" when it carries
+// none.
+func quotaValue(p *protocol.Problem, format string) string {
+	if p.QuotaValue == nil {
+		return ""
+	}
+	return fmt.Sprintf(format, *p.QuotaValue)
 }
 
 // limit is format with the limit p carries, or "" when it carries none.

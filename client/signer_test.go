@@ -393,7 +393,7 @@ func TestInitOfflineRegistersUnderACertificate(t *testing.T) {
 	from := len(e.srv.Requests())
 	a := e.mailbox()
 	for _, q := range e.srv.Requests()[from:] {
-		if strings.HasSuffix(q.Path, "/revocations") {
+		if strings.HasSuffix(q.Path, "/revocation") {
 			t.Errorf("init --offline: %s %s", q.Method, q.Path)
 		}
 	}

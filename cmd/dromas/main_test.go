@@ -111,8 +111,8 @@ func TestReport(t *testing.T) {
 		ae   *client.APIError
 		want string
 	}{
-		{&client.APIError{Status: 429, RetryAfter: 30 * time.Second, Problem: protocol.Problem{Code: protocol.CodeRateLimited, Status: 429, Limit: &limit, QuotaID: protocol.QuotaSends, Subject: protocol.SubjectMailbox, Detail: injected, Hint: injected, Title: injected}},
-			`{"type":"error","status":429,"code":"rate_limited","limit":500,"quota_id":"sends","subject":"mailbox","retry_after":30,"detail":"sending: ERROR 429 rate_limited: `},
+		{&client.APIError{Status: 429, RetryAfter: 30 * time.Second, Problem: protocol.Problem{Code: protocol.CodeRateLimited, Status: 429, QuotaValue: &limit, QuotaID: protocol.QuotaSends, Subject: protocol.SubjectMailbox, Detail: injected, Hint: injected, Title: injected}},
+			`{"type":"error","status":429,"code":"rate_limited","quota_value":500,"quota_id":"sends","subject":"mailbox","retry_after":30,"detail":"sending: ERROR 429 rate_limited: `},
 		{&client.APIError{Status: 429, RetryAfter: 30 * time.Second, Problem: protocol.Problem{Code: protocol.CodeRateLimited, Status: 429, QuotaID: injected, Subject: injected}},
 			`{"type":"error","status":429,"code":"rate_limited","retry_after":30,"detail":"sending: ERROR 429 rate_limited: the server takes no more calls of this kind for now; `},
 		{&client.APIError{Status: 400, Problem: protocol.Problem{Code: protocol.CodeUnsupportedKeyType, Status: 400, KeyTypes: []string{protocol.IdentityEd25519, injected, protocol.IdentityEd25519}, KeyType: injected}},
@@ -304,7 +304,7 @@ func TestRecvWaitRidesOutARateLimit(t *testing.T) {
 		t.Fatalf("recv --wait: %v %s", err, errs.String())
 	}
 	if limited.Load() < 2 || !strings.Contains(out.String(), `"body":"after the wait"`) || strings.Contains(errs.String(), "poll at most") ||
-		!strings.HasPrefix(errs.String(), `{"type":"waiting","for":"server","status":429,"code":"rate_limited","retry_after":1,"detail":"ERROR 429 rate_limited: the server takes no more calls of this kind for now; the server asks to wait 1 second"}`+"\n") {
+		!strings.HasPrefix(errs.String(), `{"type":"waiting","reason":"server","status":429,"code":"rate_limited","retry_after":1,"detail":"ERROR 429 rate_limited: the server takes no more calls of this kind for now; the server asks to wait 1 second"}`+"\n") {
 		t.Fatalf("polls %d, out %q, err %q", limited.Load(), out.String(), errs.String())
 	}
 }
@@ -345,7 +345,7 @@ func TestRecvWaitRidesOutAWaitAboutASender(t *testing.T) {
 				}
 				var refused atomic.Int32
 				srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
-					if r.Method == http.MethodGet && r.URL.Path == "/v1/"+a.Address().String()+"/revocations" && refused.Add(1) == 1 {
+					if r.Method == http.MethodGet && r.URL.Path == "/v1/"+a.Address().String()+"/revocation" && refused.Add(1) == 1 {
 						w.Header().Set("Retry-After", "60")
 						if c.code == "" {
 							http.Error(w, "bad gateway", c.status)
@@ -474,7 +474,7 @@ func TestRecvWaitGoesOnPastADrainUnanswered(t *testing.T) {
 			t.Fatalf("recv --wait: %v %s", err, errs.String())
 		}
 		if took := time.Since(start); !strings.Contains(out.String(), `"body":"after the drain that failed"`) || took != time.Minute ||
-			!strings.Contains(errs.String(), `{"type":"waiting","for":"server"`) {
+			!strings.Contains(errs.String(), `{"type":"waiting","reason":"server"`) {
 			t.Fatalf("recv --wait 3m: %q after %v; stderr %q", out.String(), took, errs.String())
 		}
 	})
@@ -629,7 +629,7 @@ func TestRecvWaitResumesAPacedDrain(t *testing.T) {
 	if err := do(ctx, "recv", nil, strings.NewReader(""), &out, &errs); err != nil {
 		t.Fatalf("recv: %v %s", err, errs.String())
 	}
-	if !strings.Contains(out.String(), `"type":"paced","retry_after":3,`) {
+	if !strings.Contains(out.String(), `"type":"rate_limited","retry_after":3,`) {
 		t.Fatalf("recv after a paced drain advises: %q, want the poll interval, the later wait", out.String())
 	}
 	paced.Store(0)
@@ -643,7 +643,7 @@ func TestRecvWaitResumesAPacedDrain(t *testing.T) {
 	}
 }
 
-// account adopt reads the key on stdin, puts the mailbox in the key's account
+// account join reads the key on stdin, puts the mailbox in the key's account
 // and says which; a spent key is refused; account leave takes the mailbox out.
 // The key is never an argument, and what stdin holds when it is not a key is
 // sent nowhere and never printed (the public #15).
@@ -658,23 +658,23 @@ func TestAdopt(t *testing.T) {
 	t.Setenv("DROMAS_SERVER_URL", srv.URL)
 	key := srv.AdoptKey("acme")
 	var out, errs bytes.Buffer
-	if err := do(ctx, "account adopt", nil, strings.NewReader(key+"\n"), &out, &errs); err != nil || out.String() != `{"type":"account","account":"acme"}`+"\n" || srv.Account(b.Address()) != "acme" {
+	if err := do(ctx, "account join", nil, strings.NewReader(key+"\n"), &out, &errs); err != nil || out.String() != `{"type":"account","account":"acme"}`+"\n" || srv.Account(b.Address()) != "acme" {
 		t.Fatalf("adopt: %v %q %q", err, out.String(), errs.String())
 	}
 	out.Reset()
-	if err := do(ctx, "account adopt", nil, strings.NewReader(key), &out, &errs); err != nil || !strings.Contains(out.String(), "acme") {
+	if err := do(ctx, "account join", nil, strings.NewReader(key), &out, &errs); err != nil || !strings.Contains(out.String(), "acme") {
 		t.Fatalf("a join sent again, its key spent: %v %q", err, out.String())
 	}
 	if err := do(ctx, "account leave", nil, nil, &out, &errs); err != nil {
 		t.Fatal(err)
 	}
-	if err := do(ctx, "account adopt", nil, strings.NewReader(key), &out, &errs); codeOf(err) != protocol.CodeInvalidAdoptKey || strings.Contains(err.Error(), key) {
+	if err := do(ctx, "account join", nil, strings.NewReader(key), &out, &errs); codeOf(err) != protocol.CodeInvalidAdoptKey || strings.Contains(err.Error(), key) {
 		t.Fatalf("a spent key, from a mailbox out of its account: %v", err)
 	}
 	for _, args := range [][]string{{key}, {"--leave"}, {key, key}} {
 		var wrong *usageError
-		if err := do(ctx, "account adopt", args, strings.NewReader(key), &out, &errs); !errors.As(err, &wrong) || strings.Contains(err.Error(), key) {
-			t.Fatalf("account adopt %q: %v", args, err)
+		if err := do(ctx, "account join", args, strings.NewReader(key), &out, &errs); !errors.As(err, &wrong) || strings.Contains(err.Error(), key) {
+			t.Fatalf("account join %q: %v", args, err)
 		}
 	}
 	puts := 0
@@ -686,7 +686,7 @@ func TestAdopt(t *testing.T) {
 	})
 	const secret = "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjE=\n-----END OPENSSH PRIVATE KEY-----\n"
 	for _, in := range []string{"", "\n", secret, key + "\n" + key, " " + key, "dra1_" + strings.Repeat("A", 1100), "dra1_ab$cd", "dra1_", "dra1_A", "dra1_ab-_c", "dra1_ABCD=", "dra1_ABC="} {
-		err := do(ctx, "account adopt", nil, strings.NewReader(in), &out, &errs)
+		err := do(ctx, "account join", nil, strings.NewReader(in), &out, &errs)
 		if err == nil {
 			t.Errorf("adopt with %q on stdin was taken", in)
 			continue
@@ -795,8 +795,8 @@ func TestNothingTheServerWritesIsPrinted(t *testing.T) {
 	if err == nil || out.Len() != 0 {
 		t.Fatalf("outbox flush with a receipt that names another ciphertext: %v %q", err, out.String())
 	}
-	err = do(ctx, "account adopt", nil, strings.NewReader(srv.AdoptKey("acme")), &out, &errs)
-	clean("account adopt", err, &out, &errs)
+	err = do(ctx, "account join", nil, strings.NewReader(srv.AdoptKey("acme")), &out, &errs)
+	clean("account join", err, &out, &errs)
 	if err == nil || out.Len() != 0 {
 		t.Fatalf("adopt with an account that is not an account id: %v %q", err, out.String())
 	}
@@ -1166,7 +1166,7 @@ func TestARefusedMessageDoesNotFailRecv(t *testing.T) {
 	useMailbox(t, b.Dir())
 	t.Setenv("DROMAS_SERVER_URL", srv.URL)
 	var out bytes.Buffer
-	if err := do(ctx, "status", nil, nil, &out, io.Discard); err != nil || !strings.Contains(out.String(), `"refused":0,"held":0,"policy":{"unknown":"held","server":"all"},"attention":[]`) {
+	if err := do(ctx, "status", nil, nil, &out, io.Discard); err != nil || !strings.Contains(out.String(), `"refused":0,"held":0,"policy":{"unknown":"held","admit":"all"},"attention":[]`) {
 		t.Fatalf("status of a new mailbox: %v %q", err, out.String())
 	}
 	forged := []byte("not a ciphertext its claimed sender ever signed")
@@ -1192,7 +1192,7 @@ func TestARefusedMessageDoesNotFailRecv(t *testing.T) {
 }
 
 // send's flags set the envelope's optional fields, and the recipient's recv
-// prints them. A flag may come before the link or after it. A --reply-to that
+// prints them. A flag may come before the link or after it. A --in-reply-to that
 // is not a msg_id, or a flag send does not have, is refused before any message
 // is made.
 func TestSendFlags(t *testing.T) {
@@ -1212,7 +1212,7 @@ func TestSendFlags(t *testing.T) {
 	useMailbox(t, a.Dir())
 	const first, old = "11111111-2222-4333-8444-555555555555", "22222222-2222-4333-8444-555555555555"
 	var id bytes.Buffer
-	args := []string{"--subject", "re: yours", b.Link(), "--reply-to", first, "--supersedes", old}
+	args := []string{"--subject", "re: yours", b.Link(), "--in-reply-to", first, "--supersedes", old}
 	if err := do(ctx, "send", args, strings.NewReader("the answer"), &id, io.Discard); err != nil {
 		t.Fatal(err)
 	}
@@ -1221,7 +1221,7 @@ func TestSendFlags(t *testing.T) {
 		t.Fatalf("send printed %q", id.String())
 	}
 	for _, args := range [][]string{
-		{"--reply-to", ls[0]["id"].(string), b.Link()},
+		{"--in-reply-to", ls[0]["id"].(string), b.Link()},
 		{"--urgent", b.Link()},
 	} {
 		if err := do(ctx, "send", args, strings.NewReader("refused"), io.Discard, io.Discard); err == nil {
@@ -1662,7 +1662,7 @@ func TestFlagsAreWrittenWithTwoDashes(t *testing.T) {
 		if err := do(ctx, "send", []string{"bob", h}, nil, &out, io.Discard); err != nil {
 			t.Errorf("send bob %s: %v", h, err)
 		}
-		for _, want := range []string{"--subject text", "--reply-to msg_id", "--supersedes msg_id"} {
+		for _, want := range []string{"--subject text", "--in-reply-to msg_id", "--supersedes msg_id"} {
 			if !strings.Contains(out.String(), want) {
 				t.Errorf("send %s does not list %s:\n%s", h, want, out.String())
 			}
@@ -2007,7 +2007,7 @@ func TestRevokedAsk(t *testing.T) {
 	if err != nil || certs == nil {
 		t.Fatalf("revoke earlier: %+v, %v", certs, err)
 	}
-	held := `{"type":"certificates_revoked","address":"` + addr + `","through":` + strconv.FormatUint(certs.Through, 10) + "}\n"
+	held := `{"type":"certificates_revoked","address":"` + addr + `","revocation_serial":` + strconv.FormatUint(certs.Through, 10) + "}\n"
 	// By its link, as send takes one.
 	if out, warn, err := cmd(b, "revocation ask", srv.URL+"/to/"+addr); err != nil || out != held || warn != "" {
 		t.Fatalf("ask about a mailbox with its certificates revoked: %v %q %q", err, out, warn)
@@ -2091,11 +2091,11 @@ func TestCertRevokeEarlier(t *testing.T) {
 	lines := printed(t, out.String())
 	below := func(n string) json.Number { return json.Number(strconv.FormatUint(number(t, n)-1, 10)) }
 	if typesOf(lines) != "prekey certificates_revoked" || lines[0]["serial"] != json.Number(second) || !strings.HasSuffix(lines[0]["not_after"].(string), "Z") ||
-		lines[1]["address"] != b.Address().String() || lines[1]["through"] != below(second) || !strings.Contains(lines[1]["detail"].(string), "send it again") || errs.Len() != 0 {
+		lines[1]["address"] != b.Address().String() || lines[1]["revocation_serial"] != below(second) || !strings.Contains(lines[1]["detail"].(string), "send it again") || errs.Len() != 0 {
 		t.Fatalf("its output: %q %q", out.String(), errs.String())
 	}
 	out.Reset()
-	if err := do(ctx, "cert revoke-earlier", nil, strings.NewReader(""), &out, &errs); err != nil || printed(t, out.String())[1]["through"] != below(inUse(t, b)) {
+	if err := do(ctx, "cert revoke-earlier", nil, strings.NewReader(""), &out, &errs); err != nil || printed(t, out.String())[1]["revocation_serial"] != below(inUse(t, b)) {
 		t.Fatalf("a second time: %v %q", err, out.String())
 	}
 	var rec protocol.MailboxResponse
@@ -2198,7 +2198,7 @@ func TestCertRevokeEarlierWhenTheRenewalIsRefused(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "NOT published") || !strings.Contains(err.Error(), "sends no messages, and its server takes none") || typesOf(lines) != "certificates_revoked" {
 			t.Fatalf("refused %s: %v, stdout %q", code, err, out.String())
 		}
-		through := number(t, lines[0]["through"].(json.Number).String())
+		through := number(t, lines[0]["revocation_serial"].(json.Number).String())
 		if through < number(t, first) || inUse(t, b) != first {
 			t.Fatalf("refused %s, the revocation runs through %d, with %s in use and %s recorded", code, through, first, inUse(t, b))
 		}
@@ -2232,9 +2232,9 @@ func TestCertRevokeEarlierShownItsOwnRevocationSaysThatAlone(t *testing.T) {
 			srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
 				next.ServeHTTP(w, r)
 				hit := at == "its publish" && r.Method == http.MethodGet && r.URL.Path == own ||
-					at == "its renewal" && r.Method == http.MethodPut && r.URL.Path == own+"/revocations"
+					at == "its renewal" && r.Method == http.MethodPut && r.URL.Path == own+"/revocation"
 				if hit && once.CompareAndSwap(false, true) {
-					req := httptest.NewRequest(http.MethodPut, own+"/revocations", bytes.NewReader(body))
+					req := httptest.NewRequest(http.MethodPut, own+"/revocation", bytes.NewReader(body))
 					req.Header.Set("Content-Type", "application/json")
 					next.ServeHTTP(httptest.NewRecorder(), req)
 				}
@@ -2289,7 +2289,7 @@ func TestCertRevokeEarlierSaysWhatHappenedToEach(t *testing.T) {
 	prekey := refusing(protocol.CodeRateLimited, http.MethodPut, "/prekey")
 	srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
 		prekey(w, r, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			refusing(protocol.CodeUnavailable, http.MethodPut, "/revocations")(w, r, next)
+			refusing(protocol.CodeUnavailable, http.MethodPut, "/revocation")(w, r, next)
 		}))
 	})
 	out.Reset()
@@ -2352,7 +2352,7 @@ func TestCertRevokeEarlierSaysARevocationTakenAndNotKeptIsRevoked(t *testing.T) 
 			var out, errs bytes.Buffer
 			err := (&cli{stdout: &out, stderr: &errs}).remedied(own, c.r, full)
 			lines := printed(t, out.String())
-			if typesOf(lines) != c.types || lines[len(lines)-1]["through"] != json.Number("41") {
+			if typesOf(lines) != c.types || lines[len(lines)-1]["revocation_serial"] != json.Number("41") {
 				t.Fatalf("its output: %q", out.String())
 			}
 			said := fmt.Sprint(err)
@@ -2540,7 +2540,7 @@ func TestPrekeyLifetime(t *testing.T) {
 		}
 		return ls[0]
 	}
-	if l := say(); l["seconds"] != json.Number("691200") || l["lifetime"] != "8d" || l["detail"] != nil {
+	if l := say(); l["lifetime_seconds"] != json.Number("691200") || l["lifetime"] != "8d" || l["detail"] != nil {
 		t.Fatalf("the default: %v", l)
 	}
 	for _, c := range []struct{ arg, seconds, shown, every string }{
@@ -2559,7 +2559,7 @@ func TestPrekeyLifetime(t *testing.T) {
 		{"1w1d", "691200", "8d", ""},
 	} {
 		l := say("--prekey-lifetime=" + c.arg)
-		if l["seconds"] != json.Number(c.seconds) || l["lifetime"] != c.shown {
+		if l["lifetime_seconds"] != json.Number(c.seconds) || l["lifetime"] != c.shown {
 			t.Errorf("%s: %v", c.arg, l)
 		}
 		msg, _ := l["detail"].(string)
@@ -2676,7 +2676,7 @@ func TestCertPublishRevokedBelowTheServersSaysTheHigherOne(t *testing.T) {
 		t.Fatalf("cert publish-revoked below the server's: %v %q", err, errs.String())
 	}
 	ls := printed(t, out.String())
-	if typesOf(ls) != "certificates_revoked" || ls[0]["through"] != json.Number(strconv.FormatUint(n+100, 10)) || !strings.Contains(ls[0]["detail"].(string), "higher serial") {
+	if typesOf(ls) != "certificates_revoked" || ls[0]["revocation_serial"] != json.Number(strconv.FormatUint(n+100, 10)) || !strings.Contains(ls[0]["detail"].(string), "higher serial") {
 		t.Fatalf("printed %q", out.String())
 	}
 }

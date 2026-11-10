@@ -309,10 +309,10 @@ func TestCertificateTooLongsCode(t *testing.T) {
 		t.Errorf("certificate_lifetime_too_long %d", CodeCertificateLifetimeTooLong.Status())
 	}
 	var p Problem
-	if err := Unmarshal([]byte(`{"type":"`+CodeCertificateLifetimeTooLong.TypeURI()+`","code":"certificate_lifetime_too_long","status":400,"max_certificate_lifetime":3891600}`), &p); err != nil || p.CodeAt(400) != CodeCertificateLifetimeTooLong || p.MaxCertificateLifetime == nil || *p.MaxCertificateLifetime != 3891600 {
+	if err := Unmarshal([]byte(`{"type":"`+CodeCertificateLifetimeTooLong.TypeURI()+`","code":"certificate_lifetime_too_long","status":400,"max_certificate_lifetime_seconds":3891600}`), &p); err != nil || p.CodeAt(400) != CodeCertificateLifetimeTooLong || p.MaxCertificateLifetime == nil || *p.MaxCertificateLifetime != 3891600 {
 		t.Errorf("a certificate_lifetime_too_long problem: %+v, %v", p, err)
 	}
-	if err := Unmarshal([]byte(`{"code":"certificate_lifetime_too_long","status":400,"max_certificate_lifetime":-1}`), &p); err == nil {
-		t.Error("a negative max_certificate_lifetime was taken")
+	if err := Unmarshal([]byte(`{"code":"certificate_lifetime_too_long","status":400,"max_certificate_lifetime_seconds":-1}`), &p); err == nil {
+		t.Error("a negative max_certificate_lifetime_seconds was taken")
 	}
 }

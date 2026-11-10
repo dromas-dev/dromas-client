@@ -130,7 +130,7 @@ func TestEveryNumberIsAnIntegerInDigitsAlone(t *testing.T) {
 			w.Header().Set("Cache-Control", "no-store")
 			w.Header().Set("Retry-After", "30")
 			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`{"count":` + count + `,"messages":[],"next_cursor":null}` + "\n"))
+			_, _ = w.Write([]byte(`{"total_count":` + count + `,"messages":[],"next_cursor":null}` + "\n"))
 		}))
 		req := httptest.NewRequest(http.MethodGet, addr+"/messages", nil)
 		req.Header.Set("Authorization", "dromas-pass x")

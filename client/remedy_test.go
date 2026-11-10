@@ -149,7 +149,7 @@ func TestTheRemedySendsItsRenewalOnce(t *testing.T) {
 	if err != nil || r.Prekey != nil || client.Code(r.NotRenewed) != protocol.CodeRateLimited || r.Revoked == nil {
 		t.Fatalf("the remedy after a refusal with a Retry-After of a second: %+v, %v", r, err)
 	}
-	if strings.Join(order, " ") != "revocations prekey" {
+	if strings.Join(order, " ") != "revocation prekey" {
 		t.Fatalf("the remedy's uploads, in order: %v", order)
 	}
 	order = nil
@@ -238,7 +238,7 @@ func TestTheRemedyAsksForItsOwnRevocationFirst(t *testing.T) {
 	// The server takes the next revocation and its answer is lost.
 	lost := false
 	e.srv.SetMiddle(func(w http.ResponseWriter, req *http.Request, next http.Handler) {
-		if req.Method == http.MethodPut && strings.HasSuffix(req.URL.Path, "/revocations") && !lost {
+		if req.Method == http.MethodPut && strings.HasSuffix(req.URL.Path, "/revocation") && !lost {
 			lost = true
 			next.ServeHTTP(httptest.NewRecorder(), req)
 			http.Error(w, "gateway timeout", http.StatusGatewayTimeout)
@@ -274,7 +274,7 @@ func heldCertsOf(t *testing.T, e *env, a *client.Mailbox) *protocol.RevokedCerti
 	return certs
 }
 
-// A mailbox its server forgot reads its revocations at GET …/revocations, and
+// A mailbox its server forgot reads its revocations at GET …/revocation, and
 // the remedy's ask after a conflict does too (#258): the server holds a
 // revocation of the mailbox's certificates through T, two hours above the
 // certificate in use, made on another machine, and gives no answer to the
@@ -288,7 +288,7 @@ func TestTheRemedyOfAForgottenMailboxAsksItsRevocationsAgainAfterItsConflict(t *
 	T := numberOf(t, a) + 7200
 	publish(t, e, certsRecord(t, a.Dir(), T))
 	e.srv.Forget(a.Address())
-	revocations := "/v1/" + a.Address().String() + "/revocations"
+	revocations := "/v1/" + a.Address().String() + "/revocation"
 	first := true
 	e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
 		if r.Method == http.MethodGet && r.URL.Path == revocations && first {

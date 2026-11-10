@@ -120,7 +120,7 @@ func TestASenderWhoseMailboxIsForgottenIsRefusedByItsRevokedCertificates(t *test
 	if !keptList(b, a.Address()) || keptRevocation(b, a.Address()) {
 		t.Fatal("the revocation of certificates was not kept, or the address was taken as revoked")
 	}
-	if n, m := op.count(http.MethodGet, mailboxPath(a)+"/revocations"), op.count(http.MethodGet, mailboxPath(a)); n != 1 || m != 0 {
+	if n, m := op.count(http.MethodGet, mailboxPath(a)+"/revocation"), op.count(http.MethodGet, mailboxPath(a)); n != 1 || m != 0 {
 		t.Fatalf("the sender's revocations read %d times, its mailbox %d: want once, and never", n, m)
 	}
 }
@@ -484,7 +484,7 @@ func TestASendNamesItsStatement(t *testing.T) {
 		})
 		id := send(t, a, b, "names the prekey it was sealed to").ID
 		st, _ := e.srv.Prekey(b.Address())
-		if want := "statement=" + protocol.StatementHash(st); query != want {
+		if want := "prekey_sha256=" + protocol.StatementHash(st); query != want {
 			t.Errorf("under a certificate %v: a send's query: %q, want %q", working, query, want)
 		}
 		h := sha256.Sum256(body)
@@ -515,7 +515,7 @@ func TestASendNamesItsStatement(t *testing.T) {
 			next.ServeHTTP(w, r)
 		})
 		_, err = a.Send(context.Background(), b.Address(), "sealed to a statement five above")
-		if want := "statement=" + protocol.StatementHash(p.Statement()); query != want || client.Code(err) != protocol.CodePrekeySuperseded {
+		if want := "prekey_sha256=" + protocol.StatementHash(p.Statement()); query != want || client.Code(err) != protocol.CodePrekeySuperseded {
 			t.Errorf("under a certificate %v: a send to a statement five above: %q, %v; want %q and prekey_superseded", working, query, err, want)
 		}
 	}

@@ -112,7 +112,7 @@ func (b *MailboxResponse) Record() *Revocations {
 
 // CiphertextContentType is the media type of a message's ciphertext, the
 // body of a send and of a fetch: the age file's exact bytes.
-const CiphertextContentType = "application/octet-stream"
+const CiphertextContentType = "application/vnd.age"
 
 // MaxCiphertext is the most bytes a message's ciphertext may be, in a send and
 // in a fetch (PROTOCOL.md §11.10): every reader takes one of any size up to it,
@@ -133,7 +133,7 @@ type SendQuery struct {
 }
 
 // StatementParam is the name of a send's one query parameter.
-const StatementParam = "statement"
+const StatementParam = "prekey_sha256"
 
 // statementGrammar is a statement's hash as a send names it: 64 lowercase hex
 // digits.
@@ -211,7 +211,7 @@ type Receipt struct {
 // (CheckCursor). The poll interval is no member: every list answer, a 304
 // among them, carries it in Retry-After (PollInterval).
 type MessageList struct {
-	Count      int64         `json:"count"`
+	Count      int64         `json:"total_count"`
 	Messages   []MessageInfo `json:"messages"`
 	NextCursor *string       `json:"next_cursor"`
 }

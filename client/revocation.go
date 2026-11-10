@@ -399,7 +399,7 @@ func (b *Mailbox) lookupRevocation(ctx context.Context, a protocol.Address, l *l
 }
 
 // readRevocations reads the revocations this mailbox's server holds of a, GET
-// /v1/<a>/revocations (PROTOCOL.md §11.15), keeps what verifies of the record,
+// /v1/<a>/revocation (PROTOCOL.md §11.15), keeps what verifies of the record,
 // and with l marks a as answered in the command. It reports whether this
 // mailbox now holds a revocation of a. The server keeps and serves a record
 // whether or not a mailbox is at a, so a sender whose mailbox the server has
@@ -413,7 +413,7 @@ func (b *Mailbox) lookupRevocation(ctx context.Context, a protocol.Address, l *l
 // with nothing that verifies among them.
 func (b *Mailbox) readRevocations(ctx context.Context, a protocol.Address, l *lookups) (bool, error) {
 	var rec protocol.Revocations
-	path := "/v1/" + a.String() + "/revocations"
+	path := "/v1/" + a.String() + "/revocation"
 	resp, err := b.call(ctx, http.MethodGet, path, nil, nil, &rec)
 	var gone *RevokedError
 	switch {
@@ -440,7 +440,7 @@ func (b *Mailbox) readRevocations(ctx context.Context, a protocol.Address, l *lo
 	return false, err
 }
 
-// recordAnswer is nil for an answer to GET …/revocations that is one: a 200,
+// recordAnswer is nil for an answer to GET …/revocation that is one: a 200,
 // whose record holds the identity and at least one revocation
 // (protocol.Revocations.Check). Any other 2xx is no answer (PROTOCOL.md §12.3
 // check 7), named by its method and path.
@@ -1061,7 +1061,7 @@ func served(a protocol.Address, err error) error {
 // checking the record (PROTOCOL.md §11.15): taken only once what it shows
 // verifies (proved).
 func (b *Mailbox) publishRecord(ctx context.Context, a protocol.Address, rec *protocol.Revocations) error {
-	_, err := b.call(ctx, http.MethodPut, "/v1/"+a.String()+"/revocations", rec, nil, nil)
+	_, err := b.call(ctx, http.MethodPut, "/v1/"+a.String()+"/revocation", rec, nil, nil)
 	return err
 }
 

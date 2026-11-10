@@ -179,7 +179,7 @@ func (e *cli) passphrase(file string) ([]byte, error) {
 		closeTerminal(in, out)
 		return nil, client.ErrNoPassphrase
 	}
-	_, _ = fmt.Fprintf(e.stderr, "%s\n", line("waiting", "for", "passphrase", "identity_file", file, "detail",
+	_, _ = fmt.Fprintf(e.stderr, "%s\n", line("waiting", "reason", "passphrase", "identity_file", file, "detail",
 		"waiting for the identity key's passphrase at the terminal: its key file has a passphrase, and the mailbox's agent holds no key of it"))
 	pass, err := askTerminal(e.ctx, e.interrupt,
 		func() ([]byte, error) { return readPassphrase(in, out, fd, state, prompt) },

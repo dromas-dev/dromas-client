@@ -53,13 +53,13 @@ type own struct {
 	// did not make (noteServed).
 	notMade bool
 	// err is the error of the call that got no answer this mailbox can use, or
-	// the server's 410: GET /v1/<own>'s, or GET …/revocations' where the
+	// the server's 410: GET /v1/<own>'s, or GET …/revocation' where the
 	// server holds no mailbox. It is nil when every call was answered.
 	err error
 }
 
 // known reads this mailbox at its own server, GET /v1/<own>, and its
-// revocations, GET …/revocations, where the server holds no mailbox for it, and
+// revocations, GET …/revocation, where the server holds no mailbox for it, and
 // keeps what verifies of the mailbox's own revocations that either carries
 // (take, and a 410's record in call): what its identity revoked outlives the
 // mailbox (PROTOCOL.md §11.6, §11.15). It is the one read of the mailbox's own state at
@@ -85,9 +85,9 @@ func (b *Mailbox) known(ctx context.Context) (*own, error) {
 	case code(err) == protocol.CodeMailboxNotFound:
 		o.at = atNone
 		var held protocol.Revocations
-		resp, err := b.call(ctx, http.MethodGet, b.mailboxPath("/revocations"), nil, nil, &held)
+		resp, err := b.call(ctx, http.MethodGet, b.mailboxPath("/revocation"), nil, nil, &held)
 		if err == nil {
-			err = recordAnswer(b.mailboxPath("/revocations"), resp, &held)
+			err = recordAnswer(b.mailboxPath("/revocation"), resp, &held)
 		}
 		switch {
 		case errors.As(err, &gone):
@@ -152,7 +152,7 @@ type NotMade struct {
 	// mailbox made: one that certifies a working key it holds.
 	OwnCertificate bool `json:"own_certificate"`
 	// At is this machine's clock at that read.
-	At string `json:"at"`
+	At string `json:"read_at"`
 	// RenewedAbove is the serial of the statement of this mailbox's own its
 	// server took since that read, which a server takes only above the one it
 	// held, and zero, and not written, while it has taken none (recordTaken).

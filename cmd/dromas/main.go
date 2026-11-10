@@ -62,9 +62,9 @@ was wrong ("config_error") and nothing ran. 3, the command did its work and the 
 recv, messages were received as printed and the prekey, due for renewal, was not
 renewed ("renewal_failed"), its server served a prekey the mailbox did not make
 ("prekey_not_made"), the mailbox's ACL was not sent to its server
-("acl_not_sent"), its server held an ACL the mailbox had not sent, which it
-replaced ("acl_replaced"), or a callback ran out of tries ("exec_gave_up"); from send and outbox flush, the post went ahead
-though the mailbox's ACL was not sent ("acl_not_sent"); from prekey renew, its
+("acl_sync_failed"), its server held an ACL the mailbox had not sent, which it
+replaced ("acl_replaced"), or a callback ran out of attempts ("exec_failed"); from send and outbox flush, the post went ahead
+though the mailbox's ACL was not sent ("acl_sync_failed"); from prekey renew, its
 server served a prekey the mailbox did not make ("prekey_not_made"); from any
 command that called a server, the server stops taking this client's version
 from a date ("sunset"), or deems it deprecated from a date that has passed
@@ -207,7 +207,7 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 func runWith(ctx context.Context, opt client.Options, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	// Said once, so that a wait is not read as a hang.
 	opt.Waiting = func() {
-		_, _ = fmt.Fprintf(stderr, "%s\n", line("waiting", "for", "lock", "detail",
+		_, _ = fmt.Fprintf(stderr, "%s\n", line("waiting", "reason", "lock", "detail",
 			"waiting for this mailbox's lock: another command of this mailbox is running, and a mailbox's commands write its files one at a time"))
 	}
 	if opt.Versions == nil {
@@ -250,13 +250,13 @@ func (e *cli) versions(err error) error {
 	look := false
 	if at, passed, ok := v.Deprecation(); ok {
 		look = look || passed
-		if werr := e.out(line("deprecated", "version", own, "at", at.UTC().Format(protocol.TimeLayout), "detail", client.DeprecationWords(own, at))); werr != nil && err == nil {
+		if werr := e.out(line("deprecated", "version", own, "deprecated_at", at.UTC().Format(protocol.TimeLayout), "detail", client.DeprecationWords(own, at))); werr != nil && err == nil {
 			err = werr
 		}
 	}
 	if at, ok := v.Sunset(); ok {
 		look = true
-		if werr := e.out(line("sunset", "version", own, "at", at.UTC().Format(protocol.TimeLayout), "detail", client.SunsetWords(own, at))); werr != nil && err == nil {
+		if werr := e.out(line("sunset", "version", own, "sunset_at", at.UTC().Format(protocol.TimeLayout), "detail", client.SunsetWords(own, at))); werr != nil && err == nil {
 			err = werr
 		}
 	}

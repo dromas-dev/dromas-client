@@ -284,7 +284,7 @@ func TestAnAnswerThatStallsInItsBodyOverHTTP2IsSilent(t *testing.T) {
 			}
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`{"count":`))
+			_, _ = w.Write([]byte(`{"total_count":`))
 			w.(http.Flusher).Flush()
 			<-r.Context().Done()
 		})

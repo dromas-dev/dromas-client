@@ -29,7 +29,7 @@ func TestExecSaysASignalAndAFailedStart(t *testing.T) {
 	if status := report(err, io.Discard); status != 3 {
 		t.Fatalf("recv: exit %d, %v", status, err)
 	}
-	failed := ofType(t, stdout, "exec_failed")
+	failed := ofType(t, stdout, "exec_attempt_failed")
 	if len(failed) != 3 || failed[0]["signal"] != "killed" || failed[0]["exit_status"] != nil {
 		t.Fatalf("recv printed %s", stdout)
 	}
@@ -45,7 +45,7 @@ func TestExecSaysASignalAndAFailedStart(t *testing.T) {
 	if status := report(cmd(), io.Discard); status != 3 {
 		t.Fatalf("recv: exit %d: %s %s", status, out.String(), errs.String())
 	}
-	if failed := ofType(t, out.String(), "exec_failed"); len(failed) != 3 || failed[0]["start_error"] == nil {
+	if failed := ofType(t, out.String(), "exec_attempt_failed"); len(failed) != 3 || failed[0]["start_error"] == nil {
 		t.Fatalf("recv printed %s", out.String())
 	}
 }

@@ -167,7 +167,7 @@ func TestASunsetIsSaidAndNeedsALook(t *testing.T) {
 	v.srv.SetPolicy(protocol.ServerDocument{Sunsets: []protocol.Scheduled{{Version: "1.5", At: at.Format(protocol.TimeLayout)}}})
 	ls, status, errs := v.run("recv")
 	l := lineOf(ls, "sunset")
-	if status != 3 || l == nil || l["version"] != ownVersion || l["at"] != at.Format(protocol.TimeLayout) || !strings.Contains(l["detail"].(string), at.Format(protocol.TimeLayout)) {
+	if status != 3 || l == nil || l["version"] != ownVersion || l["sunset_at"] != at.Format(protocol.TimeLayout) || !strings.Contains(l["detail"].(string), at.Format(protocol.TimeLayout)) {
 		t.Fatalf("recv: exit %d, %v, %s", status, ls, errs)
 	}
 	ls, status, _ = v.run("status")
@@ -201,7 +201,7 @@ func TestADeprecationNeedsALookOnlyOnceItsDatePasses(t *testing.T) {
 	v.srv.SetPolicy(protocol.ServerDocument{Deprecations: []protocol.Scheduled{{Below: "1.6", At: at.Format(protocol.TimeLayout)}}})
 	ls, status, errs := v.run("recv")
 	l := lineOf(ls, "deprecated")
-	if status != 0 || l == nil || l["version"] != ownVersion || l["at"] != at.Format(protocol.TimeLayout) {
+	if status != 0 || l == nil || l["version"] != ownVersion || l["deprecated_at"] != at.Format(protocol.TimeLayout) {
 		t.Fatalf("recv before the date: exit %d, %v, %s", status, ls, errs)
 	}
 	if ls, status, _ := v.run("status"); status != 0 || attention(t, ls) != "" {
@@ -424,7 +424,7 @@ func TestTheVersionHeadersPrintNoneOfTheServersWords(t *testing.T) {
 		next.ServeHTTP(&forged{ResponseWriter: w, set: map[string]string{protocol.DeprecationHeader: "@1", protocol.SunsetHeader: "Sat, 02 Jan 2027 03:04:05 GMT"}}, r)
 	})
 	ls, status, _ := v.run("recv")
-	if status != 3 || lineOf(ls, "deprecated")["at"] != "1970-01-01T00:00:01Z" || lineOf(ls, "sunset")["at"] != "2027-01-02T03:04:05Z" {
+	if status != 3 || lineOf(ls, "deprecated")["deprecated_at"] != "1970-01-01T00:00:01Z" || lineOf(ls, "sunset")["sunset_at"] != "2027-01-02T03:04:05Z" {
 		t.Fatalf("the control: exit %d, %v", status, ls)
 	}
 }

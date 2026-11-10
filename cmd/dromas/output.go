@@ -197,8 +197,8 @@ func failure(err error) []any {
 		p := &ae.Problem
 		if p.Code.Known() {
 			kv = append(kv, "code", p.Code,
-				"limit", p.Limit, "prekey_serial", p.PrekeySerial,
-				"certificate_serial", p.CertificateSerial, "through", p.Through)
+				"limit", p.Limit, "quota_value", p.QuotaValue, "prekey_serial", p.PrekeySerial,
+				"certificate_serial", p.CertificateSerial, "revocation_serial", p.Through)
 			// A quota and a subject are names: only one this client knows is printed.
 			if p.QuotaID.Known() {
 				kv = append(kv, "quota_id", p.QuotaID)

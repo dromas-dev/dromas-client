@@ -184,7 +184,7 @@ func (r *recvRun) handle(ctx context.Context, ev client.Event) error {
 		r.print(line("dropped", "id", ev.ID, "detail", "from a sender this mailbox blocked: dropped"))
 	case client.EventMore:
 		if again := seconds(ev.Result.Again()); ev.Result.Paced > 0 {
-			r.print(line("paced", "retry_after", again, "detail",
+			r.print(line("rate_limited", "retry_after", again, "detail",
 				fmt.Sprintf("the server paces how many messages this mailbox takes out: the rest is still on the server; run recv again in %d seconds or later", again)))
 		} else {
 			r.print(line("more", "detail", "this run stopped at the most one drain takes: run recv again for the rest, which is still on the server"))
@@ -197,7 +197,7 @@ func (r *recvRun) handle(ctx context.Context, ev client.Event) error {
 	case client.EventNotMade:
 		r.print(notMadeLine(ev.Result.NotMade))
 	case client.EventACLFailed:
-		r.print(line("acl_not_sent", failure(fmt.Errorf("the next recv sends this mailbox's ACL, and dromas status says whether it went through: %w", ev.Err))...))
+		r.print(line("acl_sync_failed", failure(fmt.Errorf("the next recv sends this mailbox's ACL, and dromas status says whether it went through: %w", ev.Err))...))
 	case client.EventACLReplaced:
 		r.replaced = true
 		r.print(line("acl_replaced", "detail", "this mailbox's server held an ACL other than the one this mailbox last sent it, which another machine of this mailbox, someone holding its pass or the server itself wrote: this mailbox sent its own in its place"))
@@ -216,10 +216,10 @@ func (r *recvRun) handle(ctx context.Context, ev client.Event) error {
 		if client.NotReady(ev.Err) {
 			r.say(line("error", failure(ev.Err)...))
 		} else {
-			r.say(line("waiting", append([]any{"for", "server"}, failure(ev.Err)...)...))
+			r.say(line("waiting", append([]any{"reason", "server"}, failure(ev.Err)...)...))
 		}
 	case client.EventConnectionDropped:
-		r.say(line("waiting", "for", "connection", "held", seconds(ev.Hold.After), "wait", seconds(ev.Hold.Wait), "keep_alive", seconds(ev.Hold.KeepAlive),
+		r.say(line("waiting", "reason", "connection", "held_seconds", seconds(ev.Hold.After), "wait_seconds", seconds(ev.Hold.Wait), "keep_alive_seconds", seconds(ev.Hold.KeepAlive),
 			"detail", "the connection dropped while the list was held: the next one keeps alive, and the wait shortens only if that one drops too"))
 	case client.EventOwedGone:
 		r.print(line("exec_skipped", "id", ev.ID, "detail", "this message was owed its callback, and inbox/ no longer keeps it as recv wrote it: the callback did not run"))
@@ -241,11 +241,11 @@ func (r *recvRun) callback(ctx context.Context, id string, l []byte) error {
 		if how == nil {
 			return nil
 		}
-		r.print(line("exec_failed", append(append([]any{"id", id, "try", try}, how...),
+		r.print(line("exec_attempt_failed", append(append([]any{"id", id, "attempt", try}, how...),
 			"detail", fmt.Sprintf("the callback failed at try %d of at most %d", try, execTries))...))
 		if permanent || try == execTries {
 			r.gaveUp = true
-			r.print(line("exec_gave_up", "id", id, "tries", try, "detail",
+			r.print(line("exec_failed", "id", id, "attempts", try, "detail",
 				"the callback has no try left: inbox/ keeps the message, nothing tries it again, and dromas status lists it until dromas inbox clear-failed"))
 			return client.ErrGaveUp
 		}
@@ -258,7 +258,7 @@ func (r *recvRun) callback(ctx context.Context, id string, l []byte) error {
 }
 
 // runOnce runs --exec's program once, and says how it failed, as the members of
-// an "exec_failed" line, or nil where it exited 0. Its stdout and stderr go
+// an "exec_attempt_failed" line, or nil where it exited 0. Its stdout and stderr go
 // nowhere, so nothing it writes is read, and a sender's words it passes on reach
 // no line.
 func (r *recvRun) runOnce(ctx context.Context, stdin []byte) (permanent bool, how []any) {

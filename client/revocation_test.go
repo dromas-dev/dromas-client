@@ -325,7 +325,7 @@ func TestADrainReadsEachSendersRevocationsOnce(t *testing.T) {
 		"two, none held":                            c,
 		"two, a record served that does not verify": unproved,
 	} {
-		if n := op.count(http.MethodGet, mailboxPath(from)+"/revocations"); n != 1 {
+		if n := op.count(http.MethodGet, mailboxPath(from)+"/revocation"); n != 1 {
 			t.Errorf("a sender of %s: its revocations read %d times, want 1", name, n)
 		}
 		if n := op.count(http.MethodGet, mailboxPath(from)); n != 0 {
@@ -513,7 +513,7 @@ func TestNoAnswerAboutASenderRenewsNothing(t *testing.T) {
 	if n := op.count(http.MethodPut, mailboxPath(b)+"/prekey"); n != 0 {
 		t.Fatalf("the reader renewed its own prekey %d times", n)
 	}
-	if n := op.count(http.MethodGet, mailboxPath(a)+"/revocations"); n != 1 {
+	if n := op.count(http.MethodGet, mailboxPath(a)+"/revocation"); n != 1 {
 		t.Fatalf("%d reads of the sender's revocations, want 1", n)
 	}
 	if has(b, "renew-failed") {
@@ -674,7 +674,7 @@ func TestA410CarriesTheRecord(t *testing.T) {
 		{"a publish's", func(t *testing.T, e *env, forged func(http.ResponseWriter, *http.Request, http.Handler)) (call, protocol.Address, error) {
 			a := e.mailbox()
 			rec := revoke(t, e, a)
-			put := call{http.MethodPut, "/v1/" + a.Address().String() + "/revocations"}
+			put := call{http.MethodPut, "/v1/" + a.Address().String() + "/revocation"}
 			e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
 				if r.Method == put.method && r.URL.Path == put.path {
 					forged(w, r, next)
@@ -828,7 +828,7 @@ func TestAKeptRevocationRefusesAMessageWithNoLookup(t *testing.T) {
 				return false
 			})
 			res, err := b.Receive(context.Background())
-			read := lookup.count(http.MethodGet, "/v1/"+a.Address().String()+"/revocations")
+			read := lookup.count(http.MethodGet, "/v1/"+a.Address().String()+"/revocation")
 			if c.holds {
 				if err == nil || len(res.Refused) != 0 || len(res.Delivered) != 0 || e.srv.Count(b.Address()) != 1 || read != 1 {
 					t.Fatalf("no answer about a signer nothing kept covers: %v, %+v, %d left on the server, %d reads", err, res, e.srv.Count(b.Address()), read)
@@ -893,7 +893,7 @@ func TestARecordHandedOverKeepsEachPartThatVerifies(t *testing.T) {
 			t.Fatalf("%s was published with no mailbox", name)
 		}
 	}
-	if n := op.count(http.MethodPut, "/revocations"); n != 0 {
+	if n := op.count(http.MethodPut, "/revocation"); n != 0 {
 		t.Fatalf("%d records with a bad part reached the server", n)
 	}
 }

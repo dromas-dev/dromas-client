@@ -40,7 +40,7 @@ func TestAPacedDrainStopsAndResumes(t *testing.T) {
 				w.Header().Set("Content-Type", protocol.ProblemContentType)
 				w.Header().Set("Retry-After", "90") // past the fake's poll interval
 				w.WriteHeader(http.StatusTooManyRequests)
-				_ = json.NewEncoder(w).Encode(protocol.Problem{Type: protocol.CodeFetchRateLimited.TypeURI(), Title: "Fetch paced", Status: http.StatusTooManyRequests, Code: protocol.CodeFetchRateLimited, Detail: "paced"})
+				_ = json.NewEncoder(w).Encode(protocol.Problem{Type: protocol.CodeFetchRateLimited.TypeURI(), Title: "Fetch rate limited", Status: http.StatusTooManyRequests, Code: protocol.CodeFetchRateLimited, Detail: "paced"})
 				return
 			}
 		}
@@ -117,7 +117,7 @@ func TestAWaitTheServerAsksForIsAtMostADay(t *testing.T) {
 		if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/messages") {
 			w.Header().Set("Content-Type", "application/json")
 			w.Header().Set("Retry-After", huge)
-			_, _ = w.Write([]byte(`{"count":0,"messages":[],"next_cursor":null}`))
+			_, _ = w.Write([]byte(`{"total_count":0,"messages":[],"next_cursor":null}`))
 			return
 		}
 		next.ServeHTTP(w, r)

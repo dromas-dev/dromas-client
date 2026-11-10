@@ -7,7 +7,7 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-// Revocations is what a server holds about an address: the body of PUT /v1/<address>/revocations and the answer to GET
+// Revocations is what a server holds about an address: the body of PUT /v1/<address>/revocation and the answer to GET
 // of the same path (PROTOCOL.md §10.3). It proves itself: the document hashes
 // to the address and the signature verifies under the document's key, so it
 // is worth the same from any server or from a file a person handed over.
@@ -66,7 +66,7 @@ var ErrNotARecord = errors.New("not a revocation record: it holds no identity, o
 
 // Check refuses a record that holds no identity, or neither the revocation of
 // the address nor the revocation of its certificates, as ErrNotARecord. A
-// reader holds a server's answer to GET /v1/<address>/revocations to it
+// reader holds a server's answer to GET /v1/<address>/revocation to it
 // (PROTOCOL.md §12.3 check 7); whether each revocation verifies is another
 // matter, a record that does not verify counting as nothing shown.
 func (r *Revocations) Check() error {
