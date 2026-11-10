@@ -71,7 +71,7 @@ func (b *Mailbox) Send(ctx context.Context, to protocol.Address, body string) (*
 // the outbox, then sealed for the post: dated at the post, signed for that
 // peer only by this mailbox's signer (its identity, or the working key of its
 // current certificate), and encrypted with that signature to the peer's verified
-// prekey. On 409 stale_prekey it seals the SAME envelope
+// prekey. On 409 prekey_superseded it seals the SAME envelope
 // to the newer prekey, once. If the post fails, the envelope stays in the outbox:
 // retry with [Mailbox.Flush], never by sending again, or the peer gets it twice.
 // Once the server has it, the envelope and the server's receipt are kept in
@@ -292,7 +292,7 @@ func (b *Mailbox) flush(ctx context.Context) ([]*Sent, error) {
 // ([Mailbox.proved]), so no code of provedCodes' is
 // (TestNoAnswerProvedIsUndeliverable).
 var undeliverable = []protocol.Code{
-	protocol.CodeBadAddress, protocol.CodeTooLarge, protocol.CodeConflict, protocol.CodeSenderNotAllowed,
+	protocol.CodeInvalidAddress, protocol.CodeContentTooLarge, protocol.CodeSenderNotAllowed,
 }
 
 // post seals the outbox entry stem and posts it. On failure the entry stays
@@ -403,7 +403,7 @@ func (b *Mailbox) undelivered(stem string, why error) error {
 	return fmt.Errorf("%w (it can never be delivered: moved to outbox/failed/)", why)
 }
 
-// trySend seals the entry and posts it, and on 409 stale_prekey seals the
+// trySend seals the entry and posts it, and on 409 prekey_superseded seals the
 // same envelope to the newer prekey and posts that, once. A seal is made for
 // one post and never kept: what a message waited for in the outbox is its
 // envelope, and what it is dated and sealed to is the post's. It returns the
@@ -414,7 +414,7 @@ func (b *Mailbox) trySend(ctx context.Context, to protocol.Address, stem string,
 		return nil, nil, err
 	}
 	r, err := b.postSealed(ctx, to, req)
-	if code(err) == protocol.CodeStalePrekey {
+	if code(err) == protocol.CodePrekeySuperseded {
 		if req, err = b.seal(ctx, to, stem, l); err != nil {
 			return nil, nil, err
 		}
@@ -514,7 +514,7 @@ func (b *Mailbox) postSealed(ctx context.Context, to protocol.Address, s *sealed
 //
 // The envelope is read as its recipient will read it, so one the recipient
 // would refuse is never sealed. The padding is made here, for the prekey's
-// type: an encryption after stale_prekey may be to a prekey of the other
+// type: an encryption after prekey_superseded may be to a prekey of the other
 // type. It is outside what is signed, so the signature is over the envelope
 // as dated.
 func (b *Mailbox) seal(ctx context.Context, to protocol.Address, stem string, l *lookups) (*sealed, error) {

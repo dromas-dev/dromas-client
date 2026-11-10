@@ -220,7 +220,7 @@ func TestNoAnswerAboutARecipientPostsNothing(t *testing.T) {
 
 	// A code that would end a message, had the post been answered with it:
 	// each that undeliverable names, and revoked.
-	for _, code := range []protocol.Code{protocol.CodeBadAddress, protocol.CodeTooLarge, protocol.CodeConflict, protocol.CodeSenderNotAllowed, protocol.CodeRevoked} {
+	for _, code := range []protocol.Code{protocol.CodeInvalidAddress, protocol.CodeContentTooLarge, protocol.CodeSenderNotAllowed, protocol.CodeMailboxRevoked} {
 		op = watch(e, func(w http.ResponseWriter, r *http.Request) bool {
 			return r.Method == http.MethodGet && r.URL.Path == mailboxPath(a) && answer(w, code)
 		})
@@ -232,7 +232,7 @@ func TestNoAnswerAboutARecipientPostsNothing(t *testing.T) {
 		}
 	}
 	// A 404 whose body breaks §3.3 carries no code, though it says
-	// not_revoked before the member that breaks it.
+	// revocation_not_found before the member that breaks it.
 	for _, f := range problemBad(t) {
 		body, _ := os.ReadFile(f) //nolint:gosec // a test vector
 		op = watch(e, func(w http.ResponseWriter, r *http.Request) bool {
@@ -295,9 +295,9 @@ func TestNoAnswerAboutARecipientPostsNothing(t *testing.T) {
 	if n, _ := waiting(b, a.Address()); n != 1 || failed(b, a.Address()) != 0 {
 		t.Fatal("a post answered a bare 304 moved the message")
 	}
-	// The read after a 409 stale_prekey is a read like the first (#115):
+	// The read after a 409 prekey_superseded is a read like the first (#115):
 	// whatever code it carries, the entry stays and nothing more is posted.
-	for _, code := range []protocol.Code{protocol.CodeBadAddress, protocol.CodeTooLarge, protocol.CodeConflict, protocol.CodeSenderNotAllowed} {
+	for _, code := range []protocol.Code{protocol.CodeInvalidAddress, protocol.CodeContentTooLarge, protocol.CodeSenderNotAllowed} {
 		reads := 0
 		op = watch(e, func(w http.ResponseWriter, r *http.Request) bool {
 			switch {
@@ -305,15 +305,15 @@ func TestNoAnswerAboutARecipientPostsNothing(t *testing.T) {
 				reads++
 				return reads > 1 && answer(w, code)
 			case r.Method == http.MethodPost && r.URL.Path == postTo(a):
-				return answer(w, protocol.CodeStalePrekey)
+				return answer(w, protocol.CodePrekeySuperseded)
 			}
 			return false
 		})
 		if _, err := b.Flush(ctx); err == nil || !strings.Contains(err.Error(), "kept in the outbox") {
-			t.Fatalf("the read after a stale_prekey answered %s: %v", code, err)
+			t.Fatalf("the read after a prekey_superseded answered %s: %v", code, err)
 		}
 		if n, _ := waiting(b, a.Address()); n != 1 || failed(b, a.Address()) != 0 || op.count(http.MethodPost, postTo(a)) != 1 {
-			t.Fatalf("the read after a stale_prekey answered %s moved the message or posted again: %q", code, op.seen)
+			t.Fatalf("the read after a prekey_superseded answered %s moved the message or posted again: %q", code, op.seen)
 		}
 	}
 }
@@ -410,7 +410,7 @@ func TestAMessageThatWaitedIsSealedAtThePost(t *testing.T) {
 
 // A message that waited while its recipient renewed, revoking nothing, goes
 // under the renewal once the mailbox has recorded it, whatever the server takes:
-// here one that takes any post, as a server need not answer stale_prekey
+// here one that takes any post, as a server need not answer prekey_superseded
 // (#91: a seal kept from before the renewal is never posted as it is).
 func TestAMessageThatWaitedGoesUnderTheRenewalTheMailboxRecorded(t *testing.T) {
 	t.Parallel()
@@ -561,7 +561,7 @@ func TestASendReadsTheMailboxOnceForEachPost(t *testing.T) {
 // A sender's retry after a lost answer is a second ciphertext with the same
 // msg_id, which its reader drops as a duplicate. A server that lists that
 // copy under an id that is not the SHA-256 of its ciphertext gets it refused
-// bad_id, as any message under a wrong id is, and the drain goes on: the
+// id_mismatch, as any message under a wrong id is, and the drain goes on: the
 // verdict a duplicate gets carries what its checks found, and Receive never
 // panics on it (#264).
 func TestADuplicateUnderAWrongIDIsRefusedNotAPanic(t *testing.T) {
@@ -629,7 +629,7 @@ func TestADuplicateUnderAWrongIDIsRefusedNotAPanic(t *testing.T) {
 		}()
 		res, err = a.Receive(ctx)
 	}()
-	if err != nil || len(res.Delivered) != 1 || len(res.Refused) != 1 || res.Refused[0].Code != client.RefusedID {
+	if err != nil || len(res.Delivered) != 1 || len(res.Refused) != 1 || res.Refused[0].Code != client.RefusedIDMismatch {
 		t.Errorf("a drain with a duplicate under a wrong id: %+v, %v", res, err)
 	}
 }
@@ -725,7 +725,7 @@ func TestAskingAtAnyTimeAndARevocationHandedOver(t *testing.T) {
 		t.Fatalf("a revocation of certificates handed over: %+v, %v", held, err)
 	}
 	messageAs(t, e, a, c, stolen, "signed by the key that was taken")
-	if res := receive(t, c); len(res.Delivered) != 0 || len(res.Refused) != 1 || res.Refused[0].Code != client.RefusedCertificate {
+	if res := receive(t, c); len(res.Delivered) != 0 || len(res.Refused) != 1 || res.Refused[0].Code != client.RefusedCertificateRevoked {
 		t.Fatalf("a thief's message, the revocation handed over and the server hiding it: %+v", res)
 	}
 	e.srv.SetMiddle(nil)

@@ -55,7 +55,7 @@ func finishedOwn(err error) bool {
 	return errors.As(err, &gone) && gone.Own
 }
 
-// A read answered 410 revoked with a record that does not verify is that
+// A read answered 410 mailbox_revoked with a record that does not verify is that
 // read's answer: nothing more is asked of it, so a proof's own reads are never
 // proved again (proved), and a server that answers so at every read gets one
 // (#353).
@@ -75,7 +75,7 @@ func TestARevokedReadWhoseRecordDoesNotVerifyIsNotReadAgain(t *testing.T) {
 			e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
 				// Bounded, so that a mailbox that reads again still ends.
 				if r.Method == http.MethodGet && r.URL.Path == mailboxPath(read) && reads.Add(1) <= 10 {
-					forge.Refuse(w, protocol.CodeRevoked, func(p *protocol.Problem) { p.Record = bad })
+					forge.Refuse(w, protocol.CodeMailboxRevoked, func(p *protocol.Problem) { p.Record = bad })
 					return
 				}
 				next.ServeHTTP(w, r)
@@ -86,7 +86,7 @@ func TestARevokedReadWhoseRecordDoesNotVerifyIsNotReadAgain(t *testing.T) {
 			} else {
 				_, err = a.Resolve(ctx, b.Address())
 			}
-			if client.Code(err) != protocol.CodeRevoked || finishedOwn(err) || reads.Load() != 1 {
+			if client.Code(err) != protocol.CodeMailboxRevoked || finishedOwn(err) || reads.Load() != 1 {
 				t.Errorf("a read of %s answered 410 with a record that does not verify: %v, after %d reads of it", of, err, reads.Load())
 			}
 		})
@@ -214,9 +214,9 @@ func (l *partwayLog) middle(t *testing.T, s partwaySet, rec, bad *protocol.Revoc
 			}
 			switch v {
 			case partwayRecord:
-				forge.Refuse(got, protocol.CodeRevoked, func(p *protocol.Problem) { p.Record = rec })
+				forge.Refuse(got, protocol.CodeMailboxRevoked, func(p *protocol.Problem) { p.Record = rec })
 			case partwayServed, partwayUnserved:
-				forge.Refuse(got, protocol.CodeRevoked, func(p *protocol.Problem) { p.Record = bad })
+				forge.Refuse(got, protocol.CodeMailboxRevoked, func(p *protocol.Problem) { p.Record = bad })
 			case partwayCert:
 				forge.Refuse(got, protocol.CodeCertificateRevoked)
 			case partwayRead:
@@ -521,7 +521,7 @@ func partwayHides(e *env, a *client.Mailbox) func(int, http.ResponseWriter, *htt
 }
 
 // forgetsAtUpload is the state's operator that forgets mailbox a as its first
-// prekey upload arrives, which the server then answers 404 no_such_mailbox
+// prekey upload arrives, which the server then answers 404 mailbox_not_found
 // (#386).
 func forgetsAtUpload(e *env, a *client.Mailbox) func(int, http.ResponseWriter, *http.Request, http.Handler) bool {
 	var forgot atomic.Bool

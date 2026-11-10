@@ -75,7 +75,7 @@ func AcceptsSender(declared []string, t string) bool {
 // Every ParseIdentity error wraps one of these: the document breaks its
 // format, its key fails the key checks, or it is a well-formed document of a
 // key type this package does not define. A server answers the first with
-// identity_mismatch, the second with bad_key and the third with
+// identity_mismatch, the second with invalid_key and the third with
 // unsupported_key_type.
 var (
 	ErrIdentityFormat = errors.New("not an identity document")

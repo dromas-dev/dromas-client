@@ -79,7 +79,7 @@ func TestAPassUnderAnotherCertificateIsToldTheOneTheServerTakes(t *testing.T) {
 	}
 	took := servedCertificate(t, e, b)
 	_, err := b.Receive(context.Background())
-	if client.Code(err) != protocol.CodeCertificateNotCurrent || !strings.Contains(err.Error(), fmt.Sprintf("another signer than the one it signs with, certificate %d", took)) || numberOf(t, b) == took {
+	if client.Code(err) != protocol.CodeCertificateSuperseded || !strings.Contains(err.Error(), fmt.Sprintf("another signer than the one it signs with, certificate %d", took)) || numberOf(t, b) == took {
 		t.Fatalf("recv after a renewal on another machine, which the server took at %d: %v", took, err)
 	}
 }
@@ -191,7 +191,7 @@ func TestARestoredMailboxRevokesWhatTheLostMachineNeverPublished(t *testing.T) {
 	messageAs(t, e, r, reader, taken, "signed with the key the lost machine never published")
 	send(t, r, reader, "from the restored mailbox")
 	res := receive(t, reader)
-	if len(res.Delivered) != 1 || bodyOf(t, res.Delivered[0]) != "from the restored mailbox" || len(res.Refused) != 1 || res.Refused[0].Code != client.RefusedCertificate {
+	if len(res.Delivered) != 1 || bodyOf(t, res.Delivered[0]) != "from the restored mailbox" || len(res.Refused) != 1 || res.Refused[0].Code != client.RefusedCertificateRevoked {
 		t.Fatalf("a drain of the taker's message and the restored mailbox's: %+v", res)
 	}
 }
@@ -232,7 +232,7 @@ func TestALostMachinesFastClockDoesNotDelayTheRemedy(t *testing.T) {
 	messageAs(t, e, r, reader, taken, "signed with the lost machine's key")
 	send(t, r, reader, "from the owner, at once")
 	res := receive(t, reader)
-	if len(res.Delivered) != 1 || bodyOf(t, res.Delivered[0]) != "from the owner, at once" || len(res.Refused) != 1 || res.Refused[0].Code != client.RefusedCertificate {
+	if len(res.Delivered) != 1 || bodyOf(t, res.Delivered[0]) != "from the owner, at once" || len(res.Refused) != 1 || res.Refused[0].Code != client.RefusedCertificateRevoked {
 		t.Fatalf("a drain of the taker's message and the owner's: %+v", res)
 	}
 }

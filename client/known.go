@@ -25,11 +25,11 @@ const (
 	// atUnread is a read that got no answer this mailbox can use.
 	atUnread ownAt = iota
 	// atNone is a server that holds no mailbox at this address: never
-	// registered, or forgotten (404 no_such_mailbox).
+	// registered, or forgotten (404 mailbox_not_found).
 	atNone
 	// atServed is an active mailbox, served.
 	atServed
-	// atRevoked is the address answered revoked (410 revoked), whether or not
+	// atRevoked is the address answered revoked (410 mailbox_revoked), whether or not
 	// the record it carries verifies.
 	atRevoked
 )
@@ -82,7 +82,7 @@ func (b *Mailbox) known(ctx context.Context) (*own, error) {
 	case err == nil:
 		o.at = atServed
 		rec = br.Record()
-	case code(err) == protocol.CodeNoSuchMailbox:
+	case code(err) == protocol.CodeMailboxNotFound:
 		o.at = atNone
 		var held protocol.Revocations
 		resp, err := b.call(ctx, http.MethodGet, b.mailboxPath("/revocations"), nil, nil, &held)
@@ -94,13 +94,13 @@ func (b *Mailbox) known(ctx context.Context) (*own, error) {
 			return o, err
 		case err == nil:
 			rec = &held
-		case code(err) == protocol.CodeNotRevoked:
+		case code(err) == protocol.CodeRevocationNotFound:
 			// The one answer of none held (api/openapi.yaml): any other is no
 			// answer.
 		default:
 			o.err = err
 		}
-	case code(err) == protocol.CodeRevoked:
+	case code(err) == protocol.CodeMailboxRevoked:
 		// A revoked address is answered with its record, which proves itself:
 		// this one carried none that verifies.
 		o.at, o.err = atRevoked, err

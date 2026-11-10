@@ -461,7 +461,7 @@ func retryAfter(v string) time.Duration {
 // (every 401, PROTOCOL.md §11.3), which a new pass may cure.
 func passRefused(c protocol.Code) bool {
 	switch c {
-	case protocol.CodeUnauthorized, protocol.CodePassExpired, protocol.CodeCertificateNotCurrent, protocol.CodeCertificateRevoked:
+	case protocol.CodeInvalidPass, protocol.CodePassExpired, protocol.CodeCertificateSuperseded, protocol.CodeCertificateRevoked:
 		return true
 	}
 	return false
@@ -494,7 +494,7 @@ func (b *Mailbox) ownerWith(ctx context.Context, method, path string, hdr http.H
 		if attempt > 0 || !passRefused(code(err)) {
 			return resp, err
 		}
-		if code(err) == protocol.CodeCertificateNotCurrent {
+		if code(err) == protocol.CodeCertificateSuperseded {
 			if _, err := b.known(ctx); err != nil {
 				return nil, err
 			}

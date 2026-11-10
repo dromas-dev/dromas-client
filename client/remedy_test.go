@@ -63,7 +63,7 @@ func TestTheRemedyWhenTheRenewalIsRefused(t *testing.T) {
 	// owner's own unread messages under that certificate: nobody can tell them
 	// apart.
 	messageAs(t, e, a, reader, taken, "signed with the taken working key")
-	if res := receive(t, reader); len(res.Delivered) != 0 || len(res.Refused) != 1 || res.Refused[0].Code != client.RefusedCertificate {
+	if res := receive(t, reader); len(res.Delivered) != 0 || len(res.Refused) != 1 || res.Refused[0].Code != client.RefusedCertificateRevoked {
 		t.Fatalf("the taker's message, after the revocation: %+v", res)
 	}
 
@@ -104,7 +104,7 @@ func TestTheRemedyRevokesWhateverTheRenewalMeets(t *testing.T) {
 	e := newWorkEnv(t)
 	a := e.mailbox()
 	inUse := numberOf(t, a)
-	for _, code := range []protocol.Code{protocol.CodeUnavailable, protocol.CodePassExpired, protocol.CodeBadKey, protocol.CodeRateLimited} {
+	for _, code := range []protocol.Code{protocol.CodeUnavailable, protocol.CodePassExpired, protocol.CodeInvalidKey, protocol.CodeRateLimited} {
 		says(e, code, http.MethodPut, "/prekey")
 		r, err := a.RenewAndRevoke(ctx)
 		if err != nil || r == nil || r.Prekey != nil || r.NotRevoked != nil || client.Code(r.NotRenewed) != code || r.Revoked == nil || r.Revoked.Through != r.Below-1 {
@@ -194,7 +194,7 @@ func TestTheRemedySendsNoRenewalThatWaited(t *testing.T) {
 	messageAs(t, e, a, reader, copied, "signed with the waiting renewal's working key")
 	send(t, a, reader, "from the owner")
 	res := receive(t, reader)
-	if len(res.Delivered) != 1 || bodyOf(t, res.Delivered[0]) != "from the owner" || len(res.Refused) != 1 || res.Refused[0].Code != client.RefusedCertificate {
+	if len(res.Delivered) != 1 || bodyOf(t, res.Delivered[0]) != "from the owner" || len(res.Refused) != 1 || res.Refused[0].Code != client.RefusedCertificateRevoked {
 		t.Fatalf("a drain of the copy's message and the owner's: %+v", res)
 	}
 }

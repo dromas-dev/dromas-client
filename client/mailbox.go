@@ -95,7 +95,7 @@ type Options struct {
 	// (checkRevocationFile, writeRevocationFile).
 	RevocationFile string
 	// Restore has Init acknowledge a restore (dromas init --restore): where
-	// prekeys/ holds keys the state names nowhere (StateNotTheKeys), it adopts
+	// prekeys/ holds keys the state names nowhere (RestoreRequired), it adopts
 	// them and renews, so the mailbox runs again; where it holds none, it
 	// changes nothing ([Mailbox.Restored]). Without it, Init is refused on such a state, as every
 	// command that receives, sends or renews is. Only Init reads it, and only

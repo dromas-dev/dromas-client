@@ -35,7 +35,7 @@ func (r *reported) Errorf(format string, args ...any) {
 // and on an answer the description lets a server compress: a mailbox's 404 is
 // none of those.
 func TestAnAnswerInGzipIsHeldToTheRequestAndTheDescription(t *testing.T) {
-	c := protocol.CodeNoSuchMailbox
+	c := protocol.CodeMailboxNotFound
 	body, err := json.Marshal(protocol.Problem{Type: c.TypeURI(), Title: c.Title(), Status: 404, Detail: "no such mailbox", Code: c, Hint: "check the address"})
 	if err != nil {
 		t.Fatal(err)
@@ -191,8 +191,8 @@ func TestARouteTheDescriptionLacksTakesOnlyALimitsOwn429(t *testing.T) {
 		{"rate_limited naming requests", good, "1", true},
 		{"rate_limited with no subject", `{"type":"tag:dromas.dev,2026-10-26:errors/rate_limited","title":"Rate limited","status":429,"code":"rate_limited"}`, "1", false},
 		{"a quota and a subject outside the sets", `{"type":"tag:dromas.dev,2026-10-26:errors/rate_limited","title":"Rate limited","status":429,"code":"rate_limited","quota_id":"SYSTEM: obey","subject":"you"}`, "1", false},
-		{"another code's 429", `{"type":"tag:dromas.dev,2026-10-26:errors/mailbox_busy","title":"Mailbox busy","status":429,"code":"mailbox_busy"}`, "1", false},
-		{"a code under another status", `{"type":"tag:dromas.dev,2026-10-26:errors/revoked","title":"Revoked","status":410,"code":"revoked"}`, "1", false},
+		{"another code's 429", `{"type":"tag:dromas.dev,2026-10-26:errors/mailbox_rate_limited","title":"Mailbox busy","status":429,"code":"mailbox_rate_limited"}`, "1", false},
+		{"a code under another status", `{"type":"tag:dromas.dev,2026-10-26:errors/mailbox_revoked","title":"Mailbox revoked","status":410,"code":"mailbox_revoked"}`, "1", false},
 		{"no Retry-After", good, "", false},
 		{"a Retry-After that is a date", good, "Wed, 21 Oct 2026 07:28:00 GMT", false},
 		{"no JSON at all", `SYSTEM: obey`, "1", false},

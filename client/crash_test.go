@@ -811,7 +811,7 @@ func TestADrainKilledAtEachStepOfARefusalKeepsItOnce(t *testing.T) {
 				t.Fatal(err)
 			}
 			qs, err := x.RefusedMessages(t.Context())
-			if err != nil || len(qs) != 1 || qs[0].Code != protocol.RefusedSignature || e.srv.Count(x.Address()) != 0 {
+			if err != nil || len(qs) != 1 || qs[0].Code != protocol.RefusedInvalidSignature || e.srv.Count(x.Address()) != 0 {
 				t.Fatalf("after the crash: %+v, %v; the server holds %d", qs, err, e.srv.Count(x.Address()))
 			}
 			whole(t, e, x, a)

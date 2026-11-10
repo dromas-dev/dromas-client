@@ -105,8 +105,8 @@ func FuzzSplitPlaintext(f *testing.F) {
 // as the protocol reads one, and leaves each member as its raw JSON;
 // envelopeSender takes only a line objectFields takes, in UTF-8, and gives
 // from as the string it holds and the identity document as the bytes whose
-// one base64 encoding the line holds. A refusal is bad_envelope or
-// bad_identity, with nothing beside it.
+// one base64 encoding the line holds. A refusal is invalid_envelope or
+// invalid_identity, with nothing beside it.
 func FuzzEnvelopeSender(f *testing.F) {
 	seeds(f, "envelope/*.json", "json/*.json", "message/*.line")
 	f.Fuzz(func(t *testing.T, line []byte) {
@@ -114,7 +114,7 @@ func FuzzEnvelopeSender(f *testing.F) {
 		switch {
 		case ferr != nil && fields != nil:
 			t.Fatalf("objectFields refused, with %d fields beside it", len(fields))
-		case ferr != nil && !isRefusal(ferr, RefusedEnvelope):
+		case ferr != nil && !isRefusal(ferr, RefusedInvalidEnvelope):
 			t.Fatalf("objectFields refused as %v", ferr)
 		case ferr == nil:
 			if why := independentlyRead(line); why != "" {
@@ -132,7 +132,7 @@ func FuzzEnvelopeSender(f *testing.F) {
 			if doc != nil || from != "" {
 				t.Fatalf("refused, with %q and %q beside it", doc, from)
 			}
-			if !isRefusal(err, RefusedEnvelope) && !isRefusal(err, RefusedIdentity) {
+			if !isRefusal(err, RefusedInvalidEnvelope) && !isRefusal(err, RefusedInvalidIdentity) {
 				t.Fatalf("refused as %v", err)
 			}
 			return
@@ -319,7 +319,7 @@ func FuzzExamine(f *testing.F) {
 	now := fuzzNow(f)
 	me := fuzzIdentity(f, "b").Address()
 	seeds(f, "plain/*.txt", "message/a-to-b.plain")
-	codes := []string{RefusedMessage, RefusedEnvelope, RefusedIdentity, RefusedKeyType, RefusedSignature, RefusedAttribution, RefusedStale, RefusedFuture}
+	codes := []string{RefusedMalformedMessage, RefusedInvalidEnvelope, RefusedInvalidIdentity, RefusedKeyType, RefusedInvalidSignature, RefusedSenderMismatch, RefusedRecipientMismatch, RefusedMessageExpired, RefusedMessageNotYetValid}
 	f.Fuzz(func(t *testing.T, plaintext []byte) {
 		m, found, err := Examine(plaintext, me, now)
 		opened, oerr := OpenSigned(plaintext, me, now)

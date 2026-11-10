@@ -63,13 +63,13 @@ dr_api(){ # <METHOD> <PATH> [body file] [curl args…] → the body on stdout, a
   mv "$DR/response.body" "$DR/error.json" 2> /dev/null; mv "$DR/response.meta" "$DR/error.meta" 2> /dev/null
   s=$(dr_status); c=$(dr_code); w=$(dr_wait); q=; u=; v=
   [ "$c" = rate_limited ] && q=$(dr_member quota_id "$DR_QUOTAS") && u=$(dr_member subject '["mailbox","ip"]')
-  [ "$c" = version_retired ] && v=$(jq -r '.min_version | strings | select(test("\\A(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(\\.(0|[1-9][0-9]*))?\\z"))' "$DR/error.json" 2> /dev/null)      # a version is shown only once it has a policy version's form
+  [ "$c" = client_version_unsupported ] && v=$(jq -r '.min_version | strings | select(test("\\A(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(\\.(0|[1-9][0-9]*))?\\z"))' "$DR/error.json" 2> /dev/null)      # a version is shown only once it has a policy version's form
   [ -n "$s" ] || { dr_err "no answer from $DR_SERVER_URL"; return 1; }      # curl's words, which can quote what the server sent (a certificate's name), are not printed
   jq -cn --argjson s "$s" --arg c "$c" --arg w "$w" --arg q "$q" --arg u "$u" --arg v "$v" --arg own "$DR_VERSION" '{type:"error", status:$s} + (if $c != "" then {code:$c} else {} end) + (if $q != "" then {quota_id:$q} else {} end) + (if $u != "" then {subject:$u} else {} end) + (if $v != "" then {min_version:$v} else {} end) + (if $w != "" then {retry_after:($w | tonumber)} else {} end) +
-    {detail:("ERROR \($s)" + (if $c != "" then " \($c)" elif $s >= 300 and $s <= 399 then ": a redirect, which this client never follows: the API answers where it is called" else ": an answer this client does not know" end) + (if $c == "version_retired" then ": this server no longer takes this client'"'"'s version, \($own): upgrade this client" + (if $v != "" then "; the oldest it takes is \($v)" else "" end) else "" end) + (if $q != "" then ": the limit \($q)" else "" end) + (if $u == "mailbox" then ", counted against this mailbox" elif $u == "ip" then ", counted against this machine'"'"'s IP address" else "" end) + (if $w != "" then "; the server asks to wait \($w) seconds" else "" end))}' >&2; return 1
+    {detail:("ERROR \($s)" + (if $c != "" then " \($c)" elif $s >= 300 and $s <= 399 then ": a redirect, which this client never follows: the API answers where it is called" else ": an answer this client does not know" end) + (if $c == "client_version_unsupported" then ": this server no longer takes this client'"'"'s version, \($own): upgrade this client" + (if $v != "" then "; the oldest it takes is \($v)" else "" end) else "" end) + (if $q != "" then ": the limit \($q)" else "" end) + (if $u == "mailbox" then ", counted against this mailbox" elif $u == "ip" then ", counted against this machine'"'"'s IP address" else "" end) + (if $w != "" then "; the server asks to wait \($w) seconds" else "" end))}' >&2; return 1
 }
 DR_TYPE='tag:dromas.dev,2026-10-26:errors/'      # an error's type is this and its code, which names the problem and resolves to nothing (PROTOCOL.md §11.3): a code counts only beside its own
-DR_CODES='{"bad_request":400,"bad_address":400,"identity_mismatch":400,"bad_key":400,"prekey_not_new":400,"prekey_time":400,"certificate_too_long":400,"unsupported_key_type":400,"wrong_recipient_type":400,"bad_revocation":400,"unauthorized":401,"pass_expired":401,"certificate_not_current":401,"certificate_revoked":401,"unknown_sender":403,"sender_revoked":403,"sender_not_allowed":403,"sender_key_type":403,"adopt_key_refused":403,"no_such_mailbox":404,"no_such_message":404,"not_revoked":404,"conflict":409,"mailbox_changed":409,"stale_prekey":409,"prekey_expired":409,"request_timeout":408,"revoked":410,"version_retired":410,"precondition_failed":412,"too_large":413,"rate_limited":429,"fetch_paced":429,"mailbox_full":429,"mailbox_busy":429,"unavailable":503}'      # every code, and its status (PROTOCOL.md §11.3)
+DR_CODES='{"invalid_request":400,"invalid_address":400,"identity_mismatch":400,"invalid_key":400,"prekey_already_used":400,"invalid_validity_period":400,"certificate_lifetime_too_long":400,"unsupported_key_type":400,"invalid_recipients":400,"invalid_revocation":400,"invalid_pass":401,"pass_expired":401,"certificate_superseded":401,"certificate_revoked":401,"sender_not_registered":403,"sender_revoked":403,"sender_not_allowed":403,"unsupported_sender_key_type":403,"invalid_adopt_key":403,"mailbox_not_found":404,"message_not_found":404,"revocation_not_found":404,"mailbox_already_exists":409,"serial_too_low":409,"concurrent_modification":409,"prekey_superseded":409,"prekey_expired":409,"request_timeout":408,"mailbox_revoked":410,"client_version_unsupported":410,"precondition_failed":412,"content_too_large":413,"rate_limited":429,"fetch_rate_limited":429,"mailbox_full":429,"mailbox_rate_limited":429,"unavailable":503}'      # every code, and its status (PROTOCOL.md §11.3)
 DR_QUOTAS='["polls","pages","calls","sends","renewals","certificates","certificate_revocations","registrations","registrations_range","misses","misses_range","sends_before_pass","sends_before_pass_range","requests","requests_range"]'      # every limit a rate_limited may name in quota_id (PROTOCOL.md §11.5)
 dr_met(){ # <curl meta> → keeps the earliest Deprecation and Sunset an answer of this command carried, as Unix times, in $DR/met.deprecation and $DR/met.sunset, which the command line prints at its end (dr_said): a Deprecation only as a Structured Field Date, @ and an integer of up to 15 digits with an optional - (RFC 9745 §2.1, RFC 9651 §3.3.7), and a Sunset only as an HTTP-date in its preferred form (RFC 8594, RFC 9110 §5.6.7). Any other value is none, and neither is ever printed as it came (PROTOCOL.md §11.17, §11.3)
   local d n t
@@ -83,7 +83,7 @@ dr_earliest(){ [ -s "$1" ] && [ "$(cat "$1")" -le "$2" ] || printf '%s\n' "$2" >
 dr_said(){ # → the lines the Go client prints at a command's end of what its answers said of this client's version (dr_met): a "deprecated" line and a "sunset" line, each with the date, in this script's own words. Neither changes the exit status: this script has no "needs a look" status. It reads no server's document, so it says nothing of an upgrade
   local t at
   if t=$(cat "$DR/met.deprecation" 2> /dev/null) && at=$(jq -nr --argjson t "$t" '$t | todate' 2> /dev/null); then dr_out deprecated --arg version "$DR_VERSION" --arg at "$at" --arg detail "the server deems this client's version, $DR_VERSION, deprecated from $at, by the Deprecation its last answer carried: it still takes it, and an upgrade of this client is due"; fi
-  if t=$(cat "$DR/met.sunset" 2> /dev/null) && at=$(jq -nr --argjson t "$t" '$t | todate' 2> /dev/null); then dr_out sunset --arg version "$DR_VERSION" --arg at "$at" --arg detail "the server stops taking this client's version, $DR_VERSION, from $at, by the Sunset its last answer carried: upgrade this client, whose calls it refuses as version_retired from then on"; fi
+  if t=$(cat "$DR/met.sunset" 2> /dev/null) && at=$(jq -nr --argjson t "$t" '$t | todate' 2> /dev/null); then dr_out sunset --arg version "$DR_VERSION" --arg at "$at" --arg detail "the server stops taking this client's version, $DR_VERSION, from $at, by the Sunset its last answer carried: upgrade this client, whose calls it refuses as client_version_unsupported from then on"; fi
   rm -f "$DR/met.deprecation" "$DR/met.sunset"
 }
 dr_member(){ jq -r --arg m "$1" --argjson known "$2" '.[$m] | strings | select(. as $v | $known | index([$v])) ' "$DR/error.json" 2> /dev/null; }      # <member> <known values, a JSON array> → the last API error's string member, only when it is one of them: a client shows no value it does not know (PROTOCOL.md §11.3)
@@ -115,7 +115,7 @@ dr_authed(){ # <Authorization value> <METHOD> <PATH> [body file] [curl args…] 
 dr_owner(){ # <METHOD> <PATH> [body file] [curl args…] → dr_api as this mailbox: adds its pass. If the server refuses the pass (it ran out sooner by the server's clock), signs another and tries once more. Its identity signs it, which no revocation of certificates covers (PROTOCOL.md §8), so no refusal of it is final. A pass refused twice for its time is the clock: it says what this one reads, beside the server's words
   local p; p=$(dr_pass) || return 1
   dr_authed "$p" "$@" && return 0
-  case $(dr_code) in unauthorized | pass_expired | certificate_not_current | certificate_revoked) ;; *) return 1 ;; esac
+  case $(dr_code) in invalid_pass | pass_expired | certificate_superseded | certificate_revoked) ;; *) return 1 ;; esac
   rm -f "$DR/pass" "$DR/pass-server"; p=$(dr_pass) && dr_authed "$p" "$@" && return 0
   dr_clock; return 1
 }
@@ -123,7 +123,7 @@ dr_look(){ # <address> → dr_api GET of a mailbox from this mailbox's server (G
   dr_api GET "/v1/$1"
 }
 dr_clock(){ # after a call the server refused: if it refused the pass, or a prekey statement, for its time, says what the server dates its answer and what this machine's clock reads. A new pass does not cure that, so it is nearly always a clock. The date is the server's word: a clock set by a server's lie makes an ended certificate valid again, so this sends its reader to a time source of their own
-  local d; case $(dr_code) in pass_expired | prekey_time) ;; *) return 0 ;; esac
+  local d; case $(dr_code) in pass_expired | invalid_validity_period) ;; *) return 0 ;; esac
   d=$(dr_dated) && d="the server dates its answer $d, and "
   dr_err "${d}this machine's clock reads $(jq -nr --argjson t "$(dr_now)" '$t | todate'). A server refuses a pass from a clock 10 minutes or more behind its own, or more than 50 ahead, and a prekey statement dated more than an hour ahead of it. Check this machine's clock against a time source you trust, not against the server"
 }
@@ -487,19 +487,19 @@ dr_take(){ # <address> → keeps what verifies of $DR/rev.json, a server's answe
   [ "$(dr_record "$DR/rev.json")" = "$1" ] || return 1
   dr_keep "$1" "$DR/rev.doc" "$DR/rev.sig" || return 3
 }
-dr_lookup(){ # <address> → reads the address's mailbox from this mailbox's server (GET /v1/<address>, dr_look), and keeps what verifies of the revocations it carries. A mailbox served carries the revocation of its certificates the server holds, and a revoked address is answered 410 revoked with its record. The mailbox served is left in $DR/mailbox.json, for the seal that follows. 0: this mailbox holds a revocation of the address, and that is final. 1: none: the server served the mailbox, or holds no such mailbox, or said revoked and showed nothing that verifies, which comes to the same: only the identity's own signature revokes. 2: no answer from the mailbox's own server, which is not "none". 3: a fault of this mailbox: what it keeps for the address does not verify, or cannot be written
+dr_lookup(){ # <address> → reads the address's mailbox from this mailbox's server (GET /v1/<address>, dr_look), and keeps what verifies of the revocations it carries. A mailbox served carries the revocation of its certificates the server holds, and a revoked address is answered 410 mailbox_revoked with its record. The mailbox served is left in $DR/mailbox.json, for the seal that follows. 0: this mailbox holds a revocation of the address, and that is final. 1: none: the server served the mailbox, or holds no such mailbox, or said revoked and showed nothing that verifies, which comes to the same: only the identity's own signature revokes. 2: no answer from the mailbox's own server, which is not "none". 3: a fault of this mailbox: what it keeps for the address does not verify, or cannot be written
   local r
   rm -f "$DR/mailbox.json"
   dr_gone "$1"; case $? in 0) return 0 ;; 3) return 3 ;; esac
   if dr_look "$1" > "$DR/look.json" 2> "$DR/read.err"; then dr_ismailbox "$DR/look.json" || return 2; mv "$DR/look.json" "$DR/mailbox.json"      # a 2xx that is no mailbox is no answer, as one that is no JSON is
     jq -c '{identity, revoked_certificates, revoked_certificates_signature}' "$DR/mailbox.json" > "$DR/rev.json" && dr_take "$1"; r=$?; [ $r = 1 ] || return $r
   else case $(dr_code) in
-    revoked) dr_takerecord "$1"; r=$?; [ $r = 1 ] || return $r ;;      # the record it carries proves itself, or counts as nothing shown
-    no_such_mailbox) ;;
+    mailbox_revoked) dr_takerecord "$1"; r=$?; [ $r = 1 ] || return $r ;;      # the record it carries proves itself, or counts as nothing shown
+    mailbox_not_found) ;;
     *) cat "$DR/read.err" >&2; return 2 ;; esac; fi      # no answer: its error line, the status, the code and the wait, and none of the server's words
   return 1
 }
-dr_revocations(){ # <address> → reads the address's revocations from this mailbox's server (GET /v1/<address>/revocations), which a server keeps with a mailbox there or none (PROTOCOL.md §11.15), and keeps what verifies: dr_lookup's answer. dr_judge's, for each sender in a drain (PROTOCOL.md §12.3 check 7), and dr_renew's, for a mailbox its server holds no more. A revocation of the address this mailbox keeps answers with no call. A record served and not_revoked are answers, and anything else is none: a record that is no record, and revoked with nothing that verifies, among them (PROTOCOL.md §12.3 check 7)
+dr_revocations(){ # <address> → reads the address's revocations from this mailbox's server (GET /v1/<address>/revocations), which a server keeps with a mailbox there or none (PROTOCOL.md §11.15), and keeps what verifies: dr_lookup's answer. dr_judge's, for each sender in a drain (PROTOCOL.md §12.3 check 7), and dr_renew's, for a mailbox its server holds no more. A revocation of the address this mailbox keeps answers with no call. A record served and revocation_not_found are answers, and anything else is none: a record that is no record, and revoked with nothing that verifies, among them (PROTOCOL.md §12.3 check 7)
   local r w=$1; [ "$1" != "$(cat "$DR/address" 2> /dev/null)" ] || w="this mailbox"
   dr_gone "$1"; case $? in 0) return 0 ;; 3) return 3 ;; esac
   if dr_api GET "/v1/$1/revocations" > "$DR/rev.json" 2> "$DR/read.err"; then
@@ -508,13 +508,13 @@ dr_revocations(){ # <address> → reads the address's revocations from this mail
     dr_take "$1"; return
   fi
   case $(dr_code) in
-    revoked) dr_takerecord "$1"; r=$?; [ $r = 1 ] || return $r; cat "$DR/read.err" >&2; return 2 ;;      # the record it carries proves itself; without one that verifies, the server's word is no answer
-    not_revoked) ;;
+    mailbox_revoked) dr_takerecord "$1"; r=$?; [ $r = 1 ] || return $r; cat "$DR/read.err" >&2; return 2 ;;      # the record it carries proves itself; without one that verifies, the server's word is no answer
+    revocation_not_found) ;;
     *) cat "$DR/read.err" >&2; return 2 ;;
   esac
   return 1
 }
-dr_takerecord(){ # <address> → keeps what verifies of the record a 410 revoked carries, in $DR/error.json: dr_take's answer, or 1 where it carries no record
+dr_takerecord(){ # <address> → keeps what verifies of the record a 410 mailbox_revoked carries, in $DR/error.json: dr_take's answer, or 1 where it carries no record
   jq -ce '.record | objects' "$DR/error.json" > "$DR/rev.json" 2> /dev/null && dr_isrecord "$DR/rev.json" || return 1
   dr_take "$1"
 }
@@ -529,7 +529,7 @@ dr_done(){ # <what dr_finished returned> → says on stderr why this mailbox act
   return 1
 }
 dr_own(){ # after a call as this mailbox failed: if the server said this mailbox is revoked, asks it for the revocation, and says which it is. A server's word revokes nothing
-  [ "$(dr_code)" = revoked ] || return 0
+  [ "$(dr_code)" = mailbox_revoked ] || return 0
   if dr_lookup "$(cat "$DR/address")"; then dr_err "REVOKED: this mailbox's own address is revoked, for good, and the revocation verifies. It can send and receive nothing more: make a new mailbox and give its address to those who write to this one"
   else dr_err "the server showed no revocation of this mailbox that verifies, so this mailbox does not take itself as revoked"; fi
 }
@@ -574,7 +574,7 @@ dr_seal(){ # <address> <envelope stem> [the mailbox dr_lookup read] → what to 
   [ "$(wc -c < "$s.age")" -eq "$t" ] || { rm -f "$s.age"; dr_refuse "the encrypted message is not the $t bytes its padding was made for: it is not sent at a size that tells its length"; return 1; }
   printf 'statement=%s\n' "$ph" > "$s.query"      # the prekey statement is named by the SHA-256 of its bytes as served, in lowercase hex (dr_resolve; PROTOCOL.md §11.10). The body is the age file as it is, and no signature is beside it: the server knows the sender from the pass the post carries
 }
-dr_post(){ # <address> <envelope stem> → seals it and POSTs it; on 409 stale_prekey, seals the SAME envelope again, once, to the mailbox read again. Before each seal, the recipient's mailbox is read (dr_lookup), and the seal is made to what this mailbox then holds, dated after that read. A post that fails is told, and nothing is kept
+dr_post(){ # <address> <envelope stem> → seals it and POSTs it; on 409 prekey_superseded, seals the SAME envelope again, once, to the mailbox read again. Before each seal, the recipient's mailbox is read (dr_lookup), and the seal is made to what this mailbox then holds, dated after that read. A post that fails is told, and nothing is kept
   local B=$1 o=$2 c try
   dr_finished; c=$?; case $c in      # a mailbox that holds its own revocation can never deliver it: every reader that holds the revocation refuses its messages, whenever they were signed
     0) ;;
@@ -590,13 +590,13 @@ dr_post(){ # <address> <envelope stem> → seals it and POSTs it; on 409 stale_p
       *) dr_refuse "what this mailbox keeps about $B does not verify, or could not be written: nothing is sent"; return 1 ;;
     esac
     dr_seal "$B" "$o" "$DR/mailbox.json" && dr_owner POST "/v1/$B/messages?$(cat "$DR/seal.query")" "$DR/seal.age" > "$DR/receipt.json" && dr_receipt && { dr_sent "$B"; return; }      # sealed to the mailbox the lookup read, and dated once it was read
-    [ "$try" = first ] && [ "$(dr_code)" = stale_prekey ] || break      # a newer prekey: the same envelope, sealed again once, to the mailbox read again
+    [ "$try" = first ] && [ "$(dr_code)" = prekey_superseded ] || break      # a newer prekey: the same envelope, sealed again once, to the mailbox read again
   done
   c=$(dr_code)
-  case $c in revoked) dr_lookup "$B" ;; sender_revoked) dr_lookup "$(cat "$DR/address")" ;; esac      # a server's "revoked" is checked: with the revocation in hand it is final, and without one it is a call that failed
+  case $c in mailbox_revoked) dr_lookup "$B" ;; sender_revoked) dr_lookup "$(cat "$DR/address")" ;; esac      # a server's "revoked" is checked: with the revocation in hand it is final, and without one it is a call that failed
   if dr_gone "$B" || dr_gone "$(cat "$DR/address")"; then dr_err "REVOKED: the revocation verifies, so it can never be delivered: nothing is sent"; return 1; fi
   case $c in
-    revoked | sender_revoked) dr_err "the server showed no revocation that verifies, so this mailbox does not take that address as revoked: nothing is sent" ;;
+    mailbox_revoked | sender_revoked) dr_err "the server showed no revocation that verifies, so this mailbox does not take that address as revoked: nothing is sent" ;;
     *) dr_err "nothing is sent" ;;
   esac
   return 1
@@ -631,7 +631,7 @@ dr_drain(){ # stops at a transient error or a fault of this mailbox, leaving the
       id=$(jq -r --argjson i "$i" '.messages[$i].id | strings | select(test("\\A[0-9a-f]{64}\\z"))' "$DR/list.json") && dr_hex "$id" || continue      # tested in jq: $(…) drops trailing LFs and every NUL
       [ $((k += 1)) -le 1000 ] || { dr_out more --arg detail "this run stopped at the most one drain takes: run recv again for the rest, which is still on the server"; return 0; }
       if ! grep -q "^$id " "$DR/seen" 2> /dev/null; then jq -c --argjson i "$i" '.messages[$i]' "$DR/list.json" > "$DR/entry.json" && dr_one "$B" "$id" "$DR/entry.json" || return 1; fi   # an id already handled is only acked again
-      dr_owner DELETE "/v1/$B/messages/$id" > /dev/null || [ "$(dr_code)" = no_such_message ] || return 1
+      dr_owner DELETE "/v1/$B/messages/$id" > /dev/null || [ "$(dr_code)" = message_not_found ] || return 1
     done
     c=$(jq -r '.next_cursor // empty' "$DR/list.json"); [ -n "$c" ] || return 0      # one or more of A-Z, a-z, 0-9, - and _ (dr_shape), so it goes into the next query as it is
   done
@@ -641,12 +641,12 @@ dr_one(){ # <me> <id> <its list entry> → 0 once the message is judged and its 
   rm -f "$m.json" "$m.age" "$m.sig" "$m.P" "$m.T" "$m.doc"
   cp "$3" "$m.json" && z=$(jq -r '.size // 0' "$m.json") || return 1      # an integer from 0 to 16 MiB, the protocol's largest ciphertext, or null, which is 0 (dr_shape's list; PROTOCOL.md §11.10)
   if dr_owner GET "/v1/$B/messages/$id" "" --max-filesize $((z > 0 ? z : 1)) > "$m.age"; then :      # no more than the list says it holds, and every size up to 16 MiB, the protocol's largest ciphertext, which every reader takes; the list's form holds the size to it (dr_shape; PROTOCOL.md §11.10, §12.3)
-  elif [ "$(dr_code)" = no_such_message ]; then return 0      # already gone
+  elif [ "$(dr_code)" = message_not_found ]; then return 0      # already gone
   elif [[ $(dr_status) != 2?? ]]; then return 1; fi      # a 2xx that curl cut short is a body past its size
   [ "$(wc -c < "$m.age" 2> /dev/null)" = "$z" ] || { dr_err "the server's answer for message $id is not the $z bytes of ciphertext its list gives: it stays on the server"; return 1; }      # an answer that breaks its form, the server's fault and not the sender's: no verdict, and no ack
   h=$(sha256sum < "$m.age" | cut -c1-64)      # files are named by the hash computed here, never the server's id
   rm -f "$DR/said"; why=$(dr_judge "$B" "$m"); rc=$?; cat "$DR/said" 2> /dev/null; rm -f "$DR/said"      # what the judge met on the way is printed here: its stdout is its verdict
-  if [ $rc -eq 0 ] || [ $rc -eq 2 ]; then [ "$h" = "$id" ] || { why="bad_id: the server's id for it is not the SHA-256 of its ciphertext"; rc=1; }; fi
+  if [ $rc -eq 0 ] || [ $rc -eq 2 ]; then [ "$h" = "$id" ] || { why="id_mismatch: the server's id for it is not the SHA-256 of its ciphertext"; rc=1; }; fi
   case $rc in
     0) A=$(jq -r .from "$m.P") && dr_putout "$DR/inbox/$h.json" dr_line "$m.P" && dr_seen "$A" "$m" "$h" || return 1      # stored, then seen, all on disk before the ack: a crash delivers again, never loses
        printf '{"type":"message","id":"%s","envelope":' "$h" && cat "$DR/inbox/$h.json" && echo '}' ;;      # the envelope the line inbox/ keeps, as its bytes are (jq would write the line breaks dr_line escaped), and only inside "envelope", so a member it gains later never meets the line's own (#356)
@@ -666,14 +666,14 @@ dr_judge(){ # <me> <message stem> → 0 only if EVERY check passes, in this orde
     age-keygen -y "$k" > /dev/null 2>&1 || { echo "cannot read the prekey key $k"; return 3; }
     ids+=(-i "$k"); done      # a key file age cannot read is a fault of this mailbox, which stops the drain: never a message refused for it
   [ ${#ids[@]} -gt 0 ] || { echo "this mailbox has no prekeys"; return 3; }
-  age -d "${ids[@]}" < "$m.age" > "$m.T" 2> /dev/null || { echo "undecryptable: it does not decrypt with this mailbox's prekeys"; return 1; }
+  age -d "${ids[@]}" < "$m.age" > "$m.T" 2> /dev/null || { echo "decrypt_error: it does not decrypt with this mailbox's prekeys"; return 1; }
   A=$(dr_open "$B" "$m") || { echo "$A"; return 1; }      # the sender, proved by what was decrypted
   t=$(dr_time "$(jq -r .sent_at "$m.P")") || { echo "cannot read the sent_at of what was decrypted"; return 3; }
   if ! grep -qxF -e "$A" "$DR/asked" 2> /dev/null; then      # the server is asked once for each sender in a drain, by a read of its revocations, which the server serves whether or not it holds the sender's mailbox. That it holds none is an answer; no answer is not, and the message then stays where it is
     dr_revocations "$A" >> "$DR/said"; case $? in 0) ;; 1) printf '%s\n' "$A" >> "$DR/asked" ;; 3) echo "what this mailbox keeps of its sender's revocations does not verify, or cannot be written"; return 3 ;; *) echo "whether its sender is revoked could not be asked"; return 4 ;; esac
   fi
   dr_gone "$A"; case $? in      # nobody can vouch for when a signature was made, so a revocation reaches back over everything that address signed
-    0) echo "revoked: its sender's address is revoked, and the revocation verifies: nothing signed for that address is taken, whenever it was signed"; return 1 ;;
+    0) echo "sender_revoked: its sender's address is revoked, and the revocation verifies: nothing signed for that address is taken, whenever it was signed"; return 1 ;;
     3) echo "the revocation kept for $A does not verify"; return 3 ;;
   esac
   c=$(dr_rank "$m.sig" "$m.doc" "$A") || { echo "cannot read the signer of a signature that verified"; return 3; }
@@ -683,7 +683,7 @@ dr_judge(){ # <me> <message stem> → 0 only if EVERY check passes, in this orde
   esac
   [ ! -e "$DR/seen" ] || [ -r "$DR/seen" ] || { echo "cannot read $DR/seen"; return 3; }
   h=$(sha256sum < "$m.age" | cut -c1-64)
-  ! grep -q "^$h " "$DR/seen" 2> /dev/null || { echo "replay: this ciphertext was already received"; return 1; }
+  ! grep -q "^$h " "$DR/seen" 2> /dev/null || { echo "message_already_received: this ciphertext was already received"; return 1; }
   dr_meet "$A" "$m.doc" || { echo "cannot write under $DR/peers"; return 3; }
   ! grep -q " $A $(jq -r .msg_id "$m.P")\$" "$DR/seen" 2> /dev/null || return 2
 }
@@ -692,22 +692,22 @@ dr_open(){ # <me> <message stem> → the sender's address, only if what was decr
   # Line 1 is the envelope, line 2 begins the signature, the first END line ends it, and nothing after that is read. Each part has one place; nothing is searched for. The END line is the first line that begins so, and it must end there, in a line feed
   head -n 1 "$m.T" > "$m.P"; sed -n '2,/^-----END SSH SIGNATURE-----/p' "$m.T" > "$m.sig"
   [ "$(tail -c 1 "$m.P" | od -An -tx1 | tr -d ' \n')" = 0a ] && head -n 1 "$m.sig" | cmp -s - <(printf -- '-----BEGIN SSH SIGNATURE-----\n') && tail -n 1 "$m.sig" | cmp -s - <(printf -- '-----END SSH SIGNATURE-----\n') ||      # each compared as bytes: $(…) drops a NUL
-    { echo "bad_message: what was decrypted is not an envelope line and then a signature block"; return 1; }
+    { echo "malformed_message: what was decrypted is not an envelope line and then a signature block"; return 1; }
   dr_envform "$m.P" || return 1
-  jq -e '.from | . == null or type == "string"' "$m.P" > /dev/null 2>&1 || { echo "bad_envelope: the envelope is malformed: its from is not what that field holds"; return 1; }
-  jq -e 'has("identity")' "$m.P" > /dev/null 2>&1 || { echo "bad_identity: the envelope carries no identity document"; return 1; }
-  dr_bytes "$m.P" identity "$m.doc" && [ -s "$m.doc" ] || { echo "bad_identity: the envelope's identity is not base64 of an identity document"; return 1; }      # its bytes, compared as bytes
+  jq -e '.from | . == null or type == "string"' "$m.P" > /dev/null 2>&1 || { echo "invalid_envelope: the envelope is malformed: its from is not what that field holds"; return 1; }
+  jq -e 'has("identity")' "$m.P" > /dev/null 2>&1 || { echo "invalid_identity: the envelope carries no identity document"; return 1; }
+  dr_bytes "$m.P" identity "$m.doc" && [ -s "$m.doc" ] || { echo "invalid_identity: the envelope's identity is not base64 of an identity document"; return 1; }      # its bytes, compared as bytes
   dr_idcheck "$m.doc"; case $? in 0) ;;      # a well-formed document of a key type this script does not verify has its own code, once it is known to be the sender's
-    2) jq -e --arg a "$(dr_address "$m.doc")" '.from == $a' "$m.P" > /dev/null 2>&1 || { echo "reattributed: the envelope's from is not the address of the identity it carries"; return 1; }
+    2) jq -e --arg a "$(dr_address "$m.doc")" '.from == $a' "$m.P" > /dev/null 2>&1 || { echo "sender_mismatch: the envelope's from is not the address of the identity it carries"; return 1; }
        echo "unsupported_key_type: the sender's identity is of a key type this client does not verify"; return 1 ;;
-    *) echo "bad_identity: the envelope's identity document breaks its format or its key checks"; return 1 ;;
+    *) echo "invalid_identity: the envelope's identity document breaks its format or its key checks"; return 1 ;;
   esac
   A=$(dr_address "$m.doc")      # the sender: the hash of the identity document the envelope carries. The document proves itself, and the signature must now verify under it
-  jq -e --arg a "$A" '.from == $a' "$m.P" > /dev/null 2>&1 || { echo "reattributed: the envelope's from is not the address of the identity it carries"; return 1; }
+  jq -e --arg a "$A" '.from == $a' "$m.P" > /dev/null 2>&1 || { echo "sender_mismatch: the envelope's from is not the address of the identity it carries"; return 1; }
   dr_signed "$A" "$m.doc" "dromas-msg-v1:$B" "$m.sig" "$m.P" > /dev/null; case $? in      # over line 1 exactly as decrypted, never over anything rebuilt: either form of signer, which check 7 holds to the revocation of its certificates (dr_judge)
-    0) ;; 2) echo "bad_signature: the certificate of the key that signed it has ended"; return 1 ;;
-    3) echo "bad_signature: the certificate of the key that signed it has not begun, by this machine's clock"; return 1 ;;
-    *) echo "bad_signature: it is not signed for this mailbox by the sender's identity, or by a working key the sender's identity certified"; return 1 ;;
+    0) ;; 2) echo "invalid_signature: the certificate of the key that signed it has ended"; return 1 ;;
+    3) echo "invalid_signature: the certificate of the key that signed it has not begun, by this machine's clock"; return 1 ;;
+    *) echo "invalid_signature: it is not signed for this mailbox by the sender's identity, or by a working key the sender's identity certified"; return 1 ;;
   esac
   dr_envcheck "$m.P" "$A" "$B" || return 1
   printf '%s\n' "$A"
@@ -715,18 +715,19 @@ dr_open(){ # <me> <message stem> → the sender's address, only if what was decr
 dr_envform(){ # <envelope> → 0 only for one JSON object with no member named twice in any object in it: a name given twice could be read as two values of one signed text. Otherwise the reason, and 1
   local n; n=$(jq -n --stream '[inputs | if length == 2 then .[0] else .[0][:-1] end | select(length > 0 and (.[-1] | type) == "string")] | length' "$1" 2> /dev/null) &&      # every member of every object, as written: one named twice is counted twice here, and once below
     jq -en --argjson n "$n" '[inputs] | length == 1 and (.[0] | type == "object" and ([.. | objects | length] | add) == $n)' "$1" > /dev/null 2>&1 ||
-    { echo "bad_envelope: the envelope is not one JSON object with no member named twice"; return 1; }
+    { echo "invalid_envelope: the envelope is not one JSON object with no member named twice"; return 1; }
 }
 dr_envcheck(){ # <envelope> <signer> <this mailbox> → 0 only for one JSON object, keys exact and none twice, checked in PROTOCOL.md §12.3 check 6's order: a body and fields that are strings, v the number 1, from the signer and to this mailbox, a msg_id, and sent_at no older than 7 days and no more than an hour ahead; otherwise the reason, and 1
   local e=$1 sa
   dr_envform "$e" || return 1
   jq -e 'has("body") and all(.from, .to, .msg_id, .sent_at, .subject, .in_reply_to, .supersedes, .identity; . == null or type == "string") and .v == 1' "$e" > /dev/null 2>&1 ||
-    { echo "bad_envelope: the envelope is malformed: a body, fields that are strings, and v the number 1"; return 1; }      # in PROTOCOL.md §12.3 check 6's order: a body and every member of its type, v, to, msg_id, then the time
-  jq -e --arg a "$2" --arg b "$3" '.from == $a and .to == $b' "$e" > /dev/null 2>&1 || { echo "reattributed: the inner from/to do not match the signer and this mailbox (re-attribution)"; return 1; }
-  jq -e '.msg_id | type == "string" and test("\\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\z")' "$e" > /dev/null 2>&1 || { echo "bad_envelope: the envelope has no valid msg_id"; return 1; }
-  jq -e '.sent_at | strings | test("\\A[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z\\z")' "$e" > /dev/null 2>&1 && sa=$(dr_time "$(jq -r .sent_at "$e")") || { echo "bad_envelope: the envelope's sent_at is not a UTC timestamp to the second"; return 1; }      # its grammar tested in jq first: $(…) drops trailing LFs and every NUL
-  [ "$sa" -ge $(($(dr_now) - 7*86400)) ] || { echo "stale: sent_at is older than 7 days"; return 1; }
-  [ "$sa" -le $(($(dr_now) + 3600)) ] || { echo "future: sent_at is more than 60 minutes ahead of this machine's clock"; return 1; }
+    { echo "invalid_envelope: the envelope is malformed: a body, fields that are strings, and v the number 1"; return 1; }      # in PROTOCOL.md §12.3 check 6's order: a body and every member of its type, v, to, msg_id, then the time
+  jq -e --arg a "$2" '.from == $a' "$e" > /dev/null 2>&1 || { echo "sender_mismatch: the envelope's from is not the address of the identity that signed it"; return 1; }
+  jq -e --arg b "$3" '.to == $b' "$e" > /dev/null 2>&1 || { echo "recipient_mismatch: the envelope's to is not this mailbox"; return 1; }
+  jq -e '.msg_id | type == "string" and test("\\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\z")' "$e" > /dev/null 2>&1 || { echo "invalid_envelope: the envelope has no valid msg_id"; return 1; }
+  jq -e '.sent_at | strings | test("\\A[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z\\z")' "$e" > /dev/null 2>&1 && sa=$(dr_time "$(jq -r .sent_at "$e")") || { echo "invalid_envelope: the envelope's sent_at is not a UTC timestamp to the second"; return 1; }      # its grammar tested in jq first: $(…) drops trailing LFs and every NUL
+  [ "$sa" -ge $(($(dr_now) - 7*86400)) ] || { echo "message_expired: sent_at is older than 7 days"; return 1; }
+  [ "$sa" -le $(($(dr_now) + 3600)) ] || { echo "message_not_yet_valid: sent_at is more than 60 minutes ahead of this machine's clock"; return 1; }
 }
 dr_line(){ # <checked envelope> [receipt] → the one line delivered: built from the checked fields, never the sender's bytes, with U+0085, U+2028 and U+2029 escaped (Python's splitlines and Node's readline end lines there), every character of Unicode 18.0's Default_Ignorable_Code_Point, which nobody sees and a model reads (tag characters, BiDi controls, zero-width characters, variation selectors), the controls JSON leaves raw (U+007F and the C1 block, which a terminal can act on), and U+FFF9 to U+FFFB, which some renderers hide text between: the Go client's escapeUnseen, in its set and its form. With a receipt it is dr_sent's record, the envelope inside "envelope" and the receipt beside it
   jq -j --slurpfile r "${2:-/dev/null}" 'def h4: . as $n | [range(3; -1; -1) | ($n / pow(16; .) | floor) % 16] | map("0123456789abcdef"[.:. + 1]) | add;
@@ -753,9 +754,9 @@ dr_unnamed(){ # → 0 where prekeys/ holds a key age reads that seen-keys does n
   done
   [ ${#DR_FOUND[@]} -gt 0 ]
 }
-dr_matched(){ # → 0 where this mailbox's records match its prekeys/: no key there that seen-keys does not name (dr_unnamed). Otherwise the error line, fatal, with the code state_not_the_keys, and 4, writing nothing: records lost or put back are a failure, and nothing is received, sent or renewed until its owner's init --restore (dr_restore)
+dr_matched(){ # → 0 where this mailbox's records match its prekeys/: no key there that seen-keys does not name (dr_unnamed). Otherwise the error line, fatal, with the code restore_required, and 4, writing nothing: records lost or put back are a failure, and nothing is received, sent or renewed until its owner's init --restore (dr_restore)
   dr_unnamed || return 0
-  jq -cn --arg m "REFUSED: this mailbox's records do not match its prekeys: prekeys/ holds ${#DR_FOUND[@]} prekeys seen-keys does not name, as after seen and seen-keys are lost, or put back from a copy older than a renewal, with prekeys/ kept. The mailbox receives, sends and renews nothing until its owner runs dromas.sh init --restore, which adopts those prekeys and renews. Records lost or put back have lost their replay set, so a message the mailbox accepted before may be delivered again" '{type:"error", fatal:true, code:"state_not_the_keys", detail:$m}' >&2
+  jq -cn --arg m "REFUSED: this mailbox's records do not match its prekeys: prekeys/ holds ${#DR_FOUND[@]} prekeys seen-keys does not name, as after seen and seen-keys are lost, or put back from a copy older than a renewal, with prekeys/ kept. The mailbox receives, sends and renews nothing until its owner runs dromas.sh init --restore, which adopts those prekeys and renews. Records lost or put back have lost their replay set, so a message the mailbox accepted before may be delivered again" '{type:"error", fatal:true, code:"restore_required", detail:$m}' >&2
   return 4
 }
 dr_restore(){ # → init --restore's acknowledgement, under the lock: each key prekeys/ holds that seen-keys does not name (dr_unnamed) named there, on disk, and DR_ACKED set, so init renews (dr_init); then a restore line of what it found
@@ -781,8 +782,8 @@ dr_renew(){ # → what dr_rekey does, the lock held. A serial is signed ONCE
   dr_finished || { dr_done $?; return 1; }
   dr_matched || return      # nothing renewed on records that do not match prekeys/
   dr_api GET "/v1/$A" > "$DR/self.json" 2> "$DR/self.err" || case $(dr_code) in
-    no_such_mailbox) gone=1 ;;      # 404: the server holds no mailbox here any more, past its record's expiry (PROTOCOL.md §13), so nothing is served to number above or to hold to its order, and the renewal goes as a registration
-    revoked) dr_takerecord "$A"; [ $? != 3 ] || return 1; dr_finished || { dr_done $?; return 1; }; cat "$DR/self.err" >&2; return 1 ;;      # 410: the address's record, kept once it verifies, so the mailbox signs nothing more here or at any server it is pointed at (PROTOCOL.md §12.5; #343)
+    mailbox_not_found) gone=1 ;;      # 404: the server holds no mailbox here any more, past its record's expiry (PROTOCOL.md §13), so nothing is served to number above or to hold to its order, and the renewal goes as a registration
+    mailbox_revoked) dr_takerecord "$A"; [ $? != 3 ] || return 1; dr_finished || { dr_done $?; return 1; }; cat "$DR/self.err" >&2; return 1 ;;      # 410: the address's record, kept once it verifies, so the mailbox signs nothing more here or at any server it is pointed at (PROTOCOL.md §12.5; #343)
     *) cat "$DR/self.err" >&2; return 1 ;;
   esac
   if [ -n "$gone" ]; then      # what is held of this mailbox's own revocations, at every renewal: from its server's answer, or for a mailbox it holds no more, which carries none, from its revocations alone

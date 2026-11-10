@@ -180,7 +180,7 @@ func TestVectorBadIdentities(t *testing.T) {
 			continue
 		}
 		// A server answers a format error with identity_mismatch, a key
-		// error with bad_key, and a well-formed document of a type it does
+		// error with invalid_key, and a well-formed document of a type it does
 		// not register with unsupported_key_type.
 		keyCase := strings.HasPrefix(name, "small-order") || name == "non-canonical.doc" || name == "negative-zero.doc" || name == "off-curve.doc"
 		want := ErrIdentityFormat
@@ -1198,42 +1198,42 @@ var plainVerdicts = map[string]string{
 	"accept-anything-after-the-signature":                "",
 	"accept-every-field":                                 "",
 	"accept-body-more-precise-than-binary64":             "",
-	"refuse-signed-for-another-mailbox":                  RefusedSignature,
+	"refuse-signed-for-another-mailbox":                  RefusedInvalidSignature,
 	"accept-signed-by-the-identity":                      "",
 	"refuse-certificate-revoked":                         refusedCertificateRevoked,
-	"refuse-identity-s-signature-re-wrapped":             RefusedSignature,
-	"refuse-signed-by-a-bare-working-key":                RefusedSignature,
-	"refuse-certificate-ended":                           RefusedSignature,
-	"refuse-line-changed-after-signing":                  RefusedSignature,
-	"refuse-another-mailbox-s-identity-document":         RefusedSignature,
-	"refuse-from-is-not-the-identity":                    RefusedAttribution,
-	"refuse-from-null":                                   RefusedAttribution,
+	"refuse-identity-s-signature-re-wrapped":             RefusedInvalidSignature,
+	"refuse-signed-by-a-bare-working-key":                RefusedInvalidSignature,
+	"refuse-certificate-ended":                           RefusedInvalidSignature,
+	"refuse-line-changed-after-signing":                  RefusedInvalidSignature,
+	"refuse-another-mailbox-s-identity-document":         RefusedInvalidSignature,
+	"refuse-from-is-not-the-identity":                    RefusedSenderMismatch,
+	"refuse-from-null":                                   RefusedSenderMismatch,
 	"accept-p256-sender":                                 "",
 	"accept-p256-sender-under-a-certificate":             "",
 	"refuse-unsupported-key-type":                        RefusedKeyType,
-	"refuse-from-is-not-the-identity-of-an-unknown-type": RefusedAttribution,
-	"refuse-to-another-mailbox":                          RefusedAttribution,
-	"refuse-no-identity":                                 RefusedIdentity,
-	"refuse-identity-not-base64":                         RefusedIdentity,
-	"refuse-identity-ending-in-a-line-feed":              RefusedIdentity,
-	"refuse-identity-ending-in-a-nul":                    RefusedIdentity,
-	"refuse-identity-of-small-order":                     RefusedIdentity,
-	"refuse-identity-off-curve":                          RefusedIdentity,
-	"refuse-identity-with-its-length-written-33":         RefusedIdentity,
-	"refuse-no-line-feed":                                RefusedMessage,
-	"refuse-no-signature":                                RefusedMessage,
-	"refuse-blank-line-before-the-signature":             RefusedMessage,
-	"refuse-begin-line-followed-by-a-nul":                RefusedMessage,
-	"refuse-begin-line-holding-a-nul":                    RefusedMessage,
-	"refuse-begin-line-preceded-by-a-nul":                RefusedMessage,
-	"refuse-signature-first":                             RefusedMessage,
-	"refuse-no-end-line":                                 RefusedMessage,
-	"refuse-end-line-without-its-line-feed":              RefusedMessage,
-	"refuse-end-line-followed-by-a-nul":                  RefusedMessage,
-	"refuse-end-line-followed-by-a-byte-and-a-later-one": RefusedMessage,
-	"refuse-crlf":                                        RefusedMessage,
-	"refuse-envelope-on-two-lines":                       RefusedMessage,
-	"refuse-whitespace-in-the-signature":                 RefusedSignature,
+	"refuse-from-is-not-the-identity-of-an-unknown-type": RefusedSenderMismatch,
+	"refuse-to-another-mailbox":                          RefusedRecipientMismatch,
+	"refuse-no-identity":                                 RefusedInvalidIdentity,
+	"refuse-identity-not-base64":                         RefusedInvalidIdentity,
+	"refuse-identity-ending-in-a-line-feed":              RefusedInvalidIdentity,
+	"refuse-identity-ending-in-a-nul":                    RefusedInvalidIdentity,
+	"refuse-identity-of-small-order":                     RefusedInvalidIdentity,
+	"refuse-identity-off-curve":                          RefusedInvalidIdentity,
+	"refuse-identity-with-its-length-written-33":         RefusedInvalidIdentity,
+	"refuse-no-line-feed":                                RefusedMalformedMessage,
+	"refuse-no-signature":                                RefusedMalformedMessage,
+	"refuse-blank-line-before-the-signature":             RefusedMalformedMessage,
+	"refuse-begin-line-followed-by-a-nul":                RefusedMalformedMessage,
+	"refuse-begin-line-holding-a-nul":                    RefusedMalformedMessage,
+	"refuse-begin-line-preceded-by-a-nul":                RefusedMalformedMessage,
+	"refuse-signature-first":                             RefusedMalformedMessage,
+	"refuse-no-end-line":                                 RefusedMalformedMessage,
+	"refuse-end-line-without-its-line-feed":              RefusedMalformedMessage,
+	"refuse-end-line-followed-by-a-nul":                  RefusedMalformedMessage,
+	"refuse-end-line-followed-by-a-byte-and-a-later-one": RefusedMalformedMessage,
+	"refuse-crlf":                                        RefusedMalformedMessage,
+	"refuse-envelope-on-two-lines":                       RefusedMalformedMessage,
+	"refuse-whitespace-in-the-signature":                 RefusedInvalidSignature,
 }
 
 // verdictOf is what B makes of plaintext pt at now: OpenSigned's checks, then
@@ -1414,16 +1414,16 @@ func TestVectorEnvelopes(t *testing.T) {
 				t.Errorf("%s: body %s: BODY is an unknown key, never the body", name, env.Body)
 			}
 		case strings.HasPrefix(name, "refuse-"):
-			// Every refusal has its code: bad_envelope, but for these.
+			// Every refusal has its code: invalid_envelope, but for these.
 			want := map[string]string{
-				"refuse-7-days-and-1s-old":   RefusedStale,
-				"refuse-1-hour-and-1s-ahead": RefusedFuture,
-				"refuse-from-not-signer":     RefusedAttribution,
-				"refuse-from-null":           RefusedAttribution, // null is a member left out
-				"refuse-to-another-mailbox":  RefusedAttribution,
+				"refuse-7-days-and-1s-old":   RefusedMessageExpired,
+				"refuse-1-hour-and-1s-ahead": RefusedMessageNotYetValid,
+				"refuse-from-not-signer":     RefusedSenderMismatch,
+				"refuse-from-null":           RefusedSenderMismatch, // null is a member left out
+				"refuse-to-another-mailbox":  RefusedRecipientMismatch,
 			}[name]
 			if want == "" {
-				want = RefusedEnvelope // an uppercase from or to is no address at all
+				want = RefusedInvalidEnvelope // an uppercase from or to is no address at all
 			}
 			var ee *EnvelopeError
 			if !errors.As(err, &ee) || ee.Code != want {

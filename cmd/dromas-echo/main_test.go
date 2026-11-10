@@ -359,7 +359,7 @@ func TestEchoDropsAnUndeliverableReply(t *testing.T) {
 	}
 	e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
 		if r.Method == http.MethodPost && r.URL.Path == "/v1/"+a.Address().String()+"/messages" {
-			fakeserver.WriteJSON(w, http.StatusGone, protocol.Problem{Type: protocol.CodeRevoked.TypeURI(), Code: protocol.CodeRevoked})
+			fakeserver.WriteJSON(w, http.StatusGone, protocol.Problem{Type: protocol.CodeMailboxRevoked.TypeURI(), Code: protocol.CodeMailboxRevoked})
 			return
 		}
 		next.ServeHTTP(w, r)
@@ -491,7 +491,7 @@ func TestEchoGoesOnAfterARefusalNoWaitMends(t *testing.T) {
 		mine := "/v1/" + x.b.Address().String() + "/messages"
 		srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
 			if r.Method == http.MethodGet && r.URL.Path == mine && lists.Add(1) <= 2 {
-				fakeserver.WriteJSON(w, http.StatusBadRequest, protocol.Problem{Type: protocol.CodeBadRequest.TypeURI(), Code: protocol.CodeBadRequest})
+				fakeserver.WriteJSON(w, http.StatusBadRequest, protocol.Problem{Type: protocol.CodeInvalidRequest.TypeURI(), Code: protocol.CodeInvalidRequest})
 				return
 			}
 			next.ServeHTTP(w, r)

@@ -77,7 +77,7 @@ func TestARevocationPublishedToARevokedMailbox(t *testing.T) {
 	if _, err := client.Revoke(ctx, e.opts(), rec); err != nil {
 		t.Fatalf("published again to a server that holds it: %v", err)
 	}
-	says(e, protocol.CodeRevoked, http.MethodPut, "/revocations")
+	says(e, protocol.CodeMailboxRevoked, http.MethodPut, "/revocations")
 	b := e.mailbox()
 	other, err := b.Revocation(t.Context())
 	if err != nil {

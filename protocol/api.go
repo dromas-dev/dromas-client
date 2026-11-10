@@ -85,7 +85,7 @@ type PrekeyRequest struct {
 // until checked: the document against the address, the signature's
 // certificate against the document, the statement against the certificate,
 // and the revocation of certificates against the identity. A revoked
-// address is answered 410 revoked with its record instead (Problem.Record).
+// address is answered 410 mailbox_revoked with its record instead (Problem.Record).
 type MailboxResponse struct {
 	Identity        Bytes `json:"identity"`
 	Prekey          Bytes `json:"prekey"`
@@ -128,7 +128,7 @@ const MaxCiphertext = 16 << 20
 type SendQuery struct {
 	// Statement names the prekey statement the file was sealed to, by its
 	// StatementHash. When the mailbox has another the server answers
-	// stale_prekey, and the sender seals the same envelope again.
+	// prekey_superseded, and the sender seals the same envelope again.
 	Statement string
 }
 

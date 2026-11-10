@@ -216,7 +216,7 @@ func TestMaxDepth(t *testing.T) {
 
 // A request member holding a value its call does not take, of another JSON
 // type or a number that is no integer of its range, is named in the error,
-// as §11.3's bad_request names it in member (#272): every member of every
+// as §11.3's invalid_request names it in member (#272): every member of every
 // request a server reads, given a value of each JSON type.
 func TestATypeErrorNamesItsMember(t *testing.T) {
 	for _, v := range []any{&AdoptRequest{}, &ACLDocument{}, &RegisterRequest{}, &PrekeyRequest{}, &Revocations{}} {

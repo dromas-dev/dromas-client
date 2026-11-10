@@ -233,12 +233,12 @@ func isTime(s string) bool { _, err := protocol.ParseTime(s); return err == nil 
 
 func isAddress(s string) bool { _, err := protocol.ParseAddress(s); return err == nil }
 
-// RefusedMessage is a refused message in refused/, in this client's words:
+// RefusedMalformedMessage is a refused message in refused/, in this client's words:
 // its id, the code it was refused for and why, the time the server gave,
 // and what this client's checks established about it when it judged it
 // (keptFindings), each only when it has its form. Nothing else of
 // what the server or the sender wrote is in it.
-type RefusedMessage struct {
+type RefusedMalformedMessage struct {
 	ID                string `json:"id"`
 	Code              string `json:"code"`
 	Reason            string `json:"detail,omitempty"`
@@ -257,24 +257,24 @@ type RefusedMessage struct {
 // mailbox's state keeps of why it was refused. A message with no record there,
 // or one this client did not write, has the code "unknown" and nothing from
 // it. Each value is held to its form again as it is read.
-func (b *Mailbox) RefusedMessages(ctx context.Context) ([]RefusedMessage, error) {
+func (b *Mailbox) RefusedMessages(ctx context.Context) ([]RefusedMalformedMessage, error) {
 	return reading(ctx, b, there(b, b.refusedMessages))
 }
 
 // refusedMessages is RefusedMessages inside a command or a reading.
-func (b *Mailbox) refusedMessages() ([]RefusedMessage, error) {
+func (b *Mailbox) refusedMessages() ([]RefusedMalformedMessage, error) {
 	names, err := matching(b.path("refused", "*.json"))
 	if err != nil {
 		return nil, err
 	}
-	var qs []RefusedMessage
+	var qs []RefusedMalformedMessage
 	err = b.view(func(s store) error {
 		for _, name := range names {
 			id := strings.TrimSuffix(filepath.Base(name), ".json")
 			if !IsID(id) {
 				continue
 			}
-			q := RefusedMessage{ID: id}
+			q := RefusedMalformedMessage{ID: id}
 			var kept struct {
 				ReceivedAt any `json:"received_at"`
 			}

@@ -380,7 +380,7 @@ func TestWhatChangedInAnACLNotTakenIsSaid(t *testing.T) {
 	}
 }
 
-// A server that answers mailbox_changed to an ACL (the mailbox changed while it
+// A server that answers concurrent_modification to an ACL (the mailbox changed while it
 // handled the request) is sent it again, as it is: the write is not lost to
 // a race.
 func TestAnACLIsSentAgainWhenTheMailboxChanged(t *testing.T) {
@@ -395,7 +395,7 @@ func TestAnACLIsSentAgainWhenTheMailboxChanged(t *testing.T) {
 			once.Do(func() { raced = true })
 		}
 		if raced {
-			fakeserver.WriteJSON(w, protocol.CodeMailboxChanged.Status(), protocol.Problem{Type: protocol.CodeMailboxChanged.TypeURI(), Code: protocol.CodeMailboxChanged, Status: int64(protocol.CodeMailboxChanged.Status())})
+			fakeserver.WriteJSON(w, protocol.CodeConcurrentModification.Status(), protocol.Problem{Type: protocol.CodeConcurrentModification.TypeURI(), Code: protocol.CodeConcurrentModification, Status: int64(protocol.CodeConcurrentModification.Status())})
 			return
 		}
 		next.ServeHTTP(w, r)
@@ -495,7 +495,7 @@ func TestASendWaitsOnTheACLOnlyWhenTheReplyWouldBeRefused(t *testing.T) {
 	refuseACL := func() {
 		e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
 			if r.Method == http.MethodPut && strings.HasSuffix(r.URL.Path, "/acl") {
-				code := protocol.CodeTooLarge
+				code := protocol.CodeContentTooLarge
 				fakeserver.WriteJSON(w, code.Status(), protocol.Problem{Type: code.TypeURI(), Code: code, Status: int64(code.Status())})
 				return
 			}

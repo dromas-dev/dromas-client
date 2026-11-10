@@ -203,7 +203,7 @@ func newServer(t testing.TB, now func() time.Time) (*Server, http.Handler) {
 // SetPolicy sets the server's version policy, which GET /v1/ answers, and
 // by which every answer under /v1/ carries Deprecation and Sunset for a
 // request whose version a deprecation or a sunset covers, and a request whose version is retired is answered 410
-// version_retired before anything else (PROTOCOL.md §11.17, §11.4 rule 0),
+// client_version_unsupported before anything else (PROTOCOL.md §11.17, §11.4 rule 0),
 // as a server does. Until a test sets one, the policy is empty: no floor, no
 // sunset, no latest version, and a certificate taken for up to
 // MaxCertificateLifetime; a d that names no maximum keeps that one.
@@ -227,7 +227,7 @@ func (s *Server) SetPolicy(d protocol.ServerDocument) {
 
 // versioned puts what the policy says of the request's version on its
 // answer: Deprecation where a deprecation covers it, Sunset where a sunset
-// does, and 410 version_retired, with
+// does, and 410 client_version_unsupported, with
 // min_version where there is a floor, where it is retired at the server's
 // clock, but on GET /v1/, which takes every version. It reports whether the
 // request goes on.
@@ -245,7 +245,7 @@ func (s *Server) versioned(w http.ResponseWriter, r *http.Request) bool {
 	if r.URL.Path == protocol.DocumentPath || !d.Retired(v, s.now()) {
 		return true
 	}
-	problem(w, protocol.CodeVersionRetired, "this server no longer takes this client's version: upgrade", func(p *protocol.Problem) { p.MinVersion = d.MinVersion })
+	problem(w, protocol.CodeClientVersionUnsupported, "this server no longer takes this client's version: upgrade", func(p *protocol.Problem) { p.MinVersion = d.MinVersion })
 	return false
 }
 
@@ -374,15 +374,15 @@ func problem(w http.ResponseWriter, code protocol.Code, detail string, with ...f
 }
 
 // revoked answers that an address is revoked, carrying the record the
-// server holds of it, as every 410 revoked does (PROTOCOL.md §11.3).
+// server holds of it, as every 410 mailbox_revoked does (PROTOCOL.md §11.3).
 func revoked(w http.ResponseWriter, identity []byte, k *revocations, detail string) {
 	rec := &protocol.Revocations{Identity: identity, Revocation: k.revoked, RevokedCertificates: k.certList, RevokedCertificatesSignature: k.certListSig}
-	problem(w, protocol.CodeRevoked, detail, func(p *protocol.Problem) { p.Record = rec })
+	problem(w, protocol.CodeMailboxRevoked, detail, func(p *protocol.Problem) { p.Record = rec })
 }
 
 func decode(w http.ResponseWriter, r *http.Request, v any) bool {
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(v); err != nil {
-		problem(w, protocol.CodeBadRequest, err.Error())
+		problem(w, protocol.CodeInvalidRequest, err.Error())
 		return false
 	}
 	return true
@@ -391,7 +391,7 @@ func decode(w http.ResponseWriter, r *http.Request, v any) bool {
 func pathAddr(w http.ResponseWriter, r *http.Request) (protocol.Address, bool) {
 	a, err := protocol.ParseAddress(r.PathValue("addr"))
 	if err != nil {
-		problem(w, protocol.CodeBadAddress, "not an address")
+		problem(w, protocol.CodeInvalidAddress, "not an address")
 		return a, false
 	}
 	return a, true
@@ -399,44 +399,44 @@ func pathAddr(w http.ResponseWriter, r *http.Request) (protocol.Address, bool) {
 
 // verifyPrekey checks a statement against the mailbox's identity, and returns
 // its signer, or the code its refusal is answered with, as dromas-server
-// answers it (PROTOCOL.md §11.7, step 6): prekey_time where the refusal is
+// answers it (PROTOCOL.md §11.7, step 6): invalid_validity_period where the refusal is
 // for a time (a certificate that has not begun or has ended, at this clock,
-// or a statement that has ended or ends too far ahead), and bad_key where it
+// or a statement that has ended or ends too far ahead), and invalid_key where it
 // is not. A certificate that runs longer than the server's maximum is
-// certificate_too_long, unless it is current's, the certificate of the
+// certificate_lifetime_too_long, unless it is current's, the certificate of the
 // mailbox's current statement: the maximum binds a certificate when it is
 // first taken.
 func (s *Server) verifyPrekey(identity, statement, signature []byte, current []byte) (*protocol.Prekey, *protocol.Signer, protocol.Code, error) {
 	id, err := protocol.ParseIdentity(identity)
 	if err != nil {
-		return nil, nil, protocol.CodeBadKey, err
+		return nil, nil, protocol.CodeInvalidKey, err
 	}
 	p, by, err := protocol.VerifyPrekey(id, statement, signature, s.now())
 	switch {
 	case errors.Is(err, protocol.ErrCertificateTime):
-		return nil, nil, protocol.CodePrekeyTime, err
+		return nil, nil, protocol.CodeInvalidValidityPeriod, err
 	case err != nil:
-		return nil, nil, protocol.CodeBadKey, err
+		return nil, nil, protocol.CodeInvalidKey, err
 	}
 	if err := p.CheckLifetime(s.now()); err != nil {
-		return nil, nil, protocol.CodePrekeyTime, err
+		return nil, nil, protocol.CodeInvalidValidityPeriod, err
 	}
 	if c := by.Certificate(); c != nil && !bytes.Equal(c.Marshal(), current) {
 		s.mu.Lock()
 		most := s.policy.MaxCertificateLifetime
 		s.mu.Unlock()
 		if life := c.Lifetime(); life < 0 || uint64(life/time.Second) > most { //nolint:gosec // not negative
-			return nil, nil, protocol.CodeCertificateTooLong, errors.New("the certificate runs longer than this server takes")
+			return nil, nil, protocol.CodeCertificateLifetimeTooLong, errors.New("the certificate runs longer than this server takes")
 		}
 	}
 	return p, by, "", nil
 }
 
 // refuseStatement writes a statement's refusal, carrying the server's
-// maximum, most, on certificate_too_long.
+// maximum, most, on certificate_lifetime_too_long.
 func refuseStatement(w http.ResponseWriter, c protocol.Code, err error, most uint64) {
 	problem(w, c, err.Error(), func(p *protocol.Problem) {
-		if c == protocol.CodeCertificateTooLong {
+		if c == protocol.CodeCertificateLifetimeTooLong {
 			p.MaxCertificateLifetime = &most
 		}
 	})
@@ -474,17 +474,17 @@ func revokedSigner(w http.ResponseWriter, listed *protocol.RevokedCertificates, 
 // of under, the signer the call takes a pass by (PROTOCOL.md §8). It writes
 // the refusal and reports false if not: a certificate at or below the
 // revocation of the address's certificates listed is certificate_revoked,
-// and any other certificate_not_current, naming the certificate under where
+// and any other certificate_superseded, naming the certificate under where
 // it is one.
 func (s *Server) pass(w http.ResponseWriter, r *http.Request, identity []byte, under *protocol.Signer, listed *protocol.RevokedCertificates) bool {
 	p, err := protocol.ParsePass(r.Header.Get("Authorization"))
 	if err != nil {
-		problem(w, protocol.CodeUnauthorized, "no pass, or not a pass")
+		problem(w, protocol.CodeInvalidPass, "no pass, or not a pass")
 		return false
 	}
 	id, err := protocol.ParseIdentity(identity)
 	if err != nil {
-		problem(w, protocol.CodeUnauthorized, "no identity to check the pass against")
+		problem(w, protocol.CodeInvalidPass, "no identity to check the pass against")
 		return false
 	}
 	// Run out, or running out too far ahead: either way the mailbox signs another.
@@ -498,7 +498,7 @@ func (s *Server) pass(w http.ResponseWriter, r *http.Request, identity []byte, u
 		problem(w, protocol.CodePassExpired, "the pass has run out, or its certificate is not valid now")
 		return false
 	case err != nil:
-		problem(w, protocol.CodeUnauthorized, "not this mailbox's pass for this server")
+		problem(w, protocol.CodeInvalidPass, "not this mailbox's pass for this server")
 		return false
 	case by.Identity(), bytes.Equal(keyOf(identity, by), keyOf(identity, under)) && protocol.Admits(listed, by) == nil:
 		return true
@@ -506,7 +506,7 @@ func (s *Server) pass(w http.ResponseWriter, r *http.Request, identity []byte, u
 		problem(w, protocol.CodeCertificateRevoked, "the pass is under a certificate this address's identity revoked")
 		return false
 	}
-	problem(w, protocol.CodeCertificateNotCurrent, "the pass is not by the signer this call takes a pass by", func(p *protocol.Problem) {
+	problem(w, protocol.CodeCertificateSuperseded, "the pass is not by the signer this call takes a pass by", func(p *protocol.Problem) {
 		if c := under.Certificate(); c != nil {
 			n := c.Serial()
 			p.CertificateSerial = &n
@@ -567,7 +567,7 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 			}
 			return
 		}
-		problem(w, protocol.CodeConflict, "registered with another prekey")
+		problem(w, protocol.CodeMailboxAlreadyExists, "registered with another prekey")
 		return
 	}
 	// What the identity signed about the address before it had a mailbox here
@@ -618,7 +618,7 @@ func (s *Server) getMailbox(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if b == nil {
-		problem(w, protocol.CodeNoSuchMailbox, "no mailbox has this address")
+		problem(w, protocol.CodeMailboxNotFound, "no mailbox has this address")
 		return
 	}
 	WriteJSON(w, http.StatusOK, protocol.MailboxResponse{
@@ -662,7 +662,7 @@ func (s *Server) revoke(w http.ResponseWriter, r *http.Request) {
 	// beside it (PROTOCOL.md §11.15).
 	if len(req.Revocation) > 0 || len(req.RevokedCertificates) == 0 {
 		if _, err := protocol.VerifyRevocation(a, req.Identity, req.Revocation); err != nil {
-			problem(w, protocol.CodeBadRevocation, "not a revocation of this address")
+			problem(w, protocol.CodeInvalidRevocation, "not a revocation of this address")
 			return
 		}
 	}
@@ -674,12 +674,12 @@ func (s *Server) revoke(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case err != nil && len(req.Revocation) > 0:
 		case err != nil:
-			problem(w, protocol.CodeBadRevocation, "not a revocation of this address's certificates")
+			problem(w, protocol.CodeInvalidRevocation, "not a revocation of this address's certificates")
 			return
 		case kept.listed != nil && bytes.Equal(kept.certList, req.RevokedCertificates):
 		case kept.listed != nil && certs.Through <= kept.listed.Through && len(req.Revocation) > 0:
 		case kept.listed != nil && certs.Through <= kept.listed.Through:
-			problem(w, protocol.CodeConflict, "a revocation through that serial or a higher one is held")
+			problem(w, protocol.CodeSerialTooLow, "a revocation through that serial or a higher one is held")
 			return
 		default:
 			kept.certList, kept.certListSig, kept.listed = req.RevokedCertificates, req.RevokedCertificatesSignature, certs
@@ -702,7 +702,7 @@ func (s *Server) revoke(w http.ResponseWriter, r *http.Request) {
 }
 
 // getRevocations is what the server keeps of the address, with or without a
-// mailbox here, or not_revoked.
+// mailbox here, or revocation_not_found.
 func (s *Server) getRevocations(w http.ResponseWriter, r *http.Request) {
 	a, ok := pathAddr(w, r)
 	if !ok {
@@ -718,7 +718,7 @@ func (s *Server) getRevocations(w http.ResponseWriter, r *http.Request) {
 		identity, kept = h.identity, &h.revocations
 	}
 	if kept == nil || kept.revoked == nil && kept.certList == nil {
-		problem(w, protocol.CodeNotRevoked, "no revocation of this address is held here")
+		problem(w, protocol.CodeRevocationNotFound, "no revocation of this address is held here")
 		return
 	}
 	WriteJSON(w, http.StatusOK, &protocol.Revocations{Identity: identity, Revocation: kept.revoked, RevokedCertificates: kept.certList, RevokedCertificatesSignature: kept.certListSig})
@@ -766,7 +766,7 @@ func (s *Server) newPrekey(w http.ResponseWriter, r *http.Request) {
 			revoked(w, h.identity, &h.revocations, "this address is revoked")
 			return
 		}
-		problem(w, protocol.CodeNoSuchMailbox, "no mailbox has this address")
+		problem(w, protocol.CodeMailboxNotFound, "no mailbox has this address")
 		return
 	}
 	s.mu.Lock()
@@ -776,7 +776,7 @@ func (s *Server) newPrekey(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.mailboxes[a] != b {
-		problem(w, protocol.CodeMailboxChanged, "the mailbox changed while the request was handled")
+		problem(w, protocol.CodeConcurrentModification, "the mailbox changed while the request was handled")
 		return
 	}
 	if b.revoked != nil {
@@ -807,7 +807,7 @@ func (s *Server) newPrekey(w http.ResponseWriter, r *http.Request) {
 func order(w http.ResponseWriter, b *mailbox, p *protocol.Prekey, by *protocol.Signer) bool {
 	switch {
 	case by.Rank() < b.signer.Rank(), by.Rank() == b.signer.Rank() && !bytes.Equal(keyOf(b.identity, by), b.key):
-		problem(w, protocol.CodeCertificateNotCurrent, "the signer is older than the mailbox's current one", func(pr *protocol.Problem) {
+		problem(w, protocol.CodeCertificateSuperseded, "the signer is older than the mailbox's current one", func(pr *protocol.Problem) {
 			if c := b.signer.Certificate(); c != nil {
 				n := c.Serial()
 				pr.CertificateSerial = &n
@@ -815,7 +815,7 @@ func order(w http.ResponseWriter, b *mailbox, p *protocol.Prekey, by *protocol.S
 		})
 		return true
 	case by.Rank() == b.signer.Rank() && p.Serial <= b.prekey.Serial:
-		problem(w, protocol.CodeConflict, "the serial must be higher")
+		problem(w, protocol.CodeSerialTooLow, "the serial must be higher")
 		return true
 	}
 	return false
@@ -836,7 +836,7 @@ func sendQuery(w http.ResponseWriter, r *http.Request) (protocol.SendQuery, bool
 		if errors.As(err, &qe) {
 			param = qe.Param
 		}
-		problem(w, protocol.CodeBadRequest, "not a send's query", func(p *protocol.Problem) { p.Member = param })
+		problem(w, protocol.CodeInvalidRequest, "not a send's query", func(p *protocol.Problem) { p.Member = param })
 		return q, false
 	}
 	return q, true
@@ -854,14 +854,14 @@ func (s *Server) send(w http.ResponseWriter, r *http.Request) {
 	// The body is the ciphertext, whatever its Content-Type says.
 	ct, err := io.ReadAll(io.LimitReader(r.Body, maxCiphertext))
 	if err != nil {
-		problem(w, protocol.CodeBadRequest, "the body could not be read")
+		problem(w, protocol.CodeInvalidRequest, "the body could not be read")
 		return
 	}
 	// The sender is the mailbox the pass names. The message's signature is inside
 	// the ciphertext, where this server cannot see it.
 	p, err := protocol.ParsePass(r.Header.Get("Authorization"))
 	if err != nil {
-		problem(w, protocol.CodeUnauthorized, "no pass, or not a pass")
+		problem(w, protocol.CodeInvalidPass, "no pass, or not a pass")
 		return
 	}
 	from := p.Address
@@ -869,7 +869,7 @@ func (s *Server) send(w http.ResponseWriter, r *http.Request) {
 	defer s.mu.Unlock()
 	rcpt, sender := s.mailboxes[to], s.mailboxes[from]
 	if sender == nil {
-		problem(w, protocol.CodeUnknownSender, "the sender is not registered")
+		problem(w, protocol.CodeSenderNotRegistered, "the sender is not registered")
 		return
 	}
 	if sender.revoked != nil {
@@ -885,7 +885,7 @@ func (s *Server) send(w http.ResponseWriter, r *http.Request) {
 	}
 	switch {
 	case rcpt == nil:
-		problem(w, protocol.CodeNoSuchMailbox, "no mailbox has this address")
+		problem(w, protocol.CodeMailboxNotFound, "no mailbox has this address")
 		return
 	case rcpt.revoked != nil:
 		revoked(w, rcpt.identity, &rcpt.revocations, "this mailbox is revoked")
@@ -894,7 +894,7 @@ func (s *Server) send(w http.ResponseWriter, r *http.Request) {
 		problem(w, protocol.CodePrekeyExpired, "the mailbox must publish a new prekey: its current one is under a revoked certificate")
 		return
 	case q.Statement != protocol.StatementHash(rcpt.statement):
-		problem(w, protocol.CodeStalePrekey, "the send names another statement than the mailbox's current one")
+		problem(w, protocol.CodePrekeySuperseded, "the send names another statement than the mailbox's current one")
 		return
 	}
 	// Dedupe while the message is live, from any sender: an ack leaves
@@ -959,7 +959,7 @@ func (s *Server) owner(h func(http.ResponseWriter, *http.Request, *mailbox)) htt
 			return
 		}
 		if b == nil {
-			problem(w, protocol.CodeNoSuchMailbox, "no mailbox has this address")
+			problem(w, protocol.CodeMailboxNotFound, "no mailbox has this address")
 			return
 		}
 		if !b.current() && certificatePass(r) {
@@ -982,18 +982,18 @@ func listQuery(w http.ResponseWriter, r *http.Request) (after int, wait time.Dur
 	q, err := url.ParseQuery(r.URL.RawQuery)
 	for name, v := range q {
 		if name != "cursor" && name != "wait" || len(v) != 1 {
-			problem(w, protocol.CodeBadRequest, "a list takes a cursor or a wait, once", func(p *protocol.Problem) { p.Member = name })
+			problem(w, protocol.CodeInvalidRequest, "a list takes a cursor or a wait, once", func(p *protocol.Problem) { p.Member = name })
 			return 0, 0, false
 		}
 	}
 	if err != nil {
-		problem(w, protocol.CodeBadRequest, "not a query", func(p *protocol.Problem) { p.Member = "cursor" })
+		problem(w, protocol.CodeInvalidRequest, "not a query", func(p *protocol.Problem) { p.Member = "cursor" })
 		return 0, 0, false
 	}
 	if v, ok := q["wait"]; ok {
 		n, err := protocol.Wait(v[0])
 		if err != nil || len(q) > 1 {
-			problem(w, protocol.CodeBadRequest, "a wait is digits, on the first page", func(p *protocol.Problem) { p.Member = "wait" })
+			problem(w, protocol.CodeInvalidRequest, "a wait is digits, on the first page", func(p *protocol.Problem) { p.Member = "wait" })
 			return 0, 0, false
 		}
 		held := MaxHold
@@ -1004,12 +1004,12 @@ func listQuery(w http.ResponseWriter, r *http.Request) (after int, wait time.Dur
 	}
 	c := q["cursor"]
 	if protocol.CheckCursor(c[0]) != nil {
-		problem(w, protocol.CodeBadRequest, "not a cursor", func(p *protocol.Problem) { p.Member = "cursor" })
+		problem(w, protocol.CodeInvalidRequest, "not a cursor", func(p *protocol.Problem) { p.Member = "cursor" })
 		return 0, 0, false
 	}
 	after, err = strconv.Atoi(c[0])
 	if err != nil || after < 1 || strconv.Itoa(after) != c[0] {
-		problem(w, protocol.CodeBadRequest, "not a cursor this server made", func(p *protocol.Problem) { p.Member = "cursor" })
+		problem(w, protocol.CodeInvalidRequest, "not a cursor this server made", func(p *protocol.Problem) { p.Member = "cursor" })
 		return 0, 0, false
 	}
 	return after, 0, true
@@ -1143,7 +1143,7 @@ func WriteList(w http.ResponseWriter, l protocol.MessageList) {
 func (s *Server) fetch(w http.ResponseWriter, r *http.Request, b *mailbox) {
 	m := b.messages[r.PathValue("id")]
 	if m == nil {
-		problem(w, protocol.CodeNoSuchMessage, "acked or expired")
+		problem(w, protocol.CodeMessageNotFound, "acked or expired")
 		return
 	}
 	if from, ok := protocol.RangeAsked(r.Header.Values("Range"), r.Header.Values("If-Range")); ok && from < int64(len(m.ciphertext)) {
@@ -1190,7 +1190,7 @@ func (s *Server) putACL(w http.ResponseWriter, r *http.Request, b *mailbox) {
 	}
 	acl, err := protocol.CheckACL(&d, 0)
 	if err != nil {
-		problem(w, protocol.CodeBadRequest, "not an ACL")
+		problem(w, protocol.CodeInvalidRequest, "not an ACL")
 		return
 	}
 	b.acl = acl
@@ -1246,7 +1246,7 @@ func (s *Server) ACL(a protocol.Address) *protocol.ACL {
 func (s *Server) ack(w http.ResponseWriter, r *http.Request, b *mailbox) {
 	id := r.PathValue("id")
 	if b.messages[id] == nil {
-		problem(w, protocol.CodeNoSuchMessage, "acked or expired")
+		problem(w, protocol.CodeMessageNotFound, "acked or expired")
 		return
 	}
 	delete(b.messages, id)
@@ -1278,17 +1278,17 @@ func (s *Server) Account(a protocol.Address) string {
 func (s *Server) adopt(w http.ResponseWriter, r *http.Request, b *mailbox) {
 	var req protocol.AdoptRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		problem(w, protocol.CodeBadRequest, "not JSON")
+		problem(w, protocol.CodeInvalidRequest, "not JSON")
 		return
 	}
 	acc, ok := s.keys[req.Key]
 	if !ok {
-		problem(w, protocol.CodeAdoptKeyRefused, "not a key")
+		problem(w, protocol.CodeInvalidAdoptKey, "not a key")
 		return
 	}
 	if b.account != acc { // a mailbox already in the account spends no use (PROTOCOL.md §11.16)
 		if s.spentKeys[req.Key] {
-			problem(w, protocol.CodeAdoptKeyRefused, "spent")
+			problem(w, protocol.CodeInvalidAdoptKey, "spent")
 			return
 		}
 		s.spentKeys[req.Key] = true

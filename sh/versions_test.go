@@ -15,7 +15,7 @@ const scriptVersion = "0.5.0"
 // The script names its version in every request, and its command line says
 // a Deprecation and a Sunset of it at its end, each with its date, as the Go
 // client does (PROTOCOL.md §11.17); a value of another form is none, and
-// nothing of it is printed. A 410 version_retired is said in the script's
+// nothing of it is printed. A 410 client_version_unsupported is said in the script's
 // words, with min_version once it has its form. It changes no exit status:
 // the script has none for a mailbox that needs a look.
 func TestTheScriptNamesItsVersionAndSaysASunset(t *testing.T) {
@@ -43,7 +43,7 @@ func TestTheScriptNamesItsVersionAndSaysASunset(t *testing.T) {
 	// Retired: the script's words, the floor once it has its form.
 	w.srv.SetPolicy(protocol.ServerDocument{MinVersion: "0.6"})
 	r = b.sh("bash " + script + " recv")
-	if r.rc == 0 || !strings.Contains(r.err, `"status":410,"code":"version_retired","min_version":"0.6"`) ||
+	if r.rc == 0 || !strings.Contains(r.err, `"status":410,"code":"client_version_unsupported","min_version":"0.6"`) ||
 		!strings.Contains(r.err, "this server no longer takes this client's version, 0.5.0: upgrade this client; the oldest it takes is 0.6") {
 		t.Fatalf("recv at a server that retired its version: %v", r)
 	}

@@ -85,7 +85,7 @@ func TestScriptAfterAClockAhead(t *testing.T) {
 	for _, c := range []struct {
 		ahead time.Duration
 		code  string
-	}{{61 * time.Minute, "prekey_time"}, {55 * time.Minute, "pass_expired"}} { // a statement ending more than the longest prekey lifetime and an hour after the server's clock, which it reads before the pass; then a pass ending more than an hour after it
+	}{{61 * time.Minute, "invalid_validity_period"}, {55 * time.Minute, "pass_expired"}} { // a statement ending more than the longest prekey lifetime and an hour after the server's clock, which it reads before the pass; then a pass ending more than an hour after it
 		b := at{w.empty(), c.ahead}
 		if r := b.sh("dr_init"); r.rc == 0 || !strings.Contains(r.err, c.code) {
 			t.Fatalf("a mailbox %v fast registered: %v", c.ahead, r)
@@ -144,7 +144,7 @@ func TestScriptSendsAndReadsByItsClock(t *testing.T) {
 	if r := (at{p, 2 * time.Hour}).sh("printf 'dated two hours ahead' | dr_send " + q.addr.String()); r.rc == 0 || !strings.Contains(r.err, "pass_expired") || !p.bare() {
 		t.Errorf("a send from a clock two hours fast: %v", r)
 	}
-	if d := q.recv(); len(d.messages) != 0 || strings.Contains(d.said, "future") || w.srv.Count(q.addr) != 0 {
+	if d := q.recv(); len(d.messages) != 0 || strings.Contains(d.said, "message_not_yet_valid") || w.srv.Count(q.addr) != 0 {
 		t.Errorf("its reader was sent something: %v", d)
 	}
 	p.must("dr_pass > /dev/null")
@@ -153,7 +153,7 @@ func TestScriptSendsAndReadsByItsClock(t *testing.T) {
 	}
 	l := p.line(q.addr, "00000000-0000-4000-8000-0000000000f1", "dated ahead", -3700*time.Second)
 	w.inject(q, "", l, p.sign(q.addr, l))
-	if d := q.recv(); len(d.messages) != 0 || !strings.Contains(d.said, "future: sent_at is more than 60 minutes ahead") {
+	if d := q.recv(); len(d.messages) != 0 || !strings.Contains(d.said, "message_not_yet_valid: sent_at is more than 60 minutes ahead") {
 		t.Errorf("sent_at more than an hour ahead of the reader's clock: %v", d)
 	}
 }
@@ -220,7 +220,7 @@ func TestScriptStopsAfterItsStateIsLostAndAcceptsItsCost(t *testing.T) {
 	}
 	q.must(`rm "$DR/seen" "$DR/seen-keys"`)
 	w.put(q, "", ct) // the server kept its copy
-	if d := q.recv(); d.rc != 4 || len(d.messages) != 0 || !strings.Contains(d.said, "state_not_the_keys") || w.srv.Count(q.addr) != 1 || q.has("seen-floor") {
+	if d := q.recv(); d.rc != 4 || len(d.messages) != 0 || !strings.Contains(d.said, "restore_required") || w.srv.Count(q.addr) != 1 || q.has("seen-floor") {
 		t.Fatalf("the drain before init --restore: %v", d)
 	}
 	serial := q.read("serial")
@@ -256,7 +256,7 @@ func TestScriptAKeyUnderANameNoSerialDecryptsNothing(t *testing.T) {
 		t.Fatalf("the server's copy after the state was lost, its key renamed: %v", d)
 	}
 	q.must(`dr_rekey`)
-	if d := q.recv(); len(d.messages) != 0 || d.refused("undecryptable") != 1 {
+	if d := q.recv(); len(d.messages) != 0 || d.refused("decrypt_error") != 1 {
 		t.Errorf("the server's copy once the mailbox renewed: %v", d)
 	}
 }
@@ -294,7 +294,7 @@ func TestScriptAKeyMountedDuringADrainDecryptsNothingUntilNamed(t *testing.T) {
 		}
 		next.ServeHTTP(rw, r)
 	})
-	if d := q.recv(); !mounted.Load() || len(d.messages) != 0 || d.refused("undecryptable") != 1 || q.has("seen-floor") {
+	if d := q.recv(); !mounted.Load() || len(d.messages) != 0 || d.refused("decrypt_error") != 1 || q.has("seen-floor") {
 		t.Fatalf("the drain the volume came back in: %v", d)
 	}
 	w.honest()

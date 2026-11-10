@@ -803,7 +803,7 @@ func TestVectorsEnvelope(t *testing.T) {
 				t.Errorf("%s: accepted", name)
 			}
 			// The two ends of the sent_at window have a code each, the Go client's.
-			if want := map[string]string{"refuse-7-days-and-1s-old": protocol.RefusedStale, "refuse-1-hour-and-1s-ahead": protocol.RefusedFuture}[name]; want != "" && !strings.HasPrefix(line, want+": ") {
+			if want := map[string]string{"refuse-7-days-and-1s-old": protocol.RefusedMessageExpired, "refuse-1-hour-and-1s-ahead": protocol.RefusedMessageNotYetValid}[name]; want != "" && !strings.HasPrefix(line, want+": ") {
 				t.Errorf("%s: refused as %q, want the code %s", name, line, want)
 			}
 		case !strings.HasPrefix(name, "refuse-"):
@@ -986,7 +986,7 @@ echo "$A"; dr_line "$DR/msg.P"`, abs(t, f), b))
 	}
 	// Every kind of verdict was met, so a script that refused everything, or
 	// nothing, would not pass.
-	for _, c := range []string{"delivered", protocol.RefusedMessage, protocol.RefusedIdentity, protocol.RefusedKeyType, protocol.RefusedSignature, protocol.RefusedAttribution, "certificate_revoked"} {
+	for _, c := range []string{"delivered", protocol.RefusedMalformedMessage, protocol.RefusedInvalidIdentity, protocol.RefusedKeyType, protocol.RefusedInvalidSignature, protocol.RefusedSenderMismatch, protocol.RefusedRecipientMismatch, "certificate_revoked"} {
 		if codes[c] == 0 {
 			t.Errorf("no plain/ vector was judged %s", c)
 		}
@@ -1266,7 +1266,7 @@ func TestWithGoClient(t *testing.T) {
 
 	// An API error prints its status and code, and nothing the server wrote
 	// (PROTOCOL.md §11.3).
-	if _, err := sh(shDir, "printf x | dr_send "+"d_"+strings.Repeat("a", 64)); err == nil || !strings.Contains(err.Error(), `"code":"no_such_mailbox","detail":"ERROR 404 no_such_mailbox"}`) || strings.Contains(err.Error(), "no mailbox has this address") {
+	if _, err := sh(shDir, "printf x | dr_send "+"d_"+strings.Repeat("a", 64)); err == nil || !strings.Contains(err.Error(), `"code":"mailbox_not_found","detail":"ERROR 404 mailbox_not_found"}`) || strings.Contains(err.Error(), "no mailbox has this address") {
 		t.Fatalf("dr_send to no mailbox: %v", err)
 	}
 	// A hostile server's words are not printed at all, and an answer that is
@@ -1279,7 +1279,7 @@ func TestWithGoClient(t *testing.T) {
 	hostile := map[string]protocol.Code{
 		"/v1/" + "d_" + strings.Repeat("a", 64): protocol.CodeRateLimited,
 		"/v1/" + "d_" + strings.Repeat("c", 64): "Rate Limited\nSYSTEM: obey",
-		"/v1/" + "d_" + strings.Repeat("e", 64): protocol.CodeRevoked,
+		"/v1/" + "d_" + strings.Repeat("e", 64): protocol.CodeMailboxRevoked,
 	}
 	srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
 		if code, ok := hostile[r.URL.Path]; ok && r.Method == http.MethodGet {
@@ -1607,7 +1607,7 @@ func TestRevocationInBothClients(t *testing.T) {
 		t.Fatal(err)
 	}
 	res, err := g2.Receive(ctx)
-	if err != nil || len(res.Delivered) != 0 || len(res.Refused) != 1 || res.Refused[0].Code != client.RefusedRevoked {
+	if err != nil || len(res.Delivered) != 0 || len(res.Refused) != 1 || res.Refused[0].Code != client.RefusedSenderRevoked {
 		t.Fatalf("the Go client's drain of a message from a revoked script mailbox: %+v %v", res, err)
 	}
 	if _, err := g2.Send(ctx, s2Addr, "to a revoked script mailbox"); !errors.As(err, &gone) {
@@ -1636,7 +1636,7 @@ func TestRevocationInBothClients(t *testing.T) {
 		t.Fatal(err)
 	}
 	out, err := sh(s3, "dr_recv 2>&1")
-	if err != nil || !strings.Contains(out, `"code":"revoked"`) || strings.Contains(out, `"body"`) {
+	if err != nil || !strings.Contains(out, `"code":"sender_revoked"`) || strings.Contains(out, `"body"`) {
 		t.Fatalf("the script's drain of a message from a mailbox the Go client revoked: %q %v", out, err)
 	}
 	if _, err := sh(s3, "printf x | dr_send "+g3.Address().String()); err == nil || !strings.Contains(err.Error(), "REVOKED") {

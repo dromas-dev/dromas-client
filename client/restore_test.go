@@ -43,7 +43,7 @@ var signals = []struct {
 // Each signal of a state that does not match prekeys/ stops every command that
 // receives, sends, renews or hands over a message, init among them, before it
 // makes any call: nothing is listed, fetched or acked, and nothing is renewed.
-// It is refused as StateNotTheKeys, which status says too, and every other
+// It is refused as RestoreRequired, which status says too, and every other
 // command runs. Each list is held to lockingCommands, which
 // TestEveryLockingCommandIsTriedFinished holds to the code. A mailbox whose
 // state matches its prekeys/ is the control.

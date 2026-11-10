@@ -153,19 +153,19 @@ func Examine(plaintext []byte, me Address, now time.Time) (*Signed, *Findings, e
 	f := &Findings{At: now}
 	line, signature, ok := splitPlaintext(plaintext)
 	if !ok {
-		return nil, f, &EnvelopeError{RefusedMessage, "what was decrypted is not an envelope line and then a signature block"}
+		return nil, f, &EnvelopeError{RefusedMalformedMessage, "what was decrypted is not an envelope line and then a signature block"}
 	}
 	doc, from, err := envelopeSender(line)
 	if err != nil {
 		return nil, f, err
 	}
 	if len(doc) == 0 {
-		return nil, f, &EnvelopeError{RefusedIdentity, "the envelope carries no identity document"}
+		return nil, f, &EnvelopeError{RefusedInvalidIdentity, "the envelope carries no identity document"}
 	}
 	a := AddressOf(doc)
 	f.Identity = &a
 	id, err := ParseIdentity(doc)
-	notTheSenders := &EnvelopeError{RefusedAttribution, "the envelope's from is not the address of the identity it carries"}
+	notTheSenders := &EnvelopeError{RefusedSenderMismatch, "the envelope's from is not the address of the identity it carries"}
 	switch {
 	case errors.Is(err, ErrIdentityType):
 		if from != a.String() {
@@ -173,7 +173,7 @@ func Examine(plaintext []byte, me Address, now time.Time) (*Signed, *Findings, e
 		}
 		return nil, f, &EnvelopeError{RefusedKeyType, "the sender's identity is of a key type this client does not verify"}
 	case err != nil:
-		return nil, f, &EnvelopeError{RefusedIdentity, "the envelope's identity document breaks its format or its key checks"}
+		return nil, f, &EnvelopeError{RefusedInvalidIdentity, "the envelope's identity document breaks its format or its key checks"}
 	case from != id.Address().String():
 		return nil, f, notTheSenders
 	}
@@ -187,13 +187,13 @@ func Examine(plaintext []byte, me Address, now time.Time) (*Signed, *Findings, e
 	switch {
 	case errors.Is(err, ErrCertificateTime):
 		if errors.Is(err, ErrCertificateNotBegun) {
-			return nil, f, &EnvelopeError{RefusedSignature, "the certificate of the key that signed it has not begun, by this machine's clock"}
+			return nil, f, &EnvelopeError{RefusedInvalidSignature, "the certificate of the key that signed it has not begun, by this machine's clock"}
 		}
-		return nil, f, &EnvelopeError{RefusedSignature, "the certificate of the key that signed it has ended"}
+		return nil, f, &EnvelopeError{RefusedInvalidSignature, "the certificate of the key that signed it has ended"}
 	case errors.Is(err, ErrCertificate):
-		return nil, f, &EnvelopeError{RefusedSignature, "it is not signed under a certificate of the sender's identity"}
+		return nil, f, &EnvelopeError{RefusedInvalidSignature, "it is not signed under a certificate of the sender's identity"}
 	case err != nil:
-		return nil, f, &EnvelopeError{RefusedSignature, "the signature does not verify for its sender and this mailbox"}
+		return nil, f, &EnvelopeError{RefusedInvalidSignature, "the signature does not verify for its sender and this mailbox"}
 	}
 	env, err := OpenEnvelope(line, id.Address(), me, now)
 	if err != nil {
@@ -244,7 +244,7 @@ func (f *Findings) signed(signer *Signer, line []byte) {
 // base64, the one encoding of its bytes, so no two readers decode it two ways.
 func envelopeSender(line []byte) (doc []byte, from string, err error) {
 	if !utf8Valid(line) {
-		return nil, "", badEnvelope("the envelope is not UTF-8")
+		return nil, "", invalidEnvelope("the envelope is not UTF-8")
 	}
 	fields, err := objectFields(line)
 	if err != nil {
@@ -252,14 +252,14 @@ func envelopeSender(line []byte) (doc []byte, from string, err error) {
 	}
 	if raw, ok := fields["from"]; ok {
 		if err := unmarshalString(raw, &from); err != nil {
-			return nil, "", badEnvelope("the envelope is malformed: its from is not what that field holds")
+			return nil, "", invalidEnvelope("the envelope is malformed: its from is not what that field holds")
 		}
 	}
 	raw, ok := fields["identity"]
 	if !ok {
 		return nil, from, nil
 	}
-	notDoc := &EnvelopeError{RefusedIdentity, "the envelope's identity is not base64 of an identity document"}
+	notDoc := &EnvelopeError{RefusedInvalidIdentity, "the envelope's identity is not base64 of an identity document"}
 	var b64 string
 	if err := unmarshalString(raw, &b64); err != nil {
 		return nil, "", notDoc

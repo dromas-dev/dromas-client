@@ -104,7 +104,7 @@ func TestAHeldListShownTheMailboxsOwnRevocationKeepsIt(t *testing.T) {
 		e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
 			if r.URL.Query().Has("wait") {
 				putRecord(t, next, b.Address(), rec)
-				forge.Refuse(w, protocol.CodeRevoked, func(p *protocol.Problem) { p.Record = rec })
+				forge.Refuse(w, protocol.CodeMailboxRevoked, func(p *protocol.Problem) { p.Record = rec })
 				return
 			}
 			next.ServeHTTP(w, r)
@@ -303,7 +303,7 @@ func TestAwaitEndsAtARefusalNoWaitMends(t *testing.T) {
 				forge.Refuse(w, protocol.CodeUnavailable)
 				return
 			}
-			forge.Refuse(w, protocol.CodeBadRequest)
+			forge.Refuse(w, protocol.CodeInvalidRequest)
 		})
 		var said []error
 		err := b.Await(context.Background(), start.Add(time.Hour), func(_ context.Context, ev client.Event) error {
@@ -313,8 +313,8 @@ func TestAwaitEndsAtARefusalNoWaitMends(t *testing.T) {
 			return nil
 		})
 		var ae *client.APIError
-		if !errors.As(err, &ae) || ae.Problem.Code != protocol.CodeBadRequest || len(said) != 1 {
-			t.Fatalf("Await: %v, having said %v; want the bad_request refusal, after one retry", err, said)
+		if !errors.As(err, &ae) || ae.Problem.Code != protocol.CodeInvalidRequest || len(said) != 1 {
+			t.Fatalf("Await: %v, having said %v; want the invalid_request refusal, after one retry", err, said)
 		}
 		if want := []time.Duration{0, 150 * time.Second}; len(at) != 2 || at[0] != want[0] || at[1] != want[1] {
 			t.Fatalf("held lists at %v, want %v: the second after the first's Retry-After", at, want)

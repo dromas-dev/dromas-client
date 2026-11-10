@@ -140,8 +140,8 @@ func TestReport(t *testing.T) {
 		fe   *client.FormatError
 		want string
 	}{
-		{&client.FormatError{Format: 3, Client: 2}, `{"type":"error","code":"mailbox_format_newer","format":3,"client_format":2,"detail":"REFUSED: the mailbox is in format 3, which a newer client wrote; this client reads format 2: run a newer dromas"}`},
-		{&client.FormatError{Format: 1, Client: 2}, `{"type":"error","code":"mailbox_format_older","format":1,"client_format":2,"detail":"REFUSED: the mailbox is in format 1, older than this client's 2: dromas recv, or any command that writes the mailbox, brings it forward"}`},
+		{&client.FormatError{Format: 3, Client: 2}, `{"type":"error","code":"unsupported_mailbox_format","format":3,"client_format":2,"detail":"REFUSED: the mailbox is in format 3, which a newer client wrote; this client reads format 2: run a newer dromas"}`},
+		{&client.FormatError{Format: 1, Client: 2}, `{"type":"error","code":"mailbox_upgrade_required","format":1,"client_format":2,"detail":"REFUSED: the mailbox is in format 1, older than this client's 2: dromas recv, or any command that writes the mailbox, brings it forward"}`},
 	} {
 		errs.Reset()
 		if report(c.fe, &errs) != 1 || errs.String() != c.want+"\n" {
@@ -605,7 +605,7 @@ func TestRecvWaitResumesAPacedDrain(t *testing.T) {
 	srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
 		if r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/messages/") && paced.Add(1) == 1 {
 			w.Header().Set("Retry-After", "1")
-			fakeserver.WriteJSON(w, http.StatusTooManyRequests, protocol.Problem{Type: protocol.CodeFetchPaced.TypeURI(), Code: protocol.CodeFetchPaced, Status: http.StatusTooManyRequests})
+			fakeserver.WriteJSON(w, http.StatusTooManyRequests, protocol.Problem{Type: protocol.CodeFetchRateLimited.TypeURI(), Code: protocol.CodeFetchRateLimited, Status: http.StatusTooManyRequests})
 			return
 		}
 		if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/messages") {
@@ -668,7 +668,7 @@ func TestAdopt(t *testing.T) {
 	if err := do(ctx, "account leave", nil, nil, &out, &errs); err != nil {
 		t.Fatal(err)
 	}
-	if err := do(ctx, "account adopt", nil, strings.NewReader(key), &out, &errs); codeOf(err) != protocol.CodeAdoptKeyRefused || strings.Contains(err.Error(), key) {
+	if err := do(ctx, "account adopt", nil, strings.NewReader(key), &out, &errs); codeOf(err) != protocol.CodeInvalidAdoptKey || strings.Contains(err.Error(), key) {
 		t.Fatalf("a spent key, from a mailbox out of its account: %v", err)
 	}
 	for _, args := range [][]string{{key}, {"--leave"}, {key, key}} {
@@ -988,7 +988,7 @@ func TestALostStateStopsEveryCommandUntilInitRestore(t *testing.T) {
 	for _, c := range []string{"recv", "prekey renew", "init", "outbox flush"} {
 		errs.Reset()
 		err := do(ctx, c, nil, nil, io.Discard, &errs)
-		if got := report(err, &errs); got != 4 || !strings.Contains(errs.String(), `"fatal":true`) || !strings.Contains(errs.String(), `"code":"`+client.StateNotTheKeys+`"`) || srv.Count(b.Address()) != 1 {
+		if got := report(err, &errs); got != 4 || !strings.Contains(errs.String(), `"fatal":true`) || !strings.Contains(errs.String(), `"code":"`+client.RestoreRequired+`"`) || srv.Count(b.Address()) != 1 {
 			t.Fatalf("%s after the state file was lost: exit %d, stderr %q", c, got, errs.String())
 		}
 	}
@@ -1177,7 +1177,7 @@ func TestARefusedMessageDoesNotFailRecv(t *testing.T) {
 	if err := do(ctx, "recv", nil, nil, &out, &errs); err != nil {
 		t.Fatalf("recv after refusing a message: %v", err)
 	}
-	if errs.Len() != 0 || out.String() != `{"type":"refused","id":"`+hex.EncodeToString(h[:])+`","code":"undecryptable","detail":"it does not decrypt with this mailbox's prekeys"}`+"\n" {
+	if errs.Len() != 0 || out.String() != `{"type":"refused","id":"`+hex.EncodeToString(h[:])+`","code":"decrypt_error","detail":"it does not decrypt with this mailbox's prekeys"}`+"\n" {
 		t.Fatalf("stdout %q, stderr %q", out.String(), errs.String())
 	}
 	var look *needsALook
@@ -1186,7 +1186,7 @@ func TestARefusedMessageDoesNotFailRecv(t *testing.T) {
 		t.Fatalf("status with a message in refused/: %v", err)
 	}
 	var st client.Status
-	if err := json.Unmarshal(out.Bytes(), &st); err != nil || st.Refused != 1 || len(st.Attention) != 1 || !strings.Contains(st.Attention[0], "1 refused in refused/ (undecryptable)") {
+	if err := json.Unmarshal(out.Bytes(), &st); err != nil || st.Refused != 1 || len(st.Attention) != 1 || !strings.Contains(st.Attention[0], "1 refused in refused/ (decrypt_error)") {
 		t.Fatalf("status printed %q: %v", out.String(), err)
 	}
 }
@@ -1503,7 +1503,7 @@ func TestRefusedCommands(t *testing.T) {
 		t.Fatal(err)
 	}
 	allows(t, b, a)
-	// Each message undecryptable, and listed beside a from of the server's
+	// Each message decrypt_error, and listed beside a from of the server's
 	// words, which nothing keeps.
 	srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
 		if r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/messages/") {
@@ -1535,7 +1535,7 @@ func TestRefusedCommands(t *testing.T) {
 		t.Fatalf("refused list: %v %q", err, out.String())
 	}
 	ls := printed(t, out.String())
-	if typesOf(ls) != "refused refused" || ls[0]["code"] != client.RefusedDecrypt || ls[0]["from"] != nil {
+	if typesOf(ls) != "refused refused" || ls[0]["code"] != client.RefusedDecryptError || ls[0]["from"] != nil {
 		t.Fatalf("refused list printed %q", out.String())
 	}
 	for _, args := range [][]string{nil, {"--all", ls[0]["id"].(string)}, {"../inbox/x"}} {
@@ -2190,7 +2190,7 @@ func TestCertRevokeEarlierWhenTheRenewalIsRefused(t *testing.T) {
 	first := inUse(t, b)
 	useMailbox(t, b.Dir())
 	t.Setenv("DROMAS_SERVER_URL", srv.URL)
-	for _, code := range []protocol.Code{protocol.CodeUnavailable, protocol.CodeRateLimited, protocol.CodeFetchPaced} {
+	for _, code := range []protocol.Code{protocol.CodeUnavailable, protocol.CodeRateLimited, protocol.CodeFetchRateLimited} {
 		srv.SetMiddle(refusing(code, http.MethodPut, "/prekey"))
 		var out, errs bytes.Buffer
 		err = do(ctx, "cert revoke-earlier", nil, strings.NewReader(""), &out, &errs)

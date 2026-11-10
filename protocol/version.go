@@ -402,7 +402,7 @@ func earliest(list []Scheduled, v Version) (time.Time, bool) {
 }
 
 // Retired reports whether a request of version v is answered 410
-// version_retired at the server's clock now: v is below the floor, or a
+// client_version_unsupported at the server's clock now: v is below the floor, or a
 // sunset that covers it has its date at or before now (PROTOCOL.md §11.17).
 func (d *ServerDocument) Retired(v Version, now time.Time) bool {
 	if d.MinVersion != "" {

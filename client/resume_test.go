@@ -214,7 +214,7 @@ func TestBytesSplicedIntoARangeAreRefusedAsAWrongCiphertext(t *testing.T) {
 		noPartial(t, b)
 		codes = append(codes, res.Refused[0].Code)
 	}
-	if codes[0] != codes[1] || codes[0] != client.RefusedDecrypt {
+	if codes[0] != codes[1] || codes[0] != client.RefusedDecryptError {
 		t.Errorf("a whole body with a byte changed is refused %s, and one spliced into a range %s", codes[0], codes[1])
 	}
 }
@@ -331,7 +331,7 @@ func TestA200ToARangedFetchStartsAfresh(t *testing.T) {
 }
 
 // What a mailbox kept of a message goes when the message leaves the list: a
-// drain that empties the mailbox drops it, and a fetch answered no_such_message
+// drain that empties the mailbox drops it, and a fetch answered message_not_found
 // drops it too.
 func TestAPartialGoesWhenItsMessageLeavesTheList(t *testing.T) {
 	t.Run("a drain that empties the mailbox", func(t *testing.T) {
@@ -348,7 +348,7 @@ func TestAPartialGoesWhenItsMessageLeavesTheList(t *testing.T) {
 		receive(t, b)
 		noPartial(t, b)
 	})
-	t.Run("a fetch answered no_such_message", func(t *testing.T) {
+	t.Run("a fetch answered message_not_found", func(t *testing.T) {
 		e := newEnv(t)
 		a, b := e.mailbox(), e.mailbox()
 		f := &fetches{b: b}
@@ -357,7 +357,7 @@ func TestAPartialGoesWhenItsMessageLeavesTheList(t *testing.T) {
 		client.SetDrainLimits(t, 1, 64<<20, 100) // so the drain stops before it could drop what is left
 		e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
 			if f.is(r) && strings.HasSuffix(r.URL.Path, id) {
-				fakeserver.WriteJSON(w, http.StatusNotFound, protocol.Problem{Type: protocol.CodeNoSuchMessage.TypeURI(), Title: protocol.CodeNoSuchMessage.Title(), Status: http.StatusNotFound, Code: protocol.CodeNoSuchMessage})
+				fakeserver.WriteJSON(w, http.StatusNotFound, protocol.Problem{Type: protocol.CodeMessageNotFound.TypeURI(), Title: protocol.CodeMessageNotFound.Title(), Status: http.StatusNotFound, Code: protocol.CodeMessageNotFound})
 				return
 			}
 			next.ServeHTTP(w, r)

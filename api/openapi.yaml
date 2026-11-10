@@ -187,7 +187,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '410':
-          description: '`revoked`, with the revocation record this server holds in `record`; or `version_retired` (`PROTOCOL.md` §11.17).'
+          description: '`mailbox_revoked`, with the revocation record this server holds in `record`; or `client_version_unsupported` (`PROTOCOL.md` §11.17).'
           headers:
             Date:
               $ref: '#/components/headers/Date'
@@ -216,14 +216,14 @@ paths:
                       status:
                         const: 410
                       code:
-                        enum: [revoked, version_retired]
+                        enum: [mailbox_revoked, client_version_unsupported]
                       record:
                         $ref: '#/components/schemas/RevokedRecord'
                   - if:
                       required: [code]
                       properties:
                         code:
-                          const: revoked
+                          const: mailbox_revoked
                     then:
                       required: [record]
         '412':
@@ -398,7 +398,7 @@ paths:
       summary: Read the revocations held
       description: |
         The revocation record the server holds of the address, with a mailbox
-        there or none, or `404 not_revoked` (`PROTOCOL.md` §11.15).
+        there or none, or `404 revocation_not_found` (`PROTOCOL.md` §11.15).
       security: []
       parameters:
         - $ref: '#/components/parameters/IfMatch'
@@ -1572,14 +1572,14 @@ components:
       name: addr
       in: path
       required: true
-      description: A mailbox's address, `d_` and 64 characters of base64url (`PROTOCOL.md` §4.2). Any other form, another form's name among them, is `400 bad_address`.
+      description: A mailbox's address, `d_` and 64 characters of base64url (`PROTOCOL.md` §4.2). Any other form, another form's name among them, is `400 invalid_address`.
       schema:
         $ref: '#/components/schemas/Address'
     id:
       name: id
       in: path
       required: true
-      description: A message id, the lowercase hex SHA-256 of its ciphertext. Any other form is `404 no_such_message`.
+      description: A message id, the lowercase hex SHA-256 of its ciphertext. Any other form is `404 message_not_found`.
       schema:
         $ref: '#/components/schemas/MessageID'
     IfMatch:
@@ -1791,12 +1791,12 @@ components:
             $ref: '#/components/schemas/ACL'
     BadRequest:
       description: |
-        Not a request this call takes: `bad_request` (naming what is wrong in
-        `member`, where it is a member or a query parameter) · `bad_address` ·
+        Not a request this call takes: `invalid_request` (naming what is wrong in
+        `member`, where it is a member or a query parameter) · `invalid_address` ·
         `identity_mismatch` · `unsupported_key_type` (with the server's
-        `key_types`) · `bad_key` · `prekey_not_new` · `prekey_time` ·
-        `certificate_too_long` (with the server's `max_certificate_lifetime`) ·
-        `wrong_recipient_type` · `bad_revocation`. `PROTOCOL.md` §11.3 has what
+        `key_types`) · `invalid_key` · `prekey_already_used` · `invalid_validity_period` ·
+        `certificate_lifetime_too_long` (with the server's `max_certificate_lifetime`) ·
+        `invalid_recipients` · `invalid_revocation`. `PROTOCOL.md` §11.3 has what
         each means.
       headers:
         Date:
@@ -1826,11 +1826,11 @@ components:
                   status:
                     const: 400
                   code:
-                    enum: [bad_request, bad_address, identity_mismatch, unsupported_key_type, bad_key, prekey_not_new, prekey_time, certificate_too_long, wrong_recipient_type, bad_revocation]
+                    enum: [invalid_request, invalid_address, identity_mismatch, unsupported_key_type, invalid_key, prekey_already_used, invalid_validity_period, certificate_lifetime_too_long, invalid_recipients, invalid_revocation]
     Unauthorized:
       description: |
-        The pass is refused: `unauthorized` · `pass_expired` ·
-        `certificate_not_current` (with `certificate_serial` where the signer
+        The pass is refused: `invalid_pass` · `pass_expired` ·
+        `certificate_superseded` (with `certificate_serial` where the signer
         it names is a certificate) ·
         `certificate_revoked`. `PROTOCOL.md` §8 has what each means.
       headers:
@@ -1863,12 +1863,12 @@ components:
                   status:
                     const: 401
                   code:
-                    enum: [unauthorized, pass_expired, certificate_not_current, certificate_revoked]
+                    enum: [invalid_pass, pass_expired, certificate_superseded, certificate_revoked]
     Forbidden:
       description: |
-        `unknown_sender` · `sender_revoked` · `sender_not_allowed` ·
-        `sender_key_type` (with the sender's `key_type`) ·
-        `adopt_key_refused`. `PROTOCOL.md` §11.3 has what each means.
+        `sender_not_registered` · `sender_revoked` · `sender_not_allowed` ·
+        `unsupported_sender_key_type` (with the sender's `key_type`) ·
+        `invalid_adopt_key`. `PROTOCOL.md` §11.3 has what each means.
       headers:
         Date:
           $ref: '#/components/headers/Date'
@@ -1897,10 +1897,10 @@ components:
                   status:
                     const: 403
                   code:
-                    enum: [unknown_sender, sender_revoked, sender_not_allowed, sender_key_type, adopt_key_refused]
+                    enum: [sender_not_registered, sender_revoked, sender_not_allowed, unsupported_sender_key_type, invalid_adopt_key]
     NotFound:
       description: |
-        `no_such_mailbox` · `no_such_message` · `not_revoked` (only on the
+        `mailbox_not_found` · `message_not_found` · `revocation_not_found` (only on the
         read of the revocations held, `PROTOCOL.md` §11.15). `PROTOCOL.md`
         §11.3 has what each means.
       headers:
@@ -1931,12 +1931,12 @@ components:
                   status:
                     const: 404
                   code:
-                    enum: [no_such_mailbox, no_such_message, not_revoked]
+                    enum: [mailbox_not_found, message_not_found, revocation_not_found]
     Conflict:
       description: |
-        `conflict` (with `prekey_serial`, and `certificate_serial` where the
-        current signer is a certificate, or `through`, as the call has one) ·
-        `mailbox_changed` · `stale_prekey` · `prekey_expired`.
+        `mailbox_already_exists` · `serial_too_low` (with `prekey_serial`, and
+        `certificate_serial` where the current signer is a certificate, or
+        `through`, as the call has one) · `concurrent_modification` · `prekey_superseded` · `prekey_expired`.
         `PROTOCOL.md` §11.3 has what each means.
       headers:
         Date:
@@ -1966,12 +1966,12 @@ components:
                   status:
                     const: 409
                   code:
-                    enum: [conflict, mailbox_changed, stale_prekey, prekey_expired]
+                    enum: [mailbox_already_exists, serial_too_low, concurrent_modification, prekey_superseded, prekey_expired]
     Gone:
       description: |
-        `revoked`. Every `410 revoked` a server answers from the record it
+        `mailbox_revoked`. Every `410 mailbox_revoked` a server answers from the record it
         holds carries that record in `record` (`PROTOCOL.md` §11.3, §12.5).
-        Or `version_retired`, with `min_version` where the server sets a
+        Or `client_version_unsupported`, with `min_version` where the server sets a
         floor (`PROTOCOL.md` §11.17).
       headers:
         Date:
@@ -2001,11 +2001,11 @@ components:
                   status:
                     const: 410
                   code:
-                    enum: [revoked, version_retired]
+                    enum: [mailbox_revoked, client_version_unsupported]
                   record:
                     $ref: '#/components/schemas/RevokedRecord'
     VersionRetired:
-      description: '`version_retired`, with `min_version` where the server sets a floor: the server no longer takes the version the request names (`PROTOCOL.md` §11.17, §11.4 rule 0).'
+      description: '`client_version_unsupported`, with `min_version` where the server sets a floor: the server no longer takes the version the request names (`PROTOCOL.md` §11.17, §11.4 rule 0).'
       headers:
         Date:
           $ref: '#/components/headers/Date'
@@ -2034,7 +2034,7 @@ components:
                   status:
                     const: 410
                   code:
-                    const: version_retired
+                    const: client_version_unsupported
     RequestTimeout:
       description: '`request_timeout`: the body did not arrive in the time the server waits for it (RFC 9110 §15.5.9; `PROTOCOL.md` §11.2).'
       headers:
@@ -2098,7 +2098,7 @@ components:
                   code:
                     const: precondition_failed
     ContentTooLarge:
-      description: '`too_large`, with the `limit` in bytes, or in entries for an ACL.'
+      description: '`content_too_large`, with the `limit` in bytes, or in entries for an ACL.'
       headers:
         Date:
           $ref: '#/components/headers/Date'
@@ -2127,13 +2127,13 @@ components:
                   status:
                     const: 413
                   code:
-                    const: too_large
+                    const: content_too_large
     TooManyRequests:
       description: |
         Past a limit: `rate_limited` (with `subject`, whom it was counted
         against, and `quota_id`, which limit, from a closed set; a limit
-        counted by the day also with its `limit`) · `fetch_paced` ·
-        `mailbox_full` · `mailbox_busy`.
+        counted by the day also with its `limit`) · `fetch_rate_limited` ·
+        `mailbox_full` · `mailbox_rate_limited`.
         `PROTOCOL.md` §11.3 and §11.5 have what each means.
       headers:
         Date:
@@ -2165,7 +2165,7 @@ components:
                   status:
                     const: 429
                   code:
-                    enum: [rate_limited, fetch_paced, mailbox_full, mailbox_busy]
+                    enum: [rate_limited, fetch_rate_limited, mailbox_full, mailbox_rate_limited]
     Unavailable:
       description: '`unavailable`: the server is not ready to answer (`PROTOCOL.md` §11.2).'
       headers:
@@ -2561,7 +2561,7 @@ components:
               const: revocation_record
     RevokedRecord:
       description: |
-        The record a `410 revoked` carries (`PROTOCOL.md` §10.3): on the read
+        The record a `410 mailbox_revoked` carries (`PROTOCOL.md` §10.3): on the read
         of a mailbox always, and on any other call's where the server answers from
         it. It holds the revocation of the address always, and the revocation
         of its certificates when the server holds one.
@@ -2665,7 +2665,7 @@ components:
           description: The fix as a client command, never a raw shell line.
           type: [string, 'null']
         limit:
-          description: '`too_large`: the most bytes a body or a ciphertext may hold, or entries an ACL. `rate_limited` with a quota counted by the day: how many a day it takes.'
+          description: '`content_too_large`: the most bytes a body or a ciphertext may hold, or entries an ACL. `rate_limited` with a quota counted by the day: how many a day it takes.'
           anyOf:
             - $ref: '#/components/schemas/Integer'
             - type: 'null'
@@ -2678,22 +2678,22 @@ components:
           type: [string, 'null']
           enum: [mailbox, ip, null]
         prekey_serial:
-          description: '`conflict` on a prekey: the serial a new one must be above.'
+          description: '`serial_too_low` on a prekey: the serial a new one must be above.'
           anyOf:
             - $ref: '#/components/schemas/Integer'
             - type: 'null'
         certificate_serial:
-          description: '`conflict` on a prekey: the current certificate''s serial, where the current signer is a certificate; `certificate_not_current`: the serial of the certificate the call takes a pass by, or of the one a new statement must be above, where that is a certificate (`PROTOCOL.md` §8).'
+          description: '`serial_too_low` on a prekey: the current certificate''s serial, where the current signer is a certificate; `certificate_superseded`: the serial of the certificate the call takes a pass by, or of the one a new statement must be above, where that is a certificate (`PROTOCOL.md` §8).'
           anyOf:
             - $ref: '#/components/schemas/Integer'
             - type: 'null'
         max_certificate_lifetime:
-          description: '`certificate_too_long`: the longest a certificate the server takes may run, in seconds, as its document gives it (`PROTOCOL.md` §11.18).'
+          description: '`certificate_lifetime_too_long`: the longest a certificate the server takes may run, in seconds, as its document gives it (`PROTOCOL.md` §11.18).'
           anyOf:
             - $ref: '#/components/schemas/Integer'
             - type: 'null'
         through:
-          description: '`conflict` on a revocation of certificates: the serial the one held runs through.'
+          description: '`serial_too_low` on a revocation of certificates: the serial the one held runs through.'
           anyOf:
             - $ref: '#/components/schemas/Integer'
             - type: 'null'
@@ -2703,16 +2703,16 @@ components:
           items:
             type: string
         key_type:
-          description: '`sender_key_type`: the sender''s key type, an optional one the mailbox did not declare.'
+          description: '`unsupported_sender_key_type`: the sender''s key type, an optional one the mailbox did not declare.'
           type: [string, 'null']
         member:
-          description: '`bad_request`: the request member or query parameter that is missing, unknown or given twice, or holds a value its call does not take, a byte member not base64 in its one encoding among them. A send''s body that is not an age file names none.'
+          description: '`invalid_request`: the request member or query parameter that is missing, unknown or given twice, or holds a value its call does not take, a byte member not base64 in its one encoding among them. A send''s body that is not an age file names none.'
           type: [string, 'null']
         min_version:
-          description: '`version_retired`: the lowest version the server takes, where it sets a floor, `MAJOR.MINOR` or `MAJOR.MINOR.PATCH` (`PROTOCOL.md` §11.17).'
+          description: '`client_version_unsupported`: the lowest version the server takes, where it sets a floor, `MAJOR.MINOR` or `MAJOR.MINOR.PATCH` (`PROTOCOL.md` §11.17).'
           type: [string, 'null']
         record:
-          description: '`revoked`: the revocation record the server holds (`PROTOCOL.md` §10.3), on the read of a mailbox always and on any other call where the server answers from it.'
+          description: '`mailbox_revoked`: the revocation record the server holds (`PROTOCOL.md` §10.3), on the read of a mailbox always and on any other call where the server answers from it.'
           anyOf:
             - $ref: '#/components/schemas/RevokedRecord'
             - type: 'null'
@@ -2721,7 +2721,7 @@ components:
             required: [code]
             properties:
               code:
-                const: too_large
+                const: content_too_large
           then:
             required: [limit]
         - if:
@@ -2742,7 +2742,7 @@ components:
             required: [code]
             properties:
               code:
-                const: certificate_too_long
+                const: certificate_lifetime_too_long
           then:
             required: [max_certificate_lifetime]
         - if:
@@ -2756,7 +2756,7 @@ components:
             required: [code]
             properties:
               code:
-                const: sender_key_type
+                const: unsupported_sender_key_type
           then:
             required: [key_type]
         - if:

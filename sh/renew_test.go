@@ -105,11 +105,11 @@ func TestScriptRenews(t *testing.T) {
 		t.Errorf("a rollback of the mailbox's own prekey: %v, %q", r, w.calls(n))
 	}
 	w.once(b, first)
-	if r := c.send(b.addr.String(), "via a stale cache"); r.rc != 0 || !strings.Contains(r.err, "stale_prekey") || c.read(peer+"serial") != fmt.Sprintln(b2) {
+	if r := c.send(b.addr.String(), "via a stale cache"); r.rc != 0 || !strings.Contains(r.err, "prekey_superseded") || c.read(peer+"serial") != fmt.Sprintln(b2) {
 		t.Errorf("a sender handed the first prekey: %v", r)
 	}
 	if d := b.recv(); !slices.Equal(d.bodies(), []string{"via a stale cache"}) {
-		t.Errorf("the message sealed again after stale_prekey: %v", d)
+		t.Errorf("the message sealed again after prekey_superseded: %v", d)
 	}
 }
 

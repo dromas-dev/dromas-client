@@ -61,7 +61,7 @@ func TestRevokeEarlierEndsWhatAnOldWorkingKeySigns(t *testing.T) {
 	send(t, a, b, "sent under the second certificate")
 
 	res := receive(t, b)
-	if len(res.Delivered) != 1 || bodyOf(t, res.Delivered[0]) != "sent under the second certificate" || len(res.Refused) != 1 || res.Refused[0].Code != client.RefusedCertificate {
+	if len(res.Delivered) != 1 || bodyOf(t, res.Delivered[0]) != "sent under the second certificate" || len(res.Refused) != 1 || res.Refused[0].Code != client.RefusedCertificateRevoked {
 		t.Fatalf("a drain of messages under a revoked certificate and under the current one: %+v", res)
 	}
 	if !keptList(b, a.Address()) || keptRevocation(b, a.Address()) {
@@ -72,7 +72,7 @@ func TestRevokeEarlierEndsWhatAnOldWorkingKeySigns(t *testing.T) {
 	// signs.
 	forge.Hides(e.t, e.srv)
 	messageAs(t, e, a, b, stolen, "signed by the key that was taken")
-	if res := receive(t, b); len(res.Delivered) != 0 || len(res.Refused) != 1 || res.Refused[0].Code != client.RefusedCertificate {
+	if res := receive(t, b); len(res.Delivered) != 0 || len(res.Refused) != 1 || res.Refused[0].Code != client.RefusedCertificateRevoked {
 		t.Fatalf("a thief's message under the revoked certificate, the revocation hidden: %+v", res)
 	}
 	e.srv.SetMiddle(nil)
@@ -96,7 +96,7 @@ func TestRevokeEarlierEndsWhatAnOldWorkingKeySigns(t *testing.T) {
 // A server keeps a revocation of an address's certificates after it has
 // forgotten the address's mailbox (PROTOCOL.md §13), and serves the record on
 // a read of the address's revocations (§11.15), where a read of the mailbox
-// answers 404 no_such_mailbox (§11.8). Check 7 reads the revocations (§12.3),
+// answers 404 mailbox_not_found (§11.8). Check 7 reads the revocations (§12.3),
 // so a message under a certificate so revoked is refused, and the record kept,
 // though the server holds no mailbox for its sender.
 func TestASenderWhoseMailboxIsForgottenIsRefusedByItsRevokedCertificates(t *testing.T) {
@@ -114,7 +114,7 @@ func TestASenderWhoseMailboxIsForgottenIsRefusedByItsRevokedCertificates(t *test
 	e.srv.Forget(a.Address())
 	op := watch(e, nil)
 	res := receive(t, b)
-	if len(res.Delivered) != 0 || len(res.Refused) != 1 || res.Refused[0].Code != client.RefusedCertificate {
+	if len(res.Delivered) != 0 || len(res.Refused) != 1 || res.Refused[0].Code != client.RefusedCertificateRevoked {
 		t.Fatalf("a message under a revoked certificate, from a sender whose mailbox its server forgot: %+v", res)
 	}
 	if !keptList(b, a.Address()) || keptRevocation(b, a.Address()) {
@@ -163,7 +163,7 @@ func TestRevokeEarlierAfterARenewalTakenUnseenRevokesTheCertificateBeforeIt(t *t
 			// whoever holds it and the server: c reads b's mailbox, with its
 			// revocation of certificates, before it judges.
 			messageAs(t, e, x, c, stolen, "signed with the working key b used before its renewal")
-			if res := receive(t, c); len(res.Delivered) != 0 || len(res.Refused) != 1 || res.Refused[0].Code != client.RefusedCertificate {
+			if res := receive(t, c); len(res.Delivered) != 0 || len(res.Refused) != 1 || res.Refused[0].Code != client.RefusedCertificateRevoked {
 				t.Errorf("a message under certificate %d after RevokeEarlier: delivered %d, refused %+v", before, len(res.Delivered), res.Refused)
 			}
 		})
@@ -245,7 +245,7 @@ func TestOnlyTheIdentitysHighestRevocationCounts(t *testing.T) {
 		t.Fatal(err)
 	}
 	messageAs(t, e, a, b, second, "under certificate 2, which the second revocation covers")
-	if res := receive(t, b); len(res.Delivered) != 0 || len(res.Refused) != 1 || res.Refused[0].Code != client.RefusedCertificate {
+	if res := receive(t, b); len(res.Delivered) != 0 || len(res.Refused) != 1 || res.Refused[0].Code != client.RefusedCertificateRevoked {
 		t.Fatalf("a message under a revoked certificate: %+v", res)
 	}
 
@@ -259,7 +259,7 @@ func TestOnlyTheIdentitysHighestRevocationCounts(t *testing.T) {
 		shown.Store(0)
 		messageAs(t, e, a, b, second, "under certificate 2, "+what)
 		send(t, a, b, "under the certificate in use, "+what)
-		if res := receive(t, b); len(res.Delivered) != 1 || len(res.Refused) != 1 || res.Refused[0].Code != client.RefusedCertificate || shown.Load() == 0 {
+		if res := receive(t, b); len(res.Delivered) != 1 || len(res.Refused) != 1 || res.Refused[0].Code != client.RefusedCertificateRevoked || shown.Load() == 0 {
 			t.Fatalf("%s: %+v", what, res)
 		}
 	}
@@ -270,7 +270,7 @@ func TestOnlyTheIdentitysHighestRevocationCounts(t *testing.T) {
 	e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
 		if x, ok := forge.RevocationsOf(r); ok && x == a.Address() {
 			shown.Add(1)
-			answer(w, protocol.CodeNotRevoked)
+			answer(w, protocol.CodeRevocationNotFound)
 			return
 		}
 		if x, ok := forge.ReadOf(r); ok && x == a.Address() {
@@ -493,7 +493,7 @@ func TestASendNamesItsStatement(t *testing.T) {
 		}
 		// Another statement, five above, by the same signer: the send names it
 		// as served, and the server, which holds the other, answers
-		// stale_prekey.
+		// prekey_superseded.
 		p, err := protocol.ParsePrekey(st)
 		if err != nil {
 			t.Fatal(err)
@@ -515,8 +515,8 @@ func TestASendNamesItsStatement(t *testing.T) {
 			next.ServeHTTP(w, r)
 		})
 		_, err = a.Send(context.Background(), b.Address(), "sealed to a statement five above")
-		if want := "statement=" + protocol.StatementHash(p.Statement()); query != want || client.Code(err) != protocol.CodeStalePrekey {
-			t.Errorf("under a certificate %v: a send to a statement five above: %q, %v; want %q and stale_prekey", working, query, err, want)
+		if want := "statement=" + protocol.StatementHash(p.Statement()); query != want || client.Code(err) != protocol.CodePrekeySuperseded {
+			t.Errorf("under a certificate %v: a send to a statement five above: %q, %v; want %q and prekey_superseded", working, query, err, want)
 		}
 	}
 }

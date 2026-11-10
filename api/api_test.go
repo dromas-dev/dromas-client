@@ -28,7 +28,7 @@ func model(t *testing.T) *v3.Document {
 
 // Each error status's codes are the ones protocol gives that status, no more
 // and no fewer, so a code added to protocol/errors.go and not here fails. A
-// code may be in more than one response of its status: 410's version_retired
+// code may be in more than one response of its status: 410's client_version_unsupported
 // is in Gone, beside revoked, and in VersionRetired, alone.
 func TestEachStatusHasProtocolsCodes(t *testing.T) {
 	m := model(t)

@@ -136,7 +136,7 @@ func TestADrainMendedPartWayDeletesByTheListOfTheDrainAfterIt(t *testing.T) {
 	e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
 		if r.Method == http.MethodGet && r.URL.Path == list && r.URL.Query().Get("cursor") != "" && refused.CompareAndSwap(false, true) {
 			e.clock.Add(3 * time.Hour)
-			forge.Refuse(w, protocol.CodeNoSuchMailbox)
+			forge.Refuse(w, protocol.CodeMailboxNotFound)
 			return
 		}
 		next.ServeHTTP(w, r)

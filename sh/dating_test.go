@@ -109,7 +109,7 @@ func mustAddress(t *testing.T, dir string) protocol.Address {
 }
 
 func staleProblem(w http.ResponseWriter) {
-	code := protocol.CodeStalePrekey
+	code := protocol.CodePrekeySuperseded
 	w.Header().Set("Content-Type", protocol.ProblemContentType)
 	w.WriteHeader(code.Status())
 	_ = json.NewEncoder(w).Encode(protocol.Problem{Type: code.TypeURI(), Title: code.Title(), Status: int64(code.Status()), Code: code, Detail: "a newer prekey"})
@@ -117,7 +117,7 @@ func staleProblem(w http.ResponseWriter) {
 
 // The script reading a Go sender's retry that the server stretched past the
 // outbox's TTL (59s on the mailbox read, 59s on a post answered 409
-// stale_prekey), with every pass one an honest server takes: the script's
+// prekey_superseded), with every pass one an honest server takes: the script's
 // clock 50m fast at the drain that prunes, then 9m59s slow a second later.
 func TestTheScriptTakesAStretchedRetryAtHonestClocks(t *testing.T) {
 	t.Parallel()
@@ -222,7 +222,7 @@ func TestTheScriptTakesAStretchedRetryAtHonestClocks(t *testing.T) {
 	}
 }
 
-// The script dates its retry after 409 stale_prekey once the recipient's mailbox
+// The script dates its retry after 409 prekey_superseded once the recipient's mailbox
 // is read again, as it dates its first post (#341): dr_post reads the mailbox
 // before each seal and seals to what it read. Here the retry's read is
 // answered 59 seconds later, by the clock the script (dr_now), the server

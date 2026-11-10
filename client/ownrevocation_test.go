@@ -218,7 +218,7 @@ func TestTheRemedyStopsAtAConflictThatShowsNothing(t *testing.T) {
 		next.ServeHTTP(w, r)
 	})
 	r, err := a.RenewAndRevoke(ctx)
-	if err != nil || r == nil || client.Code(r.NotRevoked) != protocol.CodeConflict || r.NotRenewed == nil || r.Prekey != nil || puts.Load() != 1 || renewals.Load() != 0 {
+	if err != nil || r == nil || client.Code(r.NotRevoked) != protocol.CodeSerialTooLow || r.NotRenewed == nil || r.Prekey != nil || puts.Load() != 1 || renewals.Load() != 0 {
 		t.Fatalf("the remedy at a conflict that shows nothing: %+v, %v; %d publishes, %d renewals", r, err, puts.Load(), renewals.Load())
 	}
 }
@@ -237,7 +237,7 @@ func TestTheRemedyStopsAtAConflictThatShowsALowerRecord(t *testing.T) {
 	e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
 		switch {
 		case r.Method == http.MethodPut && strings.HasSuffix(r.URL.Path, "/revocations"):
-			forge.Refuse(w, protocol.CodeConflict)
+			forge.Refuse(w, protocol.CodeSerialTooLow)
 			return
 		case r.Method == http.MethodPut && strings.HasSuffix(r.URL.Path, "/prekey"):
 			renewals.Add(1)
@@ -250,7 +250,7 @@ func TestTheRemedyStopsAtAConflictThatShowsALowerRecord(t *testing.T) {
 		next.ServeHTTP(w, r)
 	})
 	r, err := a.RenewAndRevoke(ctx)
-	if err != nil || r == nil || client.Code(r.NotRevoked) != protocol.CodeConflict || r.Revoked != nil || r.NotRenewed == nil || r.Prekey != nil || renewals.Load() != 0 {
+	if err != nil || r == nil || client.Code(r.NotRevoked) != protocol.CodeSerialTooLow || r.Revoked != nil || r.NotRenewed == nil || r.Prekey != nil || renewals.Load() != 0 {
 		t.Fatalf("the remedy at a conflict that shows a lower record: %+v, %v; %d renewals", r, err, renewals.Load())
 	}
 }
@@ -532,7 +532,7 @@ func TestARenewalThatMeetsItsOwnRevocationSignsNothing(t *testing.T) {
 			if at == "the read of its revocations" {
 				e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
 					if r.Method == http.MethodGet && r.URL.Path == mailboxPath(a) {
-						forge.Refuse(w, protocol.CodeNoSuchMailbox)
+						forge.Refuse(w, protocol.CodeMailboxNotFound)
 						return
 					}
 					next.ServeHTTP(w, r)
@@ -740,8 +740,8 @@ func TestAnAddressRevocationBesideALowerRevocationOfCertificates(t *testing.T) {
 }
 
 // A server that holds no mailbox for this address answers a read of its
-// revocations 200 or 404 not_revoked, and nothing else (api/openapi.yaml):
-// any other answer, no_such_mailbox among them, is no answer, and the mailbox's
+// revocations 200 or 404 revocation_not_found, and nothing else (api/openapi.yaml):
+// any other answer, mailbox_not_found among them, is no answer, and the mailbox's
 // question about itself fails rather than taking it as none held.
 func TestARevocationsReadAnsweredOutOfFormIsNoAnswer(t *testing.T) {
 	t.Parallel()
@@ -749,9 +749,9 @@ func TestARevocationsReadAnsweredOutOfFormIsNoAnswer(t *testing.T) {
 	e := newEnv(t)
 	a := e.mailbox()
 	e.srv.Forget(a.Address())
-	says(e, protocol.CodeNoSuchMailbox, http.MethodGet, "/revocations")
+	says(e, protocol.CodeMailboxNotFound, http.MethodGet, "/revocations")
 	if held, err := a.Ask(ctx, a.Address()); err == nil {
-		t.Fatalf("a revocations read answered no_such_mailbox was taken as an answer: %+v", held)
+		t.Fatalf("a revocations read answered mailbox_not_found was taken as an answer: %+v", held)
 	}
 	e.srv.SetMiddle(nil)
 	if held, err := a.Ask(ctx, a.Address()); err != nil || held.Revoked || held.Certificates != nil {
