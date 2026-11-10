@@ -14,7 +14,7 @@
 # Dromas-Version (client.Version). Without it a binary names 0.0.0-devel,
 # which any server's version floor refuses. A checkout needs its tags for the
 # pseudo-version to follow the last release (docker-publish.yml).
-FROM --platform=$BUILDPLATFORM golang:1.27.3-trixie@sha256:c65ecfe613b539ac74c62a4c3b2c27e8f8a6076384c8f27e8a3c0f3be17cc385 AS build
+FROM --platform=$BUILDPLATFORM golang:1.27.3-trixie@sha256:af1bfc2614ebb1dbd31af514b78740fd678850e76498762b425ecee4c5c6ea80 AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod go mod download
@@ -27,7 +27,7 @@ RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache
 # Dependabot moves together.
 # Nothing runs in it but the binaries, as uid 65532; the CA bundle comes from
 # the build stage, for TLS to the server.
-FROM debian:13.7-slim@sha256:f6b08b09a05725f9431502d3b5714f5c4576e82c1a84fa1debe0c24a7e0c3ec4
+FROM debian:13.7-slim@sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2
 COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=build /out/dromas-echo /out/dromas /usr/local/bin/
 USER 65532:65532
