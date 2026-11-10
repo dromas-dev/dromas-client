@@ -291,8 +291,13 @@ func TestRecvEndsOnAFolderNotMounted(t *testing.T) {
 		var out, errs bytes.Buffer
 		err := doWith(context.Background(), opt, "recv", args, strings.NewReader(""), &out, &errs)
 		var rep bytes.Buffer
-		if st := report(err, &rep); st != 4 || !strings.Contains(rep.String(), `"fatal"`) || !strings.Contains(rep.String(), "may not be mounted") || !strings.Contains(rep.String(), inbox) {
+		st := report(err, &rep)
+		lines := printed(t, rep.String())
+		if st != 4 || len(lines) != 1 || lines[0]["type"] != "error" || lines[0]["fatal"] != true {
 			t.Fatalf("recv %v: exit %d, %s", args, st, rep.String())
+		}
+		if d, _ := lines[0]["detail"].(string); !strings.Contains(d, "may not be mounted") || !strings.Contains(d, inbox) {
+			t.Fatalf("recv %v said %q", args, d)
 		}
 	}
 }
