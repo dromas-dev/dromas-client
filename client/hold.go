@@ -247,14 +247,16 @@ func timedOut(err error) bool {
 // again may get past: no answer, a server error, a rate limit or a request
 // timeout. So is a lock another command held for as long as a command waits for
 // it, a renewal held back until renewRetry after one that failed so, a drain
-// refused for what a renewal mends whose renewal failed so ([Mailbox.Receive]).
-// A refusal no wait mends is not: [Fatal] names those, a folder of the mailbox
+// refused for what a renewal mends whose renewal failed so ([Mailbox.Receive]),
+// and an answer about a revocation whose read for the proof failed so. A
+// refusal no wait mends is not: [Fatal] names those, a folder of the mailbox
 // missing and a clock behind among them.
 func Transient(err error) bool {
 	var ae *APIError
 	var re *RevokedError
 	var rh *renewalHeld
 	var ro *renewalOwed
+	var up *unproven
 	switch {
 	case err == nil, errors.As(err, &re):
 		return false
@@ -262,6 +264,8 @@ func Transient(err error) bool {
 		return true
 	case errors.As(err, &rh):
 		return rh.transient
+	case errors.As(err, &up):
+		return Transient(up.read)
 	case errors.As(err, &ae):
 		return ae.Status >= 500 || ae.Status == http.StatusTooManyRequests || ae.Status == http.StatusRequestTimeout
 	}

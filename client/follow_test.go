@@ -1015,6 +1015,52 @@ func TestACertificateRevokedWhoseRenewalFailsForNowIsARetry(t *testing.T) {
 	}
 }
 
+// A drain's 401 certificate_revoked whose read of the mailbox's own record
+// fails for now (a 503, or a 429 with its Retry-After) is left unproven: an
+// EventRetry, not Fatal, that the loop waits the read's Retry-After for, and
+// once the reads are answered the next drain renews and drains (#829 item 1).
+func TestACertificateRevokedWhoseProofReadFailsForNowIsARetry(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	for _, c := range []protocol.Code{protocol.CodeUnavailable, protocol.CodeRateLimited} {
+		e := newWorkEnv(t)
+		b := e.mailbox()
+		receive(t, b)
+		publish(t, e, certsRecord(t, b.Dir(), numberOf(t, b)))
+		own := "/v1/" + b.Address().String()
+		e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
+			if r.Method == http.MethodGet && (r.URL.Path == own || r.URL.Path == own+"/revocation") {
+				w.Header().Set("Retry-After", "3600")
+				forge.Refuse(w, c, func(p *protocol.Problem) {
+					if c == protocol.CodeRateLimited {
+						p.QuotaID, p.Subject = protocol.QuotaMisses, protocol.SubjectIP
+					}
+				})
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+		var retried error
+		err := mustOpen(t, b.Dir(), e.opts()).Follow(ctx, client.FollowOptions{}, func(_ context.Context, ev client.Event) error {
+			if ev.Kind == client.EventRetry {
+				retried = ev.Err
+				return client.ErrStop
+			}
+			return nil
+		})
+		if err != nil || retried == nil || !client.Transient(retried) || client.Fatal(retried) || client.Code(retried) != protocol.CodeCertificateRevoked {
+			t.Fatalf("%s: %v, retried %v", c, err, retried)
+		}
+		if got := client.PauseAfter(nil, retried); got != time.Hour {
+			t.Fatalf("%s: the loop would drain again after %v, want the read's hour", c, got)
+		}
+		e.srv.SetMiddle(nil)
+		if err := mustOpen(t, b.Dir(), e.opts()).Follow(ctx, oneDrain(false), nil); err != nil {
+			t.Fatalf("%s: one drain once the reads are answered: %v", c, err)
+		}
+	}
+}
+
 // The owner's cert revoke-earlier while the loop holds the list, its renewal
 // refused for now: the loop's next hold meets the revocation, and the drain
 // after renews, as RenewAndRevoke says Receive does.

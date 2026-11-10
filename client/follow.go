@@ -216,8 +216,12 @@ func ended(err error) error {
 	return err
 }
 
-// pauseAfter is how long the loop waits before the drain after res and err.
+// pauseAfter is how long the loop waits before the drain after res and err:
+// for an answer about a revocation left unproven, the failed read's wait.
 func pauseAfter(res *Result, err error) time.Duration {
+	if up := (*unproven)(nil); errors.As(err, &up) {
+		err = up.read
+	}
 	pause := time.Minute
 	if res != nil && res.Again() > 0 {
 		pause = res.Again()
