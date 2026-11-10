@@ -3,17 +3,22 @@
 package client_test
 
 import (
+	"context"
 	"encoding/binary"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 	"unsafe"
 
 	"github.com/dromas-dev/dromas-client/client"
+	"github.com/dromas-dev/dromas-client/internal/forge"
+	"github.com/dromas-dev/dromas-client/protocol"
 
 	"golang.org/x/sys/windows"
 )
@@ -463,6 +468,38 @@ func TestAKeyFileAtALongPath(t *testing.T) {
 	}
 	defer f.Close() //nolint:errcheck // the test's own
 	if err := ownerOnly(f.Name()); err != nil {
+		t.Error(err)
+	}
+}
+
+// outbox/failed/ is made as every directory of a mailbox is (makeDir), with a
+// protected access list of its own, never the list outbox/ passes down.
+func TestOutboxFailedHasAProtectedListOfItsOwn(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	e := newEnv(t)
+	a, b := e.mailbox(), e.mailbox()
+	forge.FailOnce(e.srv, http.MethodPost, "/v1/"+b.Address().String()+"/messages")
+	if _, err := a.Send(ctx, b.Address(), "stuck"); err == nil {
+		t.Fatal("the send should have failed")
+	}
+	e.clock.Add(protocol.TTL + time.Second)
+	if _, err := a.Flush(ctx); err == nil {
+		t.Fatal("the stale entry should have moved to outbox/failed/")
+	}
+	failed := filepath.Join(a.Dir(), "outbox", "failed")
+	sd, err := windows.GetNamedSecurityInfo(failed, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
+	if err != nil {
+		t.Fatal(err)
+	}
+	control, _, err := sd.Control()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if control&windows.SE_DACL_PROTECTED == 0 {
+		t.Errorf("outbox/failed/ inherits its list: %s", sd)
+	}
+	if err := ownerOnly(failed); err != nil {
 		t.Error(err)
 	}
 }
