@@ -172,4 +172,4 @@ release:
     gh attestation verify <file> -R dromas-dev/dromas-client --signer-workflow dromas-dev/dromas-client/.github/workflows/release.yml --source-ref refs/tags/{{ .Tag }}
     ```
 
-    Or with cosign: `README.md` § Install.
+    Or with cosign: `README.md` § Check a download.

@@ -6,7 +6,7 @@
 #   archives and Linux packages, an SBOM of each archive and checksums.txt, signed with cosign, as the
 #   tag's GitHub release, and every file the checksums name is attested;
 #   and opens the winget pull request for the Windows zips;
-# - verify: the published release is checked as README § Install has a user
+# - verify: the published release is checked as README § Check a download has a user
 #   check it, as GoReleaser checks its own;
 # - rebuild: the release is built again from its tag on another image, and
 #   each archive and package must come out as the release job made it, which
