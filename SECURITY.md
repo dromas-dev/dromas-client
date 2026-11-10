@@ -22,11 +22,41 @@ gh api repos/dromas-dev/dromas-client/security-advisories/reports \
 - If private reporting is unavailable, open an issue asking for a security contact, with no detail.
 
 **Not a vulnerability, though a better design is welcome as an issue:**
-- What the design says it does not defend: the operator sees who writes to whom, when and how much; it can drop or delay messages; a recipient can show anyone what a sender signed; there is no ratchet (`PROTOCOL.md` §15).
+- A question already decided: § Decided questions, below.
 - A weakness already public: an open issue, or one of dromas-server's `LIMITS.md` § Known weaknesses.
-- What a verified sender says. Dromas proves who sent a message, never that it is safe to obey (`README.md`).
 
 **What happens next.** Reports reach the maintainer, who works them with Custos, his AI assistant. The fix lands in this repo together with the published advisory, which credits the reporter unless they ask otherwise. No response time is promised yet: the project is young and has one human maintainer.
+
+## Decided questions
+
+Each entry is a security question that is already decided. The `PROTOCOL.md` section that the entry names gives the reasoning. The issue that the entry names decided the question, and carries the `decided` label: `gh issue list -R dromas-dev/dromas-client --label decided --state closed` lists every such issue. A report of a decided question is not a vulnerability. A better design for one is welcome as an issue.
+
+**What the server sees and can do**
+- The operator sees who writes to whom, when, how much, and from which IP address (§15.2, §15.8; #507).
+- A server can drop, delay or delete a message, and no receipt shows the loss (§15.2, §15.9). A receipt from one client to another is #516, open.
+- The party that terminates TLS for a server is part of that server, and sees each pass in transit (§15.8; #586).
+- A sender that posts the same ciphertext again learns, on the server's word, whether the recipient's mailbox still holds the message (§15.8; #719).
+- A reader's lookup of a sender's revocations tells the server which senders the reader has just verified (§15.8; #752).
+- A lookup's compressed length can help a network observer guess which mailbox a sender is about to write to (§15.8).
+
+**Passes, keys and revocation**
+- A pass is a bearer credential at one server for ten minutes, and is not bound to the request that carries the pass (§15.5; #570, #724).
+- A server can withhold a revocation from a reader that has never seen the revocation, and the protocol has no key transparency (§15.6; #572).
+- Against a hostile server, a stolen working key signs until the key's certificate ends, at most 45 days and an hour after the certificate began (§15.5; #716).
+
+**Forward secrecy and the signature**
+- Version 1 has no ratchet, so the protocol gives no per-message forward secrecy and no post-compromise security (§15.3; #575).
+- A recipient can show anyone what a sender signed, so a message is not deniable toward the message's recipient (§15.4; #29).
+- A reader decrypts a message before the reader verifies the message's signature (§15.4; #49).
+- A verified signature proves who sent a message, and does not prove that the message is safe to obey (§15.9).
+
+**The mailbox's own machine**
+- Code that runs as the mailbox's owner can read the mailbox's keys and write the mailbox's files (§15.1; #717).
+- A mailbox that loses its state, or puts back an older copy of the state, can be served again a message that the mailbox accepted before (§15.9; #784).
+- A clock that steps or jumps is a failure, and the failure's cost is accepted (§15.7; #831).
+
+**Senders**
+- One verified sender, or many cheap identities, can fill an open mailbox to the mailbox's caps and spend the mailbox's intake budget (§15.9; dromas-server's `LIMITS.md` § Known weaknesses). An allow list is the full defence for a mailbox that knows its senders.
 
 ## Checking the claims yourself
 
