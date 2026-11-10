@@ -5,6 +5,7 @@
 # - release: GoReleaser builds it (.goreleaser.yaml) and publishes the
 #   archives and Linux packages, an SBOM of each archive and checksums.txt, signed with cosign, as the
 #   tag's GitHub release, and every file the checksums name is attested;
+#   and opens the winget pull request for the Windows zips;
 # - verify: the published release is checked as README § Install has a user
 #   check it, as GoReleaser checks its own;
 # - rebuild: the release is built again from its tag on another image, and
@@ -102,6 +103,10 @@ jobs:
           args: ${{ github.ref_type == 'tag' && 'release --clean' || 'release --snapshot --clean' }}
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          # The classic token that opens the winget pull request
+          # (.goreleaser.yaml § winget), on a tag alone: a hand-run's snapshot
+          # publishes nothing and is given none.
+          WINGET_GITHUB_TOKEN: ${{ github.ref_type == 'tag' && secrets.WINGET_GITHUB_TOKEN || '' }}
       - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         if: github.ref_type == 'tag'
         with:

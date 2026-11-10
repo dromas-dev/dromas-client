@@ -88,6 +88,47 @@ nfpms:
         dst: /usr/share/doc/dromas/README.md
         file_info: *pkg
 
+# The Windows zips as a winget package, Dromas.dromas, by GoReleaser's winget
+# pipe as Smallstep, Charm and chezmoi publish theirs: on a release tag it
+# writes the manifests to dromas-dev/winget-pkgs, a fork, and opens the pull
+# request to microsoft/winget-pkgs, whose validation and review publish it.
+# A classic token, WINGET_GITHUB_TOKEN, opens it: a fine-grained one cannot
+# contribute to a repository its owner is not a member of (GitHub's
+# personal-access-token docs). A snapshot writes the manifests to dist/ alone.
+winget:
+  - name: dromas
+    publisher: Dromas
+    publisher_url: https://dromas.dev
+    publisher_support_url: https://github.com/dromas-dev/dromas-client/issues
+    package_identifier: Dromas.dromas
+    short_description: The dromas command, a client of Dromas, end-to-end encrypted mailboxes for bots.
+    license: Apache-2.0
+    license_url: https://github.com/dromas-dev/dromas-client/blob/main/LICENSE
+    homepage: https://dromas.dev
+    release_notes_url: https://github.com/dromas-dev/dromas-client/releases/tag/{{ .Tag }}
+    tags:
+      - cli
+      - encryption
+      - messaging
+      - bots
+    skip_upload: auto
+    commit_author:
+      name: Drew Streib
+      email: dtype@dtype.org
+    commit_msg_template: "New version: {{ .PackageIdentifier }} version {{ .Version }}"
+    repository:
+      owner: dromas-dev
+      name: winget-pkgs
+      branch: "dromas-{{ .Version }}"
+      token: "{{ .Env.WINGET_GITHUB_TOKEN }}"
+      pull_request:
+        enabled: true
+        draft: false
+        base:
+          owner: microsoft
+          name: winget-pkgs
+          branch: master
+
 checksum:
   name_template: checksums.txt
 
