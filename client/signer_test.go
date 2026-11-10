@@ -155,7 +155,7 @@ func TestACertificateIsRefusedWhereTheServersMaximumLeavesNoRoom(t *testing.T) {
 
 // A certificate runs for the longest its server's document names. A server
 // whose maximum is shorter than that, its document read before it changed,
-// answers certificate_too_long with its maximum, and the mailbox makes the
+// answers certificate_lifetime_too_long with its maximum, and the mailbox makes the
 // statement again under a certificate of that one, once.
 func TestACertificateTooLongIsMadeAgainAtTheServersMaximum(t *testing.T) {
 	t.Parallel()
@@ -173,16 +173,16 @@ func TestACertificateTooLongIsMadeAgainAtTheServersMaximum(t *testing.T) {
 		next.ServeHTTP(w, r)
 	})
 	if _, err := a.Rekey(ctx); err != nil {
-		t.Fatalf("a renewal answered certificate_too_long: %v", err)
+		t.Fatalf("a renewal answered certificate_lifetime_too_long: %v", err)
 	}
 	st, sig := e.srv.Prekey(a.Address())
 	_, by, err := protocol.VerifyPrekey(a.Identity(), st, sig, e.clock.Now())
 	if err != nil || by.Certificate() == nil || by.Certificate().Lifetime() != time.Duration(short)*time.Second {
 		t.Fatalf("the statement taken: %v, %+v", err, by)
 	}
-	words := (&client.APIError{Status: 400, Problem: protocol.Problem{Code: protocol.CodeCertificateTooLong, MaxCertificateLifetime: &short}}).Error()
+	words := (&client.APIError{Status: 400, Problem: protocol.Problem{Code: protocol.CodeCertificateLifetimeTooLong, MaxCertificateLifetime: &short}}).Error()
 	if !strings.Contains(words, strconv.FormatUint(short, 10)+" seconds") {
-		t.Errorf("certificate_too_long says %q", words)
+		t.Errorf("certificate_lifetime_too_long says %q", words)
 	}
 }
 
@@ -323,7 +323,7 @@ func TestAReaderTakesTheIdentityAndACertificateAboveTheRevocation(t *testing.T) 
 	messageAs(t, e, a, b, old, "under a revoked certificate")
 	send(t, a, b, "under the current certificate")
 	res := receive(t, b)
-	if len(res.Delivered) != 2 || len(res.Refused) != 1 || res.Refused[0].Code != client.RefusedCertificate {
+	if len(res.Delivered) != 2 || len(res.Refused) != 1 || res.Refused[0].Code != client.RefusedCertificateRevoked {
 		t.Fatalf("after a revocation of certificates: %+v", res)
 	}
 	for _, d := range res.Delivered {
@@ -341,7 +341,7 @@ func TestAReaderTakesTheIdentityAndACertificateAboveTheRevocation(t *testing.T) 
 
 // Statements are ordered by (c, p), the identity at 0, so once a statement
 // under a certificate is taken an identity statement stands below it: the
-// server refuses one as certificate_not_current (PROTOCOL.md §11.9), and a
+// server refuses one as certificate_superseded (PROTOCOL.md §11.9), and a
 // sender that saw the certificate's refuses one served as a rollback, posting
 // nothing (PROTOCOL.md §12.2).
 func TestAnIdentityStatementAfterACertificatesIsRefused(t *testing.T) {
@@ -352,8 +352,8 @@ func TestAnIdentityStatementAfterACertificatesIsRefused(t *testing.T) {
 	e.working = false
 	b := e.mailbox()
 	send(t, b, a, "to a mailbox under a certificate")
-	if code := upload(t, e, a, identityKey(t, a), numberOf(t, a)+10, identityKey(t, a)); code != protocol.CodeCertificateNotCurrent {
-		t.Errorf("an identity statement at a mailbox under a certificate: %q, want certificate_not_current", code)
+	if code := upload(t, e, a, identityKey(t, a), numberOf(t, a)+10, identityKey(t, a)); code != protocol.CodeCertificateSuperseded {
+		t.Errorf("an identity statement at a mailbox under a certificate: %q, want certificate_superseded", code)
 	}
 	if servedCertificate(t, e, a) != numberOf(t, a) {
 		t.Fatalf("the server serves %d, the mailbox published %d", servedCertificate(t, e, a), numberOf(t, a))
@@ -393,7 +393,7 @@ func TestInitOfflineRegistersUnderACertificate(t *testing.T) {
 	from := len(e.srv.Requests())
 	a := e.mailbox()
 	for _, q := range e.srv.Requests()[from:] {
-		if strings.HasSuffix(q.Path, "/revocations") {
+		if strings.HasSuffix(q.Path, "/revocation") {
 			t.Errorf("init --offline: %s %s", q.Method, q.Path)
 		}
 	}
@@ -412,7 +412,7 @@ func TestInitOfflineRegistersUnderACertificate(t *testing.T) {
 
 // A server takes the identity's pass always, and a certificate's only under
 // exactly the current statement's certificate (PROTOCOL.md §8): another is
-// certificate_not_current, naming the current one where it is a certificate
+// certificate_superseded, naming the current one where it is a certificate
 // and none where it is the identity, and one at or below the revocation of
 // certificates is certificate_revoked, as is a statement under one.
 func TestThePassIsTheIdentitysOrTheCurrentCertificates(t *testing.T) {
@@ -428,7 +428,7 @@ func TestThePassIsTheIdentitysOrTheCurrentCertificates(t *testing.T) {
 		t.Errorf("the current certificate's pass: %q", code)
 	}
 	other := certificateOf(t, e, a, numberOf(t, a)+5)
-	if code, p := passAt(t, e, a, other); code != protocol.CodeCertificateNotCurrent || p.CertificateSerial == nil || *p.CertificateSerial != numberOf(t, a) {
+	if code, p := passAt(t, e, a, other); code != protocol.CodeCertificateSuperseded || p.CertificateSerial == nil || *p.CertificateSerial != numberOf(t, a) {
 		t.Errorf("another certificate's pass: %q, %+v", code, p)
 	}
 	old := worker(t, a)
@@ -452,11 +452,11 @@ func TestThePassIsTheIdentitysOrTheCurrentCertificates(t *testing.T) {
 	e.working = false
 	b := e.mailbox()
 	code, p := passAt(t, e, b, certificateOf(t, e, b, protocol.SerialAt(e.clock.Now(), 0)+5))
-	if code != protocol.CodeCertificateNotCurrent || p.CertificateSerial != nil {
+	if code != protocol.CodeCertificateSuperseded || p.CertificateSerial != nil {
 		t.Errorf("a certificate's pass at a mailbox whose identity signs: %q, %+v", code, p)
 	}
 	if words := (&client.APIError{Status: 401, Problem: p}).Error(); strings.Contains(words, "certificate 0") || strings.Contains(words, ", certificate ") {
-		t.Errorf("certificate_not_current with no certificate says %q", words)
+		t.Errorf("certificate_superseded with no certificate says %q", words)
 	}
 }
 
@@ -505,7 +505,7 @@ func TestASwitchRenewsUnderACertificate(t *testing.T) {
 	if res := receive(t, b); len(res.Delivered) != 2 || len(res.Refused) != 0 {
 		t.Errorf("the reader: %+v", res)
 	}
-	if code := upload(t, e, a, identityKey(t, a), numberOf(t, a)+10, identityKey(t, a)); code != protocol.CodeCertificateNotCurrent {
+	if code := upload(t, e, a, identityKey(t, a), numberOf(t, a)+10, identityKey(t, a)); code != protocol.CodeCertificateSuperseded {
 		t.Errorf("an identity statement after the switch: %q", code)
 	}
 	first := numberOf(t, a)

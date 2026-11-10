@@ -52,12 +52,12 @@ func (e *FormatError) Error() string {
 	return fmt.Sprintf("REFUSED: the mailbox is in format %d, older than this client's %d: dromas recv, or any command that writes the mailbox, brings it forward", e.Format, e.Client)
 }
 
-// Code is the refusal's code: "mailbox_format_newer" or "mailbox_format_older".
+// Code is the refusal's code: "unsupported_mailbox_format" or "mailbox_upgrade_required".
 func (e *FormatError) Code() string {
 	if e.Format > e.Client {
-		return "mailbox_format_newer"
+		return "unsupported_mailbox_format"
 	}
-	return "mailbox_format_older"
+	return "mailbox_upgrade_required"
 }
 
 // formatOf is the format s records, and whether it records one: 1 where it

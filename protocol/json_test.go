@@ -127,29 +127,29 @@ func prekey() any { return new(PrekeyRequest) }
 // a server answers in member.
 func TestParseSendQuery(t *testing.T) {
 	h := strings.Repeat("0123456789abcdef", 4)
-	if q, err := ParseSendQuery("statement=" + h); err != nil || q.Statement != h {
+	if q, err := ParseSendQuery("prekey_sha256=" + h); err != nil || q.Statement != h {
 		t.Errorf("%s: %+v, %v", h, q, err)
 	}
-	if q := (SendQuery{Statement: h}); q.Encode() != "statement="+h {
+	if q := (SendQuery{Statement: h}); q.Encode() != "prekey_sha256="+h {
 		t.Errorf("Encode: %s", q.Encode())
 	} else if back, err := ParseSendQuery(q.Encode()); err != nil || back != q {
 		t.Errorf("Encode does not read back: %+v, %v", back, err)
 	}
 	for raw, param := range map[string]string{
-		"":                                         StatementParam,
-		"statement=":                               StatementParam,
-		"statement=" + h[:63]:                      StatementParam,
-		"statement=" + h + "0":                     StatementParam,
-		"statement=" + strings.ToUpper(h):          StatementParam,
-		"statement=" + h[:63] + "g":                StatementParam,
-		"statement=" + h[:63] + "%0a":              StatementParam, // a line feed, once the query is decoded
-		"statement=" + h + "%0a":                   StatementParam,
-		"statement=+" + h[1:]:                      StatementParam, // a space, once decoded
-		"statement=" + h + "&statement=" + h:       StatementParam,
-		"statement=" + h + "&prekey_serial=1":      "prekey_serial",
-		"statement=" + h + "&certificate_serial=1": "certificate_serial",
-		"statement=" + h + "&Statement=" + h:       "Statement",
-		"Statement=" + h:                           "Statement",
+		"":                                             StatementParam,
+		"prekey_sha256=":                               StatementParam,
+		"prekey_sha256=" + h[:63]:                      StatementParam,
+		"prekey_sha256=" + h + "0":                     StatementParam,
+		"prekey_sha256=" + strings.ToUpper(h):          StatementParam,
+		"prekey_sha256=" + h[:63] + "g":                StatementParam,
+		"prekey_sha256=" + h[:63] + "%0a":              StatementParam, // a line feed, once the query is decoded
+		"prekey_sha256=" + h + "%0a":                   StatementParam,
+		"prekey_sha256=+" + h[1:]:                      StatementParam, // a space, once decoded
+		"prekey_sha256=" + h + "&prekey_sha256=" + h:   StatementParam,
+		"prekey_sha256=" + h + "&prekey_serial=1":      "prekey_serial",
+		"prekey_sha256=" + h + "&certificate_serial=1": "certificate_serial",
+		"prekey_sha256=" + h + "&Prekey_sha256=" + h:   "Prekey_sha256",
+		"Prekey_sha256=" + h:                           "Prekey_sha256",
 	} {
 		_, err := ParseSendQuery(raw)
 		var qe *QueryError
@@ -158,7 +158,7 @@ func TestParseSendQuery(t *testing.T) {
 		}
 	}
 	// A query that is not one names no parameter.
-	for _, raw := range []string{"%zz", "statement=" + h + ";x=1"} {
+	for _, raw := range []string{"%zz", "prekey_sha256=" + h + ";x=1"} {
 		var qe *QueryError
 		if _, err := ParseSendQuery(raw); !errors.As(err, &qe) || qe.Param != "" {
 			t.Errorf("%q: %v", raw, err)
@@ -216,7 +216,7 @@ func TestMaxDepth(t *testing.T) {
 
 // A request member holding a value its call does not take, of another JSON
 // type or a number that is no integer of its range, is named in the error,
-// as §11.3's bad_request names it in member (#272): every member of every
+// as §11.3's invalid_request names it in member (#272): every member of every
 // request a server reads, given a value of each JSON type.
 func TestATypeErrorNamesItsMember(t *testing.T) {
 	for _, v := range []any{&AdoptRequest{}, &ACLDocument{}, &RegisterRequest{}, &PrekeyRequest{}, &Revocations{}} {

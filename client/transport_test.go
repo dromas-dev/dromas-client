@@ -148,7 +148,7 @@ func TestARedirectedPublishIsNotTaken(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		redirect(e, status, x.URL, http.MethodPut, func(p string) bool { return strings.HasSuffix(p, "/revocations") })
+		redirect(e, status, x.URL, http.MethodPut, func(p string) bool { return strings.HasSuffix(p, "/revocation") })
 		if _, err := b.Revoke(ctx, rec); !isRedirect(err, status) {
 			t.Fatalf("%d from the mailbox's server: %v", status, err)
 		}

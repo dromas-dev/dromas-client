@@ -56,7 +56,7 @@ func TestScriptRefusesInItsOwnWords(t *testing.T) {
 		}
 	}
 	d := b.recv()
-	if len(d.messages) != 0 || d.refused("bad_envelope") != 3 || d.refused("bad_identity") != 1 || strings.Contains(d.said, "IGNORE") || strings.Contains(d.said, "EVIL") || strings.Contains(d.said, "RUN THIS") || strings.Contains(d.said, "SYSTEM") {
+	if len(d.messages) != 0 || d.refused("invalid_envelope") != 3 || d.refused("invalid_identity") != 1 || strings.Contains(d.said, "IGNORE") || strings.Contains(d.said, "EVIL") || strings.Contains(d.said, "RUN THIS") || strings.Contains(d.said, "SYSTEM") {
 		t.Errorf("a refusal that prints what the sender wrote: %v", d)
 	}
 	_, said, _ := strings.Cut(d.said, "REFUSED "+evil1+": ")
@@ -79,7 +79,7 @@ func TestScriptRefusesInItsOwnWords(t *testing.T) {
 		b.recv()
 	}
 	for _, c := range w.calls(n) {
-		if rest, ok := strings.CutPrefix(c, "GET /v1/"); ok && (!strings.Contains(rest, "/") || strings.HasSuffix(rest, "/revocations")) {
+		if rest, ok := strings.CutPrefix(c, "GET /v1/"); ok && (!strings.Contains(rest, "/") || strings.HasSuffix(rest, "/revocation")) {
 			t.Errorf("the server was asked about a sender it made up: %s", c)
 		}
 	}
@@ -168,7 +168,7 @@ func TestScriptReadsAProblemsCodeAndWait(t *testing.T) {
 	out := b.must(`p(){ printf '%s\n%s\n\n' "$1" "$2" > "$DR/error.meta"; printf %s "$3" > "$DR/error.json"; }
 p 429 0017 '{"type":"tag:dromas.dev,2026-10-26:errors/rate_limited","status":429,"code":"rate_limited"}'; echo "1 $(dr_code) $(dr_wait)"
 p 429 0017 '{"type":"https://dromas.dev/errors/rate_limited","status":429,"code":"rate_limited"}'; echo "2 $(dr_code)"
-p 429 0017 '{"type":"tag:dromas.dev,2026-10-26:errors/fetch_paced","status":429,"code":"rate_limited"}'; echo "3 $(dr_code)"
+p 429 0017 '{"type":"tag:dromas.dev,2026-10-26:errors/fetch_rate_limited","status":429,"code":"rate_limited"}'; echo "3 $(dr_code)"
 p 429 'Fri, 31 Dec 2027 23:59:59 GMT' '{}'; echo "4 $(dr_wait)"
 p 429 +17 '{}'; echo "5 $(dr_wait)"
 p 429 123456789012345678901234567890 '{}'; echo "6 $(dr_wait)"`)
@@ -244,16 +244,16 @@ func TestScriptPads(t *testing.T) {
 		"0 2048\n1023 3072\n1 2048\n184 16384\n2032 18432\n6523 73728\n2053 73728\n" {
 		t.Errorf("dr_padding: %q", out)
 	}
-	// After 409 stale_prekey the same envelope is padded again, for the newer prekey.
+	// After 409 prekey_superseded the same envelope is padded again, for the newer prekey.
 	earlier := w.prekey(q)
 	q.must("dr_rekey")
 	w.once(q, earlier)
-	if r := p.send(q.addr.String(), "sealed twice"); r.rc != 0 || !strings.Contains(r.err, "stale_prekey") || w.srv.Count(q.addr) != 1 {
+	if r := p.send(q.addr.String(), "sealed twice"); r.rc != 0 || !strings.Contains(r.err, "prekey_superseded") || w.srv.Count(q.addr) != 1 {
 		t.Fatalf("the send handed Q's earlier prekey: %v", r)
 	}
 	w.honest()
 	if size := q.must(`dr_owner GET "/v1/$(cat "$DR/address")/messages" | jq .messages[0].size`); size != "3072\n" {
-		t.Errorf("a re-encryption after stale_prekey is %q bytes", size)
+		t.Errorf("a re-encryption after prekey_superseded is %q bytes", size)
 	}
 	if d := q.recv(); !slices.Equal(d.bodies(), []string{"sealed twice"}) {
 		t.Errorf("the message sealed again: %v", d)
@@ -261,7 +261,7 @@ func TestScriptPads(t *testing.T) {
 	// The sender reads its envelope as the recipient will, and checks the size of what age wrote.
 	n := w.posts(q.addr)
 	writeFile(t, p.file("other.P"), envelope(t, p.addr, w.operator().addr, []byte(p.read("identity.doc")), "33333333-2222-4333-8444-555555555555", "for another mailbox", 0))
-	if r := p.sh("dr_seal " + q.addr.String() + ` "$DR/other"`); r.rc == 0 || !strings.Contains(r.err, "is not one this mailbox made for that address: reattributed") {
+	if r := p.sh("dr_seal " + q.addr.String() + ` "$DR/other"`); r.rc == 0 || !strings.Contains(r.err, "is not one this mailbox made for that address: recipient_mismatch") {
 		t.Errorf("an envelope that names another recipient: %v", r)
 	}
 	if r := p.sh(`age(){ command age "$@" && printf x; }; printf 'a size that tells' | dr_send ` + q.addr.String()); r.rc == 0 || !strings.Contains(r.err, "is not the 3072 bytes its padding was made for") || w.posts(q.addr) != n {

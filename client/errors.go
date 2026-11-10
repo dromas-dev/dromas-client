@@ -74,17 +74,18 @@ type lookupError struct{ err error }
 func (e *lookupError) Error() string { return e.err.Error() }
 func (e *lookupError) Unwrap() error { return e.err }
 
-// Why a message was refused, as codes: with protocol's (bad_message,
-// bad_envelope, bad_identity, bad_signature, reattributed, stale), a closed
+// Why a message was refused, as codes: with protocol's (malformed_message,
+// invalid_envelope, invalid_identity, invalid_signature, sender_mismatch,
+// recipient_mismatch, message_expired and the rest), a closed
 // set; and why a send refused its recipient's prekey statement when nothing is
 // wrong with it (RefusedPrekeyType). A refusal's words are this client's own
 // and never quote the message, its claimed sender's text or the server's:
 // whoever reads a refusal may be a model.
 const (
-	RefusedDecrypt    = "undecryptable"           // not encrypted to a prekey this mailbox holds, or not to exactly one recipient of a prekey's type
-	RefusedReplay     = "replay"                  // this ciphertext was already received
-	RefusedID         = "bad_id"                  // the server's id for it is not the SHA-256 of its ciphertext
-	RefusedPrekeyType = "unsupported_prekey_type" // the recipient's prekey is an age recipient of a type this client cannot encrypt to
+	RefusedDecryptError           = "decrypt_error"            // not encrypted to a prekey this mailbox holds, or not to exactly one recipient of a prekey's type
+	RefusedMessageAlreadyReceived = "message_already_received" // this ciphertext was already received
+	RefusedIDMismatch             = "id_mismatch"              // the server's id for it is not the SHA-256 of its ciphertext
+	RefusedPrekeyType             = "unsupported_prekey_type"  // the recipient's prekey is an age recipient of a type this client cannot encrypt to
 )
 
 // APIError is a non-2xx answer from the server. Problem is the RFC 9457 body
@@ -104,7 +105,7 @@ type APIError struct {
 	// the time as about anything else.
 	Dated, Read time.Time
 	// Version is the version the request named (Dromas-Version), for
-	// version_retired's words.
+	// client_version_unsupported's words.
 	Version string
 }
 
@@ -135,19 +136,19 @@ func (e *APIError) Error() string {
 func (e *APIError) words() string {
 	p := &e.Problem
 	switch p.Code {
-	case protocol.CodeBadRequest:
+	case protocol.CodeInvalidRequest:
 		return "the server could not read the request: a bug in this client, or a server that reads the protocol otherwise"
-	case protocol.CodeBadAddress:
+	case protocol.CodeInvalidAddress:
 		return "the server does not take that as an address, which is \"d_\" and 64 characters of base64url"
 	case protocol.CodeIdentityMismatch:
 		return "the server finds that the identity document does not hash to the address, or is not in its one form"
-	case protocol.CodeBadKey:
+	case protocol.CodeInvalidKey:
 		return "the server refused a key, certificate or prekey statement this mailbox sent, as malformed or not verifying: dromas prekey renew signs a new statement, and a mailbox that cannot register needs a new identity (dromas init)"
-	case protocol.CodePrekeyNotNew:
+	case protocol.CodePrekeyAlreadyUsed:
 		return "the server has seen that prekey before, and every prekey is a new key: dromas prekey renew makes one"
-	case protocol.CodePrekeyTime:
+	case protocol.CodeInvalidValidityPeriod:
 		return "the server finds the prekey statement, or the certificate it is under, not valid at its clock: not begun, or ended"
-	case protocol.CodeCertificateTooLong:
+	case protocol.CodeCertificateLifetimeTooLong:
 		s := "the server takes no certificate that runs longer than its maximum"
 		if p.MaxCertificateLifetime != nil && *p.MaxCertificateLifetime <= protocol.MaxInteger {
 			s += fmt.Sprintf(", %d seconds", *p.MaxCertificateLifetime)
@@ -159,15 +160,15 @@ func (e *APIError) words() string {
 			s += "; it registers " + t
 		}
 		return s + ". dromas init makes an ssh-ed25519 identity unless told otherwise"
-	case protocol.CodeWrongRecipientType:
+	case protocol.CodeInvalidRecipients:
 		return "the server finds the ciphertext not encrypted to one recipient of the type of the mailbox's prekey: a prekey is post-quantum, which needs age 1.3 or later"
-	case protocol.CodeBadRevocation:
+	case protocol.CodeInvalidRevocation:
 		return "the server does not take that record as a revocation its address's own identity signed"
-	case protocol.CodeUnauthorized:
+	case protocol.CodeInvalidPass:
 		return "the server refused this mailbox's pass, and a new one: check that the server's URL names the mailbox's own server"
 	case protocol.CodePassExpired:
 		return "the server refused this mailbox's pass, and a new one, as not valid at its clock"
-	case protocol.CodeCertificateNotCurrent:
+	case protocol.CodeCertificateSuperseded:
 		s := "the server takes this mailbox's pass by another signer than the one it signs with"
 		if p.CertificateSerial != nil && *p.CertificateSerial >= 1 && *p.CertificateSerial <= protocol.MaxSerial {
 			s += fmt.Sprintf(", certificate %d", *p.CertificateSerial)
@@ -175,42 +176,44 @@ func (e *APIError) words() string {
 		return s + ", as after a restore or a renewal on another machine: dromas prekey renew publishes a statement above it"
 	case protocol.CodeCertificateRevoked:
 		return "the server holds the certificate this mailbox signs under as one its identity revoked, at or below its revocation of certificates: dromas prekey renew certifies a new working key above it"
-	case protocol.CodeUnknownSender:
+	case protocol.CodeSenderNotRegistered:
 		return "the server does not know this mailbox: it is not registered there, or was forgotten there (dromas init registers a mailbox, and dromas prekey renew registers one again)"
 	case protocol.CodeSenderRevoked:
 		return "the server answers that this mailbox is revoked: this client takes that only from a revocation that verifies"
 	case protocol.CodeSenderNotAllowed:
 		return "the recipient's ACL does not let this mailbox write to it: only the recipient can change that"
-	case protocol.CodeSenderKeyType:
+	case protocol.CodeUnsupportedSenderKeyType:
 		return "the recipient's client does not verify identities of this mailbox's key type: a mailbox with an ssh-ed25519 identity can write to any mailbox"
-	case protocol.CodeAdoptKeyRefused:
+	case protocol.CodeInvalidAdoptKey:
 		return "the server refused the adopt key as spent, expired, revoked or not its own: ask the account for a new one"
-	case protocol.CodeNoSuchMailbox:
+	case protocol.CodeMailboxNotFound:
 		return "the server holds no mailbox at that address: never registered, or forgotten"
-	case protocol.CodeNoSuchMessage:
+	case protocol.CodeMessageNotFound:
 		return "the server holds no message with that id: acked or expired"
-	case protocol.CodeNotRevoked:
+	case protocol.CodeRevocationNotFound:
 		return "the server holds no revocation of that address"
-	case protocol.CodeConflict:
-		s := "the server holds a newer version of what was sent, or another"
+	case protocol.CodeMailboxAlreadyExists:
+		return "the server holds this address registered with another prekey: dromas prekey renew replaces a registered mailbox's prekey"
+	case protocol.CodeSerialTooLow:
+		s := "the server holds a higher serial than the one sent"
 		switch {
 		case p.Through != nil:
 			s += fmt.Sprintf(": a revocation of certificates through serial %d", *p.Through)
 		case p.PrekeySerial != nil:
-			s += fmt.Sprintf(": prekey serial %d", *p.PrekeySerial)
+			s += fmt.Sprintf(": prekey serial %d, which a new prekey statement must exceed", *p.PrekeySerial)
 		}
 		return s
-	case protocol.CodeMailboxChanged:
+	case protocol.CodeConcurrentModification:
 		return "the mailbox changed on the server while the request was handled: send it again as it is"
-	case protocol.CodeStalePrekey:
+	case protocol.CodePrekeySuperseded:
 		return "the mailbox has a newer prekey than the one the message was encrypted to"
 	case protocol.CodePrekeyExpired:
 		return "the mailbox's prekey has expired at the server, so it takes no messages until its owner renews it"
 	case protocol.CodeRequestTimeout:
 		return "the server stopped waiting for the request's body, which arrived too slowly for it: send it again"
-	case protocol.CodeRevoked:
+	case protocol.CodeMailboxRevoked:
 		return "the server answers that that mailbox is revoked: this client takes that only from a revocation that verifies"
-	case protocol.CodeVersionRetired:
+	case protocol.CodeClientVersionUnsupported:
 		s := "this server no longer takes this client's version"
 		if e.Version != "" {
 			s += ", " + e.Version
@@ -222,15 +225,15 @@ func (e *APIError) words() string {
 		return s
 	case protocol.CodePreconditionFailed:
 		return "what the server holds no longer has the tag the request's If-Match named"
-	case protocol.CodeTooLarge:
+	case protocol.CodeContentTooLarge:
 		return "too large for the server" + limit(p, ": its limit is %d")
 	case protocol.CodeRateLimited:
 		return rateLimited(p)
-	case protocol.CodeFetchPaced:
+	case protocol.CodeFetchRateLimited:
 		return "the server paces the messages the mailbox fetches, new ones and ones fetched before: the rest wait on the server"
 	case protocol.CodeMailboxFull:
 		return "the recipient's mailbox is full"
-	case protocol.CodeMailboxBusy:
+	case protocol.CodeMailboxRateLimited:
 		return "the recipient's mailbox has taken all the new messages it takes for now: dromas outbox flush posts it again"
 	case protocol.CodeUnavailable:
 		return "the server is not ready to answer"
@@ -238,11 +241,11 @@ func (e *APIError) words() string {
 	return "an answer this client does not know"
 }
 
-// MinVersion is the min_version a version_retired carries, only where it is
+// MinVersion is the min_version a client_version_unsupported carries, only where it is
 // a policy's version (protocol.ParsePolicyVersion): a value of any other
 // form is none, and a client shows none of it.
 func MinVersion(p *protocol.Problem) (string, bool) {
-	if p.Code != protocol.CodeVersionRetired || p.MinVersion == "" {
+	if p.Code != protocol.CodeClientVersionUnsupported || p.MinVersion == "" {
 		return "", false
 	}
 	if _, err := protocol.ParsePolicyVersion(p.MinVersion); err != nil {
@@ -277,9 +280,9 @@ func rateLimited(p *protocol.Problem) string {
 	if s, ok := quotaWords[p.QuotaID]; ok {
 		switch p.QuotaID {
 		case protocol.QuotaSends:
-			return s + limit(p, " (%d a day)") + ": an account can lift a mailbox's limits (dromas account adopt)"
+			return s + quotaValue(p, " (%d a day)") + ": an account can lift a mailbox's limits (dromas account join)"
 		case protocol.QuotaRenewals, protocol.QuotaCertificates, protocol.QuotaCertificateRevocations:
-			return s + limit(p, " (%d a day)")
+			return s + quotaValue(p, " (%d a day)")
 		}
 		return s
 	}
@@ -290,6 +293,15 @@ func rateLimited(p *protocol.Problem) string {
 		return "the server takes no more calls of this kind from this machine's IP address for now"
 	}
 	return "the server takes no more calls of this kind for now"
+}
+
+// quotaValue is format with the quota value p carries, or "" when it carries
+// none.
+func quotaValue(p *protocol.Problem, format string) string {
+	if p.QuotaValue == nil {
+		return ""
+	}
+	return fmt.Sprintf(format, *p.QuotaValue)
 }
 
 // limit is format with the limit p carries, or "" when it carries none.
@@ -325,7 +337,7 @@ func knownTypes(names []string) string {
 // their own and never to the server's.
 func (e *APIError) clock() string {
 	c := e.Problem.Code
-	if (c != protocol.CodePassExpired && c != protocol.CodePrekeyTime) || e.Dated.IsZero() || e.Read.IsZero() {
+	if (c != protocol.CodePassExpired && c != protocol.CodeInvalidValidityPeriod) || e.Dated.IsZero() || e.Read.IsZero() {
 		return ""
 	}
 	slow, fast := protocol.PassLifetime, protocol.MaxPassLifetime-protocol.PassLifetime

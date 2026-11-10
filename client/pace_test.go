@@ -40,7 +40,7 @@ func TestAPacedDrainStopsAndResumes(t *testing.T) {
 				w.Header().Set("Content-Type", protocol.ProblemContentType)
 				w.Header().Set("Retry-After", "90") // past the fake's poll interval
 				w.WriteHeader(http.StatusTooManyRequests)
-				_ = json.NewEncoder(w).Encode(protocol.Problem{Type: protocol.CodeFetchPaced.TypeURI(), Title: "Fetch paced", Status: http.StatusTooManyRequests, Code: protocol.CodeFetchPaced, Detail: "paced"})
+				_ = json.NewEncoder(w).Encode(protocol.Problem{Type: protocol.CodeFetchRateLimited.TypeURI(), Title: "Fetch rate limited", Status: http.StatusTooManyRequests, Code: protocol.CodeFetchRateLimited, Detail: "paced"})
 				return
 			}
 		}
@@ -77,8 +77,8 @@ func TestOnlyAPacedFetchEndsADrainQuietly(t *testing.T) {
 		code   protocol.Code
 	}{
 		{"a call budget's 429 on the read of the sender's revocations", lookup, http.StatusTooManyRequests, protocol.CodeRateLimited},
-		{"a pacing code on the read of the sender's revocations", lookup, http.StatusTooManyRequests, protocol.CodeFetchPaced},
-		{"a pacing code under another status on the fetch", fetch, http.StatusServiceUnavailable, protocol.CodeFetchPaced},
+		{"a pacing code on the read of the sender's revocations", lookup, http.StatusTooManyRequests, protocol.CodeFetchRateLimited},
+		{"a pacing code under another status on the fetch", fetch, http.StatusServiceUnavailable, protocol.CodeFetchRateLimited},
 		{"a call budget's 429 on the fetch", fetch, http.StatusTooManyRequests, protocol.CodeRateLimited},
 	} {
 		e := newEnv(t)
@@ -117,7 +117,7 @@ func TestAWaitTheServerAsksForIsAtMostADay(t *testing.T) {
 		if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/messages") {
 			w.Header().Set("Content-Type", "application/json")
 			w.Header().Set("Retry-After", huge)
-			_, _ = w.Write([]byte(`{"count":0,"messages":[],"next_cursor":null}`))
+			_, _ = w.Write([]byte(`{"total_count":0,"messages":[],"next_cursor":null}`))
 			return
 		}
 		next.ServeHTTP(w, r)

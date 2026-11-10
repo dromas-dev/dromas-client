@@ -315,7 +315,7 @@ func (b *Mailbox) versionsAttention() []string {
 // stops taking this client's version, own, at a date (PROTOCOL.md §11.17).
 func SunsetWords(own string, at time.Time) string {
 	return "the server stops taking this client's version, " + own + ", from " + at.UTC().Format(protocol.TimeLayout) +
-		", by the Sunset its last answer carried: upgrade this client, whose calls it refuses as version_retired from then on"
+		", by the Sunset its last answer carried: upgrade this client, whose calls it refuses as client_version_unsupported from then on"
 }
 
 // DeprecationWords say, in this client's own words, that the server deems

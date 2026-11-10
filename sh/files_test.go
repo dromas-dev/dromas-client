@@ -410,7 +410,7 @@ func TestAForgottenMailboxsRenewalRefusesARevocationsAnswerThatIsNoRecord(t *tes
 	var mu sync.Mutex
 	answer := ""
 	srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
-		if r.Method == http.MethodGet && r.URL.Path == "/v1/"+a.String()+"/revocations" {
+		if r.Method == http.MethodGet && r.URL.Path == "/v1/"+a.String()+"/revocation" {
 			mu.Lock()
 			body := answer
 			mu.Unlock()

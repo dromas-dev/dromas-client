@@ -18,7 +18,7 @@ var shSignals = []struct{ name, make string }{
 
 // Each signal stops every command of the script that receives, sends or
 // renews, init among them, with exit 4 and a fatal error line of the code
-// state_not_the_keys, before anything is listed, fetched or acked; addr still
+// restore_required, before anything is listed, fetched or acked; addr still
 // runs. Records that match are the control.
 func TestScriptStopsEveryCommandOnRecordsThatDoNotMatchItsPrekeys(t *testing.T) {
 	for _, s := range append(shSignals, struct{ name, make string }{"control: records that match", ":"}) {
@@ -42,7 +42,7 @@ func TestScriptStopsEveryCommandOnRecordsThatDoNotMatchItsPrekeys(t *testing.T) 
 				case control && r.rc == 4:
 					t.Errorf("%s on records that match: %v", c, r)
 				case control:
-				case r.rc != 4 || !strings.Contains(r.err, `"fatal":true,"code":"state_not_the_keys"`) || len(w.srv.Requests()) != before || w.srv.Count(q.addr) != 1:
+				case r.rc != 4 || !strings.Contains(r.err, `"fatal":true,"code":"restore_required"`) || len(w.srv.Requests()) != before || w.srv.Count(q.addr) != 1:
 					t.Errorf("%s: %v, with %d calls", c, r, len(w.srv.Requests())-before)
 				}
 			}

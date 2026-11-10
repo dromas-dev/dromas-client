@@ -94,7 +94,7 @@ func TestAReplayIsRefusedAfterTheClockStepsBack(t *testing.T) {
 				t.Error("a message already delivered was delivered again, or the replay was not judged")
 			}
 			// Past what the replay set reaches back over, the prekey it was
-			// sealed to is gone too, and it is refused as undecryptable.
+			// sealed to is gone too, and it is refused as decrypt_error.
 			if c.serverToo && len(res.Refused) != 1 {
 				t.Errorf("the replay after a step back of 62 days: refused %v, want one refusal", res.Refused)
 			}

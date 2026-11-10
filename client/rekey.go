@@ -121,7 +121,7 @@ func (b *Mailbox) renewAs(ctx context.Context, asked, certify bool) (*protocol.P
 
 // renewFrom is renew from what the mailbox knows of itself at its server, st.
 // A statement whose certificate the server answers is longer than it takes
-// (certificate_too_long) is spent, and one under a certificate of the
+// (certificate_lifetime_too_long) is spent, and one under a certificate of the
 // maximum that answer names is made and sent, once (shorter).
 func (b *Mailbox) renewFrom(ctx context.Context, st *ownRead) (*protocol.Prekey, time.Time, error) {
 	for attempt := 0; ; attempt++ {
@@ -140,7 +140,7 @@ func (b *Mailbox) renewFrom(ctx context.Context, st *ownRead) (*protocol.Prekey,
 		if took {
 			return p, at, err
 		}
-		if attempt > 0 || code(err) != protocol.CodeCertificateTooLong {
+		if attempt > 0 || code(err) != protocol.CodeCertificateLifetimeTooLong {
 			return nil, time.Time{}, err
 		}
 		if err := b.shorter(err); err != nil {
@@ -149,7 +149,7 @@ func (b *Mailbox) renewFrom(ctx context.Context, st *ownRead) (*protocol.Prekey,
 	}
 }
 
-// shorter takes the maximum a certificate_too_long names, err, as the
+// shorter takes the maximum a certificate_lifetime_too_long names, err, as the
 // lifetime of the certificates this command makes, where it is shorter than
 // the one it made and leaves room to sign messages (certificateLifetime); a
 // waiting statement under a longer one is then spent (signedPrekey). It
@@ -206,7 +206,7 @@ type renewal struct {
 // sendRenewal publishes renewal r of statement n: as a new prekey, or to a
 // server that forgot the mailbox, as its registration, for every renewal (Rekey,
 // Receive's, Init's, the remedy's). A server may forget a mailbox past its
-// record's expiry at any moment, and answer its upload 404 no_such_mailbox
+// record's expiry at any moment, and answer its upload 404 mailbox_not_found
 // after a read that served it (PROTOCOL.md §11.9): the mailbox then reads itself
 // once more (known, whose error, a fault of the mailbox or its own revocation,
 // ends the renewal there), and where that read shows no mailbox, every call
@@ -224,7 +224,7 @@ type renewal struct {
 func (b *Mailbox) sendRenewal(ctx context.Context, r renewal, n uint64) (time.Time, error) {
 	if !r.forgotten {
 		at, err := b.publish(ctx, b.mailboxPath("/prekey"), r.req, n)
-		if !at.IsZero() || code(err) != protocol.CodeNoSuchMailbox {
+		if !at.IsZero() || code(err) != protocol.CodeMailboxNotFound {
 			return at, err
 		}
 		o, kerr := b.known(ctx)

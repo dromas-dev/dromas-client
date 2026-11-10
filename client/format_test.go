@@ -86,7 +86,7 @@ func TestANewerFormatIsRefusedByEveryEntryWritingNothing(t *testing.T) {
 	for _, name := range slices.Sorted(maps.Keys(waits(nil, nil, nil, client.Options{}))) {
 		err := waits(opened(t, e, b), c, rec, e.opts())[name](t.Context())
 		var fe *client.FormatError
-		if !errors.As(err, &fe) || fe.Format != newer || fe.Client != client.ClientFormat() || fe.Code() != "mailbox_format_newer" {
+		if !errors.As(err, &fe) || fe.Format != newer || fe.Client != client.ClientFormat() || fe.Code() != "unsupported_mailbox_format" {
 			t.Errorf("%s on a newer format: %v", name, err)
 		}
 		if got := changes(before, snapshot(b.Dir())); got != "nothing" {
@@ -125,7 +125,7 @@ func TestAnOlderFormatIsBroughtForwardByACommandAndRefusedByAReading(t *testing.
 		err := f(t.Context())
 		if readings[name] {
 			var fe *client.FormatError
-			if !errors.As(err, &fe) || fe.Format != 1 || fe.Client != 2 || fe.Code() != "mailbox_format_older" {
+			if !errors.As(err, &fe) || fe.Format != 1 || fe.Client != 2 || fe.Code() != "mailbox_upgrade_required" {
 				t.Errorf("%s, a reading, on an older format: %v", name, err)
 			}
 			if got := changes(before, snapshot(b.Dir())); got != "nothing" || ran != 0 {

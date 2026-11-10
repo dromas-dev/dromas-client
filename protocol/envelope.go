@@ -62,14 +62,15 @@ func IsMsgID(s string) bool { return msgIDGrammar.MatchString(s) }
 // The checks an envelope can fail, as codes: a closed set, so that whoever
 // reads a refusal reads words this code chose.
 const (
-	RefusedMessage     = "bad_message"          // what was decrypted is not an envelope line and then a signature block
-	RefusedEnvelope    = "bad_envelope"         // not UTF-8 JSON, one object with no key twice, version 1, with a body, a msg_id and a sent_at
-	RefusedIdentity    = "bad_identity"         // the envelope carries no identity document, or one that breaks its format or its key checks
-	RefusedKeyType     = "unsupported_key_type" // the sender's identity is a well-formed document of a key type this client does not verify
-	RefusedSignature   = "bad_signature"        // not signed for this mailbox by a working key the sender's identity certified, under a certificate valid now
-	RefusedAttribution = "reattributed"         // its from is not the address of the identity that signed it, or its to is not this mailbox
-	RefusedStale       = "stale"                // its sent_at is older than TTL
-	RefusedFuture      = "future"               // its sent_at is more than MaxSkew ahead of the reader's clock
+	RefusedMalformedMessage   = "malformed_message"     // what was decrypted is not an envelope line and then a signature block
+	RefusedInvalidEnvelope    = "invalid_envelope"      // not UTF-8 JSON, one object with no key twice, version 1, with a body, a msg_id and a sent_at
+	RefusedInvalidIdentity    = "invalid_identity"      // the envelope carries no identity document, or one that breaks its format or its key checks
+	RefusedKeyType            = "unsupported_key_type"  // the sender's identity is a well-formed document of a key type this client does not verify
+	RefusedInvalidSignature   = "invalid_signature"     // not signed for this mailbox by a working key the sender's identity certified, under a certificate valid now
+	RefusedSenderMismatch     = "sender_mismatch"       // its from is not the address of the identity that signed it
+	RefusedRecipientMismatch  = "recipient_mismatch"    // its to is not this mailbox
+	RefusedMessageExpired     = "message_expired"       // its sent_at is older than TTL
+	RefusedMessageNotYetValid = "message_not_yet_valid" // its sent_at is more than MaxSkew ahead of the reader's clock
 )
 
 // EnvelopeError is the check an envelope failed: one of the codes above and
@@ -79,7 +80,7 @@ type EnvelopeError struct{ Code, Why string }
 
 func (e *EnvelopeError) Error() string { return e.Why }
 
-func badEnvelope(why string) error { return &EnvelopeError{RefusedEnvelope, why} }
+func invalidEnvelope(why string) error { return &EnvelopeError{RefusedInvalidEnvelope, why} }
 
 // Envelope is a message: one line of JSON, which the sender's working key
 // signs. It is encrypted to the recipient's prekey with that signature after
@@ -224,10 +225,10 @@ func OpenEnvelope(plaintext []byte, signer, me Address, now time.Time) (*Envelop
 		return nil, err
 	}
 	if e.SentAt.Before(now.Add(-TTL)) {
-		return nil, &EnvelopeError{RefusedStale, fmt.Sprintf("sent_at is older than %d days", TTL/(24*time.Hour))}
+		return nil, &EnvelopeError{RefusedMessageExpired, fmt.Sprintf("sent_at is older than %d days", TTL/(24*time.Hour))}
 	}
 	if e.SentAt.After(now.Add(MaxSkew)) {
-		return nil, &EnvelopeError{RefusedFuture, fmt.Sprintf("sent_at is more than %d minutes ahead of this machine's clock", MaxSkew/time.Minute)}
+		return nil, &EnvelopeError{RefusedMessageNotYetValid, fmt.Sprintf("sent_at is more than %d minutes ahead of this machine's clock", MaxSkew/time.Minute)}
 	}
 	return e, nil
 }
@@ -238,14 +239,14 @@ func OpenEnvelope(plaintext []byte, signer, me Address, now time.Time) (*Envelop
 // its own to judge. Nobody judging another mailbox's messages uses it.
 func OpenEnvelopeRecord(plaintext []byte, signer, me Address) (*Envelope, error) {
 	if !utf8.Valid(plaintext) {
-		return nil, badEnvelope("the envelope is not UTF-8")
+		return nil, invalidEnvelope("the envelope is not UTF-8")
 	}
 	fields, err := objectFields(plaintext)
 	if err != nil {
 		return nil, err
 	}
 	if _, ok := fields["body"]; !ok {
-		return nil, badEnvelope("the envelope has no body")
+		return nil, invalidEnvelope("the envelope has no body")
 	}
 	var w wireEnvelope
 	for key, dst := range map[string]any{
@@ -254,7 +255,7 @@ func OpenEnvelopeRecord(plaintext []byte, signer, me Address) (*Envelope, error)
 	} {
 		if raw, ok := fields[key]; ok {
 			if err := jsonv2.Unmarshal(raw, dst); err != nil {
-				return nil, badEnvelope("the envelope is malformed: its " + key + " is not what that field holds")
+				return nil, invalidEnvelope("the envelope is malformed: its " + key + " is not what that field holds")
 			}
 		}
 	}
@@ -263,17 +264,20 @@ func OpenEnvelopeRecord(plaintext []byte, signer, me Address) (*Envelope, error)
 	// alone, so 1.0 and 1e0 are no version.
 	var v uint64
 	if err := jsonv2.Unmarshal(fields["v"], &v, jsonv2.WithUnmarshalers(integers)); err != nil || v != EnvelopeVersion {
-		return nil, badEnvelope("unknown envelope version: v is the JSON number 1")
+		return nil, invalidEnvelope("unknown envelope version: v is the JSON number 1")
 	}
-	if w.From != signer || w.To != me {
-		return nil, &EnvelopeError{RefusedAttribution, "the inner from/to do not match the signer and this mailbox (re-attribution)"}
+	if w.From != signer {
+		return nil, &EnvelopeError{RefusedSenderMismatch, "the envelope's from is not the address of the identity that signed it"}
+	}
+	if w.To != me {
+		return nil, &EnvelopeError{RefusedRecipientMismatch, "the envelope's to is not this mailbox"}
 	}
 	if !msgIDGrammar.MatchString(w.MsgID) {
-		return nil, badEnvelope("the envelope has no valid msg_id")
+		return nil, invalidEnvelope("the envelope has no valid msg_id")
 	}
 	sentAt, err := ParseTime(w.SentAt)
 	if err != nil {
-		return nil, badEnvelope("the envelope's sent_at is not a UTC timestamp to the second, YYYY-MM-DDTHH:MM:SSZ")
+		return nil, invalidEnvelope("the envelope's sent_at is not a UTC timestamp to the second, YYYY-MM-DDTHH:MM:SSZ")
 	}
 	e := &Envelope{
 		From:       w.From,
@@ -297,13 +301,13 @@ func objectFields(data []byte) (map[string]json.RawMessage, error) {
 	switch why := checkJSON(data); why {
 	case "":
 	case whyTwice:
-		return nil, badEnvelope("the envelope has a key twice")
+		return nil, invalidEnvelope("the envelope has a key twice")
 	default:
-		return nil, badEnvelope("the envelope is not one JSON object as the protocol reads one: " + why)
+		return nil, invalidEnvelope("the envelope is not one JSON object as the protocol reads one: " + why)
 	}
 	var fields map[string]json.RawMessage
 	if err := jsonv2.Unmarshal(data, &fields); err != nil {
-		return nil, badEnvelope("the envelope is not one JSON object")
+		return nil, invalidEnvelope("the envelope is not one JSON object")
 	}
 	return fields, nil
 }

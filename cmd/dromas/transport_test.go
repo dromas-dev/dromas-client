@@ -99,7 +99,7 @@ func TestATransportErrorPrintsNoneOfTheServersWords(t *testing.T) {
 }
 
 // Three stdout lines carry an error's words, from calls of the mailbox's own
-// server: renewal_failed and acl_not_sent from recv, mailbox_unread from cert
+// server: renewal_failed and acl_sync_failed from recv, lookup_failed from cert
 // revoke-earlier. None carries the server's.
 func TestTheServersWordsReachNoStdoutLine(t *testing.T) {
 	ctx := context.Background()
@@ -114,14 +114,14 @@ func TestTheServersWordsReachNoStdoutLine(t *testing.T) {
 		{"renewal_failed", "recv", nil, func(_ *client.Mailbox, r *http.Request) bool {
 			return r.Method == http.MethodPut && strings.HasSuffix(r.URL.Path, "/prekey")
 		}},
-		{"acl_not_sent", "recv", func(b, a *client.Mailbox) {
+		{"acl_sync_failed", "recv", func(b, a *client.Mailbox) {
 			if err := os.WriteFile(filepath.Join(b.Dir(), "blocked"), []byte(a.Address().String()+"\n"), 0o600); err != nil {
 				t.Fatal(err)
 			}
 		}, func(_ *client.Mailbox, r *http.Request) bool {
 			return r.Method == http.MethodPut && strings.HasSuffix(r.URL.Path, "/acl")
 		}},
-		{"mailbox_unread", "cert revoke-earlier", nil, func(b *client.Mailbox, r *http.Request) bool {
+		{"lookup_failed", "cert revoke-earlier", nil, func(b *client.Mailbox, r *http.Request) bool {
 			return r.Method == http.MethodGet && r.URL.Path == "/v1/"+b.Address().String()
 		}},
 	} {

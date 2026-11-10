@@ -279,16 +279,16 @@ func TestExecIsTriedThreeTimesAndGivesUp(t *testing.T) {
 		t.Fatalf("recv: exit %d, %v; %s", status, err, stderr)
 	}
 	messages := ofType(t, stdout, "message")
-	failed, gaveUp := ofType(t, stdout, "exec_failed"), ofType(t, stdout, "exec_gave_up")
+	failed, gaveUp := ofType(t, stdout, "exec_attempt_failed"), ofType(t, stdout, "exec_failed")
 	if len(messages) != 2 || len(failed) != 6 || len(gaveUp) != 2 {
 		t.Fatalf("recv printed %s", stdout)
 	}
 	for i, l := range failed {
 		id := messages[i/3]["id"]
-		if l["id"] != id || l["try"] != jsonInt(i%3+1) || l["exit_status"] != jsonInt(7) || l["signal"] != nil {
+		if l["id"] != id || l["attempt"] != jsonInt(i%3+1) || l["exit_status"] != jsonInt(7) || l["signal"] != nil {
 			t.Errorf("failed try %d: %v", i, l)
 		}
-		if gaveUp[i/3]["id"] != id || gaveUp[i/3]["tries"] != jsonInt(3) {
+		if gaveUp[i/3]["id"] != id || gaveUp[i/3]["attempts"] != jsonInt(3) {
 			t.Errorf("gave up: %v", gaveUp[i/3])
 		}
 	}
@@ -309,7 +309,7 @@ func TestExecIsTriedThreeTimesAndGivesUp(t *testing.T) {
 
 // A message whose callback gave up keeps dromas status at exit status 3 while
 // inbox/ keeps its file, through a later recv --exec. dromas inbox clear-failed
-// takes no id, clears every one in one "gave_up_cleared" line with their count,
+// takes no id, clears every one in one "failed_cleared" line with their count,
 // and status exits 0; a callback that gives up after it raises status again.
 func TestInboxClearFailedClearsEveryCallbackThatGaveUpUntilTheNext(t *testing.T) {
 	c := newCallback(t)
@@ -328,7 +328,7 @@ func TestInboxClearFailedClearsEveryCallbackThatGaveUpUntilTheNext(t *testing.T)
 			t.Fatalf("status: exit %d, want %d: %s", code, want, stdout)
 		}
 		var got []string
-		if ids, ok := ls[0]["gave_up"].([]any); ok {
+		if ids, ok := ls[0]["failed"].([]any); ok {
 			for _, id := range ids {
 				got = append(got, fmt.Sprint(id))
 			}
@@ -343,8 +343,8 @@ func TestInboxClearFailedClearsEveryCallbackThatGaveUpUntilTheNext(t *testing.T)
 		t.Helper()
 		stdout, code := run("inbox clear-failed")
 		ls := printed(t, stdout)
-		if code != 0 || len(ls) != 1 || ls[0]["type"] != "gave_up_cleared" || ls[0]["count"] != jsonInt(want) || len(ls[0]) != 2 {
-			t.Fatalf("inbox clear-failed: exit %d, %s; want one gave_up_cleared line of count %d", code, stdout, want)
+		if code != 0 || len(ls) != 1 || ls[0]["type"] != "failed_cleared" || ls[0]["count"] != jsonInt(want) || len(ls[0]) != 2 {
+			t.Fatalf("inbox clear-failed: exit %d, %s; want one failed_cleared line of count %d", code, stdout, want)
 		}
 	}
 	c.send("fails", "fails too")
@@ -353,7 +353,7 @@ func TestInboxClearFailedClearsEveryCallbackThatGaveUpUntilTheNext(t *testing.T)
 		t.Fatalf("recv: exit %d, %s", code, stdout)
 	}
 	var ids []string
-	for _, l := range ofType(t, stdout, "exec_gave_up") {
+	for _, l := range ofType(t, stdout, "exec_failed") {
 		ids = append(ids, fmt.Sprint(l["id"]))
 	}
 	if len(ids) != 2 {
@@ -376,7 +376,7 @@ func TestInboxClearFailedClearsEveryCallbackThatGaveUpUntilTheNext(t *testing.T)
 	cleared(0)
 	c.send("fails again")
 	stdout, _, err = c.recv(ctx, append([]string{"--wait", "0s"}, c.exec("exit", "100")...)...)
-	again := ofType(t, stdout, "exec_gave_up")
+	again := ofType(t, stdout, "exec_failed")
 	if code := report(err, io.Discard); code != 3 || len(again) != 1 {
 		t.Fatalf("recv: exit %d, %s", code, stdout)
 	}
@@ -390,7 +390,7 @@ func TestExecExit100IsPermanent(t *testing.T) {
 	c := newCallback(t)
 	c.send("fails for good")
 	stdout, _, err := c.recv(context.Background(), append([]string{"--wait", "0s"}, c.exec("exit", "100")...)...)
-	if status := report(err, io.Discard); status != 3 || len(ofType(t, stdout, "exec_failed")) != 1 || len(ofType(t, stdout, "exec_gave_up")) != 1 {
+	if status := report(err, io.Discard); status != 3 || len(ofType(t, stdout, "exec_attempt_failed")) != 1 || len(ofType(t, stdout, "exec_failed")) != 1 {
 		t.Fatalf("recv: exit %d, %s", status, stdout)
 	}
 	if got := strings.Count(c.recorded(), "\n"); got != 1 {
@@ -407,7 +407,7 @@ func TestExecThatSucceedsOnARetryEndsThere(t *testing.T) {
 	c := newCallback(t)
 	c.send("fails once")
 	stdout, stderr, err := c.recv(context.Background(), append([]string{"--wait", "0s"}, c.exec("fail-first")...)...)
-	if err != nil || len(ofType(t, stdout, "exec_failed")) != 1 || len(ofType(t, stdout, "exec_gave_up")) != 0 {
+	if err != nil || len(ofType(t, stdout, "exec_attempt_failed")) != 1 || len(ofType(t, stdout, "exec_failed")) != 0 {
 		t.Fatalf("recv: %v, %s %s", err, stdout, stderr)
 	}
 	if got := strings.Count(c.recorded(), "\n"); got != 2 {
@@ -430,8 +430,8 @@ func TestExecTimeoutKillsAHungCallback(t *testing.T) {
 	if status := report(err, io.Discard); status != 3 {
 		t.Fatalf("recv: exit %d, %v %s", status, err, stderr)
 	}
-	failed := ofType(t, stdout, "exec_failed")
-	if len(failed) != 6 || len(ofType(t, stdout, "exec_gave_up")) != 2 {
+	failed := ofType(t, stdout, "exec_attempt_failed")
+	if len(failed) != 6 || len(ofType(t, stdout, "exec_failed")) != 2 {
 		t.Fatalf("recv printed %s", stdout)
 	}
 	for _, l := range failed {
@@ -453,7 +453,7 @@ func TestExecPrintsNothingOfACallbacksOutput(t *testing.T) {
 	if strings.Contains(stderr, "SYSTEM") || strings.Contains(stderr, "NOISE") || strings.Contains(stdout, "NOISE") {
 		t.Fatalf("recv printed a callback's output: stdout %.300q stderr %.300q", stdout, stderr)
 	}
-	for _, typ := range []string{"exec_failed", "exec_gave_up"} {
+	for _, typ := range []string{"exec_attempt_failed", "exec_failed"} {
 		for _, l := range ofType(t, stdout, typ) {
 			if strings.Contains(fmt.Sprint(l), "SYSTEM") {
 				t.Fatalf("a line quotes the message: %v", l)
@@ -467,7 +467,7 @@ func TestExecThatDoesNotReadItsStdinIsDone(t *testing.T) {
 	c := newCallback(t)
 	c.send(strings.Repeat("large ", 1<<17))
 	stdout, stderr, err := c.recv(context.Background(), append([]string{"--wait", "0s"}, c.exec("noread")...)...)
-	if err != nil || len(ofType(t, stdout, "exec_failed")) != 0 || c.recorded() != "ran\n" {
+	if err != nil || len(ofType(t, stdout, "exec_attempt_failed")) != 0 || c.recorded() != "ran\n" {
 		t.Fatalf("recv: %v, %.300s %s", err, stdout, stderr)
 	}
 }
@@ -493,7 +493,7 @@ func TestAnInterruptedCallbackRunsAgainAtTheNextStart(t *testing.T) {
 	}
 	cancel()
 	first := <-done
-	if first.err != nil || len(ofType(t, first.stdout, "exec_failed")) != 0 {
+	if first.err != nil || len(ofType(t, first.stdout, "exec_attempt_failed")) != 0 {
 		t.Fatalf("recv --follow, interrupted: %v, %s", first.err, first.stdout)
 	}
 	if stdout, _, err := c.recv(context.Background()); err != nil || strings.Contains(stdout, "interrupted") {
@@ -650,7 +650,7 @@ func TestTheConfigsExecIsTheCallbackOfARecvThatWaits(t *testing.T) {
 	c.execConfig("hang", `exec-timeout = "1s"`)
 	c.send("hangs")
 	stdout, stderr, err := c.recv(context.Background(), "--wait", "0s")
-	if status := report(err, io.Discard); status != 3 || len(ofType(t, stdout, "exec_gave_up")) != 1 {
+	if status := report(err, io.Discard); status != 3 || len(ofType(t, stdout, "exec_failed")) != 1 {
 		t.Fatalf("recv: exit %d, %v %s %s", status, err, stdout, stderr)
 	}
 }

@@ -86,7 +86,7 @@ func TestFailedAckIsRetriedQuietly(t *testing.T) {
 	}
 }
 
-// The same envelope re-encrypted (as after stale_prekey) is a new ciphertext
+// The same envelope re-encrypted (as after prekey_superseded) is a new ciphertext
 // with the same msg_id: acked, and not delivered again.
 func TestDuplicateRetryIsAckedNotDelivered(t *testing.T) {
 	t.Parallel()
@@ -115,7 +115,7 @@ func TestDuplicateRetryIsAckedNotDelivered(t *testing.T) {
 	}
 }
 
-// On 409 stale_prekey the client re-encrypts the SAME envelope to the newer
+// On 409 prekey_superseded the client re-encrypts the SAME envelope to the newer
 // prekey: same msg_id, so the recipient can never act on it twice.
 func TestStalePrekeyReencryptsSameEnvelope(t *testing.T) {
 	t.Parallel()
@@ -533,7 +533,7 @@ func TestFlushNeverStopsAtABadEntry(t *testing.T) {
 	}
 
 	rs, err := a.Flush(ctx)
-	if len(rs) != 1 || err == nil || !strings.Contains(err.Error(), "no_such_mailbox") {
+	if len(rs) != 1 || err == nil || !strings.Contains(err.Error(), "mailbox_not_found") {
 		t.Fatalf("flush: %d sent, %v", len(rs), err)
 	}
 	if res := receive(t, b); len(res.Delivered) != 1 {

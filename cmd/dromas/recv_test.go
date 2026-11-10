@@ -187,7 +187,7 @@ func TestRecvFollowRidesOutAServerErrorAndEndsWithItsContext(t *testing.T) {
 		if err := <-ended; err != nil {
 			t.Fatalf("recv --follow, its context ended: %v %s", err, errs.String())
 		}
-		if n := strings.Count(errs.String(), `"for":"server"`); n != 3 {
+		if n := strings.Count(errs.String(), `"reason":"server"`); n != 3 {
 			t.Fatalf("%d waiting lines, want 3: %s", n, errs.String())
 		}
 	})
@@ -203,9 +203,9 @@ func TestRecvTellsAFatalEndFromOneToRetry(t *testing.T) {
 		fatal  bool
 		args   []string
 	}{
-		{"no mailbox under recv --follow", http.StatusNotFound, string(protocol.CodeNoSuchMailbox), true, []string{"--follow"}},
-		{"bad request under recv --wait", http.StatusBadRequest, string(protocol.CodeBadRequest), true, []string{"--wait", "1m"}},
-		{"bad request under recv", http.StatusBadRequest, string(protocol.CodeBadRequest), true, nil},
+		{"no mailbox under recv --follow", http.StatusNotFound, string(protocol.CodeMailboxNotFound), true, []string{"--follow"}},
+		{"bad request under recv --wait", http.StatusBadRequest, string(protocol.CodeInvalidRequest), true, []string{"--wait", "1m"}},
+		{"bad request under recv", http.StatusBadRequest, string(protocol.CodeInvalidRequest), true, nil},
 		{"a server error at recv's deadline", http.StatusServiceUnavailable, string(protocol.CodeUnavailable), false, []string{"--wait", "1s"}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -261,7 +261,7 @@ func TestRecvOfAForgottenMailboxWhoseRegistrationFailsForNowExits1(t *testing.T)
 	var errs bytes.Buffer
 	status := report(err, &errs)
 	line := printed(t, errs.String())
-	if status != 1 || len(line) != 1 || line[0]["type"] != "error" || line[0]["fatal"] != nil || line[0]["code"] != string(protocol.CodeNoSuchMailbox) {
+	if status != 1 || len(line) != 1 || line[0]["type"] != "error" || line[0]["fatal"] != nil || line[0]["code"] != string(protocol.CodeMailboxNotFound) {
 		t.Fatalf("exit %d, %s; err %v", status, errs.String(), err)
 	}
 }

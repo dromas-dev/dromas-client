@@ -12,7 +12,7 @@ import (
 // mailbox, and its owner is told once: a key in prekeys/ that the state names
 // nowhere (unnamedKeys) stops every command that receives, sends, renews or
 // hands over a message, before it lists, acks or renews anything (keysMatch),
-// with the refusal StateNotTheKeys, which no wait mends. Its owner's
+// with the refusal RestoreRequired, which no wait mends. Its owner's
 // acknowledgement, dromas init --restore (Options.Restore), adopts the keys
 // found, and Init then renews. That is how ZFS refuses to import a pool another
 // system last used until its owner runs zpool import -f.
@@ -25,16 +25,16 @@ import (
 // nothing. A mailbox restored from its identity alone holds no key, so it
 // needs no acknowledgement.
 
-// StateNotTheKeys is the code of a command refused because prekeys/ holds a
+// RestoreRequired is the code of a command refused because prekeys/ holds a
 // key the mailbox's state names nowhere (keysMatch): only its owner's dromas
 // init --restore mends it.
-const StateNotTheKeys = "state_not_the_keys"
+const RestoreRequired = "restore_required"
 
 // NotTheKeys reports whether err is a command refused because the mailbox's
-// state does not match its prekeys/ (StateNotTheKeys).
+// state does not match its prekeys/ (RestoreRequired).
 func NotTheKeys(err error) bool {
 	var re *RefusedError
-	return errors.As(err, &re) && re.Code == StateNotTheKeys
+	return errors.As(err, &re) && re.Code == RestoreRequired
 }
 
 // Restored is what an acknowledged restore found and did (Options.Restore,
@@ -130,7 +130,7 @@ func (b *Mailbox) notMatched() error {
 // notTheKeys is the refusal of a command that receives, sends, renews or hands
 // over a message where prekeys/ holds found keys the state names nowhere.
 func notTheKeys(found int) error {
-	return &RefusedError{Code: StateNotTheKeys, Reason: fmt.Sprintf("this mailbox's state does not match its prekeys: prekeys/ holds %d prekeys the state does not name, as after the state is lost, or put back from a copy older than a renewal. The mailbox receives, sends, delivers and renews nothing until its owner runs dromas init --restore, which adopts those prekeys and renews. A state lost or put back has lost its replay set, so a message the mailbox accepted before may be delivered again", found)}
+	return &RefusedError{Code: RestoreRequired, Reason: fmt.Sprintf("this mailbox's state does not match its prekeys: prekeys/ holds %d prekeys the state does not name, as after the state is lost, or put back from a copy older than a renewal. The mailbox receives, sends, delivers and renews nothing until its owner runs dromas init --restore, which adopts those prekeys and renews. A state lost or put back has lost its replay set, so a message the mailbox accepted before may be delivered again", found)}
 }
 
 // unnamedKeys is each key file in prekeys/ that the state file names nowhere

@@ -10,12 +10,12 @@ import (
 )
 
 // scriptVersion is the version the script names in every request.
-const scriptVersion = "0.5.0"
+const scriptVersion = "0.6.0"
 
 // The script names its version in every request, and its command line says
 // a Deprecation and a Sunset of it at its end, each with its date, as the Go
 // client does (PROTOCOL.md §11.17); a value of another form is none, and
-// nothing of it is printed. A 410 version_retired is said in the script's
+// nothing of it is printed. A 410 client_version_unsupported is said in the script's
 // words, with min_version once it has its form. It changes no exit status:
 // the script has none for a mailbox that needs a look.
 func TestTheScriptNamesItsVersionAndSaysASunset(t *testing.T) {
@@ -26,12 +26,12 @@ func TestTheScriptNamesItsVersionAndSaysASunset(t *testing.T) {
 	dep := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
 	sun := time.Now().UTC().Add(30 * 24 * time.Hour).Truncate(time.Second)
 	w.srv.SetPolicy(protocol.ServerDocument{
-		Deprecations: []protocol.Scheduled{{Below: "0.6", At: dep.Format(protocol.TimeLayout)}},
-		Sunsets:      []protocol.Scheduled{{Version: "0.5", At: sun.Format(protocol.TimeLayout)}},
+		Deprecations: []protocol.Scheduled{{Below: "0.7", At: dep.Format(protocol.TimeLayout)}},
+		Sunsets:      []protocol.Scheduled{{Version: "0.6", At: sun.Format(protocol.TimeLayout)}},
 	})
 	r := b.sh("bash " + script + " recv")
-	if r.rc != 0 || !strings.Contains(r.out, `{"type":"deprecated","version":"0.5.0","at":"`+dep.Format(protocol.TimeLayout)+`","detail":"`) ||
-		!strings.Contains(r.out, `{"type":"sunset","version":"0.5.0","at":"`+sun.Format(protocol.TimeLayout)+`","detail":"`) {
+	if r.rc != 0 || !strings.Contains(r.out, `{"type":"deprecated","version":"0.6.0","deprecated_at":"`+dep.Format(protocol.TimeLayout)+`","detail":"`) ||
+		!strings.Contains(r.out, `{"type":"sunset","version":"0.6.0","sunset_at":"`+sun.Format(protocol.TimeLayout)+`","detail":"`) {
 		t.Fatalf("recv: %v", r)
 	}
 	for _, q := range w.srv.Requests() {
@@ -41,10 +41,10 @@ func TestTheScriptNamesItsVersionAndSaysASunset(t *testing.T) {
 	}
 
 	// Retired: the script's words, the floor once it has its form.
-	w.srv.SetPolicy(protocol.ServerDocument{MinVersion: "0.6"})
+	w.srv.SetPolicy(protocol.ServerDocument{MinVersion: "0.7"})
 	r = b.sh("bash " + script + " recv")
-	if r.rc == 0 || !strings.Contains(r.err, `"status":410,"code":"version_retired","min_version":"0.6"`) ||
-		!strings.Contains(r.err, "this server no longer takes this client's version, 0.5.0: upgrade this client; the oldest it takes is 0.6") {
+	if r.rc == 0 || !strings.Contains(r.err, `"status":410,"code":"client_version_unsupported","min_version":"0.7"`) ||
+		!strings.Contains(r.err, "this server no longer takes this client's version, 0.6.0: upgrade this client; the oldest it takes is 0.7") {
 		t.Fatalf("recv at a server that retired its version: %v", r)
 	}
 
@@ -67,7 +67,7 @@ func TestTheScriptNamesItsVersionAndSaysASunset(t *testing.T) {
 	w.srv.SetMiddle(func(rw http.ResponseWriter, req *http.Request, next http.Handler) {
 		next.ServeHTTP(&forged{ResponseWriter: rw, set: map[string]string{protocol.DeprecationHeader: "@1", protocol.SunsetHeader: "Sat, 02 Jan 2027 03:04:05 GMT"}}, req)
 	})
-	if r := b.sh("bash " + script + " recv"); r.rc != 0 || !strings.Contains(r.out, `"type":"deprecated","version":"0.5.0","at":"1970-01-01T00:00:01Z"`) || !strings.Contains(r.out, `"type":"sunset","version":"0.5.0","at":"2027-01-02T03:04:05Z"`) {
+	if r := b.sh("bash " + script + " recv"); r.rc != 0 || !strings.Contains(r.out, `"type":"deprecated","version":"0.6.0","deprecated_at":"1970-01-01T00:00:01Z"`) || !strings.Contains(r.out, `"type":"sunset","version":"0.6.0","sunset_at":"2027-01-02T03:04:05Z"`) {
 		t.Fatalf("the control: %v", r)
 	}
 }

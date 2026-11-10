@@ -586,7 +586,7 @@ func (b *Mailbox) aclWhy() (string, error) {
 // whoever wrote it, and carries no If-Match (PROTOCOL.md §11.14): the mailbox's
 // files are what its ACL is, so what another machine of the mailbox sent is
 // replaced, not merged, and a precondition would only add a read and a 412
-// to end the same way. One the server answers mailbox_changed (the mailbox changed
+// to end the same way. One the server answers concurrent_modification (the mailbox changed
 // while it handled the request) is sent again as it is, once. The server's
 // answer must be the ACL sent, and is kept in the mailbox's state. It reads
 // nothing of the server first, so it does not see an ACL another writer put
@@ -661,10 +661,10 @@ func (b *Mailbox) heldACL(ctx context.Context) (*protocol.ACL, error) {
 }
 
 // sendACL sends the mailbox's ACL, want, and keeps the server's answer as the
-// ACL it took: once more after a mailbox_changed, as it is.
+// ACL it took: once more after a concurrent_modification, as it is.
 func (b *Mailbox) sendACL(ctx context.Context, want *protocol.ACL) error {
 	got, err := b.putACL(ctx, want)
-	if code(err) == protocol.CodeMailboxChanged {
+	if code(err) == protocol.CodeConcurrentModification {
 		got, err = b.putACL(ctx, want)
 	}
 	if err != nil {

@@ -618,7 +618,7 @@ sed 's/"body":"hello"/"body":"hellp"/' message/a-to-b.line > "$L"; cat "$L" "$GO
 # A sender whose identity is P-256, signed by that identity, made once and kept: delivered by a client
 # that verifies ecdsa-sha2-nistp256, and refused with unsupported_key_type by one that does not; and the same under C's
 # certificate, which nothing revokes. Then one of a type nobody verifies: refused so if the document is the sender's,
-# and as reattributed if it is not.
+# and as sender_mismatch if it is not.
 line "$C" "$B" "$(b64 < c/identity.doc)" > "$L"; [ -e plain/accept-p256-sender.txt ] || refuse accept-p256-sender "$L" sign c "dromas-msg-v1:$B"
 head -n 1 plain/accept-p256-sender.txt | cmp -s - "$L" || { echo "plain/accept-p256-sender.txt is not C's line" >&2; exit 1; }
 refuse accept-p256-sender-under-a-certificate "$L" under c-work c/work-cert.pub "dromas-msg-v1:$B"
@@ -755,39 +755,39 @@ at mailbox-bad-sender-key-types-a-string '{"identity":"%s","prekey":"%s","prekey
 at mailbox-bad-signature-unpadded '{"identity":"%s","prekey":"%s","prekey_signature":"%s"}' "$ID_A" "$P1" "$NOPAD"
 at mailbox-bad-prekey-a-number '{"identity":"%s","prekey":1,"prekey_signature":"%s"}' "$ID_A" "$P1S"
 at mailbox-bad-revoked-certificates-a-number '{"identity":"%s","prekey":"%s","prekey_signature":"%s","revoked_certificates":4}' "$ID_A" "$P1" "$P1S"
-at list-ok '{"count":1,"messages":[{"id":"%s","size":%s,"received_at":"%s","expires_at":"2026-10-16T22:58:00Z"}],"next_cursor":null}' "$HASH" "$(wc -c < message/a-to-b.age)" "$NOW"
-at list-ok-empty '{"count":0,"messages":[],"next_cursor":null}'
-at list-bad-count-negative '{"count":-1,"messages":[],"next_cursor":null}'
-at list-bad-count-above-2-53 '{"count":9007199254740992,"messages":[],"next_cursor":null}'
-at list-bad-count-a-fraction '{"count":0.5,"messages":[],"next_cursor":null}'
-at list-bad-count-written-with-a-fraction '{"count":1.0,"messages":[],"next_cursor":null}' # an integer member is written as one
-at list-bad-count-written-with-an-exponent '{"count":1e0,"messages":[],"next_cursor":null}' # jq gives it back as 1, so the script takes it: how jq reads a number, a difference that guards none of the five (AGENTS.md § The shell client)
-at list-bad-size-a-string '{"count":1,"messages":[{"id":"%s","size":"2048"}],"next_cursor":null}' "$HASH"
+at list-ok '{"total_count":1,"messages":[{"id":"%s","size":%s,"received_at":"%s","expires_at":"2026-10-16T22:58:00Z"}],"next_cursor":null}' "$HASH" "$(wc -c < message/a-to-b.age)" "$NOW"
+at list-ok-empty '{"total_count":0,"messages":[],"next_cursor":null}'
+at list-bad-total-count-negative '{"total_count":-1,"messages":[],"next_cursor":null}'
+at list-bad-total-count-above-2-53 '{"total_count":9007199254740992,"messages":[],"next_cursor":null}'
+at list-bad-total-count-a-fraction '{"total_count":0.5,"messages":[],"next_cursor":null}'
+at list-bad-total-count-written-with-a-fraction '{"total_count":1.0,"messages":[],"next_cursor":null}' # an integer member is written as one
+at list-bad-total-count-written-with-an-exponent '{"total_count":1e0,"messages":[],"next_cursor":null}' # jq gives it back as 1, so the script takes it: how jq reads a number, a difference that guards none of the five (AGENTS.md § The shell client)
+at list-bad-size-a-string '{"total_count":1,"messages":[{"id":"%s","size":"2048"}],"next_cursor":null}' "$HASH"
 # A size is at most 16 MiB, the largest ciphertext (PROTOCOL.md §11.10, §12.3): a list that gives a larger one is no answer, before anything is fetched
-at list-ok-size-the-largest '{"count":1,"messages":[{"id":"%s","size":16777216,"received_at":"%s","expires_at":"2026-10-16T22:58:00Z"}],"next_cursor":null}' "$HASH" "$NOW"
-at list-bad-size-past-the-largest '{"count":1,"messages":[{"id":"%s","size":16777217,"received_at":"%s","expires_at":"2026-10-16T22:58:00Z"}],"next_cursor":null}' "$HASH" "$NOW"
-at list-bad-messages-an-object '{"count":0,"messages":{},"next_cursor":null}'
-at list-bad-cursor-a-number '{"count":0,"messages":[],"next_cursor":7}'
+at list-ok-size-the-largest '{"total_count":1,"messages":[{"id":"%s","size":16777216,"received_at":"%s","expires_at":"2026-10-16T22:58:00Z"}],"next_cursor":null}' "$HASH" "$NOW"
+at list-bad-size-past-the-largest '{"total_count":1,"messages":[{"id":"%s","size":16777217,"received_at":"%s","expires_at":"2026-10-16T22:58:00Z"}],"next_cursor":null}' "$HASH" "$NOW"
+at list-bad-messages-an-object '{"total_count":0,"messages":{},"next_cursor":null}'
+at list-bad-cursor-a-number '{"total_count":0,"messages":[],"next_cursor":7}'
 # A cursor is opaque and URL-safe (AEP-158): one or more of A-Z, a-z, 0-9, - and _, pasted into the next query as it is
-at list-ok-cursor '{"count":2,"messages":[],"next_cursor":"AZaz09-_"}'
-at list-bad-cursor-a-slash '{"count":2,"messages":[],"next_cursor":"a/b"}'
-at list-bad-cursor-a-percent '{"count":2,"messages":[],"next_cursor":"a%%2Fb"}'
-at list-bad-cursor-empty '{"count":2,"messages":[],"next_cursor":""}'
-at list-bad-id-a-number '{"count":1,"messages":[{"id":5,"size":%s}],"next_cursor":null}' "$(wc -c < message/a-to-b.age)" # the id names what is fetched and acked
+at list-ok-cursor '{"total_count":2,"messages":[],"next_cursor":"AZaz09-_"}'
+at list-bad-cursor-a-slash '{"total_count":2,"messages":[],"next_cursor":"a/b"}'
+at list-bad-cursor-a-percent '{"total_count":2,"messages":[],"next_cursor":"a%%2Fb"}'
+at list-bad-cursor-empty '{"total_count":2,"messages":[],"next_cursor":""}'
+at list-bad-id-a-number '{"total_count":1,"messages":[{"id":5,"size":%s}],"next_cursor":null}' "$(wc -c < message/a-to-b.age)" # the id names what is fetched and acked
 at receipt-ok '{"id":"%s","received_at":"%s","expires_at":"2026-10-16T22:58:00Z"}' "$HASH" "$NOW"
 at receipt-bad-id-an-array '{"id":["%s"],"received_at":"%s"}' "$HASH" "$NOW"
-at problem-ok '{"type":"tag:dromas.dev,2026-10-26:errors/not_revoked","title":"Not revoked","status":404,"detail":"no revocation of this address is held here","code":"not_revoked","hint":"nothing to do"}'
-at problem-bad-code-twice '{"type":"tag:dromas.dev,2026-10-26:errors/not_revoked","status":404,"code":"not_revoked","code":"revoked"}'
-at problem-bad-status-a-string '{"status":"404","code":"not_revoked"}'
-at problem-bad-status-a-fraction-after-the-code '{"code":"not_revoked","status":1.5}' # a reader that kept what it read before the fault would act on the code
+at problem-ok '{"type":"tag:dromas.dev,2026-10-26:errors/revocation_not_found","title":"Not revoked","status":404,"detail":"no revocation of this address is held here","code":"revocation_not_found","hint":"nothing to do"}'
+at problem-bad-code-twice '{"type":"tag:dromas.dev,2026-10-26:errors/revocation_not_found","status":404,"code":"revocation_not_found","code":"mailbox_revoked"}'
+at problem-bad-status-a-string '{"status":"404","code":"revocation_not_found"}'
+at problem-bad-status-a-fraction-after-the-code '{"code":"revocation_not_found","status":1.5}' # a reader that kept what it read before the fault would act on the code
 # The members a problem carries beside its words (PROTOCOL.md §11.3), each of its type: a client reads them, never the words
-at problem-ok-members '{"type":"tag:dromas.dev,2026-10-26:errors/rate_limited","title":"Rate limited","status":429,"detail":"this mailbox has sent its 20 messages a day","code":"rate_limited","hint":"wait","limit":20,"quota_id":"sends","subject":"mailbox","count":3,"prekey_serial":2,"certificate_serial":1792000000,"through":5,"key_types":["ssh-ed25519",null],"key_type":"ecdsa-sha2-nistp256","member":"prekey_serial"}'
+at problem-ok-members '{"type":"tag:dromas.dev,2026-10-26:errors/rate_limited","title":"Rate limited","status":429,"detail":"this mailbox has sent its 20 messages a day","code":"rate_limited","hint":"wait","limit":20,"quota_id":"sends","subject":"mailbox","count":3,"prekey_serial":2,"certificate_serial":1792000000,"revocation_serial":5,"key_types":["ssh-ed25519",null],"key_type":"ecdsa-sha2-nistp256","param":"prekey_serial"}'
 at problem-bad-limit-negative '{"code":"rate_limited","status":429,"limit":-1}'
 at problem-bad-quota-id-a-number '{"code":"rate_limited","status":429,"quota_id":5,"subject":"mailbox"}'
 at problem-bad-subject-an-array '{"code":"rate_limited","status":429,"subject":["mailbox"]}'
-at problem-bad-limit-written-with-an-exponent '{"code":"too_large","status":413,"limit":1e3}'
-at problem-bad-through-above-2-53 '{"code":"conflict","status":409,"through":9007199254740992}'
+at problem-bad-limit-written-with-an-exponent '{"code":"content_too_large","status":413,"limit":1e3}'
+at problem-bad-revocation-serial-above-2-53 '{"code":"serial_too_low","status":409,"revocation_serial":9007199254740992}'
 at problem-bad-key-types-a-string '{"code":"unsupported_key_type","status":400,"key_types":"ssh-ed25519"}'
-at problem-bad-member-a-number '{"code":"bad_request","status":400,"member":7}'
-at problem-ok-record '{"type":"tag:dromas.dev,2026-10-26:errors/revoked","title":"Revoked","status":410,"detail":"this mailbox is revoked","code":"revoked","record":{"type":"revocation_record","identity":"%s","revocation_signature":"%s"}}' "$ID_A" "$REV" # a read of a revoked mailbox carries its record
-at problem-bad-record-another-type '{"code":"revoked","status":410,"record":{"type":"revocation","identity":"%s","revocation_signature":"%s"}}' "$ID_A" "$REV" # held to its type as a record alone is
+at problem-bad-param-a-number '{"code":"invalid_request","status":400,"param":7}'
+at problem-ok-record '{"type":"tag:dromas.dev,2026-10-26:errors/mailbox_revoked","title":"Mailbox revoked","status":410,"detail":"this mailbox is revoked","code":"mailbox_revoked","record":{"type":"revocation_record","identity":"%s","revocation_signature":"%s"}}' "$ID_A" "$REV" # a read of a revoked mailbox carries its record
+at problem-bad-record-another-type '{"code":"mailbox_revoked","status":410,"record":{"type":"revocation","identity":"%s","revocation_signature":"%s"}}' "$ID_A" "$REV" # held to its type as a record alone is

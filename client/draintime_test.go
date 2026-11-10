@@ -183,7 +183,7 @@ func TestADrainHoldsTheLockForItsTimeAndTheNextGoesOnFromIt(t *testing.T) {
 			t.Fatal(err)
 		}
 		res := receive(t, z)
-		if len(res.Refused) != 1 || res.Refused[0].ID != id || res.Refused[0].Code != client.RefusedDecrypt || res.More {
+		if len(res.Refused) != 1 || res.Refused[0].ID != id || res.Refused[0].Code != client.RefusedDecryptError || res.More {
 			t.Fatalf("the next recv: %+v", res)
 		}
 		if ns := fetched(); len(ns) != 2 || ns[1] != protocol.MaxCiphertext-kept {

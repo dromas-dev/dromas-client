@@ -108,7 +108,7 @@ func TestAMailboxWhoseClockIsTooFarOffIsToldSo(t *testing.T) {
 		{-11 * time.Minute, protocol.CodePassExpired, "11m0s behind that"},
 		{-50 * time.Minute, protocol.CodePassExpired, "50m0s behind that"},
 		{51 * time.Minute, protocol.CodePassExpired, "51m0s ahead of that"},
-		{61 * time.Minute, protocol.CodePrekeyTime, "1h1m0s ahead of that"},
+		{61 * time.Minute, protocol.CodeInvalidValidityPeriod, "1h1m0s ahead of that"},
 	} {
 		e := newEnv(t)
 		off, dir := c.off, t.TempDir()
@@ -149,8 +149,8 @@ func TestTheDateOnAnAnswerIsNeverAnOrder(t *testing.T) {
 		{"a pass refused for its time, the clocks agreeing", client.APIError{Status: 401, Problem: problem(protocol.CodePassExpired), Dated: now, Read: now}, true},
 		{"a pass refused for its time, no Date on the answer", client.APIError{Status: 401, Problem: problem(protocol.CodePassExpired)}, false},
 		{"a rate limit, dated 40 days back", client.APIError{Status: 429, Problem: problem(protocol.CodeRateLimited), Dated: lie, Read: now}, false},
-		{"a bad key, dated 40 days back", client.APIError{Status: 400, Problem: problem(protocol.CodeBadKey), Dated: lie, Read: now}, false},
-		{"another 401, dated 40 days back", client.APIError{Status: 401, Problem: problem(protocol.CodeUnauthorized), Dated: lie, Read: now}, false},
+		{"a bad key, dated 40 days back", client.APIError{Status: 400, Problem: problem(protocol.CodeInvalidKey), Dated: lie, Read: now}, false},
+		{"another 401, dated 40 days back", client.APIError{Status: 401, Problem: problem(protocol.CodeInvalidPass), Dated: lie, Read: now}, false},
 	} {
 		s := c.err.Error()
 		if got := strings.Contains(s, "the server dates its answer"); got != c.want {

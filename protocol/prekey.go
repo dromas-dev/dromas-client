@@ -30,8 +30,8 @@ const (
 	MaxPrekeyLifetime = PrekeyLifetime + MaxSkew
 	// MaxSerial is the largest serial, of a prekey or a certificate, and the
 	// largest a revocation of certificates runs through: MaxInteger, 2^53 − 1,
-	// since an answer names a serial as a JSON number (stale_prekey's, a
-	// conflict's), and RFC 7493 promises no reader holds a larger integer
+	// since an answer names a serial as a JSON number (prekey_superseded's, a
+	// serial_too_low's), and RFC 7493 promises no reader holds a larger integer
 	// exactly.
 	MaxSerial = MaxInteger
 	// TimeLayout is the one timestamp format in signed statements and the

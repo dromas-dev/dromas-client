@@ -269,7 +269,7 @@ func PutRevocations(ctx context.Context, opt Options, a protocol.Address, rec *p
 	if err != nil {
 		return nil, err
 	}
-	return b.call(ctx, http.MethodPut, "/v1/"+a.String()+"/revocations", rec, nil, nil)
+	return b.call(ctx, http.MethodPut, "/v1/"+a.String()+"/revocation", rec, nil, nil)
 }
 
 // Records is what the mailbox's state keeps, each record by the name of the file

@@ -91,7 +91,7 @@ func TestAForgottenMailboxRegistersAnewAtItsRenewal(t *testing.T) {
 }
 
 // A mailbox its server forgets between its renewal's read, which serves it, and
-// its upload, which the server then answers 404 no_such_mailbox (PROTOCOL.md
+// its upload, which the server then answers 404 mailbox_not_found (PROTOCOL.md
 // §13: "at any moment"): the renewal reads the mailbox once more, and where the
 // server holds no mailbox sends the same statement as its registration, by
 // prekey renew, by the renewal recv makes, whose ACL then goes again as
@@ -106,11 +106,11 @@ func TestARenewalWhoseUploadMeetsAMailboxForgottenSinceItsReadRegistersIt(t *tes
 		before    bool
 		calls     string
 	}{
-		{"control: prekey renew of a mailbox forgotten before its read", "prekey renew", true, "GET /v1/own, GET /v1/own/revocations, PUT /v1/own +pass"},
-		{"prekey renew", "prekey renew", false, "GET /v1/own, PUT /v1/own/prekey +pass, GET /v1/own, GET /v1/own/revocations, PUT /v1/own +pass"},
-		{"recv", "recv", false, "GET /v1/own, PUT /v1/own/prekey +pass, GET /v1/own, GET /v1/own/revocations, PUT /v1/own +pass, GET /v1/own/acl +pass, PUT /v1/own/acl +pass, GET /v1/own/messages +pass"},
-		{"control: cert revoke-earlier of a mailbox forgotten before its read", "cert revoke-earlier", true, "GET /v1/own, GET /v1/own/revocations, PUT /v1/own/revocations, GET /v1/, PUT /v1/own +pass"},
-		{"cert revoke-earlier", "cert revoke-earlier", false, "GET /v1/own, PUT /v1/own/revocations, GET /v1/, PUT /v1/own/prekey +pass, GET /v1/own, GET /v1/own/revocations, PUT /v1/own +pass"},
+		{"control: prekey renew of a mailbox forgotten before its read", "prekey renew", true, "GET /v1/own, GET /v1/own/revocation, PUT /v1/own +pass"},
+		{"prekey renew", "prekey renew", false, "GET /v1/own, PUT /v1/own/prekey +pass, GET /v1/own, GET /v1/own/revocation, PUT /v1/own +pass"},
+		{"recv", "recv", false, "GET /v1/own, PUT /v1/own/prekey +pass, GET /v1/own, GET /v1/own/revocation, PUT /v1/own +pass, GET /v1/own/acl +pass, PUT /v1/own/acl +pass, GET /v1/own/messages +pass"},
+		{"control: cert revoke-earlier of a mailbox forgotten before its read", "cert revoke-earlier", true, "GET /v1/own, GET /v1/own/revocation, PUT /v1/own/revocation, GET /v1/, PUT /v1/own +pass"},
+		{"cert revoke-earlier", "cert revoke-earlier", false, "GET /v1/own, PUT /v1/own/revocation, GET /v1/, PUT /v1/own/prekey +pass, GET /v1/own, GET /v1/own/revocation, PUT /v1/own +pass"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			e := newEnv(t)
@@ -193,7 +193,7 @@ func TestARenewalWhoseUploadMeetsAMailboxForgottenSinceItsReadRegistersIt(t *tes
 	}
 }
 
-// An upload answered 404 no_such_mailbox whose read again shows a mailbox, or
+// An upload answered 404 mailbox_not_found whose read again shows a mailbox, or
 // gets no answer, of the mailbox or of its revocations where it shows none, is
 // no mailbox forgotten: the renewal's error is the upload's, and no
 // registration goes (#386). A negative answer and no answer are different
@@ -210,8 +210,8 @@ func TestARenewalWhoseUploadIs404RegistersOnlyOnAReadThatShowsNoMailbox(t *testi
 			forge.Refuse(w, protocol.CodeUnavailable)
 		}, "GET /v1/own, PUT /v1/own/prekey +pass, GET /v1/own"},
 		{"no mailbox shown, and no answer about its revocations", func(w http.ResponseWriter, _ *http.Request, _ http.Handler) {
-			forge.Refuse(w, protocol.CodeNoSuchMailbox)
-		}, "GET /v1/own, PUT /v1/own/prekey +pass, GET /v1/own, GET /v1/own/revocations"},
+			forge.Refuse(w, protocol.CodeMailboxNotFound)
+		}, "GET /v1/own, PUT /v1/own/prekey +pass, GET /v1/own, GET /v1/own/revocation"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			e := newEnv(t)
@@ -222,10 +222,10 @@ func TestARenewalWhoseUploadIs404RegistersOnlyOnAReadThatShowsNoMailbox(t *testi
 			e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
 				switch {
 				case r.Method == http.MethodPut && r.URL.Path == mailboxPath(b)+"/prekey":
-					forge.Refuse(w, protocol.CodeNoSuchMailbox) // the mailbox is still held
+					forge.Refuse(w, protocol.CodeMailboxNotFound) // the mailbox is still held
 				case r.Method == http.MethodGet && r.URL.Path == mailboxPath(b) && reads.Add(1) > 1:
 					c.again(w, r, next)
-				case r.Method == http.MethodGet && r.URL.Path == mailboxPath(b)+"/revocations":
+				case r.Method == http.MethodGet && r.URL.Path == mailboxPath(b)+"/revocation":
 					forge.Refuse(w, protocol.CodeUnavailable)
 				default:
 					next.ServeHTTP(w, r)
@@ -242,14 +242,14 @@ func TestARenewalWhoseUploadIs404RegistersOnlyOnAReadThatShowsNoMailbox(t *testi
 				}
 				calls = append(calls, s)
 			}
-			if client.Code(err) != protocol.CodeNoSuchMailbox || strings.Join(calls, ", ") != c.calls || numberOf(t, b) != first {
+			if client.Code(err) != protocol.CodeMailboxNotFound || strings.Join(calls, ", ") != c.calls || numberOf(t, b) != first {
 				t.Fatalf("an upload answered 404 with %s: %v; calls %q, want %q; published %d, was %d", c.name, err, calls, c.calls, numberOf(t, b), first)
 			}
 		})
 	}
 }
 
-// An upload the server took and answered 404 no_such_mailbox, whose read
+// An upload the server took and answered 404 mailbox_not_found, whose read
 // again serves the very statement it carried, is a renewal taken, by the mailbox's
 // state, which that read wrote (noteServed): Rekey, Receive's renewal and the
 // remedy return the new prekey with no error, the server's answer being no
@@ -272,7 +272,7 @@ func TestAnUploadAnswered404WhoseReadAgainServesItIsTaken(t *testing.T) {
 			e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
 				if r.Method == http.MethodPut && r.URL.Path == mailboxPath(b)+"/prekey" && lied.CompareAndSwap(false, true) {
 					next.ServeHTTP(httptest.NewRecorder(), r) // taken
-					forge.Refuse(w, protocol.CodeNoSuchMailbox)
+					forge.Refuse(w, protocol.CodeMailboxNotFound)
 					return
 				}
 				next.ServeHTTP(w, r)
@@ -400,7 +400,7 @@ func TestARenewalWhoseReadAgainEndsSendsNoRegistration(t *testing.T) {
 						putRecord(t, next, b.Address(), rec)
 					}
 					return
-				case r.Method == http.MethodGet && r.URL.Path == mailboxPath(b)+"/revocations":
+				case r.Method == http.MethodGet && r.URL.Path == mailboxPath(b)+"/revocation":
 					// The mailbox's next write is the keep of what this read shows.
 					keys = keysOf(b.Dir())
 					armed.Store(c == "a fault of the mailbox")
@@ -421,7 +421,7 @@ func TestARenewalWhoseReadAgainEndsSendsNoRegistration(t *testing.T) {
 			}
 			// A new certificate runs for the longest its
 			// server takes, which its document names (GET /v1/).
-			if want := "GET /v1/own, GET /v1/, PUT /v1/own/prekey +pass, GET /v1/own, GET /v1/own/revocations"; strings.Join(calls, ", ") != want {
+			if want := "GET /v1/own, GET /v1/, PUT /v1/own/prekey +pass, GET /v1/own, GET /v1/own/revocation"; strings.Join(calls, ", ") != want {
 				t.Fatalf("calls %q, want %q", calls, want)
 			}
 			if got := keysOf(b.Dir()); !slices.Equal(got, keys) {
@@ -796,7 +796,7 @@ func TestTheNewestRetiredPrekeyIsKeptWhileTheTakeIsUnknown(t *testing.T) {
 	e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
 		if r.Method == http.MethodPut && r.URL.Path == mailboxPath(b)+"/prekey" && lied.CompareAndSwap(false, true) {
 			next.ServeHTTP(httptest.NewRecorder(), r) // taken, and the answer lost
-			forge.Refuse(w, protocol.CodeNoSuchMailbox)
+			forge.Refuse(w, protocol.CodeMailboxNotFound)
 			return
 		}
 		next.ServeHTTP(w, r)
@@ -1069,7 +1069,7 @@ func TestAKeyNeverSignedIsUsed(t *testing.T) {
 	}
 }
 
-// A server that answers every list 404 no_such_mailbox, and takes every
+// A server that answers every list 404 mailbox_not_found, and takes every
 // registration, is not mended by the renewal a drain so refused makes: the
 // next such renewal waits an hour, as one that failed does, so the mailbox makes
 // one an hour there and not one at every Receive (#328). Control: a mailbox its
@@ -1084,9 +1084,9 @@ func TestARenewalThatMendsNothingWaitsAnHour(t *testing.T) {
 	e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
 		switch {
 		case r.Method == http.MethodGet && (r.URL.Path == own || r.URL.Path == own+"/messages"):
-			forge.Refuse(w, protocol.CodeNoSuchMailbox)
-		case r.Method == http.MethodGet && r.URL.Path == own+"/revocations":
-			forge.Refuse(w, protocol.CodeNotRevoked)
+			forge.Refuse(w, protocol.CodeMailboxNotFound)
+		case r.Method == http.MethodGet && r.URL.Path == own+"/revocation":
+			forge.Refuse(w, protocol.CodeRevocationNotFound)
 		case r.Method == http.MethodPut && r.URL.Path == own:
 			registrations++
 			fakeserver.WriteJSON(w, http.StatusCreated, struct{}{})
@@ -1134,7 +1134,7 @@ func TestADrainMendedPartWaySaysWhatItsFirstPassDelivered(t *testing.T) {
 	var refused atomic.Bool
 	e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
 		if r.Method == http.MethodGet && r.URL.Path == list && r.URL.Query().Get("cursor") != "" && refused.CompareAndSwap(false, true) {
-			forge.Refuse(w, protocol.CodeNoSuchMailbox)
+			forge.Refuse(w, protocol.CodeMailboxNotFound)
 			return
 		}
 		next.ServeHTTP(w, r)

@@ -261,8 +261,8 @@ func TestCodes(t *testing.T) {
 	if Code("nope").Status() != 0 {
 		t.Error("an unknown code has a status")
 	}
-	b, _ := json.Marshal(Problem{Type: CodeMailboxBusy.TypeURI(), Title: "t", Status: 429, Code: CodeMailboxBusy})
-	if string(b) != `{"type":"tag:dromas.dev,2026-10-26:errors/mailbox_busy","title":"t","status":429,"code":"mailbox_busy"}` {
+	b, _ := json.Marshal(Problem{Type: CodeMailboxRateLimited.TypeURI(), Title: "t", Status: 429, Code: CodeMailboxRateLimited})
+	if string(b) != `{"type":"tag:dromas.dev,2026-10-26:errors/mailbox_rate_limited","title":"t","status":429,"code":"mailbox_rate_limited"}` {
 		t.Errorf("Problem JSON %s", b)
 	}
 }
@@ -294,13 +294,13 @@ func TestACodeCountsOnlyBesideItsOwnType(t *testing.T) {
 		status int
 		want   Code
 	}{
-		{Problem{Type: CodeNotRevoked.TypeURI(), Code: CodeNotRevoked}, 404, CodeNotRevoked},
-		{Problem{Type: CodeNotRevoked.TypeURI(), Code: CodeNotRevoked}, 400, ""},
-		{Problem{Type: CodeRevoked.TypeURI(), Code: CodeNotRevoked}, 404, ""},
-		{Problem{Type: "https://dromas.dev/errors/not_revoked", Code: CodeNotRevoked}, 404, ""},
-		{Problem{Type: "tag:dromas.dev,2026-10:errors/not_revoked", Code: CodeNotRevoked}, 404, ""},
-		{Problem{Type: "tag:irongall.dev,2026-10-17:errors/not_revoked", Code: CodeNotRevoked}, 404, ""}, // another authority's type names no code
-		{Problem{Code: CodeNotRevoked}, 404, ""},
+		{Problem{Type: CodeRevocationNotFound.TypeURI(), Code: CodeRevocationNotFound}, 404, CodeRevocationNotFound},
+		{Problem{Type: CodeRevocationNotFound.TypeURI(), Code: CodeRevocationNotFound}, 400, ""},
+		{Problem{Type: CodeMailboxRevoked.TypeURI(), Code: CodeRevocationNotFound}, 404, ""},
+		{Problem{Type: "https://dromas.dev/errors/revocation_not_found", Code: CodeRevocationNotFound}, 404, ""},
+		{Problem{Type: "tag:dromas.dev,2026-10:errors/revocation_not_found", Code: CodeRevocationNotFound}, 404, ""},
+		{Problem{Type: "tag:irongall.dev,2026-10-17:errors/revocation_not_found", Code: CodeRevocationNotFound}, 404, ""}, // another authority's type names no code
+		{Problem{Code: CodeRevocationNotFound}, 404, ""},
 		{Problem{Type: TypePrefix + "nope", Code: "nope"}, 404, ""},
 	} {
 		if got := c.p.CodeAt(c.status); got != c.want {

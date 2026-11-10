@@ -74,7 +74,7 @@ func (b *Mailbox) resolve(ctx context.Context, peer protocol.Address, l *lookups
 		return nil, &RevokedError{Address: peer, Own: peer == b.id.Address()}
 	}
 	if err != nil {
-		if code(err) == protocol.CodeRevoked {
+		if code(err) == protocol.CodeMailboxRevoked {
 			err = fmt.Errorf("%w; it showed no revocation of %s that verifies, so this mailbox does not take that address as revoked", err, peer)
 		}
 		return nil, &lookupError{err}

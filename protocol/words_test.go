@@ -19,7 +19,7 @@ func TestTheWireSaysMessageAndMailbox(t *testing.T) {
 			t.Fatalf("the reading misses %q", s)
 		}
 	}
-	for _, s := range []string{"mailbox_full", "inbox", "outbox", "no_such_mailbox", "message"} {
+	for _, s := range []string{"mailbox_full", "inbox", "outbox", "mailbox_not_found", "message"} {
 		if oldWords.MatchString(s) {
 			t.Fatalf("the reading matches %q", s)
 		}

@@ -53,10 +53,10 @@ type Status struct {
 	PrekeyNotAfter string `json:"prekey_not_after"`
 	// PrekeyMade is when that prekey was signed, by the record its client
 	// kept: empty if there is none, and the next recv renews it.
-	PrekeyMade string `json:"prekey_made,omitempty"`
+	PrekeyMade string `json:"prekey_signed_at,omitempty"`
 	// PrekeyLifetime is how long each new prekey is valid for, in seconds
 	// (Options.PrekeyLifetime).
-	PrekeyLifetime int64 `json:"prekey_lifetime"`
+	PrekeyLifetime int64 `json:"prekey_lifetime_seconds"`
 	// CertificateSerial and CertificateNotAfter are the certificate of the
 	// working key in use, the one made with that prekey: zero and empty, and
 	// not written, if the mailbox holds none it can sign with, and where its
@@ -74,8 +74,9 @@ type Status struct {
 	Refused             int    `json:"refused"`
 	// Held counts the messages held/ keeps from senders this mailbox has not allowed.
 	Held int `json:"held"`
-	// Policy is the mailbox's policy ([Mailbox.Policy]).
-	Policy Policy `json:"policy"`
+	// Policy is the mailbox's policy ([Mailbox.Policy]), by the names a
+	// config file gives it.
+	Policy StatusPolicy `json:"policy"`
 	// Revoked is true when the mailbox holds a revocation of its own address
 	// that verifies: the address is finished.
 	Revoked bool `json:"revoked,omitempty"`
@@ -85,11 +86,11 @@ type Status struct {
 	// Owed counts the messages inbox/ keeps whose handling, a callback's where
 	// recv --exec runs one, has not ended ([Mailbox.Follow]): the next such run
 	// begins with them.
-	Owed int `json:"owed,omitempty"`
+	Owed int `json:"exec_pending,omitempty"`
 	// GaveUp names the messages inbox/ keeps whose handling gave up
 	// ([ErrGaveUp]), which nothing tries again, until [Mailbox.ClearFailed]
 	// clears every one.
-	GaveUp []string `json:"gave_up,omitempty"`
+	GaveUp []string `json:"failed,omitempty"`
 	// Attention says, in words, each thing that needs a look. It is empty
 	// when nothing does.
 	Attention []string `json:"attention"`
@@ -136,8 +137,9 @@ func (b *Mailbox) status() (*Status, error) {
 		s.Revoked = true
 		s.Attention = append(s.Attention, "this mailbox's address is revoked, for good, and the revocation verifies: it sends and receives nothing more. Make a new mailbox and give its address to those who wrote to this one")
 	}
-	var err error
-	if s.Policy, err = b.policy(); err != nil {
+	p, err := b.policy()
+	s.Policy = StatusPolicy{Unknown: p.Unknown, Admit: p.Server}
+	if err != nil {
 		s.Attention = append(s.Attention, fmt.Sprintf("the mailbox's policy cannot be read, so it neither sends nor receives until that is put right: %v", err))
 	}
 	switch pending, perr := b.aclPending(); {
@@ -301,4 +303,13 @@ func (b *Mailbox) refusedCodes() string {
 	}
 	slices.Sort(codes)
 	return strings.Join(codes, ", ")
+}
+
+// StatusPolicy is the policy in force as status prints it, by the names a
+// config file gives it: where a message from a sender not allowed lands, and
+// whom the server takes messages from. The state file keeps the names it was
+// written with (Policy).
+type StatusPolicy struct {
+	Unknown string `json:"unknown"`
+	Admit   string `json:"admit"`
 }

@@ -418,7 +418,7 @@ func TestARestoreOfARegisteredMailboxRenewsAtOnce(t *testing.T) {
 
 // A key file whose name is no serial is never adopted, so it decrypts nothing:
 // with the state file lost, the copy the server kept of a message the lost state
-// delivered, which only that key opens, is refused as undecryptable, never
+// delivered, which only that key opens, is refused as decrypt_error, never
 // delivered again (PROTOCOL.md §12.3 checks 1 and 8).
 func TestAKeyUnderANameNoSerialDecryptsNothing(t *testing.T) {
 	t.Parallel()
@@ -452,8 +452,8 @@ func TestAKeyUnderANameNoSerialDecryptsNothing(t *testing.T) {
 	if got := client.AdoptedKeys(t, x); len(got) != 0 {
 		t.Fatalf("adopted %v", got)
 	}
-	if len(res.Delivered) != 0 || len(res.Refused) != 1 || res.Refused[0].Code != client.RefusedDecrypt {
-		t.Fatalf("the copy the server kept: %+v, want it refused as undecryptable", res)
+	if len(res.Delivered) != 0 || len(res.Refused) != 1 || res.Refused[0].Code != client.RefusedDecryptError {
+		t.Fatalf("the copy the server kept: %+v, want it refused as decrypt_error", res)
 	}
 }
 
@@ -516,8 +516,8 @@ func TestAKeyMountedDuringADrainDecryptsNothingUntilAdopted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !mounted.Load() || len(res.Delivered) != 0 || len(res.Refused) != 1 || res.Refused[0].Code != client.RefusedDecrypt {
-		t.Fatalf("the drain the volume came back in: %+v, want the copy refused as undecryptable", res)
+	if !mounted.Load() || len(res.Delivered) != 0 || len(res.Refused) != 1 || res.Refused[0].Code != client.RefusedDecryptError {
+		t.Fatalf("the drain the volume came back in: %+v, want the copy refused as decrypt_error", res)
 	}
 	if got := client.AdoptedKeys(t, x); len(got) != 0 {
 		t.Fatalf("adopted %v in the drain the volume came back in", got)

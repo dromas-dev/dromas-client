@@ -104,7 +104,7 @@ func TestTheScriptFollowsAGoMailboxUnderACertificate(t *testing.T) {
 	d := s.recv()
 	reads := 0
 	for _, c := range w.calls(n) {
-		if c == http.MethodGet+" /v1/"+gb.addr.String()+"/revocations" {
+		if c == http.MethodGet+" /v1/"+gb.addr.String()+"/revocation" {
 			reads++
 		}
 	}

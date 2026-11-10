@@ -171,7 +171,7 @@ func TestForgeries(t *testing.T) {
 		// is good. The certificate is the forger's.
 		line := e.line(a.Identity().Document(), a.Address(), b.Address(), "from A, says the forger")
 		e.seal(b, line, forge.Sign(t, worker(t, o), line, b.Address()))
-		refusedFor(t, receive(t, b), protocol.RefusedSignature, "not signed under a certificate of the sender's identity")
+		refusedFor(t, receive(t, b), protocol.RefusedInvalidSignature, "not signed under a certificate of the sender's identity")
 		if pinnedPeer(b, a.Address()) {
 			t.Fatal("a sender whose signature did not verify was pinned")
 		}
@@ -500,7 +500,7 @@ func TestForgeries(t *testing.T) {
 		receive(t, b)
 		other := sha256.Sum256([]byte("another id"))
 		e.srv.Inject(b.Address(), hex.EncodeToString(other[:]), *sent) // a send's body is its ciphertext
-		refusedFor(t, receive(t, b), client.RefusedReplay, "replay")
+		refusedFor(t, receive(t, b), client.RefusedMessageAlreadyReceived, "already received")
 	})
 
 	t.Run("sent_at older than the TTL", func(t *testing.T) {
@@ -516,7 +516,7 @@ func TestForgeries(t *testing.T) {
 			t.Fatal(err)
 		}
 		e.seal(b, line, sig)
-		refusedFor(t, receive(t, b), protocol.RefusedStale, fmt.Sprintf("older than %d days", protocol.TTL/(24*time.Hour)))
+		refusedFor(t, receive(t, b), protocol.RefusedMessageExpired, fmt.Sprintf("older than %d days", protocol.TTL/(24*time.Hour)))
 	})
 
 	t.Run("not encrypted to this mailbox", func(t *testing.T) {
@@ -528,7 +528,7 @@ func TestForgeries(t *testing.T) {
 		e.srv.SetMiddle(nil)
 		id := sha256.Sum256(*sent)
 		e.srv.Inject(b.Address(), hex.EncodeToString(id[:]), *sent)
-		refusedFor(t, receive(t, b), client.RefusedDecrypt, "does not decrypt")
+		refusedFor(t, receive(t, b), client.RefusedDecryptError, "does not decrypt")
 	})
 
 	t.Run("an id that is not the hash", func(t *testing.T) {
@@ -548,7 +548,7 @@ func TestForgeries(t *testing.T) {
 			_, _ = w.Write(bytes.ReplaceAll(rec.Body.Bytes(), []byte(realID), []byte(fake)))
 		})
 		res := receive(t, b)
-		refusedFor(t, res, client.RefusedID, "not the SHA-256")
+		refusedFor(t, res, client.RefusedIDMismatch, "not the SHA-256")
 		if res.Refused[0].ID != realID || !exists(filepath.Join(b.Dir(), "mail", "refused", realID+".json")) {
 			t.Fatalf("kept in refused/ as %s, not by the ciphertext's hash", res.Refused[0].ID)
 		}

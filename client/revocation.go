@@ -12,13 +12,13 @@ import (
 	"github.com/dromas-dev/dromas-client/protocol"
 )
 
-// RefusedRevoked is why a message from a revoked address is refused: this mailbox
-// holds a revocation of the sender that verifies. RefusedCertificate is why
+// RefusedSenderRevoked is why a message from a revoked address is refused: this mailbox
+// holds a revocation of the sender that verifies. RefusedCertificateRevoked is why
 // a message under a revoked certificate is: its sender's address goes on, and the
 // identity has revoked the certificate the message was signed under.
 const (
-	RefusedRevoked     = "revoked"
-	RefusedCertificate = "certificate_revoked"
+	RefusedSenderRevoked      = "sender_revoked"
+	RefusedCertificateRevoked = "certificate_revoked"
 )
 
 // RevokedError is an address this mailbox holds a revocation of. The revocation
@@ -321,7 +321,7 @@ func (b *Mailbox) heldRecord(a protocol.Address) (doc, revocation, certs, certsS
 // mailbox now holds a revocation of a.
 //
 // A served mailbox carries the revocation of its certificates the server holds,
-// and a revoked address is answered 410 revoked with its record (proved, in
+// and a revoked address is answered 410 mailbox_revoked with its record (proved, in
 // call): either is kept once it verifies, and what does not verify counts as
 // nothing shown, since only a statement the identity signed can revoke an
 // address or a certificate. No such mailbox, and "revoked" with nothing that
@@ -342,7 +342,7 @@ func (b *Mailbox) readMailbox(ctx context.Context, a protocol.Address, l *lookup
 				return nil, gone, err
 			}
 		}
-	case code(err) != protocol.CodeRevoked && code(err) != protocol.CodeNoSuchMailbox:
+	case code(err) != protocol.CodeMailboxRevoked && code(err) != protocol.CodeMailboxNotFound:
 		return nil, false, err
 	}
 	// The mailbox's own server has answered, whatever it served: with l, a
@@ -357,10 +357,10 @@ func (b *Mailbox) readMailbox(ctx context.Context, a protocol.Address, l *lookup
 	return &br, false, nil
 }
 
-// recordOf is the revocation record a server's 410 revoked carries, or nil.
+// recordOf is the revocation record a server's 410 mailbox_revoked carries, or nil.
 func recordOf(err error) *protocol.Revocations {
 	var e *APIError
-	if errors.As(err, &e) && e.Problem.Code == protocol.CodeRevoked {
+	if errors.As(err, &e) && e.Problem.Code == protocol.CodeMailboxRevoked {
 		return e.Problem.Record
 	}
 	return nil
@@ -399,7 +399,7 @@ func (b *Mailbox) lookupRevocation(ctx context.Context, a protocol.Address, l *l
 }
 
 // readRevocations reads the revocations this mailbox's server holds of a, GET
-// /v1/<a>/revocations (PROTOCOL.md §11.15), keeps what verifies of the record,
+// /v1/<a>/revocation (PROTOCOL.md §11.15), keeps what verifies of the record,
 // and with l marks a as answered in the command. It reports whether this
 // mailbox now holds a revocation of a. The server keeps and serves a record
 // whether or not a mailbox is at a, so a sender whose mailbox the server has
@@ -407,13 +407,13 @@ func (b *Mailbox) lookupRevocation(ctx context.Context, a protocol.Address, l *l
 //
 // Two answers are answers: a 200 with the record, which holds the identity and
 // at least one revocation (recordAnswer), whose parts that do not verify count
-// as nothing shown (take), and 404 not_revoked, the server's word that it holds
-// none. A 410 revoked whose record verifies is kept (proved, in call). Anything
-// else is no answer, an error, another 2xx, a 404 no_such_mailbox and a 410
+// as nothing shown (take), and 404 revocation_not_found, the server's word that it holds
+// none. A 410 mailbox_revoked whose record verifies is kept (proved, in call). Anything
+// else is no answer, an error, another 2xx, a 404 mailbox_not_found and a 410
 // with nothing that verifies among them.
 func (b *Mailbox) readRevocations(ctx context.Context, a protocol.Address, l *lookups) (bool, error) {
 	var rec protocol.Revocations
-	path := "/v1/" + a.String() + "/revocations"
+	path := "/v1/" + a.String() + "/revocation"
 	resp, err := b.call(ctx, http.MethodGet, path, nil, nil, &rec)
 	var gone *RevokedError
 	switch {
@@ -431,7 +431,7 @@ func (b *Mailbox) readRevocations(ctx context.Context, a protocol.Address, l *lo
 			l.answered[a] = true
 		}
 		return held, nil
-	case code(err) == protocol.CodeNotRevoked:
+	case code(err) == protocol.CodeRevocationNotFound:
 		if l != nil {
 			l.answered[a] = true
 		}
@@ -440,7 +440,7 @@ func (b *Mailbox) readRevocations(ctx context.Context, a protocol.Address, l *lo
 	return false, err
 }
 
-// recordAnswer is nil for an answer to GET …/revocations that is one: a 200,
+// recordAnswer is nil for an answer to GET …/revocation that is one: a 200,
 // whose record holds the identity and at least one revocation
 // (protocol.Revocations.Check). Any other 2xx is no answer (PROTOCOL.md §12.3
 // check 7), named by its method and path.
@@ -609,7 +609,7 @@ type Remedy struct {
 // The revocation is published first, once, through the serial below the
 // number this machine's clock gives, or through the highest one held if that
 // is higher. A server that holds a higher one it did not show answers
-// conflict: the mailbox reads itself once more, keeps that one once it verifies,
+// serial_too_low: the mailbox reads itself once more, keeps that one once it verifies,
 // and goes on above it, or stops there with nothing renewed when it shows
 // none that covers what this one would have. Only then is the new
 // certificate numbered, one above the revocation, so it is never revoked as
@@ -693,15 +693,15 @@ func (b *Mailbox) renewAndRevoke(ctx context.Context) (*Remedy, error) {
 		return r, err
 	}
 	// A mailbox shown its own revocation on the way, a 410 to its publish or at
-	// the read after a conflict, has nothing more to remedy, and says that
+	// the read after a serial_too_low, has nothing more to remedy, and says that
 	// alone: no server took anything from it there (#326).
 	if gone := ownRevoked(r.NotRevoked); gone != nil {
 		return nil, gone
 	}
-	// A conflict that showed no revocation covering what this one would have
+	// A serial_too_low that showed no revocation covering what this one would have
 	// stops here: a server that holds a higher one would refuse a renewal under
 	// it, and nothing here tells how high it runs.
-	if code(r.NotRevoked) == protocol.CodeConflict {
+	if code(r.NotRevoked) == protocol.CodeSerialTooLow {
 		r.NotRenewed = refuse("the server holds a revocation of this mailbox's certificates higher than the one it signed, and showed none that verifies: nothing is renewed above it. dromas revocation ask <this mailbox's address> reads it again, and dromas cert revoke-earlier tries again")
 		return done(nil)
 	}
@@ -757,9 +757,9 @@ func (b *Mailbox) ownRevokes(n uint64) bool {
 // below. It signs from what the mailbox holds, which its caller has read.
 //
 // It publishes once. A server that holds a higher one it did not show answers
-// conflict, and the mailbox reads itself once more (known), which keeps that one
+// serial_too_low, and the mailbox reads itself once more (known), which keeps that one
 // once it verifies: it is the revocation, with no error, when it covers every
-// certificate below serial, as the mailbox's would have; otherwise the conflict
+// certificate below serial, as the mailbox's would have; otherwise the serial_too_low
 // is the error (PROTOCOL.md §12.6). The revocation with an error is one the
 // server took or holds, and a fault of this mailbox at its keep after that.
 func (b *Mailbox) revokeBelow(ctx context.Context, serial uint64) (*protocol.RevokedCertificates, error) {
@@ -795,7 +795,7 @@ func (b *Mailbox) revokeBelow(ctx context.Context, serial uint64) (*protocol.Rev
 		step("revocation kept")
 		return certs, nil
 	}
-	if code(perr) != protocol.CodeConflict {
+	if code(perr) != protocol.CodeSerialTooLow {
 		return nil, perr
 	}
 	o, err := b.known(ctx)
@@ -824,14 +824,14 @@ func (b *Mailbox) revokeBelow(ctx context.Context, serial uint64) (*protocol.Rev
 // never believes: each is final only once this mailbox holds a revocation that
 // verifies, so none is ever one of undeliverable's, whose answers end a
 // message for good (TestNoAnswerProvedIsUndeliverable).
-var provedCodes = []protocol.Code{protocol.CodeRevoked, protocol.CodeSenderRevoked, protocol.CodeCertificateRevoked}
+var provedCodes = []protocol.Code{protocol.CodeMailboxRevoked, protocol.CodeSenderRevoked, protocol.CodeCertificateRevoked}
 
 // proved turns what a server answered about a revocation into what this mailbox
 // has checked, by what the answer names (PROTOCOL.md §12.5). Every
 // answer of every call passes it (call; a request made outside the mailbox's
 // lock, provedLocked), and nothing else proves one:
 //
-//   - 410 revoked names the mailbox the call's path names. The record it carries
+//   - 410 mailbox_revoked names the mailbox the call's path names. The record it carries
 //     is taken as a read's is (take); without one that verifies, that mailbox is
 //     read for one (readMailbox), unless the call was itself a read of it or
 //     of its revocations, whose answer is that read (#353).
@@ -858,7 +858,7 @@ func (b *Mailbox) proved(ctx context.Context, method, path string, err error) er
 		return err
 	}
 	if b.id == nil {
-		if c != protocol.CodeRevoked {
+		if c != protocol.CodeMailboxRevoked {
 			return err
 		}
 		if revokes(who, recordOf(err)) {
@@ -914,7 +914,7 @@ func (b *Mailbox) proved(ctx context.Context, method, path string, err error) er
 		// The mailbox the 410 is about is read (PROTOCOL.md §12.5), and a
 		// 410 with its record is the proof.
 		_, held, lerr = b.readMailbox(ctx, who, nil)
-		if c := code(lerr); c == protocol.CodeRevoked || c == protocol.CodeNoSuchMailbox {
+		if c := code(lerr); c == protocol.CodeMailboxRevoked || c == protocol.CodeMailboxNotFound {
 			lerr = nil
 		}
 	}
@@ -1023,12 +1023,12 @@ func (b *Mailbox) Publish(ctx context.Context, rec *protocol.Revocations) (proto
 	}
 	// As this mailbox, under its lock: what the server then shows of a
 	// revocation is kept once it verifies (proved). A revocation of its
-	// certificates below the one the server holds is answered conflict: the
+	// certificates below the one the server holds is answered serial_too_low: the
 	// mailbox reads itself and keeps that one once it verifies, which covers this
 	// one, and the record has nothing left to do.
 	return a, b.lockedFinishedDo(ctx, func() error {
 		err := b.publishRecord(ctx, a, rec)
-		if code(err) != protocol.CodeConflict || a != b.id.Address() || len(rec.RevokedCertificates) == 0 {
+		if code(err) != protocol.CodeSerialTooLow || a != b.id.Address() || len(rec.RevokedCertificates) == 0 {
 			return served(a, err)
 		}
 		mine, perr := protocol.ParseRevokedCertificates(rec.RevokedCertificates)
@@ -1061,7 +1061,7 @@ func served(a protocol.Address, err error) error {
 // checking the record (PROTOCOL.md §11.15): taken only once what it shows
 // verifies (proved).
 func (b *Mailbox) publishRecord(ctx context.Context, a protocol.Address, rec *protocol.Revocations) error {
-	_, err := b.call(ctx, http.MethodPut, "/v1/"+a.String()+"/revocations", rec, nil, nil)
+	_, err := b.call(ctx, http.MethodPut, "/v1/"+a.String()+"/revocation", rec, nil, nil)
 	return err
 }
 

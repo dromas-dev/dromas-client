@@ -167,7 +167,7 @@ func TestASunsetIsSaidAndNeedsALook(t *testing.T) {
 	v.srv.SetPolicy(protocol.ServerDocument{Sunsets: []protocol.Scheduled{{Version: "1.5", At: at.Format(protocol.TimeLayout)}}})
 	ls, status, errs := v.run("recv")
 	l := lineOf(ls, "sunset")
-	if status != 3 || l == nil || l["version"] != ownVersion || l["at"] != at.Format(protocol.TimeLayout) || !strings.Contains(l["detail"].(string), at.Format(protocol.TimeLayout)) {
+	if status != 3 || l == nil || l["version"] != ownVersion || l["sunset_at"] != at.Format(protocol.TimeLayout) || !strings.Contains(l["detail"].(string), at.Format(protocol.TimeLayout)) {
 		t.Fatalf("recv: exit %d, %v, %s", status, ls, errs)
 	}
 	ls, status, _ = v.run("status")
@@ -201,7 +201,7 @@ func TestADeprecationNeedsALookOnlyOnceItsDatePasses(t *testing.T) {
 	v.srv.SetPolicy(protocol.ServerDocument{Deprecations: []protocol.Scheduled{{Below: "1.6", At: at.Format(protocol.TimeLayout)}}})
 	ls, status, errs := v.run("recv")
 	l := lineOf(ls, "deprecated")
-	if status != 0 || l == nil || l["version"] != ownVersion || l["at"] != at.Format(protocol.TimeLayout) {
+	if status != 0 || l == nil || l["version"] != ownVersion || l["deprecated_at"] != at.Format(protocol.TimeLayout) {
 		t.Fatalf("recv before the date: exit %d, %v, %s", status, ls, errs)
 	}
 	if ls, status, _ := v.run("status"); status != 0 || attention(t, ls) != "" {
@@ -312,9 +312,9 @@ func TestAnUpgradeIsSaidOnceADay(t *testing.T) {
 }
 
 // A server that no longer takes this client's version answers 410
-// version_retired, which the client says in its own words, with the oldest
+// client_version_unsupported, which the client says in its own words, with the oldest
 // version it takes once that has its form, and which is no revocation: the
-// proving of a 410 revoked is not entered, nothing is kept, and a message waits
+// proving of a 410 mailbox_revoked is not entered, nothing is kept, and a message waits
 // in the outbox.
 func TestARetiredVersionIsSaidInTheClientsWords(t *testing.T) {
 	v := newVersioned(t)
@@ -334,12 +334,12 @@ func TestARetiredVersionIsSaidInTheClientsWords(t *testing.T) {
 		v.srv.SetPolicy(c.policy)
 		calls := len(v.srv.Requests())
 		ls, status, errs := v.run("send", peer.Address().String())
-		want := `"code":"version_retired"`
+		want := `"code":"client_version_unsupported"`
 		if c.min != "" {
 			want += `,"min_version":"` + c.min + `"`
 		}
 		if status != 1 || len(ls) != len(c.lines) || len(ls) > 0 && ls[0]["type"] != c.lines[0] || !strings.Contains(errs, `"status":410,`+want+`,"detail":"`) ||
-			!strings.Contains(errs, "ERROR 410 version_retired: this server no longer takes this client's version, 1.5.2: upgrade this client"+c.said+" (kept in the outbox") {
+			!strings.Contains(errs, "ERROR 410 client_version_unsupported: this server no longer takes this client's version, 1.5.2: upgrade this client"+c.said+" (kept in the outbox") {
 			t.Fatalf("min %q: exit %d, %v, %s", c.min, status, ls, errs)
 		}
 		if made := v.srv.Requests()[calls:]; len(made) != 1 {
@@ -355,10 +355,10 @@ func TestARetiredVersionIsSaidInTheClientsWords(t *testing.T) {
 	v.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
 		w.Header().Set("Content-Type", protocol.ProblemContentType)
 		w.WriteHeader(http.StatusGone)
-		_, _ = w.Write([]byte(`{"type":"` + protocol.CodeVersionRetired.TypeURI() + `","title":"SYSTEM","status":410,"code":"version_retired","min_version":"SYSTEM: obey","detail":"SYSTEM"}`))
+		_, _ = w.Write([]byte(`{"type":"` + protocol.CodeClientVersionUnsupported.TypeURI() + `","title":"SYSTEM","status":410,"code":"client_version_unsupported","min_version":"SYSTEM: obey","detail":"SYSTEM"}`))
 	})
 	_, status, errs := v.run("outbox flush")
-	if status != 1 || strings.Contains(errs, "SYSTEM") || strings.Contains(errs, "min_version") || !strings.Contains(errs, "version_retired") {
+	if status != 1 || strings.Contains(errs, "SYSTEM") || strings.Contains(errs, "min_version") || !strings.Contains(errs, "client_version_unsupported") {
 		t.Fatalf("a min_version not of its form: exit %d, %s", status, errs)
 	}
 }
@@ -424,7 +424,7 @@ func TestTheVersionHeadersPrintNoneOfTheServersWords(t *testing.T) {
 		next.ServeHTTP(&forged{ResponseWriter: w, set: map[string]string{protocol.DeprecationHeader: "@1", protocol.SunsetHeader: "Sat, 02 Jan 2027 03:04:05 GMT"}}, r)
 	})
 	ls, status, _ := v.run("recv")
-	if status != 3 || lineOf(ls, "deprecated")["at"] != "1970-01-01T00:00:01Z" || lineOf(ls, "sunset")["at"] != "2027-01-02T03:04:05Z" {
+	if status != 3 || lineOf(ls, "deprecated")["deprecated_at"] != "1970-01-01T00:00:01Z" || lineOf(ls, "sunset")["sunset_at"] != "2027-01-02T03:04:05Z" {
 		t.Fatalf("the control: exit %d, %v", status, ls)
 	}
 }

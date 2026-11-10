@@ -265,11 +265,11 @@ func TestScriptSendsAndReads(t *testing.T) {
 	}
 	var reads []string
 	for _, c := range w.calls(n) {
-		if rest, ok := strings.CutPrefix(c, "GET /v1/"); ok && (!strings.Contains(rest, "/") || strings.HasSuffix(rest, "/revocations")) {
+		if rest, ok := strings.CutPrefix(c, "GET /v1/"); ok && (!strings.Contains(rest, "/") || strings.HasSuffix(rest, "/revocation")) {
 			reads = append(reads, c)
 		}
 	}
-	if !slices.Equal(reads, []string{"GET /v1/" + a.addr.String() + "/revocations"}) || b.read("peers/"+a.addr.String()+"/identity.doc") != a.read("identity.doc") {
+	if !slices.Equal(reads, []string{"GET /v1/" + a.addr.String() + "/revocation"}) || b.read("peers/"+a.addr.String()+"/identity.doc") != a.read("identity.doc") {
 		t.Errorf("B asked about a sender it never met other than by one read of its revocations, or pinned another identity: %q", reads)
 	}
 	if strings.Contains(strings.Join(d.messages, ""), `"identity"`) {
@@ -350,7 +350,7 @@ func TestScriptRefusesForgedMessages(t *testing.T) {
 	w.inject(b, "", forged(a))
 	r := b.sh("dr_recv")
 	refusals++
-	if !strings.Contains(r.out, `"code":"bad_signature","detail":"it is not signed for this mailbox by the sender's identity, or by a working key the sender's identity certified"}`) || r.err != "" || w.srv.Count(b.addr) != 0 || pinned() != a.read("identity.doc") {
+	if !strings.Contains(r.out, `"code":"invalid_signature","detail":"it is not signed for this mailbox by the sender's identity, or by a working key the sender's identity certified"}`) || r.err != "" || w.srv.Count(b.addr) != 0 || pinned() != a.read("identity.doc") {
 		t.Errorf("a message in A's name under the operator's certificate: %v", r)
 	}
 	var l struct{ Type, ID, Code, Detail string }
@@ -358,7 +358,7 @@ func TestScriptRefusesForgedMessages(t *testing.T) {
 		t.Errorf("a refusal is not one line of JSON on stdout, its type first: %q", r.out)
 	}
 	w.inject(b, "", forged(d))
-	refused("first contact, a message in D's name under the operator's certificate", "bad_signature", b.recv())
+	refused("first contact, a message in D's name under the operator's certificate", "invalid_signature", b.recv())
 	if b.has("peers/" + d.addr.String()) {
 		t.Error("the forgery pinned D")
 	}
@@ -390,7 +390,7 @@ func TestScriptRefusesForgedMessages(t *testing.T) {
 			l.Messages[i].From = c.addr.String()
 		}
 	})
-	refused("A's message listed as C's", "replay", b.recv())
+	refused("A's message listed as C's", "message_already_received", b.recv())
 	w.honest()
 	if b.has("peers/" + c.addr.String()) {
 		t.Error("the message listed as C's pinned C")
@@ -400,7 +400,7 @@ func TestScriptRefusesForgedMessages(t *testing.T) {
 		t.Errorf("a replay under an id already handled is more than acked again: %v", dr)
 	}
 	w.put(b, randomID(), genuine)
-	refused("a replay under a new id", "replay", b.recv())
+	refused("a replay under a new id", "message_already_received", b.recv())
 	// A genuine new message under an id that is not its hash; one older than the TTL; a key twice.
 	wl := a.line(b.addr, "44444444-2222-4333-8444-555555555555", "wrong id", 0)
 	w.inject(b, randomID(), wl, a.sign(b.addr, wl))
@@ -426,7 +426,7 @@ func TestScriptRefusesForgedMessages(t *testing.T) {
 		w.inject(b, "", parts...)
 	}
 	refusals += 3
-	if dr := b.recv(); len(dr.messages) != 0 || dr.refused("bad_message") != 3 || !strings.Contains(dr.said, "bad_message: what was decrypted is not an envelope line and then a signature block") {
+	if dr := b.recv(); len(dr.messages) != 0 || dr.refused("malformed_message") != 3 || !strings.Contains(dr.said, "malformed_message: what was decrypted is not an envelope line and then a signature block") {
 		t.Errorf("a line before the envelope, a blank line before the signature, or no signature: %v", dr)
 	}
 	// The two refusals of A's genuine ciphertext share its hash, so one file.
@@ -445,7 +445,7 @@ func TestScriptRefusesForgedMessages(t *testing.T) {
 	}
 	for _, f := range reasons {
 		code, _, _ := strings.Cut(mustReadString(t, f), ": ")
-		if !slices.Contains([]string{"bad_identity", "bad_message", "bad_signature", "reattributed", "replay", "bad_id", "stale", "bad_envelope"}, code) {
+		if !slices.Contains([]string{"invalid_identity", "malformed_message", "invalid_signature", "sender_mismatch", "recipient_mismatch", "message_already_received", "id_mismatch", "message_expired", "invalid_envelope"}, code) {
 			t.Errorf("%s: %q is no code", f, code)
 		}
 	}
@@ -641,8 +641,8 @@ func TestScriptKeepsNothingOfAFailedSend(t *testing.T) {
 		code protocol.Code
 		want string
 	}{
-		{protocol.CodeTooLarge, "nothing is sent"},
-		{protocol.CodeRevoked, "showed no revocation that verifies"},
+		{protocol.CodeContentTooLarge, "nothing is sent"},
+		{protocol.CodeMailboxRevoked, "showed no revocation that verifies"},
 		{protocol.CodeUnavailable, "nothing is sent"},
 	} {
 		w.srv.SetMiddle(func(rw http.ResponseWriter, r *http.Request, next http.Handler) {
@@ -701,7 +701,7 @@ func TestScriptAsksAboutTheSenderItsSignatureProves(t *testing.T) {
 			l.Messages[i].From = c.addr.String()
 		}
 	})
-	if d := b.recv(); len(d.messages) != 0 || d.refused("revoked") != 1 {
+	if d := b.recv(); len(d.messages) != 0 || d.refused("sender_revoked") != 1 {
 		t.Errorf("a revoked sender's message listed as C's: %v", d)
 	}
 }

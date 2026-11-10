@@ -190,41 +190,43 @@ func TestAPolicyCoversItsVersions(t *testing.T) {
 // which every document carries, from 1 to MaxInteger seconds, and the
 // implementation's members, where it names one, each of its text.
 func TestTheServersDocumentBreaksItsFormAsItSays(t *testing.T) {
-	good := `{"min_version":"0.1","latest_version":"0.1.8","deprecations":[{"below":"0.1.5","at":"2027-01-01T00:00:00Z"}],"sunsets":[{"below":"0.1.5","at":"2027-01-01T00:00:00Z"},{"version":"0.1.6","at":"2027-02-01T00:00:00Z"}],"capabilities":[{"name":"long_poll2"}],"max_certificate_lifetime":3891600,"server":{"name":"dromas-server","version":"v0.5.1","revision":"c4258bc37344474025fe2c2d6420476eb617450a"},"later":1}`
+	good := `{"min_version":"0.1","latest_version":"0.1.8","deprecations":[{"below":"0.1.5","effective_at":"2027-01-01T00:00:00Z"}],"sunsets":[{"below":"0.1.5","effective_at":"2027-01-01T00:00:00Z"},{"version":"0.1.6","effective_at":"2027-02-01T00:00:00Z"}],"capabilities":[{"name":"long_poll2"}],"max_certificate_lifetime_seconds":3891600,"server":{"name":"dromas-server","version":"v0.5.1","revision":"c4258bc37344474025fe2c2d6420476eb617450a"},"later":1}`
 	var d ServerDocument
 	if err := Unmarshal([]byte(good), &d); err != nil || d.LatestVersion != "0.1.8" || len(d.Sunsets) != 2 || d.Capabilities[0].Name != "long_poll2" || d.MaxCertificateLifetime != 3891600 || d.Server == nil || d.Server.Version != "v0.5.1" {
 		t.Fatalf("%+v %v", d, err)
 	}
 	// withMax is a document's text with a maximum it takes, so that the
 	// member a case breaks is the one it names.
-	withMax := func(text string) string { return `{"max_certificate_lifetime":1,` + strings.TrimPrefix(text, "{") }
+	withMax := func(text string) string {
+		return `{"max_certificate_lifetime_seconds":1,` + strings.TrimPrefix(text, "{")
+	}
 	many := func(list string, n int, item string) string {
 		return `{"` + list + `":[` + strings.TrimSuffix(strings.Repeat(item+",", n), ",") + `]}`
 	}
-	sunset := `{"below":"1.0","at":"2027-01-01T00:00:00Z"}`
+	sunset := `{"below":"1.0","effective_at":"2027-01-01T00:00:00Z"}`
 	if err := Unmarshal([]byte(withMax(many("sunsets", MaxSunsets, sunset))), &d); err != nil {
 		t.Errorf("%d sunsets: %v", MaxSunsets, err)
 	}
 	for text, member := range map[string]string{
-		many("sunsets", MaxSunsets+1, sunset):                                       "sunsets",
-		many("deprecations", MaxDeprecations+1, sunset):                             "deprecations",
-		many("capabilities", MaxCapabilities+1, `{"name":"a"}`):                     "capabilities",
-		`{"min_version":"v1.0"}`:                                                    "min_version",
-		`{"latest_version":"1.0.0-rc.1"}`:                                           "latest_version",
-		`{"sunsets":[{"at":"2027-01-01T00:00:00Z"}]}`:                               "below",
-		`{"sunsets":[{"below":"1.0","version":"1.0","at":"2027-01-01T00:00:00Z"}]}`: "below",
-		`{"sunsets":[{"version":"1","at":"2027-01-01T00:00:00Z"}]}`:                 "version",
-		`{"sunsets":[{"below":"1.0","at":"2027-01-01"}]}`:                           "at",
-		`{"deprecations":[{"below":"1.0"}]}`:                                        "at",
-		`{"capabilities":[{"name":"Long"}]}`:                                        "name",
-		`{"capabilities":[{"name":"_a"}]}`:                                          "name",
-		`{"capabilities":[{"name":"` + strings.Repeat("a", 65) + `"}]}`:             "name",
-		`{"server":{"version":"v1"}}`:                                               "name",
-		`{"server":{"name":"a b","version":"v1"}}`:                                  "name",
-		`{"server":{"name":"a"}}`:                                                   "version",
-		`{"server":{"name":"a","version":"` + strings.Repeat("1", 129) + `"}}`:      "version",
-		`{"server":{"name":"a","version":"v1","revision":"é"}}`:                     "revision",
-		`{"deprecations":[{"version":"1.0","at":"2027-02-01T00:00:00Z"}],"sunsets":[{"version":"1.0","at":"2027-01-31T23:59:59Z"}]}`: "sunsets",
+		many("sunsets", MaxSunsets+1, sunset):                                                 "sunsets",
+		many("deprecations", MaxDeprecations+1, sunset):                                       "deprecations",
+		many("capabilities", MaxCapabilities+1, `{"name":"a"}`):                               "capabilities",
+		`{"min_version":"v1.0"}`:                                                              "min_version",
+		`{"latest_version":"1.0.0-rc.1"}`:                                                     "latest_version",
+		`{"sunsets":[{"effective_at":"2027-01-01T00:00:00Z"}]}`:                               "below",
+		`{"sunsets":[{"below":"1.0","version":"1.0","effective_at":"2027-01-01T00:00:00Z"}]}`: "below",
+		`{"sunsets":[{"version":"1","effective_at":"2027-01-01T00:00:00Z"}]}`:                 "version",
+		`{"sunsets":[{"below":"1.0","effective_at":"2027-01-01"}]}`:                           "effective_at",
+		`{"deprecations":[{"below":"1.0"}]}`:                                                  "effective_at",
+		`{"capabilities":[{"name":"Long"}]}`:                                                  "name",
+		`{"capabilities":[{"name":"_a"}]}`:                                                    "name",
+		`{"capabilities":[{"name":"` + strings.Repeat("a", 65) + `"}]}`:                       "name",
+		`{"server":{"version":"v1"}}`:                                                         "name",
+		`{"server":{"name":"a b","version":"v1"}}`:                                            "name",
+		`{"server":{"name":"a"}}`:                                                             "version",
+		`{"server":{"name":"a","version":"` + strings.Repeat("1", 129) + `"}}`:                "version",
+		`{"server":{"name":"a","version":"v1","revision":"é"}}`:                               "revision",
+		`{"deprecations":[{"version":"1.0","effective_at":"2027-02-01T00:00:00Z"}],"sunsets":[{"version":"1.0","effective_at":"2027-01-31T23:59:59Z"}]}`: "sunsets",
 	} {
 		var d ServerDocument
 		err := Unmarshal([]byte(withMax(text)), &d)
@@ -235,8 +237,8 @@ func TestTheServersDocumentBreaksItsFormAsItSays(t *testing.T) {
 	// A sunset on its deprecation's date, or of other versions, is no
 	// sunset earlier than a deprecation.
 	for _, text := range []string{
-		`{"deprecations":[{"version":"1.0","at":"2027-02-01T00:00:00Z"}],"sunsets":[{"version":"1.0","at":"2027-02-01T00:00:00Z"}]}`,
-		`{"deprecations":[{"version":"1.0","at":"2027-02-01T00:00:00Z"}],"sunsets":[{"below":"1.0","at":"2027-01-01T00:00:00Z"},{"version":"1.0.1","at":"2027-01-01T00:00:00Z"}]}`,
+		`{"deprecations":[{"version":"1.0","effective_at":"2027-02-01T00:00:00Z"}],"sunsets":[{"version":"1.0","effective_at":"2027-02-01T00:00:00Z"}]}`,
+		`{"deprecations":[{"version":"1.0","effective_at":"2027-02-01T00:00:00Z"}],"sunsets":[{"below":"1.0","effective_at":"2027-01-01T00:00:00Z"},{"version":"1.0.1","effective_at":"2027-01-01T00:00:00Z"}]}`,
 	} {
 		var d ServerDocument
 		if err := Unmarshal([]byte(withMax(text)), &d); err != nil {
@@ -245,8 +247,8 @@ func TestTheServersDocumentBreaksItsFormAsItSays(t *testing.T) {
 	}
 	// The maximum: from 1 to MaxInteger, and never left out.
 	for text, want := range map[string]uint64{
-		`{"max_certificate_lifetime":1}`:                1,
-		`{"max_certificate_lifetime":9007199254740991}`: MaxInteger,
+		`{"max_certificate_lifetime_seconds":1}`:                1,
+		`{"max_certificate_lifetime_seconds":9007199254740991}`: MaxInteger,
 	} {
 		var d ServerDocument
 		if err := Unmarshal([]byte(text), &d); err != nil || d.MaxCertificateLifetime != want {
@@ -255,19 +257,19 @@ func TestTheServersDocumentBreaksItsFormAsItSays(t *testing.T) {
 	}
 	for _, text := range []string{
 		`{}`,
-		`{"max_certificate_lifetime":null}`,
-		`{"max_certificate_lifetime":0}`,
-		`{"max_certificate_lifetime":9007199254740992}`,
-		`{"max_certificate_lifetime":-1}`,
-		`{"max_certificate_lifetime":1.5}`,
-		`{"max_certificate_lifetime":"3891600"}`,
+		`{"max_certificate_lifetime_seconds":null}`,
+		`{"max_certificate_lifetime_seconds":0}`,
+		`{"max_certificate_lifetime_seconds":9007199254740992}`,
+		`{"max_certificate_lifetime_seconds":-1}`,
+		`{"max_certificate_lifetime_seconds":1.5}`,
+		`{"max_certificate_lifetime_seconds":"3891600"}`,
 	} {
 		var d ServerDocument
-		if err := Unmarshal([]byte(text), &d); !errors.Is(err, ErrMemberValue) || Member(err) != "max_certificate_lifetime" {
+		if err := Unmarshal([]byte(text), &d); !errors.Is(err, ErrMemberValue) || Member(err) != "max_certificate_lifetime_seconds" {
 			t.Errorf("%s: %v, naming %q", text, err, Member(err))
 		}
 	}
-	if err := (&ServerDocument{MaxCertificateLifetime: MaxInteger + 1}).Check(); Member(err) != "max_certificate_lifetime" {
+	if err := (&ServerDocument{MaxCertificateLifetime: MaxInteger + 1}).Check(); Member(err) != "max_certificate_lifetime_seconds" {
 		t.Errorf("Check of a maximum above MaxInteger: %v", err)
 	}
 }

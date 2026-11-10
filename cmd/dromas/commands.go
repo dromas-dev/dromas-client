@@ -325,7 +325,7 @@ twice in an object among them, is refused, and nothing is sent.`,
 	// refused, never kept once.
 	c.Flags().BoolVar(&asJSON, "json", false, "the body is one JSON value, sent as that value and not as text")
 	c.Flags().StringVar(&f.Subject, "subject", "", "the message's subject: any `text`")
-	c.Flags().StringVar(&f.InReplyTo, "reply-to", "", "the `msg_id` of the message this answers, as recv printed it")
+	c.Flags().StringVar(&f.InReplyTo, "in-reply-to", "", "the `msg_id` of the message this answers, as recv printed it")
 	c.Flags().StringVar(&f.Supersedes, "supersedes", "", "the `msg_id` of an earlier message of yours that this replaces, as sent/ names it")
 	return c
 }
@@ -389,8 +389,8 @@ run one recv for each mailbox.
 Exit status 0 is done, and 100 is failed for good. Any other exit status, a
 signal, a run longer than --exec-timeout (which kills the process) or a
 program that does not start is tried again, up to %d tries in all, %s apart.
-Each failed try prints an "exec_failed" line, and a message with no try left
-an "exec_gave_up" line, which dromas status then lists under attention until
+Each failed attempt prints an "exec_attempt_failed" line, and a message with no attempt left
+an "exec_failed" line, which dromas status then lists under attention until
 dromas inbox clear-failed clears it, and recv goes on to the next message and
 exits with status 3 at its end. Nothing runs that message's command again:
 dromas inbox show <id> | <program> hands it to a program by hand. A
@@ -486,7 +486,7 @@ before any file is read.`,
 func (e *cli) inboxClearFailedCmd() *cobra.Command {
 	return command("clear-failed", "clear what status says of every callback that gave up",
 		`Clear the record of every message in inbox/ whose recv --exec callback gave
-up, and print a "gave_up_cleared" line with their "count": dromas status lists
+up, and print a "failed_cleared" line with their "count": dromas status lists
 none of them from then on, and asks for no look for them, until a callback
 gives up again. It takes no id, and clears every one that gave up, and none
 whose callback still has tries left; with none, its count is 0. Each message
@@ -501,7 +501,7 @@ stays in inbox/, and nothing runs its callback again: dromas inbox show <id> |
 			if err != nil {
 				return err
 			}
-			return e.out(line("gave_up_cleared", "count", n))
+			return e.out(line("failed_cleared", "count", n))
 		})
 }
 
@@ -847,7 +847,7 @@ func (e *cli) aclNotSent(err error) error {
 	if err == nil {
 		return nil
 	}
-	if werr := e.out(line("acl_not_sent", failure(fmt.Errorf("the mailbox's server takes the reply under the ACL it last took: the next send or recv sends this mailbox's, and dromas status says whether it went through: %w", err))...)); werr != nil {
+	if werr := e.out(line("acl_sync_failed", failure(fmt.Errorf("the mailbox's server takes the reply under the ACL it last took: the next send or recv sends this mailbox's, and dromas status says whether it went through: %w", err))...)); werr != nil {
 		return werr
 	}
 	return &needsALook{}
@@ -915,7 +915,7 @@ made for longer.`, formatTime(client.MinPrekeyLifetime), formatTime(protocol.Pre
 			if d < shortLifetime {
 				warning = fmt.Sprintf("WARNING: a lifetime under %s risks a single missed daily check-in leaving this mailbox unable to receive messages. At %s, run dromas recv at least every %s.", formatTime(shortLifetime), formatTime(d), formatTime(client.RecvWithin(d)))
 			}
-			return e.out(line("prekey_lifetime", "seconds", int64(d/time.Second), "lifetime", formatTime(d), "detail", warning))
+			return e.out(line("prekey_lifetime", "lifetime_seconds", int64(d/time.Second), "lifetime", formatTime(d), "detail", warning))
 		})
 }
 
@@ -1083,7 +1083,7 @@ func (e *cli) remedied(own protocol.Address, r *client.Remedy, err error) error 
 		return r.NotRenewed
 	}
 	if r.Unread != nil {
-		if err := e.out(line("mailbox_unread", failure(fmt.Errorf("this mailbox's server could not be read, or served what this mailbox does not take, so the new certificate was numbered from what this mailbox knows: %w", r.Unread))...)); err != nil {
+		if err := e.out(line("lookup_failed", failure(fmt.Errorf("this mailbox's server could not be read, or served what this mailbox does not take, so the new certificate was numbered from what this mailbox knows: %w", r.Unread))...)); err != nil {
 			return err
 		}
 	}
@@ -1094,7 +1094,7 @@ func (e *cli) remedied(own protocol.Address, r *client.Remedy, err error) error 
 	}
 	if r.Revoked != nil {
 		const resend = "A message this mailbox sent before now, and that its reader has not read yet, was signed under a certificate just revoked and will be refused: send it again."
-		if err := e.out(line("certificates_revoked", "address", own, "through", r.Revoked.Through, "detail", resend)); err != nil {
+		if err := e.out(line("certificates_revoked", "address", own, "revocation_serial", r.Revoked.Through, "detail", resend)); err != nil {
 			return err
 		}
 	}
@@ -1174,7 +1174,7 @@ that one, with the address in full.`,
 					}
 				}
 			}
-			if err := e.out(line("certificates_revoked", "address", a, "through", through, "detail", said)); err != nil {
+			if err := e.out(line("certificates_revoked", "address", a, "revocation_serial", through, "detail", said)); err != nil {
 				return err
 			}
 			// A server that holds the address revoked took the record as done
@@ -1191,10 +1191,10 @@ that one, with the address in full.`,
 }
 
 func (e *cli) adoptCmd() *cobra.Command {
-	return command("adopt", "join the account an adopt key names: the key on stdin",
+	return command("join", "join the account an adopt key names: the key on stdin",
 		`Join the account an adopt key names, which can lift this mailbox's limits. The key
 is read from stdin, never from the command line, where ps, a shell's history
-and an agent's transcript would keep it: dromas account adopt < key.txt.
+and an agent's transcript would keep it: dromas account join < key.txt.
 What is read is held to an adopt key's form before anything is sent, so a
 wrong file goes nowhere, and no error prints the key.`,
 		nargs(0, 0), func(c *cobra.Command, _ []string) error {
@@ -1259,7 +1259,7 @@ key: keep it where only you can read it, somewhere other than this mailbox, for
 the day the mailbox is lost (umask 077; dromas revocation make > <file>). The
 line is the record as every server takes it: dromas revocation publish
 --record publishes it, and so does a PUT of it to
-<server>/v1/<address>/revocations.`,
+<server>/v1/<address>/revocation.`,
 		nargs(0, 0), func(c *cobra.Command, _ []string) error {
 			b, err := e.mailbox()
 			if err != nil {
@@ -1396,7 +1396,7 @@ func (e *cli) sayHeld(a protocol.Address, held *client.Held) error {
 	case held.Revoked:
 		return e.out(line("revoked", "address", a))
 	case held.Certificates != nil:
-		return e.out(line("certificates_revoked", "address", a, "through", held.Certificates.Through))
+		return e.out(line("certificates_revoked", "address", a, "revocation_serial", held.Certificates.Through))
 	}
 	return e.out(line("not_revoked", "address", a, "detail", "no revocation shown. That is the server's word, and it can keep a record back: a record from the mailbox's owner settles it (dromas revocation keep <file>)."))
 }
@@ -1428,7 +1428,7 @@ func notMadeLine(nm *client.NotMade) []byte {
 	if nm.RenewedAbove != 0 {
 		renewed = nm.RenewedAbove
 	}
-	return line("prekey_not_made", "serial", nm.Serial, "certificate_serial", serial, "own_certificate", own, "renewed_above", renewed, "at", nm.At, "detail", nm.Words())
+	return line("prekey_not_made", "serial", nm.Serial, "certificate_serial", serial, "own_certificate", own, "renewed_above", renewed, "read_at", nm.At, "detail", nm.Words())
 }
 
 // readRecord reads a revocation record: the JSON dromas revocation make

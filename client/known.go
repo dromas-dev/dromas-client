@@ -25,11 +25,11 @@ const (
 	// atUnread is a read that got no answer this mailbox can use.
 	atUnread ownAt = iota
 	// atNone is a server that holds no mailbox at this address: never
-	// registered, or forgotten (404 no_such_mailbox).
+	// registered, or forgotten (404 mailbox_not_found).
 	atNone
 	// atServed is an active mailbox, served.
 	atServed
-	// atRevoked is the address answered revoked (410 revoked), whether or not
+	// atRevoked is the address answered revoked (410 mailbox_revoked), whether or not
 	// the record it carries verifies.
 	atRevoked
 )
@@ -53,13 +53,13 @@ type own struct {
 	// did not make (noteServed).
 	notMade bool
 	// err is the error of the call that got no answer this mailbox can use, or
-	// the server's 410: GET /v1/<own>'s, or GET …/revocations' where the
+	// the server's 410: GET /v1/<own>'s, or GET …/revocation' where the
 	// server holds no mailbox. It is nil when every call was answered.
 	err error
 }
 
 // known reads this mailbox at its own server, GET /v1/<own>, and its
-// revocations, GET …/revocations, where the server holds no mailbox for it, and
+// revocations, GET …/revocation, where the server holds no mailbox for it, and
 // keeps what verifies of the mailbox's own revocations that either carries
 // (take, and a 410's record in call): what its identity revoked outlives the
 // mailbox (PROTOCOL.md §11.6, §11.15). It is the one read of the mailbox's own state at
@@ -82,25 +82,25 @@ func (b *Mailbox) known(ctx context.Context) (*own, error) {
 	case err == nil:
 		o.at = atServed
 		rec = br.Record()
-	case code(err) == protocol.CodeNoSuchMailbox:
+	case code(err) == protocol.CodeMailboxNotFound:
 		o.at = atNone
 		var held protocol.Revocations
-		resp, err := b.call(ctx, http.MethodGet, b.mailboxPath("/revocations"), nil, nil, &held)
+		resp, err := b.call(ctx, http.MethodGet, b.mailboxPath("/revocation"), nil, nil, &held)
 		if err == nil {
-			err = recordAnswer(b.mailboxPath("/revocations"), resp, &held)
+			err = recordAnswer(b.mailboxPath("/revocation"), resp, &held)
 		}
 		switch {
 		case errors.As(err, &gone):
 			return o, err
 		case err == nil:
 			rec = &held
-		case code(err) == protocol.CodeNotRevoked:
+		case code(err) == protocol.CodeRevocationNotFound:
 			// The one answer of none held (api/openapi.yaml): any other is no
 			// answer.
 		default:
 			o.err = err
 		}
-	case code(err) == protocol.CodeRevoked:
+	case code(err) == protocol.CodeMailboxRevoked:
 		// A revoked address is answered with its record, which proves itself:
 		// this one carried none that verifies.
 		o.at, o.err = atRevoked, err
@@ -152,7 +152,7 @@ type NotMade struct {
 	// mailbox made: one that certifies a working key it holds.
 	OwnCertificate bool `json:"own_certificate"`
 	// At is this machine's clock at that read.
-	At string `json:"at"`
+	At string `json:"read_at"`
 	// RenewedAbove is the serial of the statement of this mailbox's own its
 	// server took since that read, which a server takes only above the one it
 	// held, and zero, and not written, while it has taken none (recordTaken).

@@ -84,10 +84,10 @@ func TestARetryAfterAStepOfTheHour(t *testing.T) {
 	}
 }
 
-// The Go client's second seal after 409 stale_prekey is dated when it is
+// The Go client's second seal after 409 prekey_superseded is dated when it is
 // made, with no second look at the outbox's TTL. The hostile server
 // answers the mailbox read and the post each after 59s (under the client's
-// one-minute request timeout), the post 409 stale_prekey, and keeps the
+// one-minute request timeout), the post 409 prekey_superseded, and keeps the
 // retry sealed again: dated 1m58s past W + TTL. The reader's clock is then
 // 50m fast at the drain that prunes and 9m59s slow a second later: passes an
 // honest server takes, which the fake server checks as one does.
@@ -97,7 +97,7 @@ func TestAStretchedRetryAtClocksAnHonestServerTakes(t *testing.T) {
 	fast, slow := 50*time.Minute, -(9*time.Minute + 59*time.Second)
 	for _, c := range []struct {
 		name          string
-		stretch       bool          // the mailbox read and the post each answered after 59s, the post 409 stale_prekey
+		stretch       bool          // the mailbox read and the post each answered after 59s, the post 409 prekey_superseded
 		slowRead      bool          // the mailbox read answered after 59s, the post kept, no 409
 		prune         time.Duration // true time of the drain that prunes, after W + 2TTL
 		fast, slow    time.Duration // the reader's clock at the drain that prunes, and at the replay
@@ -138,8 +138,8 @@ func TestAStretchedRetryAtClocksAnHonestServerTakes(t *testing.T) {
 				case q.Method == http.MethodPost && q.URL.Path == mailbox+"/messages" && mode == "keep":
 					posts++
 					if c.stretch && posts == 1 {
-						e.clock.Add(59 * time.Second) // the post answered after 59s: 409 stale_prekey
-						code := protocol.CodeStalePrekey
+						e.clock.Add(59 * time.Second) // the post answered after 59s: 409 prekey_superseded
+						code := protocol.CodePrekeySuperseded
 						w.Header().Set("Content-Type", protocol.ProblemContentType)
 						w.WriteHeader(code.Status())
 						_ = json.NewEncoder(w).Encode(protocol.Problem{Type: code.TypeURI(), Title: code.Title(), Status: int64(code.Status()), Code: code, Detail: "a newer prekey"})

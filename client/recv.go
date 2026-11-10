@@ -38,7 +38,7 @@ type Delivery struct {
 	Plaintext []byte
 	Signature []byte
 	// findings is what judge established, kept should the message yet be
-	// refused (bad_id).
+	// refused (id_mismatch).
 	findings *protocol.Findings
 	// owed is the delivery's key in the state file's owed records, where
 	// [Mailbox.Follow] made one (owe).
@@ -84,7 +84,7 @@ type Result struct {
 	// Receive, which goes on from what a fetch the time cut kept.
 	More bool
 	// Paced is how long the server asked the mailbox to wait before taking out
-	// more, when it paced the drain (a 429 fetch_paced with
+	// more, when it paced the drain (a 429 fetch_rate_limited with
 	// Retry-After, on a fetch); zero otherwise.
 	Paced time.Duration
 	// PollAfter is the server's poll interval, in seconds: the list's
@@ -289,7 +289,7 @@ func renewalMends(err error) bool {
 	case errors.As(err, &rf) && rf.renews:
 		return true
 	}
-	return code(err) == protocol.CodeNoSuchMailbox
+	return code(err) == protocol.CodeMailboxNotFound
 }
 
 // renewalOwed is a drain's error that a renewal mends (renewalMends), whose
@@ -443,7 +443,7 @@ func (b *Mailbox) drainPages(ctx context.Context, asked *lookups, res *Result) e
 }
 
 // pacedError is the server pacing a drain, as only the answer to a fetch
-// says it (PROTOCOL.md §11.12): a 429 fetch_paced, with how
+// says it (PROTOCOL.md §11.12): a 429 fetch_rate_limited, with how
 // long to wait.
 type pacedError struct {
 	wait time.Duration
@@ -490,9 +490,9 @@ func (b *Mailbox) receiveOne(ctx context.Context, m protocol.MessageInfo, res *R
 		}
 		var api *APIError
 		switch {
-		case code(err) == protocol.CodeNoSuchMessage:
+		case code(err) == protocol.CodeMessageNotFound:
 			return 0, p.drop() // already gone
-		case errors.As(err, &api) && api.Problem.Code == protocol.CodeFetchPaced && api.RetryAfter > 0:
+		case errors.As(err, &api) && api.Problem.Code == protocol.CodeFetchRateLimited && api.RetryAfter > 0:
 			return 0, &pacedError{wait: api.RetryAfter, err: err}
 		case err != nil:
 			return fetched, err
@@ -506,7 +506,7 @@ func (b *Mailbox) receiveOne(ctx context.Context, m protocol.MessageInfo, res *R
 		// The server's id is held to the hash whatever the verdict, a
 		// duplicate's included, with what the checks found (#264).
 		if v.refusal == nil && local != id {
-			v = verdict{refusal: &Refusal{Code: RefusedID, Reason: "the server's id for it is not the SHA-256 of its ciphertext", Findings: v.found}, found: v.found}
+			v = verdict{refusal: &Refusal{Code: RefusedIDMismatch, Reason: "the server's id for it is not the SHA-256 of its ciphertext", Findings: v.found}, found: v.found}
 		}
 		d, why := v.delivery, v.refusal
 		switch {
@@ -574,7 +574,7 @@ func (b *Mailbox) receiveOne(ctx context.Context, m protocol.MessageInfo, res *R
 		}
 	}
 	_, err = b.owner(ctx, http.MethodDelete, b.mailboxPath("/messages/"+id), nil, nil)
-	if code(err) == protocol.CodeNoSuchMessage {
+	if code(err) == protocol.CodeMessageNotFound {
 		return fetched, nil
 	}
 	return fetched, err
@@ -655,15 +655,15 @@ func (b *Mailbox) judge(ctx context.Context, ct []byte, asked *lookups) (verdict
 	r, err := decrypt(ct, ids)
 	switch {
 	case errors.Is(err, errNoNative):
-		return refused(RefusedDecrypt, "it is encrypted to no recipient of a prekey's type, which no server takes as a send: nothing was decrypted")
+		return refused(RefusedDecryptError, "it is encrypted to no recipient of a prekey's type, which no server takes as a send: nothing was decrypted")
 	case errors.Is(err, errNotOneNative):
-		return refused(RefusedDecrypt, "it is not encrypted to exactly one recipient of a prekey's type, as every server takes a send: nothing was decrypted")
+		return refused(RefusedDecryptError, "it is not encrypted to exactly one recipient of a prekey's type, as every server takes a send: nothing was decrypted")
 	case err != nil:
-		return refused(RefusedDecrypt, "it does not decrypt with this mailbox's prekeys")
+		return refused(RefusedDecryptError, "it does not decrypt with this mailbox's prekeys")
 	}
 	p, err := io.ReadAll(io.LimitReader(r, protocol.MaxCiphertext)) // less than its ciphertext, which is at most that
 	if err != nil {
-		return refused(RefusedDecrypt, "it does not decrypt with this mailbox's prekeys")
+		return refused(RefusedDecryptError, "it does not decrypt with this mailbox's prekeys")
 	}
 	signed, found, err := protocol.Examine(p, b.id.Address(), now)
 	if err != nil {
@@ -691,10 +691,10 @@ func (b *Mailbox) judge(ctx context.Context, ct []byte, asked *lookups) (verdict
 		}
 	}
 	if gone {
-		return refused(RefusedRevoked, "its sender's address is revoked, and the revocation verifies: nothing signed for that address is taken, whenever it was signed")
+		return refused(RefusedSenderRevoked, "its sender's address is revoked, and the revocation verifies: nothing signed for that address is taken, whenever it was signed")
 	}
 	if covered {
-		return refused(RefusedCertificate, "it is signed under a certificate its sender's identity has revoked: nothing signed under it is taken, whenever it was signed")
+		return refused(RefusedCertificateRevoked, "it is signed under a certificate its sender's identity has revoked: nothing signed under it is taken, whenever it was signed")
 	}
 	h := sha256.Sum256(ct)
 	seen, err := b.seenHash(hex.EncodeToString(h[:]))
@@ -702,7 +702,7 @@ func (b *Mailbox) judge(ctx context.Context, ct []byte, asked *lookups) (verdict
 		return verdict{}, err
 	}
 	if seen {
-		return refused(RefusedReplay, "replay: this ciphertext was already received")
+		return refused(RefusedMessageAlreadyReceived, "message_already_received: this ciphertext was already received")
 	}
 	if err := b.pin(signed.Sender); err != nil {
 		return verdict{}, err

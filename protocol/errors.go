@@ -9,66 +9,73 @@ import (
 // Code is an API error's machine code, from the closed list below
 // (PROTOCOL.md §11.3). A code names what a client does about the error: one
 // call that can fail for causes a client meets differently has a code for
-// each, and where the call itself tells them apart (a too_large on an ACL is
+// each, and where the call itself tells them apart (a content_too_large on an ACL is
 // entries, on a send bytes) one code serves.
 type Code string
 
-// The error codes, grouped by HTTP status.
+// The error codes, grouped by HTTP status. A code is snake_case, by the
+// convention the standards share (OAuth's invalid_request, TLS's
+// certificate_revoked, gRPC's NOT_FOUND and ALREADY_EXISTS): invalid_<thing>
+// or unsupported_<thing> for an input, <thing>_<participle> for a state,
+// <thing>_mismatch, <thing>_too_large or _too_low for a bound, and
+// <action>_required; never an HTTP reason phrase. The test holds every code
+// to it (TestCodeNames).
 const (
 	// 400
-	CodeBadRequest         Code = "bad_request"          // not JSON, a missing, unknown or ill-formed field (a byte field not base64 among them), a bad cursor, a send's body that is not an age file
-	CodeBadAddress         Code = "bad_address"          // not "d_" and 64 characters of base64url
-	CodeIdentityMismatch   Code = "identity_mismatch"    // the identity does not hash to the address, or breaks its grammar
-	CodeBadKey             Code = "bad_key"              // an identity key, certificate or prekey statement that is malformed or does not verify
-	CodePrekeyNotNew       Code = "prekey_not_new"       // the prekey was published before: every prekey is a new key
-	CodePrekeyTime         Code = "prekey_time"          // the statement or its certificate is not valid at the server's clock
-	CodeCertificateTooLong Code = "certificate_too_long" // the certificate runs longer than the server's maximum: max_certificate_lifetime
-	CodeUnsupportedKeyType Code = "unsupported_key_type" // an identity of a key type this server does not register
-	CodeWrongRecipientType Code = "wrong_recipient_type" // not exactly one stanza of a live prekey type
-	CodeBadRevocation      Code = "bad_revocation"       // not a revocation of the address: the document does not hash to it, or the signature is not its identity's own
+	CodeInvalidRequest             Code = "invalid_request"               // not JSON, a missing, unknown or ill-formed field (a byte field not base64 among them), a bad cursor, a send's body that is not an age file
+	CodeInvalidAddress             Code = "invalid_address"               // not "d_" and 64 characters of base64url
+	CodeIdentityMismatch           Code = "identity_mismatch"             // the identity does not hash to the address, or breaks its grammar
+	CodeInvalidKey                 Code = "invalid_key"                   // an identity key, certificate or prekey statement that is malformed or does not verify
+	CodePrekeyAlreadyUsed          Code = "prekey_already_used"           // the prekey was published before: every prekey is a new key
+	CodeInvalidValidityPeriod      Code = "invalid_validity_period"       // the statement or its certificate is not valid at the server's clock: not begun, or ended
+	CodeCertificateLifetimeTooLong Code = "certificate_lifetime_too_long" // the certificate runs longer than the server's maximum: max_certificate_lifetime_seconds
+	CodeUnsupportedKeyType         Code = "unsupported_key_type"          // an identity of a key type this server does not register
+	CodeInvalidRecipients          Code = "invalid_recipients"            // not exactly one stanza of a live prekey type
+	CodeInvalidRevocation          Code = "invalid_revocation"            // not a revocation of the address: the document does not hash to it, or the signature is not its identity's own
 
 	// 401, with WWW-Authenticate
-	CodeUnauthorized          Code = "unauthorized"            // no pass, or one that is not this mailbox's, for this server
-	CodePassExpired           Code = "pass_expired"            // the pass, or the certificate it is under, is not valid at the server's clock: sign another, retry
-	CodeCertificateNotCurrent Code = "certificate_not_current" // the pass or statement is under a certificate that is neither the mailbox's current one nor above it
-	CodeCertificateRevoked    Code = "certificate_revoked"     // a certificate the mailbox's identity revoked: which calls, PROTOCOL.md §8 and §11.4
+	CodeInvalidPass           Code = "invalid_pass"           // no pass, or one that is not this mailbox's, for this server
+	CodePassExpired           Code = "pass_expired"           // the pass, or the certificate it is under, is not valid at the server's clock: sign another, retry
+	CodeCertificateSuperseded Code = "certificate_superseded" // the pass or statement is under a certificate that is neither the mailbox's current one nor above it
+	CodeCertificateRevoked    Code = "certificate_revoked"    // a certificate the mailbox's identity revoked: which calls, PROTOCOL.md §8 and §11.4
 
 	// 403
-	CodeUnknownSender    Code = "unknown_sender"     // not registered
-	CodeSenderRevoked    Code = "sender_revoked"     // YOUR mailbox is revoked
-	CodeSenderNotAllowed Code = "sender_not_allowed" // not on the mailbox's allow list, or on its block list
-	CodeSenderKeyType    Code = "sender_key_type"    // the mailbox's client does not verify identities of YOUR mailbox's key type
-	CodeAdoptKeyRefused  Code = "adopt_key_refused"  // an adopt key that is spent, expired, revoked or not this server's
+	CodeSenderNotRegistered      Code = "sender_not_registered"       // YOUR mailbox is not registered here, or was forgotten
+	CodeSenderRevoked            Code = "sender_revoked"              // YOUR mailbox is revoked
+	CodeSenderNotAllowed         Code = "sender_not_allowed"          // not on the mailbox's allow list, or on its block list
+	CodeUnsupportedSenderKeyType Code = "unsupported_sender_key_type" // the mailbox's client does not verify identities of YOUR mailbox's key type
+	CodeInvalidAdoptKey          Code = "invalid_adopt_key"           // an adopt key that is spent, expired, revoked or not this server's
 
 	// 404
-	CodeNoSuchMailbox Code = "no_such_mailbox" // never registered, or forgotten
-	CodeNoSuchMessage Code = "no_such_message" // acked or expired: treat it as gone
-	CodeNotRevoked    Code = "not_revoked"     // no revocation of this address is held here
+	CodeMailboxNotFound    Code = "mailbox_not_found"    // never registered, or forgotten
+	CodeMessageNotFound    Code = "message_not_found"    // acked or expired: treat it as gone
+	CodeRevocationNotFound Code = "revocation_not_found" // no revocation of this address is held here
 
 	// 409
-	CodeConflict       Code = "conflict"        // what is held is newer, or another: a replay that is not byte-identical
-	CodeMailboxChanged Code = "mailbox_changed" // the mailbox changed while the request was handled: send it again as it is
-	CodeStalePrekey    Code = "stale_prekey"    // a newer prekey exists: re-fetch, re-encrypt the same envelope
-	CodePrekeyExpired  Code = "prekey_expired"  // the mailbox's owner must publish a new prekey
+	CodeMailboxAlreadyExists   Code = "mailbox_already_exists"  // the address is registered with another prekey: a replay that is not byte-identical
+	CodeSerialTooLow           Code = "serial_too_low"          // a prekey or a revocation of certificates at a serial not above the one held: the answer names it
+	CodeConcurrentModification Code = "concurrent_modification" // the mailbox changed while the request was handled: send it again as it is
+	CodePrekeySuperseded       Code = "prekey_superseded"       // a newer prekey exists: re-fetch, re-encrypt the same envelope
+	CodePrekeyExpired          Code = "prekey_expired"          // the mailbox's owner must publish a new prekey
 
 	// 408
 	CodeRequestTimeout Code = "request_timeout" // the body did not arrive in the time the server waits for it: send it again
 
 	// 410
-	CodeRevoked        Code = "revoked"         // the mailbox you named is revoked, forever
-	CodeVersionRetired Code = "version_retired" // the server no longer takes the client's version: upgrade (PROTOCOL.md §11.17)
+	CodeMailboxRevoked           Code = "mailbox_revoked"            // the mailbox you named is revoked, forever
+	CodeClientVersionUnsupported Code = "client_version_unsupported" // the server no longer takes the client's version: upgrade (PROTOCOL.md §11.17)
 
 	// 412
 	CodePreconditionFailed Code = "precondition_failed" // an If-Match the server evaluated false (RFC 9110 §13.1.1)
 
 	// 413
-	CodeTooLarge Code = "too_large"
+	CodeContentTooLarge Code = "content_too_large"
 
 	// 429, all with Retry-After
-	CodeRateLimited Code = "rate_limited" // a limit takes no more for now: which one is quota_id, and whom it counted against subject
-	CodeFetchPaced  Code = "fetch_paced"  // the mailbox has fetched all it may for now, new messages or again: the rest wait
-	CodeMailboxFull Code = "mailbox_full"
-	CodeMailboxBusy Code = "mailbox_busy" // the mailbox has taken all the new messages it takes for now
+	CodeRateLimited        Code = "rate_limited"       // a limit takes no more for now: which one is quota_id, and whom it counted against subject
+	CodeFetchRateLimited   Code = "fetch_rate_limited" // the mailbox has fetched all it may for now, new messages or again: the rest wait
+	CodeMailboxFull        Code = "mailbox_full"
+	CodeMailboxRateLimited Code = "mailbox_rate_limited" // the mailbox has taken all the new messages it takes for now
 
 	// 503, with Retry-After
 	CodeUnavailable Code = "unavailable"
@@ -78,42 +85,43 @@ var codes = map[Code]struct {
 	status int
 	title  string
 }{
-	CodeBadRequest:            {http.StatusBadRequest, "Bad request"},
-	CodeBadAddress:            {http.StatusBadRequest, "Bad address"},
-	CodeIdentityMismatch:      {http.StatusBadRequest, "Identity mismatch"},
-	CodeBadKey:                {http.StatusBadRequest, "Bad key"},
-	CodePrekeyNotNew:          {http.StatusBadRequest, "Prekey not new"},
-	CodePrekeyTime:            {http.StatusBadRequest, "Prekey not valid now"},
-	CodeCertificateTooLong:    {http.StatusBadRequest, "Certificate too long"},
-	CodeUnsupportedKeyType:    {http.StatusBadRequest, "Unsupported key type"},
-	CodeWrongRecipientType:    {http.StatusBadRequest, "Wrong recipient type"},
-	CodeBadRevocation:         {http.StatusBadRequest, "Bad revocation"},
-	CodeUnauthorized:          {http.StatusUnauthorized, "Unauthorized"},
-	CodePassExpired:           {http.StatusUnauthorized, "Pass expired"},
-	CodeCertificateNotCurrent: {http.StatusUnauthorized, "Certificate not current"},
-	CodeCertificateRevoked:    {http.StatusUnauthorized, "Certificate revoked"},
-	CodeUnknownSender:         {http.StatusForbidden, "Unknown sender"},
-	CodeSenderRevoked:         {http.StatusForbidden, "Sender revoked"},
-	CodeSenderNotAllowed:      {http.StatusForbidden, "Sender not allowed"},
-	CodeSenderKeyType:         {http.StatusForbidden, "Sender key type"},
-	CodeAdoptKeyRefused:       {http.StatusForbidden, "Adopt key refused"},
-	CodeNoSuchMailbox:         {http.StatusNotFound, "No such mailbox"},
-	CodeNoSuchMessage:         {http.StatusNotFound, "No such message"},
-	CodeNotRevoked:            {http.StatusNotFound, "Not revoked"},
-	CodeConflict:              {http.StatusConflict, "Conflict"},
-	CodeMailboxChanged:        {http.StatusConflict, "Mailbox changed"},
-	CodeStalePrekey:           {http.StatusConflict, "Stale prekey"},
-	CodePrekeyExpired:         {http.StatusConflict, "Prekey expired"},
-	CodeRequestTimeout:        {http.StatusRequestTimeout, "Request timeout"},
-	CodeRevoked:               {http.StatusGone, "Revoked"},
-	CodeVersionRetired:        {http.StatusGone, "Version retired"},
-	CodePreconditionFailed:    {http.StatusPreconditionFailed, "Precondition failed"},
-	CodeTooLarge:              {http.StatusRequestEntityTooLarge, "Too large"},
-	CodeRateLimited:           {http.StatusTooManyRequests, "Rate limited"},
-	CodeFetchPaced:            {http.StatusTooManyRequests, "Fetch paced"},
-	CodeMailboxFull:           {http.StatusTooManyRequests, "Mailbox full"},
-	CodeMailboxBusy:           {http.StatusTooManyRequests, "Mailbox busy"},
-	CodeUnavailable:           {http.StatusServiceUnavailable, "Unavailable"},
+	CodeInvalidRequest:             {http.StatusBadRequest, "Invalid request"},
+	CodeInvalidAddress:             {http.StatusBadRequest, "Invalid address"},
+	CodeIdentityMismatch:           {http.StatusBadRequest, "Identity mismatch"},
+	CodeInvalidKey:                 {http.StatusBadRequest, "Invalid key"},
+	CodePrekeyAlreadyUsed:          {http.StatusBadRequest, "Prekey already used"},
+	CodeInvalidValidityPeriod:      {http.StatusBadRequest, "Invalid validity period"},
+	CodeCertificateLifetimeTooLong: {http.StatusBadRequest, "Certificate lifetime too long"},
+	CodeUnsupportedKeyType:         {http.StatusBadRequest, "Unsupported key type"},
+	CodeInvalidRecipients:          {http.StatusBadRequest, "Invalid recipients"},
+	CodeInvalidRevocation:          {http.StatusBadRequest, "Invalid revocation"},
+	CodeInvalidPass:                {http.StatusUnauthorized, "Invalid pass"},
+	CodePassExpired:                {http.StatusUnauthorized, "Pass expired"},
+	CodeCertificateSuperseded:      {http.StatusUnauthorized, "Certificate superseded"},
+	CodeCertificateRevoked:         {http.StatusUnauthorized, "Certificate revoked"},
+	CodeSenderNotRegistered:        {http.StatusForbidden, "Sender not registered"},
+	CodeSenderRevoked:              {http.StatusForbidden, "Sender revoked"},
+	CodeSenderNotAllowed:           {http.StatusForbidden, "Sender not allowed"},
+	CodeUnsupportedSenderKeyType:   {http.StatusForbidden, "Unsupported sender key type"},
+	CodeInvalidAdoptKey:            {http.StatusForbidden, "Invalid adopt key"},
+	CodeMailboxNotFound:            {http.StatusNotFound, "Mailbox not found"},
+	CodeMessageNotFound:            {http.StatusNotFound, "Message not found"},
+	CodeRevocationNotFound:         {http.StatusNotFound, "Revocation not found"},
+	CodeMailboxAlreadyExists:       {http.StatusConflict, "Mailbox already exists"},
+	CodeSerialTooLow:               {http.StatusConflict, "Serial too low"},
+	CodeConcurrentModification:     {http.StatusConflict, "Concurrent modification"},
+	CodePrekeySuperseded:           {http.StatusConflict, "Prekey superseded"},
+	CodePrekeyExpired:              {http.StatusConflict, "Prekey expired"},
+	CodeRequestTimeout:             {http.StatusRequestTimeout, "Request timeout"},
+	CodeMailboxRevoked:             {http.StatusGone, "Mailbox revoked"},
+	CodeClientVersionUnsupported:   {http.StatusGone, "Client version unsupported"},
+	CodePreconditionFailed:         {http.StatusPreconditionFailed, "Precondition failed"},
+	CodeContentTooLarge:            {http.StatusRequestEntityTooLarge, "Content too large"},
+	CodeRateLimited:                {http.StatusTooManyRequests, "Rate limited"},
+	CodeFetchRateLimited:           {http.StatusTooManyRequests, "Fetch rate limited"},
+	CodeMailboxFull:                {http.StatusTooManyRequests, "Mailbox full"},
+	CodeMailboxRateLimited:         {http.StatusTooManyRequests, "Mailbox rate limited"},
+	CodeUnavailable:                {http.StatusServiceUnavailable, "Unavailable"},
 }
 
 // Status returns the code's HTTP status, or 0 for a code this version does
@@ -160,39 +168,43 @@ type Problem struct {
 	Code   Code   `json:"code"`
 	Hint   string `json:"hint,omitempty"`
 
-	// Limit is the limit hit: the most bytes a body or a ciphertext may
-	// hold, or entries an ACL (too_large); how many a day a limit counted by
-	// the day takes (rate_limited with QuotaSends, QuotaRenewals,
-	// QuotaCertificates or QuotaCertificateRevocations).
+	// Limit is the limit hit by a content_too_large: the most bytes a body
+	// or a ciphertext may hold, or entries an ACL.
 	Limit *uint64 `json:"limit,omitempty"`
 	// QuotaID is the limit a rate_limited names, and Subject whom it was
 	// counted against (Google's QuotaFailure.Violation). A client shows each
 	// only once it knows the value.
 	QuotaID Quota   `json:"quota_id,omitempty"`
 	Subject Subject `json:"subject,omitempty"`
+	// QuotaValue is how many a day a rate_limited's limit takes, for one
+	// counted by the day (QuotaSends, QuotaRenewals, QuotaCertificates,
+	// QuotaCertificateRevocations): Google's QuotaFailure carries it as
+	// quota_value beside quota_id.
+	QuotaValue *uint64 `json:"quota_value,omitempty"`
 	// PrekeySerial and CertificateSerial are serials of a prekey and of a
 	// certificate: which ones each code names is PROTOCOL.md §11.3's.
 	PrekeySerial      *uint64 `json:"prekey_serial,omitempty"`
 	CertificateSerial *uint64 `json:"certificate_serial,omitempty"`
 	// MaxCertificateLifetime is the longest a certificate the server takes may
-	// run, valid-before less valid-after, in seconds (certificate_too_long).
-	MaxCertificateLifetime *uint64 `json:"max_certificate_lifetime,omitempty"`
-	// Through is the serial a revocation of certificates held runs through
-	// (conflict).
-	Through *uint64 `json:"through,omitempty"`
+	// run, valid-before less valid-after, in seconds (certificate_lifetime_too_long).
+	MaxCertificateLifetime *uint64 `json:"max_certificate_lifetime_seconds,omitempty"`
+	// Through is the revocation serial of the revocation of certificates
+	// held: the serial it runs through (serial_too_low).
+	Through *uint64 `json:"revocation_serial,omitempty"`
 	// KeyTypes are the identity key types a server registers
 	// (unsupported_key_type), and KeyType the one a mailbox's client does not
-	// verify (sender_key_type).
+	// verify (unsupported_sender_key_type).
 	KeyTypes []string `json:"key_types,omitempty"`
 	KeyType  string   `json:"key_type,omitempty"`
 	// Member is the request member or query parameter that is missing,
-	// unknown, given twice or not of its form (bad_request).
-	Member string `json:"member,omitempty"`
+	// unknown, given twice or not of its form (invalid_request): Stripe's
+	// param.
+	Member string `json:"param,omitempty"`
 	// MinVersion is the lowest version a server that retired the request's
-	// takes, where it sets a floor (version_retired): a policy's version
+	// takes, where it sets a floor (client_version_unsupported): a policy's version
 	// (ParsePolicyVersion), which a client shows only once it has that form.
 	MinVersion string `json:"min_version,omitempty"`
-	// Record is the revocation record of the address a 410 revoked names,
+	// Record is the revocation record of the address a 410 mailbox_revoked names,
 	// which the read of a mailbox always carries, and any other call's where its
 	// server answers from the record (PROTOCOL.md §11.3). A client checks it,
 	// and takes "revoked" on nothing less.

@@ -40,7 +40,7 @@ func putRecord(t *testing.T, next http.Handler, a protocol.Address, rec *protoco
 	if err != nil {
 		t.Fatal(err)
 	}
-	req := httptest.NewRequest(http.MethodPut, "/v1/"+a.String()+"/revocations", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPut, "/v1/"+a.String()+"/revocation", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
 	next.ServeHTTP(rr, req)
@@ -55,7 +55,7 @@ func finishedOwn(err error) bool {
 	return errors.As(err, &gone) && gone.Own
 }
 
-// A read answered 410 revoked with a record that does not verify is that
+// A read answered 410 mailbox_revoked with a record that does not verify is that
 // read's answer: nothing more is asked of it, so a proof's own reads are never
 // proved again (proved), and a server that answers so at every read gets one
 // (#353).
@@ -75,7 +75,7 @@ func TestARevokedReadWhoseRecordDoesNotVerifyIsNotReadAgain(t *testing.T) {
 			e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
 				// Bounded, so that a mailbox that reads again still ends.
 				if r.Method == http.MethodGet && r.URL.Path == mailboxPath(read) && reads.Add(1) <= 10 {
-					forge.Refuse(w, protocol.CodeRevoked, func(p *protocol.Problem) { p.Record = bad })
+					forge.Refuse(w, protocol.CodeMailboxRevoked, func(p *protocol.Problem) { p.Record = bad })
 					return
 				}
 				next.ServeHTTP(w, r)
@@ -86,7 +86,7 @@ func TestARevokedReadWhoseRecordDoesNotVerifyIsNotReadAgain(t *testing.T) {
 			} else {
 				_, err = a.Resolve(ctx, b.Address())
 			}
-			if client.Code(err) != protocol.CodeRevoked || finishedOwn(err) || reads.Load() != 1 {
+			if client.Code(err) != protocol.CodeMailboxRevoked || finishedOwn(err) || reads.Load() != 1 {
 				t.Errorf("a read of %s answered 410 with a record that does not verify: %v, after %d reads of it", of, err, reads.Load())
 			}
 		})
@@ -115,7 +115,7 @@ func TestEveryCommandShownItsOwnRevocationAtEachCall(t *testing.T) {
 			honest := partwayHonest(t, c)
 			for n, call := range honest {
 				for _, v := range partwayVariants {
-					if v == partwayRead && !(call.method == http.MethodGet && strings.HasSuffix(call.path, "/revocations")) {
+					if v == partwayRead && !(call.method == http.MethodGet && strings.HasSuffix(call.path, "/revocation")) {
 						continue
 					}
 					t.Run(fmt.Sprintf("call %d %s %s/%s", n+1, call.method, call.short, v), func(t *testing.T) {
@@ -214,9 +214,9 @@ func (l *partwayLog) middle(t *testing.T, s partwaySet, rec, bad *protocol.Revoc
 			}
 			switch v {
 			case partwayRecord:
-				forge.Refuse(got, protocol.CodeRevoked, func(p *protocol.Problem) { p.Record = rec })
+				forge.Refuse(got, protocol.CodeMailboxRevoked, func(p *protocol.Problem) { p.Record = rec })
 			case partwayServed, partwayUnserved:
-				forge.Refuse(got, protocol.CodeRevoked, func(p *protocol.Problem) { p.Record = bad })
+				forge.Refuse(got, protocol.CodeMailboxRevoked, func(p *protocol.Problem) { p.Record = bad })
 			case partwayCert:
 				forge.Refuse(got, protocol.CodeCertificateRevoked)
 			case partwayRead:
@@ -252,7 +252,7 @@ func partwayShows(r *http.Request, got *httptest.ResponseRecorder, a protocol.Ad
 			return false
 		}
 		rec = p.Record
-	case got.Code == http.StatusOK && r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/revocations"):
+	case got.Code == http.StatusOK && r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/revocation"):
 		rec = &protocol.Revocations{}
 		if protocol.Unmarshal(got.Body.Bytes(), rec) != nil {
 			return false
@@ -275,7 +275,7 @@ func partwayNames(path string, a protocol.Address) bool {
 // revocations, which carries no pass.
 func partwayIsRead(c partwayCall) bool {
 	rest, _ := strings.CutPrefix(c.path, "/v1/")
-	return c.method == http.MethodGet && (!strings.Contains(rest, "/") || strings.HasSuffix(rest, "/revocations"))
+	return c.method == http.MethodGet && (!strings.Contains(rest, "/") || strings.HasSuffix(rest, "/revocation"))
 }
 
 // partwayMustLearn reports whether the mailbox must hold its revocation after
@@ -403,7 +403,7 @@ func partwayAt(t *testing.T, c partwayCase, n int, v string) {
 	}
 	if partwayProved(at, v, s.a.Address()) {
 		for _, c := range l.calls[n:l.event] {
-			if c.method != http.MethodGet || c.short != "/v1/own" && c.short != "/v1/own/revocations" {
+			if c.method != http.MethodGet || c.short != "/v1/own" && c.short != "/v1/own/revocation" {
 				t.Errorf("asked between the answer to prove and the proof: %s; calls %v", c, l.calls)
 			}
 		}
@@ -475,7 +475,7 @@ func recvSaysItAlone(t *testing.T, w *partwayRun) {
 // server took anything from it (#326, #379).
 func remedySaysItAlone(t *testing.T, w *partwayRun) {
 	for _, c := range w.calls[:w.event] {
-		if c.method == http.MethodPut && c.short == "/v1/own/revocations" && (c.status < 300 || c.status == http.StatusConflict) {
+		if c.method == http.MethodPut && c.short == "/v1/own/revocation" && (c.status < 300 || c.status == http.StatusConflict) {
 			return
 		}
 	}
@@ -521,7 +521,7 @@ func partwayHides(e *env, a *client.Mailbox) func(int, http.ResponseWriter, *htt
 }
 
 // forgetsAtUpload is the state's operator that forgets mailbox a as its first
-// prekey upload arrives, which the server then answers 404 no_such_mailbox
+// prekey upload arrives, which the server then answers 404 mailbox_not_found
 // (#386).
 func forgetsAtUpload(e *env, a *client.Mailbox) func(int, http.ResponseWriter, *http.Request, http.Handler) bool {
 	var forgot atomic.Bool
@@ -716,7 +716,7 @@ func partwayCases() []partwayCase {
 			serverAllowed(t, a)
 			return partwaySet{dir: a.Dir(), a: a, run: func(ctx context.Context) (any, error) { return nil, a.SyncACL(ctx) }}
 		}},
-		{"account adopt", func(t *testing.T, e *env) partwaySet {
+		{"account join", func(t *testing.T, e *env) partwaySet {
 			a := e.mailbox()
 			key := e.srv.AdoptKey("acct")
 			return partwaySet{dir: a.Dir(), a: a, run: func(ctx context.Context) (any, error) { return a.Adopt(ctx, key) }}

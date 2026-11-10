@@ -86,7 +86,7 @@ type fileConfig struct {
 	UnsafeState     *bool  `toml:"unsafe-state-permissions"`
 	Policy          struct {
 		Unknown string `toml:"unknown"`
-		Server  string `toml:"server"`
+		Admit   string `toml:"admit"`
 	} `toml:"policy"`
 	Recv struct {
 		Wait        string   `toml:"wait"`
@@ -299,6 +299,19 @@ func eachKey(v reflect.Value, path []string, f func(path []string, value reflect
 	return nil
 }
 
+// renamedKeys are the keys a release renamed, by their old names: a file that
+// still gives one is told the new name.
+var renamedKeys = map[string]string{"policy.server": "policy.admit"}
+
+// unknownKey is the refusal of a key this client does not read, which names
+// the new name of one a release renamed.
+func unknownKey(file, name string) *configError {
+	if now, ok := renamedKeys[name]; ok {
+		return &configError{file: file, key: name, msg: fmt.Sprintf("%s: %s is now %s: rename it", file, name, now)}
+	}
+	return &configError{file: file, key: name, msg: fmt.Sprintf("%s: this client reads no key %s", file, name)}
+}
+
 // checkKeys refuses what the decoder lets through: it takes a key in another case
 // for the key, and of two such keeps either, by a map's order; and an empty
 // string decodes as no value, which would take the default, the public server
@@ -317,7 +330,7 @@ func checkKeys(file string, md toml.MetaData, fc *fileConfig) error {
 	}
 	for _, k := range md.Keys() {
 		if name := strings.Join(k, "."); !known[name] {
-			return &configError{file: file, key: name, msg: fmt.Sprintf("%s: this client reads no key %s", file, name)}
+			return unknownKey(file, name)
 		}
 	}
 	return nil
@@ -338,7 +351,7 @@ func readConfig(file string, fc *fileConfig) error {
 		return &configError{file: file, msg: msg}
 	}
 	if un := md.Undecoded(); len(un) > 0 {
-		return &configError{file: file, key: un[0].String(), msg: fmt.Sprintf("%s: this client reads no key %s", file, un[0])}
+		return unknownKey(file, un[0].String())
 	}
 	return checkKeys(file, md, fc)
 }
@@ -508,14 +521,14 @@ func (cfg *config) resolve(g *globals, fc *fileConfig, rel string, noMailbox boo
 		return err
 	}
 
-	cfg.policy = client.Policy{Unknown: fc.Policy.Unknown, Server: fc.Policy.Server}
+	cfg.policy = client.Policy{Unknown: fc.Policy.Unknown, Server: fc.Policy.Admit}
 	if p := cfg.policy.Unknown; p != "" && p != client.LandHeld && p != client.LandInbox {
 		return bad("policy.unknown", `policy.unknown is %q or %q, and %.40q is not`, client.LandHeld, client.LandInbox, p)
 	}
 	if p := cfg.policy.Server; p != "" && p != client.AdmitAll && p != client.AdmitAllowed {
-		return bad("policy.server", `policy.server is %q or %q, and %.40q is not`, client.AdmitAll, client.AdmitAllowed, p)
+		return bad("policy.admit", `policy.admit is %q or %q, and %.40q is not`, client.AdmitAll, client.AdmitAllowed, p)
 	}
-	for key, v := range map[string]string{"policy.unknown": cfg.policy.Unknown, "policy.server": cfg.policy.Server} {
+	for key, v := range map[string]string{"policy.unknown": cfg.policy.Unknown, "policy.admit": cfg.policy.Server} {
 		if v != "" {
 			cfg.values[key] = setting{v, "file"}
 		}
@@ -655,7 +668,7 @@ func templateFor(profile string, g *globals) string {
 	setting("prekey-lifetime", g.prekeyLifetime, formatTime(protocol.PrekeyLifetime))
 	setting("certificate-lifetime", g.certLifetime, formatTime(protocol.MaxCertificateLifetime))
 	b.WriteString("\n# [policy]\n")
-	fmt.Fprintf(&b, "# unknown = %s\n# server = %s\n", tomlString(client.LandHeld), tomlString(client.AdmitAll))
+	fmt.Fprintf(&b, "# unknown = %s\n# admit = %s\n", tomlString(client.LandHeld), tomlString(client.AdmitAll))
 	b.WriteString("\n# [recv]\n")
 	fmt.Fprintf(&b, "# drain-time = %s\n# headers = false\n", tomlString(strings.TrimSuffix(client.DefaultDrainTime.String(), "0s")))
 	return b.String()

@@ -121,7 +121,7 @@ func (w *world) goMailbox(workingKey bool) (*client.Mailbox, *shMailbox) {
 func (w *world) publish(a protocol.Address, record string) {
 	w.t.Helper()
 	p := &shMailbox{w: w, dir: filepath.Join(w.work, "publisher")}
-	p.must(`mkdir -p "$DR" && dr_api PUT "/v1/` + a.String() + `/revocations" ` + record + ` > /dev/null`)
+	p.must(`mkdir -p "$DR" && dr_api PUT "/v1/` + a.String() + `/revocation" ` + record + ` > /dev/null`)
 }
 
 // ran is what one command did.

@@ -170,7 +170,7 @@ func TestShowHoldsTheFileToTheLineRecvKept(t *testing.T) {
 		{"empty", ""},
 		{"cut short", string(line[:len(line)/2])},
 		{"a line feed after it", string(line) + "\n"},
-		{"two lines", string(line) + "\n" + `{"type":"refused","id":"` + strings.Repeat("0", 64) + `","code":"bad_signature","detail":"x"}`},
+		{"two lines", string(line) + "\n" + `{"type":"refused","id":"` + strings.Repeat("0", 64) + `","code":"invalid_signature","detail":"x"}`},
 		{"a space before it", " " + string(line)},
 		{"one JSON object that is no line recv keeps", `{"v":1}`},
 		{"a line to another mailbox", strings.ReplaceAll(string(line), b.Address().String(), a.Address().String())},

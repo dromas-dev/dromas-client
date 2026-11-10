@@ -35,10 +35,10 @@ func ReadOf(r *http.Request) (protocol.Address, bool) {
 }
 
 // RevocationsOf reports whether r is a read of an address's revocations, GET
-// /v1/<address>/revocations, and of which address.
+// /v1/<address>/revocation, and of which address.
 func RevocationsOf(r *http.Request) (protocol.Address, bool) {
 	rest, ok := strings.CutPrefix(r.URL.Path, "/v1/")
-	addr, ok2 := strings.CutSuffix(rest, "/revocations")
+	addr, ok2 := strings.CutSuffix(rest, "/revocation")
 	if !ok || !ok2 || r.Method != http.MethodGet || strings.Contains(addr, "/") {
 		return protocol.Address{}, false
 	}
@@ -69,14 +69,14 @@ func Serve(t testing.TB, s *fakeserver.Server, w http.ResponseWriter, r *http.Re
 	fakeserver.WriteJSON(w, http.StatusOK, br)
 }
 
-// Carry answers r as next answers it, but that a 410 revoked carries rec in
+// Carry answers r as next answers it, but that a 410 mailbox_revoked carries rec in
 // place of the record its server holds, or none for nil: an operator that
 // says an address is revoked and shows another record, or none.
 func Carry(w http.ResponseWriter, r *http.Request, next http.Handler, rec *protocol.Revocations) {
 	got := httptest.NewRecorder()
 	next.ServeHTTP(got, r)
 	if got.Code == http.StatusGone {
-		Refuse(w, protocol.CodeRevoked, func(p *protocol.Problem) { p.Record = rec })
+		Refuse(w, protocol.CodeMailboxRevoked, func(p *protocol.Problem) { p.Record = rec })
 		return
 	}
 	for k, v := range got.Header() {
@@ -89,11 +89,11 @@ func Carry(w http.ResponseWriter, r *http.Request, next http.Handler, rec *proto
 // Hides puts an operator in front of s that serves every mailbox without what
 // its identity signed about it: a revoked mailbox as if it were not, and no
 // revocation of a mailbox's certificates. A read of an address's revocations
-// is answered 404 not_revoked.
+// is answered 404 revocation_not_found.
 func Hides(t testing.TB, s *fakeserver.Server) {
 	s.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
 		if _, ok := RevocationsOf(r); ok {
-			Refuse(w, protocol.CodeNotRevoked)
+			Refuse(w, protocol.CodeRevocationNotFound)
 			return
 		}
 		if _, ok := ReadOf(r); !ok {
