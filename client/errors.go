@@ -18,9 +18,6 @@ type RefusedError struct {
 	// RefusedPrekeyType. Otherwise it is empty.
 	Code   string
 	Reason string
-	// notReady is set on a refusal that this machine puts right without its
-	// owner ([NotReady]).
-	notReady bool
 	// renews is set on a refusal that the mailbox's next renewal puts right
 	// (renewalMends).
 	renews bool
@@ -32,37 +29,10 @@ func refuse(format string, args ...any) error {
 	return &RefusedError{Reason: fmt.Sprintf(format, args...)}
 }
 
-// refuseNotReady is refuse, of a fault that this machine puts right without
-// its owner ([NotReady]).
-func refuseNotReady(format string, args ...any) error {
-	return &RefusedError{Reason: fmt.Sprintf(format, args...), notReady: true}
-}
-
 // refuseRenews is refuse, of a refusal that the mailbox's next renewal puts
 // right (renewalMends).
 func refuseRenews(format string, args ...any) error {
 	return &RefusedError{Reason: fmt.Sprintf(format, args...), renews: true}
-}
-
-// NotReady reports whether err is a refusal that this machine puts right
-// without its owner, as after a boot: a folder of the mailbox missing, as on a
-// volume not yet mounted, or this machine's clock behind, as before a time
-// source sets it. The clock is behind where a certificate of the mailbox has
-// not begun by it, or where the server refuses a pass as not valid at its
-// clock and dates its answer later than this machine's clock reads.
-// [Transient] takes it, and [Mailbox.Follow] and [Mailbox.Await] try again
-// [ReceiveEvery] after it, as kubelet tries a volume not mounted again; a
-// folder removed on purpose is tried until its owner makes it again.
-func NotReady(err error) bool {
-	var rf *RefusedError
-	var ae *APIError
-	switch {
-	case errors.As(err, &rf):
-		return rf.notReady
-	case errors.As(err, &ae):
-		return ae.Problem.Code == protocol.CodePassExpired && !ae.Dated.IsZero() && !ae.Read.IsZero() && ae.Read.Before(ae.Dated)
-	}
-	return false
 }
 
 // lookupError is a read of a mailbox that served nothing to seal to: no answer,

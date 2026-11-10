@@ -452,7 +452,7 @@ func (b *Mailbox) sentAt(stem string) (time.Time, bool) {
 // one it is in. Delete them there to drop the message.
 func (b *Mailbox) moveToFailed(stem string) error {
 	failed := b.path("outbox", "failed")
-	if err := os.MkdirAll(failed, 0o700); err != nil {
+	if err := makeDir(failed); err != nil {
 		return err
 	}
 	err := os.Rename(stem+".P", filepath.Join(failed, filepath.Base(stem)+".P"))

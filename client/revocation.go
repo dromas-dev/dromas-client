@@ -820,6 +820,20 @@ func (b *Mailbox) revokeBelow(ctx context.Context, serial uint64) (*protocol.Rev
 	return nil, fmt.Errorf("%w; it showed no revocation of this mailbox's certificates that verifies and covers every one below %d", perr, serial)
 }
 
+// unproven is an answer about a revocation whose read for the proof failed:
+// the call's error, whose code is what a caller reads, beside the read's,
+// which says whether a wait mends it ([Transient]).
+type unproven struct {
+	err, read error
+	what      string
+}
+
+func (e *unproven) Error() string {
+	return fmt.Sprintf("%v; %s failed: %v", e.err, e.what, e.read)
+}
+
+func (e *unproven) Unwrap() error { return e.err }
+
 // provedCodes are the answers about a revocation that proved checks and
 // never believes: each is final only once this mailbox holds a revocation that
 // verifies, so none is ever one of undeliverable's, whose answers end a
@@ -845,9 +859,10 @@ var provedCodes = []protocol.Code{protocol.CodeMailboxRevoked, protocol.CodeSend
 // A revocation that verifies is a [RevokedError], which is final; of this
 // mailbox's own address it is kept, the event that ends its command
 // (keepRevocation). Without one the error stays the call's, saying so: a
-// server's word revokes nothing. A read is proved by what it carries alone,
-// so a proof's own reads are not proved again. With no mailbox ([Publish]),
-// nothing is kept.
+// server's word revokes nothing. Where the read for one failed, the answer is
+// unproven, and a wait that mends that read mends the call ([Transient]). A
+// read is proved by what it carries alone, so a proof's own reads are not
+// proved again. With no mailbox ([Publish]), nothing is kept.
 func (b *Mailbox) proved(ctx context.Context, method, path string, err error) error {
 	c := code(err)
 	if !slices.Contains(provedCodes, c) {
@@ -898,7 +913,7 @@ func (b *Mailbox) proved(ctx context.Context, method, path string, err error) er
 			kerr = o.err
 		}
 		if kerr != nil {
-			return fmt.Errorf("%w; reading this mailbox's revocations failed: %v", err, kerr)
+			return &unproven{err: err, read: kerr, what: "reading this mailbox's revocations"}
 		}
 		if !b.usesRevoked() {
 			return fmt.Errorf("%w; it showed no revocation of this mailbox's certificates that verifies and covers the one it uses", err)
@@ -919,9 +934,7 @@ func (b *Mailbox) proved(ctx context.Context, method, path string, err error) er
 		}
 	}
 	if lerr != nil {
-		// The call's error alone is wrapped: its code is what a caller reads,
-		// whichever comes first.
-		return fmt.Errorf("%w; asking for the revocation failed: %v", err, lerr)
+		return &unproven{err: err, read: lerr, what: "asking for the revocation"}
 	}
 	if !held {
 		return fmt.Errorf("%w; it showed no revocation of %s that verifies, so this mailbox does not take that address as revoked", err, who)

@@ -248,7 +248,10 @@ func checkKeptDir(path string) error {
 
 // createPrivate makes a new file with a protected access list (ownersAlone) from
 // its making: a file inherits its directory's otherwise, and a list set once it
-// exists leaves whoever opened it before then their handle.
+// exists leaves whoever opened it before then their handle. It opens a link
+// as itself (FILE_FLAG_OPEN_REPARSE_POINT, as syscall.Open does for
+// O_CREATE|O_EXCL), so a name that is a link is refused as one that exists,
+// as O_EXCL refuses one on Unix, and nothing is made at the link's target.
 func createPrivate(name string, want *windows.SECURITY_DESCRIPTOR) (windows.Handle, error) {
 	sa := windows.SecurityAttributes{SecurityDescriptor: want}
 	sa.Length = uint32(unsafe.Sizeof(sa))
@@ -257,7 +260,7 @@ func createPrivate(name string, want *windows.SECURITY_DESCRIPTOR) (windows.Hand
 		return 0, err
 	}
 	return windows.CreateFile(path, windows.GENERIC_READ|windows.GENERIC_WRITE,
-		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE, &sa, windows.CREATE_NEW, windows.FILE_ATTRIBUTE_NORMAL, 0)
+		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE, &sa, windows.CREATE_NEW, windows.FILE_ATTRIBUTE_NORMAL|windows.FILE_FLAG_OPEN_REPARSE_POINT, 0)
 }
 
 // NewPrivateTemp is a new empty file in dir, to rename into place, its owner's

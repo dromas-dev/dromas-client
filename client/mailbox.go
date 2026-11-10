@@ -912,7 +912,7 @@ func (b *Mailbox) foldersThere() error {
 	if len(missing) == 0 {
 		return nil
 	}
-	return refuseNotReady("%s: missing, and this mailbox's state file records that it made them. The volume they are on may not be mounted, or the config file may name another place, so this command listed, fetched and acked nothing. Mount the volume or put the config file right. If a folder was removed on purpose, make it again, empty, and run the command again", strings.Join(missing, ", "))
+	return refuse("%s: missing, and this mailbox's state file records that it made them. The volume they are on may not be mounted, or the config file may name another place, so this command listed, fetched and acked nothing. Mount the volume or put the config file right, then run the command again. If a folder was removed on purpose, make it again, empty, and run the command again", strings.Join(missing, ", "))
 }
 
 // there is f, a reading of a folder, refused first where a folder is missing
