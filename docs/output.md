@@ -1,8 +1,8 @@
 # Output format
 
-Every `dromas` command prints [JSON Lines](https://jsonlines.org/): one JSON object per line, with `type` as the first member, naming what the line reports. Help is the only output that is plain text.
+Every `dromas` command prints [JSON Lines](https://jsonlines.org/): one JSON object per line, with `type` as the first member, naming what the line reports. Help, and the notice that `-h` is deprecated in favour of `--help`, are the only output in plain text.
 
-A command prints what it did, and what it met on the way, to stdout, messages and refusals alike. A command prints only these lines to stderr:
+A command prints what it did, and what it met on the way, to stdout, messages and refusals alike. The only JSON lines a command prints to stderr are these:
 
 - `error`, when the command failed
 - `usage_error`, when the command line was invalid
@@ -48,13 +48,13 @@ Other line types are named for what they report, and `allowed` and `blocked` car
 |---|---|
 | `0` | Success. Refused and held messages do not change the exit code, because any sender can cause either |
 | `1` | Failure |
-| `2` | Invalid command line or config file, so nothing ran. `--help` exits `0` |
+| `2` | Invalid command line or config file, so nothing ran. Help that you ask for exits `0` |
 | `3` | Success, and the mailbox needs attention: from `recv`, messages were received, and the prekey was not renewed, its server served a prekey the mailbox did not make (`prekey_not_made`), the mailbox's ACL was not sent to its server, the server held an ACL the mailbox had not sent, or an `--exec` program ran out of tries (`exec_failed`); from `send` and `outbox flush`, the post went ahead though the mailbox's ACL was not sent (`acl_sync_failed`); from `prekey renew`, `prekey_not_made`; from any command that called a server, a `sunset` line, or a `deprecated` line whose date has passed. Later runs retry; if `dromas status` still reports it a day later, the server is refusing the change or cannot be reached. From `status`, its `attention` list is not empty |
 | `4` | From `recv`, a refusal no wait mends, and its `error` line has `fatal`: a revocation, no mailbox at this address with its registration refused, a mailbox in another format, a folder of the mailbox missing, this machine's clock behind, or any other refusal of a server's or of this client's. Under the systemd unit, which does not restart on `4`, the service stays failed until its owner puts it right and starts it again. Exit `4` also comes from any command that receives, sends, delivers or renews, `init` and `peer allow` among them, refused as `restore_required`. A process started again meets it again. Exit `1` from `recv` is a failure that a later run may pass, and `recv --follow` makes again by itself a call that a wait may mend |
 
 ## Refusal codes
 
-A refused message's `code` names the check that failed. A refusal's words are the client's own, never text from the message, its sender or the server.
+The `code` member of a `refused` line or an `error` line names the check that failed. A refusal's words are the client's own, never text from the message, its sender or the server.
 
 | Code | Check that failed |
 |---|---|

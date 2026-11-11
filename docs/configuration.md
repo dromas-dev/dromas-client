@@ -28,7 +28,7 @@ rotating-keys-dir = "~/.local/state/dromas/default/keys"
 # headers = false
 ```
 
-`dromas init` writes the file only when none exists, so you can make the file read-only. Flags you give `dromas init`, such as `--server`, are written into the file. When `XDG_DATA_HOME` or `XDG_STATE_HOME` is an absolute path, `dromas init` writes paths under that directory instead of `~/.local/share` or `~/.local/state`.
+`dromas init` writes the file only when none exists, so you can make the file read-only. The paths, `--server`, `--ca-file`, `--prekey-lifetime` and `--certificate-lifetime` that you give `dromas init` are written into the file. When `XDG_DATA_HOME` or `XDG_STATE_HOME` is an absolute path, `dromas init` writes paths under that directory instead of `~/.local/share` or `~/.local/state`.
 
 ### Location
 
@@ -37,7 +37,7 @@ The config file for the default profile is `~/.config/dromas/default.toml`, or `
 - `--profile <name>` or `DROMAS_PROFILE` selects `<name>.toml` in the same directory. A profile name contains only letters, digits, `-` and `_`.
 - `--config <file>` or `DROMAS_CONFIG` selects the file at that path.
 
-Give a profile or a file, not both. `dromas` never reads a config file from the working directory.
+A flag wins over an environment variable. Two flags, or two environment variables, that name both a profile and a file are an error. `dromas` never reads a config file from the working directory.
 
 `dromas` rejects a config file that other users can write or that another user owns, a file that is not valid TOML, and any key this page does not list. An invalid config file stops every command with exit status 2 and a `config_error` line.
 
@@ -72,7 +72,7 @@ A key that takes a **duration** accepts a Go duration, with units up to `h`: `90
 - Default: none; the key is required
 - Flag: `--base-dir`
 
-The directory of the mailbox's state file and lists (`state`, `allowed`, `blocked`, `aliases`). `identity-file` and `rotating-keys-dir` default to paths under it. On Linux and macOS, `dromas` rejects a `base-dir` on a network filesystem, because the mailbox's lock is a `flock`.
+The directory of the mailbox's state file and lists (`state`, `allowed`, `blocked`, `aliases`). `identity-file` and `rotating-keys-dir` default to paths under it. On Linux and macOS, which can detect a network filesystem, `dromas` rejects a `base-dir` on one, because the mailbox's lock is a `flock`.
 
 ### `mail-dir`
 
@@ -135,7 +135,7 @@ How long each new prekey is valid. A shorter lifetime shortens how long a stolen
 ### `certificate-lifetime`
 
 - Type: time, more than `7d1h` and at most `45d1h`
-- Default: the longest lifetime the server accepts
+- Default: `45d1h`, or the longest lifetime the server accepts when that is shorter
 - Flag: `--certificate-lifetime`
 - Environment: `DROMAS_CERTIFICATE_LIFETIME`
 
@@ -184,7 +184,7 @@ After a passphrase unlocks the identity's key file, add the key to the agent, as
 - Flag: `--unsafe-inbox-permissions`
 - Environment: `DROMAS_UNSAFE_INBOX_PERMISSIONS`
 
-When `true`, `dromas` reads `inbox-dir` and `held/` even when other users can write to them, and reads message files that other users can access. Anyone who can write there can add a message that reads as delivered.
+When `true`, `dromas` reads `inbox-dir` and `held/` even when other users can write to them or another user owns them, and reads message files that other users can access. Anyone who can write there can add a message that reads as delivered.
 
 ### `unsafe-state-permissions`
 

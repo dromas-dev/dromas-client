@@ -23,7 +23,7 @@ An `inbox-dir` that is itself a mount point stays as an empty directory when the
 
 ### File permissions
 
-`dromas` creates each directory readable only by you, and leaves a directory that exists as it is. `dromas` rejects:
+`dromas` creates each directory accessible only to you, and leaves a directory that exists as it is. `dromas` rejects:
 
 - A private key file that other users can access, as ssh does. A Kubernetes or Docker Compose secret needs mode `0400`. No setting turns this off.
 - `state`, `gate`, `partial`, `allowed`, `blocked` or `aliases` when other users can access the file or another user owns it. The error gives the command that fixes the file. A list you write yourself needs mode `0600`.
@@ -45,7 +45,7 @@ Never back up or sync `prekeys/` or `tls-ticket`. A copy of `prekeys/` undoes fo
 
 To restore a mailbox:
 
-1. Put `identity` at the path that `identity-file` names, and the lists beside it if you kept them.
+1. Put `identity` at the path that `identity-file` names, and the lists in `base-dir` if you kept them.
 2. Run `dromas prekey renew`. If you also kept `prekeys/`, run `dromas init --restore` instead.
 
 Without `allowed` and `blocked`, the first renewal that `recv` makes replaces the server's ACL with an open one. A sender you blocked then reaches `held/` again until you restore the lists.
@@ -60,7 +60,7 @@ A lost `state` loses its replay set, so the mailbox may deliver a message again 
 
 An identity is an Ed25519 key. To make a P-256 identity instead, run `dromas init --identity-type ecdsa-sha2-nistp256`. Every client verifies both (`PROTOCOL.md` §4.1).
 
-The identity's key file has no passphrase by default. To add one, run `ssh-keygen -p -f <identity-file>`, without `-m PEM`, so the file stays in the OpenSSH format. A key file with a passphrase leaves the mailbox locked after a reboot, until you unlock the key in one of these ways:
+The identity's key file has no passphrase by default. To add one, run `ssh-keygen -p -f <identity-file>`, without `-m PEM`, so the file stays in the OpenSSH format. A command then needs the key unlocked in one of these ways:
 
 - **The mailbox's own ssh-agent.** `dromas agent start` runs stock `ssh-agent` at the socket that [`agent`](configuration.md#agent) names, separate from your shell's agent, which ssh forwards. `dromas agent add` then loads the key with stock `ssh-add`. Each command prints the command it runs.
 - **An askpass program.** [`askpass`](configuration.md#askpass) names a program that prints the passphrase, as `SSH_ASKPASS` does for ssh.
@@ -72,7 +72,9 @@ A command that signs with the identity uses the agent when the agent lists the k
 - For a key file with a passphrase, the command runs the `askpass` program when one is set, and otherwise prompts at the terminal. With neither, the command fails with `identity_locked`.
 - A command keeps a key it unlocked until its process ends, so `recv --wait` asks once.
 
-`dromas agent add` has `ssh-add` ask for the passphrase the same way. `ssh-add` runs the `askpass` program at most 3 times in all, and `agent add` fails with `identity_locked` when no passphrase from the program unlocks the key file.
+Without an `askpass` program, a reboot leaves the mailbox locked until you load the key into the agent again or run a command at a terminal.
+
+`dromas agent add` has `ssh-add` ask for the passphrase the same way, when the key file has one. `ssh-add` runs the `askpass` program at most 3 times in all, and `agent add` fails with `identity_locked` when no passphrase from the program unlocks the key file.
 
 While the key is locked, a mailbox whose identity signs neither sends nor receives. A mailbox under a certificate keeps sending and receiving, and renews nothing until you unlock the key.
 
@@ -115,7 +117,7 @@ A held message runs no program, and neither does a message that another `recv` r
 
 ## Send messages
 
-Never send a message a second time. A message the server did not accept waits in `outbox/`. `dromas outbox flush` posts it again, sealed afresh to the recipient's keys that the mailbox holds at that time.
+Never send a message a second time. A message the server did not accept waits in `outbox/`. `dromas outbox flush` posts it again, encrypted afresh to the recipient's prekey as the server serves it at that time.
 
 ## Senders
 
@@ -139,7 +141,7 @@ To be able to revoke the address without the mailbox or the key, make a revocati
 
 ```sh
 umask 077; dromas revocation make > <file>
-dromas revocation publish --record <file> <address>   # later, from any machine
+dromas revocation publish --record <file> <address>   # later, without the mailbox or its key
 ```
 
 `dromas init --revocation-file <file>` writes the record to a new file when it creates the mailbox. `dromas init` rejects a path inside one of the mailbox's directories.
@@ -165,7 +167,7 @@ The server sets the limits, and the server's `llms.txt` states them. A refusal n
 
 ## Run as a service
 
-To receive messages as they arrive, run `dromas recv --follow --headers` under your system's service manager, one service for each mailbox. For a mailbox other than the default, add `--profile <name>`. `--headers` keeps the text a sender chose out of the service's log, and the `recv.exec` program still gets the whole message.
+To receive messages as they arrive, run `dromas recv --follow --headers` under your system's service manager, one service for each mailbox. For a mailbox other than the default, add `--profile <name>`. With `--headers`, the service's log records who sent each message and when, and none of the text a sender chose. The `recv.exec` program still gets the whole message.
 
 ### Linux
 
@@ -181,7 +183,7 @@ The `.deb`, `.rpm` and `.apk` packages install a systemd user unit, `dromas@.ser
 
    The unit runs `/usr/bin/dromas`. If you installed `dromas` somewhere else, edit `ExecStart` in the copy.
 
-2. Enable and start the service:
+2. Enable the service, to start it now and at each login:
 
    ```sh
    systemctl --user enable --now dromas@default
