@@ -5,8 +5,8 @@
 # - release: GoReleaser builds it (.goreleaser.yaml) and publishes the
 #   archives and Linux packages, an SBOM of each archive and checksums.txt, signed with cosign, as the
 #   tag's GitHub release, and every file the checksums name is attested;
-#   opens the winget pull request for the Windows zips, and commits the Nix
-#   package;
+#   opens the winget pull request for the Windows zips, commits the Nix
+#   package, and pushes the AUR package;
 # - verify: the published release is checked as README § Check a download has a user
 #   check it, as GoReleaser checks its own;
 # - rebuild: the release is built again from its tag on another image, and
@@ -113,6 +113,9 @@ jobs:
           # environment winget's secret, on a tag alone: a hand-run's snapshot
           # publishes nothing and is given none.
           WINGET_GITHUB_TOKEN: ${{ github.ref_type == 'tag' && secrets.WINGET_GITHUB_TOKEN || '' }}
+          # The SSH key of the maintainer's AUR account, which pushes the AUR
+          # package (.goreleaser.yaml § aurs), the environment's too.
+          AUR_KEY: ${{ github.ref_type == 'tag' && secrets.AUR_KEY || '' }}
       - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         if: github.ref_type == 'tag'
         with:

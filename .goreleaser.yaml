@@ -3,7 +3,7 @@
 # archived with the licence and README, a .deb, .rpm and .apk of each Linux
 # build, an SBOM of each archive, and
 # checksums.txt, signed with cosign, whose files the workflow attests; and
-# the winget and Nix packages made from those archives. Built
+# the winget, AUR and Nix packages made from those archives. Built
 # from the tagged module as Go's module proxy serves it (gomod.proxy), so a
 # release is what go install …@<tag> builds, and with GoReleaser's settings
 # for a reproducible build.
@@ -129,6 +129,34 @@ winget:
           owner: microsoft
           name: winget-pkgs
           branch: master
+
+# The Linux archives as the AUR package dromas-bin, by GoReleaser's aurs pipe:
+# on a release tag it pushes the PKGBUILD over SSH with AUR_KEY, the key of
+# the maintainer's AUR account, which the environment winget holds. The
+# package installs what the .deb does. A snapshot writes the PKGBUILD to
+# dist/ alone.
+aurs:
+  - name: dromas-bin
+    homepage: https://dromas.dev
+    description: The dromas command, a client of Dromas, end-to-end encrypted mailboxes for bots.
+    maintainers:
+      - "Drew Streib <dtype at dtype dot org>"
+    license: Apache-2.0
+    private_key: "{{ .Env.AUR_KEY }}"
+    git_url: "ssh://aur@aur.archlinux.org/dromas-bin.git"
+    skip_upload: auto
+    provides:
+      - dromas
+    conflicts:
+      - dromas
+    commit_author:
+      name: Drew Streib
+      email: dtype@dtype.org
+    package: |-
+      install -Dm755 ./dromas "${pkgdir}/usr/bin/dromas"
+      install -Dm644 ./packaging/systemd/dromas@.service "${pkgdir}/usr/lib/systemd/user/dromas@.service"
+      install -Dm644 ./LICENSE "${pkgdir}/usr/share/licenses/dromas-bin/LICENSE"
+      install -Dm644 ./README.md "${pkgdir}/usr/share/doc/dromas/README.md"
 
 # The Linux and macOS archives as a Nix package in the Nix User Repository
 # dromas-dev/nur, by GoReleaser's nix pipe, as GoReleaser publishes its own
