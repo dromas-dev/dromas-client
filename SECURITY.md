@@ -99,7 +99,7 @@ Each entry is a security question that is already decided. The `PROTOCOL.md` sec
 
 ## Where the rest is
 
-- **The threat model, what a server sees and can and cannot do, and the residual risks:** `PROTOCOL.md` §15. For whoever runs a mailbox, in short: `README.md` § No Server Trust.
+- **The threat model, what a server sees and can and cannot do, and the residual risks:** `PROTOCOL.md` §15. For whoever runs a mailbox, in short: `README.md` § No server trust.
 - **What is not built, or not decided:** the open issues, here and in [dromas-server](https://github.com/dromas-dev/dromas-server/issues); every one is wanted for v1.
 - **Every design decision beside the standard or system that does the same:** `PRECEDENTS.md`.
 - **The server's limits, and where each is weak:** dromas-server's [`LIMITS.md`](https://github.com/dromas-dev/dromas-server/blob/main/LIMITS.md).
