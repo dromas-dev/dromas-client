@@ -15,7 +15,7 @@
 # disk (client/fsync.go): a test kills a process, never the machine. -short
 # skips the long tests, each of which says so; CI never passes it. On macOS,
 # Windows and the BSDs ./sh is left to the Linux runs: the script is held to
-# GNU's and uutils' tools (README § The shell client), and its tests, a few
+# GNU's and uutils' tools (AGENTS.md § The shell client), and its tests, a few
 # thousand short processes, take from 3 to more than 20 minutes on a Mac,
 # where a process costs less than on Windows (go test ./sh still runs them,
 # with bash 4 or later and GNU coreutils first in PATH).

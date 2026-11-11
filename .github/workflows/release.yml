@@ -7,7 +7,7 @@
 #   tag's GitHub release, and every file the checksums name is attested;
 #   opens the winget pull request for the Windows zips, and commits the Nix
 #   package;
-# - verify: the published release is checked as README § Check a download has a user
+# - verify: the published release is checked as docs/install/verify.md has a user
 #   check it, as GoReleaser checks its own;
 # - rebuild: the release is built again from its tag on another image, and
 #   each archive and package must come out as the release job made it, which

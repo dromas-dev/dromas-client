@@ -53,8 +53,8 @@ archives:
         info: *info
       - src: README.md
         info: *info
-      # The systemd user unit, in the Linux archives alone (README § Run it as
-      # a service): the path is empty for any other system, which adds nothing.
+      # The systemd user unit, in the Linux archives alone (docs/mailbox.md
+      # § Run it as a service): the path is empty for any other system, which adds nothing.
       - src: '{{ if eq .Os "linux" }}packaging/systemd/dromas@.service{{ end }}'
         info: *info
 
@@ -199,4 +199,4 @@ release:
     gh attestation verify <file> -R dromas-dev/dromas-client --signer-workflow dromas-dev/dromas-client/.github/workflows/release.yml --source-ref refs/tags/{{ .Tag }}
     ```
 
-    Or with cosign: `README.md` § Check a download.
+    Or with cosign: `docs/install/verify.md`.
