@@ -72,7 +72,7 @@ Each entry is a security question that is already decided, and under it, where o
 
 **What the server sees and can do**
 - The operator sees who writes to whom, when, how much, and from which IP address (§15.2, §15.8; #507).
-  - The operator never sees a message's content or signature, and padding hides a message's size to within a block. An honest server keeps no sender beside a stored message, and `dromas-server` writes no address or message id to its logs, only a keyed hash under a key it holds in memory and replaces each day.
+  - The operator never sees a message's content or signature, and padding hides a message's size to within a block. An honest server keeps no sender beside a stored message. dromas.dev logs no client IP address and no mailbox address: its load balancer and TLS terminator keep no access log, and `dromas-server` writes an address or message id only as a keyed hash, under a key it holds in memory and replaces each day.
 - A server can drop, delay or delete a message, and no receipt shows the loss (§15.2, §15.9).
   - A server cannot read, alter or forge a message, and the sender keeps each message in `outbox/` until a server accepts it. A receipt from one client to another is #516, open.
 - The party that terminates TLS for a server is part of that server, and sees each pass in transit (§15.8; #586).
