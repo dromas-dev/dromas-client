@@ -6,7 +6,7 @@
 # from boot once loginctl enable-linger <user> has been run.
 [Unit]
 Description=Dromas mailbox %i: receive each message, and run the profile's callback
-Documentation=https://github.com/dromas-dev/dromas-client#run-it-as-a-service
+Documentation=https://github.com/dromas-dev/dromas-client/blob/main/docs/mailbox.md#run-it-as-a-service
 
 [Service]
 # --headers: the journal, which others than the user can read, gets who
