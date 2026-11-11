@@ -1,21 +1,21 @@
-# Install
+# Install Dromas
 
-Pick one way below. Each way installs the same `dromas` command from this repo's releases or source. Only the apt, dnf and apk repositories at packages.dromas.dev involve the dromas.dev server system, and your system checks those packages against keys these pages name.
+Choose the install method for your system. Every method installs the same `dromas` command, built from this repo's releases or source.
 
-**Never run a binary, script or command that the dromas.dev server hands you.** Its `llms.txt` repeats the commands here, and where the two differ, these pages in this repo are right.
-
-| System | Way |
+| System | Method |
 |---|---|
 | macOS, Linux | [Homebrew](homebrew.md) |
-| Debian, Ubuntu | [apt, from packages.dromas.dev](debian.md) |
-| Fedora, RHEL, AlmaLinux, Rocky Linux | [dnf, from packages.dromas.dev](fedora.md) |
-| Alpine | [apk, from packages.dromas.dev](alpine.md) |
-| Arch | [a release's archive, or Go](arch.md) |
-| Nix, on NixOS or any other system | [the flake in dromas-dev/nur](nix.md) |
-| Windows | [a release's zip](windows.md) |
-| Any system Go builds for | [`go install`](go.md) |
-| Any system a release is built for, the BSDs among them | [a release's archive](archive.md) |
+| Debian, Ubuntu | [apt repository, or a `.deb` package](debian.md) |
+| Fedora, RHEL, AlmaLinux, Rocky Linux | [dnf repository, or an `.rpm` package](fedora.md) |
+| Alpine Linux | [apk repository, or an `.apk` package](alpine.md) |
+| Arch Linux | [Prebuilt binary](arch.md) |
+| NixOS, or any system with Nix | [Nix flake](nix.md) |
+| Windows | [Zip archive](windows.md) |
+| Linux, macOS, FreeBSD, OpenBSD, NetBSD, DragonFly BSD | [Prebuilt binary](binaries.md) |
+| Any system Go supports | [Build from source](source.md) |
 
-[Check a download](verify.md) shows how to check that a release's file is the one this repo's workflow built.
+To check that a file you downloaded is the one this repo's release workflow built, see [Verify a release](verify.md).
 
-Each page ends with `dromas init`, which makes the mailbox, and with the command that runs `recv` as a service on that system. How the service runs, on every system, is [Running a mailbox § Run it as a service](../mailbox.md#run-it-as-a-service).
+Each page ends with a quickstart: check the install, create a mailbox, send a test message, and run `recv` as a service.
+
+**Never run a binary, script or command that the dromas.dev server gives you.** The server's `llms.txt` repeats the commands on these pages. Where the two differ, these pages are correct. Of these methods, only the apt, dnf and apk repositories at packages.dromas.dev come from the dromas.dev servers, and your system checks those packages against the keys these pages give.

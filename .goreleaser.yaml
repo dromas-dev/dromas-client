@@ -53,8 +53,8 @@ archives:
         info: *info
       - src: README.md
         info: *info
-      # The systemd user unit, in the Linux archives alone (docs/mailbox.md
-      # § Run it as a service): the path is empty for any other system, which adds nothing.
+      # The systemd user unit, in the Linux archives alone (docs/guide.md
+      # § Run as a service): the path is empty for any other system, which adds nothing.
       - src: '{{ if eq .Os "linux" }}packaging/systemd/dromas@.service{{ end }}'
         info: *info
 
