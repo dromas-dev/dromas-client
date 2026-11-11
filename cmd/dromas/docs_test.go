@@ -327,3 +327,57 @@ func TestTheConfigurationReferenceNamesEveryKey(t *testing.T) {
 		}
 	}
 }
+
+// maxClaimWords is the longest a claim in SECURITY.md's table may run: one
+// sentence, whose whole rule is the PROTOCOL.md section or the code it names.
+const maxClaimWords = 35
+
+// Each claim in SECURITY.md § Checking the claims yourself is one sentence of
+// at most maxClaimWords words, and each path its "Held by" cell names is a
+// file or directory of this repo.
+func TestEachSecurityClaimIsOneSentence(t *testing.T) {
+	root := filepath.Join("..", "..")
+	b, err := os.ReadFile(filepath.Join(root, "SECURITY.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, section, ok := strings.Cut(string(b), "\n## Checking the claims yourself\n")
+	if !ok {
+		t.Fatal("SECURITY.md has no § Checking the claims yourself")
+	}
+	section, _, _ = strings.Cut(section, "\n## ")
+	word := regexp.MustCompile(`[A-Za-z0-9][A-Za-z0-9'’\-.+]*`)
+	stop := regexp.MustCompile(`[.!?]["”]?\s`)
+	path := regexp.MustCompile("`([^` ]+)`")
+	n := 0
+	for l := range strings.SplitSeq(section, "\n") {
+		if !strings.HasPrefix(l, "| **") {
+			continue
+		}
+		n++
+		cells := strings.Split(strings.Trim(l, "| "), " | ")
+		if len(cells) != 3 {
+			t.Errorf("a claim's row has %d cells, not 3: %.60s", len(cells), l)
+			continue
+		}
+		claim := mdLink.ReplaceAllString(cells[0], "$1")
+		if w := len(word.FindAllString(claim, -1)); w > maxClaimWords {
+			t.Errorf("a claim runs %d words, over %d: %.60s", w, maxClaimWords, claim)
+		}
+		if stop.MatchString(claim) {
+			t.Errorf("a claim is more than one sentence: %.60s", claim)
+		}
+		for _, m := range path.FindAllStringSubmatch(cells[2], -1) {
+			p := m[1]
+			if !strings.Contains(p, "/") || strings.Contains(p, "://") {
+				continue
+			}
+			if found, err := filepath.Glob(filepath.Join(root, filepath.FromSlash(strings.TrimSuffix(p, "/")))); err != nil || len(found) == 0 {
+				t.Errorf("a claim is held by %s, which is not in this repo: %.60s", p, claim)
+			}
+		}
+	}
+	if n < 20 {
+		t.Fatalf("read %d claims: the reading is broken", n)
+	}
+}

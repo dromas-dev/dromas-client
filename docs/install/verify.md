@@ -2,15 +2,15 @@
 
 This repo's release workflow builds each release from the release's signed tag, after the tests pass on that commit. The workflow publishes, with each release:
 
-- an attestation of the build for every file
+- an attestation of the build for every file, which names the tag, the commit and the workflow
 - an SBOM of each archive
 - `checksums.txt`, signed with cosign by the workflow, as GoReleaser documents
 
-Releases are immutable. A `go install` build needs none of this, because Go's checksum database verifies the module instead.
+From v0.1.1 on, a release is immutable, and its tag cannot move. A `go install` build needs none of this, because Go's checksum database verifies the module instead.
 
 ## Verify with the GitHub CLI
 
-With gh 2.102.0 or later, check a file against the release, and check that this repo's workflow built the file from the release's tag on a GitHub-hosted runner. Replace `<tag>` with the release's tag, such as `v0.6.2`:
+With gh 2.102.0 or later, check a file against the release, and check that this repo's workflow built the file from the release's tag on a GitHub-hosted runner. Replace `<tag>` with the release's tag, such as `v0.6.2`. Keep `--source-ref`: without it, an attestation that this repo's workflow made on any branch passes.
 
 ```sh
 gh release verify-asset <tag> dromas_*_linux_amd64.tar.gz -R dromas-dev/dromas-client
