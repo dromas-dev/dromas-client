@@ -68,34 +68,49 @@ Each row is a claim in one sentence, the section of `PROTOCOL.md` that gives the
 
 ## Decided questions
 
-Each entry is a security question that is already decided. The `PROTOCOL.md` section that the entry names gives the reasoning. The issue that the entry names decided the question, and carries the `decided` label: `gh issue list -R dromas-dev/dromas-client --label decided --state closed` lists every such issue. A report of a decided question is not a vulnerability. A better design for one is welcome as an issue.
+Each entry is a security question that is already decided, and under it, where one applies, what limits the risk or why the design accepts it. The `PROTOCOL.md` section that the entry names gives the reasoning. The issue that the entry names decided the question, and carries the `decided` label: `gh issue list -R dromas-dev/dromas-client --label decided --state closed` lists every such issue. A report of a decided question is not a vulnerability. A better design for one is welcome as an issue.
 
 **What the server sees and can do**
 - The operator sees who writes to whom, when, how much, and from which IP address (§15.2, §15.8; #507).
-- A server can drop, delay or delete a message, and no receipt shows the loss (§15.2, §15.9). A receipt from one client to another is #516, open.
+  - The operator never sees a message's content or signature, and padding hides a message's size to within a block. An honest server keeps no sender beside a stored message, and `dromas-server` writes no address or message id to its logs, only a keyed hash under a key it holds in memory and replaces each day.
+- A server can drop, delay or delete a message, and no receipt shows the loss (§15.2, §15.9).
+  - A server cannot read, alter or forge a message, and the sender keeps each message in `outbox/` until a server accepts it. A receipt from one client to another is #516, open.
 - The party that terminates TLS for a server is part of that server, and sees each pass in transit (§15.8; #586).
+  - A pass lasts ten minutes at one server, and never gives plaintext or a signature. `README.md` § No server trust says who terminates TLS for dromas.dev.
 - A sender that posts the same ciphertext again learns, on the server's word, whether the recipient's mailbox still holds the message (§15.8; #719).
+  - Removing the signal would need the server to keep a record of each acked message, and a conforming sender never posts a message twice.
 - A reader's lookup of a sender's revocations tells the server which senders the reader has just verified (§15.8; #752).
+  - The lookup is how a reader catches a revoked sender at read time, and any call that names the sender gives the server the same link.
 - A lookup's compressed length can help a network observer guess which mailbox a sender is about to write to (§15.8).
+  - The answer holds only the mailbox's public documents, so the length can point at a mailbox but reveals no secret.
 
 **Passes, keys and revocation**
 - A pass is a bearer credential at one server for ten minutes, and is not bound to the request that carries the pass (§15.5; #570, #724).
+  - Binding a pass to each request would leave the server a signed record of who writes to whom. A stolen pass gives a thief only what a hostile server can already do.
 - A server can withhold a revocation from a reader that has never seen the revocation, and the protocol has no key transparency (§15.6; #572).
+  - A reader keeps every revocation it was shown, and a record that the owner hands over out of band settles the question. Key transparency fits inside version 1.
 - Against a hostile server, a stolen working key signs until the key's certificate ends, at most 45 days and an hour after the certificate began (§15.5; #716).
+  - Every reader enforces that limit, whatever the server serves, and a renewal or a revocation ends the key wherever it is seen.
 
 **Forward secrecy and the signature**
-- Version 1 has no ratchet, so the protocol gives no per-message forward secrecy and no post-compromise security (§15.3; #575).
-- A recipient can show anyone what a sender signed, so a message is not deniable toward the message's recipient (§15.4; #29).
+- Forward secrecy is per prekey, and version 1 has no ratchet, so it gives no post-compromise security (§15.3; #575).
+  - A mailbox that renews daily and polls deletes a message's prekey about a day after the message arrives, and a shorter prekey lifetime shortens that. Per-prekey forward secrecy keeps no state per peer, so each mailbox renews and deletes on its own.
+- A recipient can show anyone what a sender signed, so a message is not deniable toward its recipient (§15.4; #29).
+  - This is the trade-off that lets a program verify who sent each message it acts on. The server keeps no signature, and can prove nothing about who sent what.
 - A reader decrypts a message before the reader verifies the message's signature (§15.4; #49).
+  - Every system whose encryption wraps the signature does the same, OpenPGP and Nostr's NIP-17 among them (`PRECEDENTS.md`), and the wrapping keeps the signature from the server.
 - A verified signature proves who sent a message, and does not prove that the message is safe to obey (§15.9).
 
 **The mailbox's own machine**
-- Code that runs as the mailbox's owner can read the mailbox's keys and write the mailbox's files (§15.1; #717).
+- The client trusts code that runs as the mailbox's owner (§15.1; #717).
 - A mailbox that loses its state, or puts back an older copy of the state, can be served again a message that the mailbox accepted before (§15.9; #784).
-- A clock that steps or jumps is a failure, and the failure's cost is accepted (§15.7; #831).
+  - A replay works only within that message's TTL, and keying work by `from` and `msg_id` makes a repeat harmless.
+- A clock that steps or jumps is a failure whose cost is accepted (§15.7; #831).
+  - A clock further off than the skew allowance is stopped at its pass before it fetches, prunes or deletes, and a client never sets its clock by a server.
 
 **Senders**
-- One verified sender, or many cheap identities, can fill an open mailbox to the mailbox's caps and spend the mailbox's intake budget (§15.9; dromas-server's `LIMITS.md` § Known weaknesses). An allow list is the full defence for a mailbox that knows its senders.
+- One verified sender, or many cheap identities, can fill an open mailbox to the mailbox's caps and spend the mailbox's intake budget (§15.9; dromas-server's `LIMITS.md` § Known weaknesses).
+  - An allow list is the full defence for a mailbox that knows its senders.
 
 ## Where the rest is
 

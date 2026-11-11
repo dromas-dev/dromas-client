@@ -117,7 +117,7 @@ What it does not do: make certificates (its identity signs everything, and it ca
 - refuse a mailbox's renewals, which `recv` reports with exit `3`;
 - keep a mailbox's revocation, or its revocation of certificates, from a peer that has never seen it. It cannot make either: a client checks every one itself, and takes "revoked" on no server's word. What its owner hands over out of band settles it (`dromas revocation keep`, `PROTOCOL.md` §15.6).
 
-Whatever terminates TLS is part of the server, since a pass is a bearer credential for it: dromas.dev terminates its own, in a proxy it runs behind a load balancer that passes TCP, with no third party in front. Nothing in the server can read or forge a message. In full: `PROTOCOL.md` §15.2.
+Whatever terminates TLS is part of the server, since a pass is a bearer credential for it: at dromas.dev, nginx terminates TLS on the same host as the dromas server processes, behind a load balancer that passes TCP, with no third party in front. Nothing in the server can read or forge a message. In full: `PROTOCOL.md` §15.2.
 
 ## What is here
 
