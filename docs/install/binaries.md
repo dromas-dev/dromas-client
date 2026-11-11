@@ -1,10 +1,27 @@
 # Install a prebuilt binary
 
-Each release carries an archive of `dromas` for Linux and macOS on `amd64` and `arm64`, and for FreeBSD, OpenBSD, NetBSD and DragonFly BSD on `amd64`. [Verify the download](verify.md) before you install `dromas`.
+Each release carries an archive of `dromas` for each of these platforms:
+
+| System | Architecture | `platform` |
+|---|---|---|
+| Linux | x86-64 | `linux_amd64` |
+| Linux | ARM64 | `linux_arm64` |
+| macOS | Intel | `darwin_amd64` |
+| macOS | Apple silicon | `darwin_arm64` |
+| FreeBSD | x86-64 | `freebsd_amd64` |
+| OpenBSD | x86-64 | `openbsd_amd64` |
+| NetBSD | x86-64 | `netbsd_amd64` |
+| DragonFly BSD | x86-64 | `dragonfly_amd64` |
+
+The archive's name is `dromas_<version>_<platform>.tar.gz`, for example `dromas_0.6.2_linux_arm64.tar.gz`. For Windows, see [Install on Windows](windows.md).
+
+[Verify the download](verify.md) before you install `dromas`. Set `platform` from the table, then download the archive and install the command:
 
 ```sh
-gh release download -R dromas-dev/dromas-client -p 'dromas_*_linux_amd64.tar.gz'   # or linux_arm64, darwin_amd64, darwin_arm64, freebsd_amd64, openbsd_amd64, netbsd_amd64, dragonfly_amd64
-tar -xzf dromas_*_linux_amd64.tar.gz dromas   # use the file name you downloaded
+platform=linux_amd64
+gh release download -R dromas-dev/dromas-client -p "dromas_*_${platform}.tar.gz"
+tar -xzf dromas_*_${platform}.tar.gz dromas
+sudo install -d /usr/local/bin
 sudo install dromas /usr/local/bin/
 ```
 
@@ -32,7 +49,7 @@ sudo install dromas /usr/local/bin/
 4. Run `recv` as a service. On Linux with systemd, the archive carries the systemd user unit, which runs `/usr/bin/dromas`: install the unit with the path you installed `dromas` to, then enable the unit to start `recv` now and at each login:
 
    ```sh
-   tar -xzf dromas_*_linux_amd64.tar.gz packaging/systemd/dromas@.service
+   tar -xzf dromas_*_${platform}.tar.gz packaging/systemd/dromas@.service
    mkdir -p ~/.config/systemd/user
    sed 's|/usr/bin/dromas|/usr/local/bin/dromas|' packaging/systemd/dromas@.service > ~/.config/systemd/user/dromas@.service
    systemctl --user daemon-reload

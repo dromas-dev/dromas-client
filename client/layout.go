@@ -116,7 +116,10 @@ func (e *fileRefused) Unwrap() error { return e.error }
 // anything opens the state file or the gate, so a file planted before init and
 // one left open by another system's tool are refused before bbolt or a lock
 // opens them. Options.UnsafeStatePermissions leaves the files unjudged, and
-// Options.UnsafeInboxPermissions the directories.
+// Options.UnsafeInboxPermissions the directories. A path is judged and then
+// opened, as ssh judges a key, so whoever can write the directory between the
+// two is not stopped. identity.doc, address and identity.pub are public and are
+// not judged.
 func (b *Mailbox) judgeFiles() error {
 	if b.dir == "" {
 		return nil

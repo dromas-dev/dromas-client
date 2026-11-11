@@ -13,6 +13,11 @@
 #   each archive and package must come out as the release job made it, which
 #   verify has checked against what was published; the .deb is installed and
 #   its systemd unit verified.
+# .github/allowed_signers and this workflow are read from the tagged commit, so
+# a change merged to main changes both for the next tag; the repo's tag ruleset
+# lets only an org admin make, move or delete a v* tag, so nobody else can
+# release such a change. From v0.1.1 on, a release is immutable and its tag
+# cannot move.
 # By hand (workflow_dispatch), all of it but the tag and verify, on main as a
 # snapshot published nowhere: so a release's every build and test runs
 # before any tag is made. Actions are

@@ -44,10 +44,14 @@ const resumeWithin = 24 * time.Hour
 // server it resumes to, because a resumed session carries no certificate, and it
 // authenticates the mailbox to nobody, so every call that needs a pass still
 // carries one (PROTOCOL.md §8). A session read from the file offers no early
-// data (decode).
+// data (decode); no test holds that, because crypto/tls offers early data only
+// over QUIC. Past resumeWithin, the outer limit is crypto/tls's own: it resumes
+// no session past its leaf certificate's NotAfter, or whose verified chain no
+// longer verifies. Whoever can write the rotating keys' directory can plant a
+// ticket, which is within that directory's trust.
 //
 // The ticket's secret is a key: whoever reads the file and is on the network
-// path can stand in for the server (SECURITY.md). The state file holds no key,
+// path can stand in for the server. The state file holds no key,
 // because a key deleted inside a database stays in its free pages
 // (client/store.go). crypto/tls calls Put as a connection reads, during a Hold
 // that holds no lock, and during a command that holds the state file. So Put
