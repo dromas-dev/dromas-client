@@ -344,28 +344,33 @@ func askpass(program, prompt string) ([]byte, error) {
 
 // agentGroup is the agent group and its commands.
 func (e *cli) agentGroup() *cobra.Command {
-	return e.group("agent", "the mailbox's own ssh-agent, which holds its identity's key: start, add",
-		`The identity's key may be kept in an ssh-agent of the mailbox's own, at the
-socket --agent names, apart from the shell's agent, which ssh forwards. The key
-file can then keep a passphrase. After a reboot the agent holds no key, so the
-mailbox is locked until its owner runs dromas agent add again, or runs a
-command with --askpass or at a terminal. A command that needs the key and has
-it from none of these fails as "identity_locked". The agent's key is taken only
-where it matches the identity's public key: the key file's where the file
-carries one, and identity.pub's otherwise. A key the agent lists is the key
-used, and the key file is not tried after it. The agent is stock ssh-agent, and dromas
-agent start and dromas agent add each print the command they run.`,
+	return e.group("agent", "the mailbox's own ssh-agent for the identity's key: start, add",
+		`You can keep the identity's key in the mailbox's own ssh-agent, at the socket
+that --agent names, separate from your shell's agent, which ssh forwards. The
+key file can then keep a passphrase.
+
+After a reboot, the agent holds no key, so the mailbox stays locked until you
+run dromas agent add again, or run a command with --askpass or at a terminal. A
+command that needs the key and gets it from none of these fails with
+"identity_locked".
+
+dromas uses the agent's key only when it matches the identity's public key: the
+key file's public key when the file carries one, and identity.pub otherwise.
+When the agent lists the key, dromas uses that key and does not try the key
+file. The agent is stock ssh-agent, and dromas agent start and dromas agent add
+each print the command they run.`,
 		e.agentStartCmd(), e.agentAddCmd())
 }
 
 func (e *cli) agentStartCmd() *cobra.Command {
-	return command("start", "run ssh-agent at the mailbox's agent socket, until it is stopped",
-		`Run stock ssh-agent in the foreground at --agent's socket, as a service's
-unit runs it: ssh-agent -D -a <socket>. It prints an "agent" line with the line
-it runs first, makes the socket's directory, 0700, where it is missing, and
-removes a socket there that no agent answers on. It refuses a socket an agent
-already answers on. It sets no SSH_AUTH_SOCK: the shell's agent stays the
-shell's.`,
+	return command("start", "run ssh-agent at the mailbox's agent socket until it is stopped",
+		`Run stock ssh-agent in the foreground at the socket that --agent names, as a
+service unit runs it: ssh-agent -D -a <socket>.
+
+agent start first prints an "agent" line with the command it runs. It creates
+the socket's directory, mode 0700, when the directory is missing, and removes a
+socket there that no agent answers on. It refuses a socket that an agent already
+answers on. It sets no SSH_AUTH_SOCK, so your shell's agent stays your shell's.`,
 		nargs(0, 0), func(c *cobra.Command, _ []string) error {
 			socket, err := e.agentSocket()
 			if err != nil {
@@ -401,25 +406,31 @@ shell's.`,
 func (e *cli) agentAddCmd() *cobra.Command {
 	var life string
 	c := command("add [flags]", "load the identity's key into the mailbox's agent, with ssh-add",
-		`Run stock ssh-add on the identity key file, against the socket --agent names,
-with the command's stdin: SSH_AUTH_SOCK=<socket> ssh-add <identity-file>.
+		`Run stock ssh-add on the identity key file, against the socket that --agent
+names, with this command's stdin: SSH_AUTH_SOCK=<socket> ssh-add
+<identity-file>.
+
 Without --askpass, ssh-add asks for the key's passphrase at the terminal and
-runs no askpass program (SSH_ASKPASS_REQUIRE=never); where the key file has a
-passphrase that ssh-add could not ask for, since stdin is no terminal or
---no-prompt is set, agent add fails as "identity_locked" before ssh-add runs.
-With --askpass, ssh-add runs that
-program through dromas (SSH_ASKPASS=<dromas> SSH_ASKPASS_REQUIRE=force
-DROMAS_ASKPASS=<program>), which gives ssh-add no passphrase after 3, as ssh's
-NumberOfPasswordPrompts does; where no passphrase the askpass program gave
-unlocked the key file, agent add fails as "identity_locked". Any other failure
-of ssh-add is said with what ssh-add wrote to stderr. A revoked mailbox, which signs
-nothing more, is refused before ssh-add runs. Before ssh-add runs, an
-"agent_add" line gives the command it runs. Once the agent holds the key, an
-"agent_added" line gives the mailbox's signer, as status names it.
---lifetime is ssh-add -t: when it ends, the agent drops the key. While the
-agent lacks the key, and the key file has a passphrase, a mailbox whose
-identity signs neither sends nor receives, and a mailbox under a certificate
-renews nothing, but in a command run with --askpass or at a terminal.`,
+runs no askpass program (SSH_ASKPASS_REQUIRE=never). When the key file has a
+passphrase that ssh-add cannot ask for, because stdin is not a terminal or
+--no-prompt is set, agent add fails with "identity_locked" before ssh-add runs.
+
+With --askpass, ssh-add runs that program through dromas (SSH_ASKPASS=<dromas>
+SSH_ASKPASS_REQUIRE=force DROMAS_ASKPASS=<program>), and dromas gives ssh-add no
+passphrase after the third, as ssh's NumberOfPasswordPrompts does. When no
+passphrase from the askpass program unlocks the key file, agent add fails with
+"identity_locked". Any other ssh-add failure is reported with what ssh-add wrote
+to stderr.
+
+agent add refuses a revoked mailbox, which signs nothing more, before ssh-add
+runs. Before ssh-add runs, an "agent_add" line gives the command it runs. Once
+the agent holds the key, an "agent_added" line gives the mailbox's signer, as
+status names it.
+
+--lifetime is ssh-add -t: when it ends, the agent drops the key. While the agent
+lacks the key and the key file has a passphrase, a mailbox whose identity signs
+neither sends nor receives, and a mailbox under a certificate renews nothing,
+except in a command run with --askpass or at a terminal.`,
 		nargs(0, 0), func(c *cobra.Command, _ []string) error {
 			b, err := e.mailbox()
 			if err != nil {

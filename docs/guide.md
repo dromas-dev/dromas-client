@@ -117,7 +117,7 @@ A held message runs no program, and neither does a message that another `recv` r
 
 ## Send messages
 
-Never send a message a second time. A message the server did not accept waits in `outbox/`. `dromas outbox flush` posts it again, encrypted afresh to the recipient's prekey as the server serves it at that time.
+Never send a message a second time. A message the server did not accept waits in `outbox/`. `dromas outbox flush` posts it again, signed and encrypted afresh as `dromas send` does it.
 
 ## Senders
 

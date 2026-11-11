@@ -54,17 +54,17 @@ func (g *globals) add(c *cobra.Command) {
 	f.StringVar(&g.mailDir, "mail-dir", "", "the `directory` of inbox/, held/, refused/ and sent/")
 	f.StringVar(&g.identityFile, "identity-file", "", "the identity key `file`: <base-dir>/identity")
 	f.StringVar(&g.rotatingKeysDir, "rotating-keys-dir", "", "the `directory` of prekeys/, work/ and tls-ticket, never to be backed up: <base-dir>/keys")
-	f.StringVar(&g.inbox, "inbox-dir", "", "the `directory` of inbox/, apart from the rest of the mail: <mail-dir>/inbox")
+	f.StringVar(&g.inbox, "inbox-dir", "", "the `directory` of inbox/, apart from the mailbox's other messages: <mail-dir>/inbox")
 	f.StringVar(&g.server, "server", "", "the server's `URL`: $DROMAS_SERVER_URL, or "+client.DefaultBase)
 	f.StringVar(&g.caFile, "ca-file", "", "trust only the certificates in this PEM `file` for the server's TLS certificate, in place of the system's CAs: $DROMAS_CA_FILE")
-	f.StringVar(&g.prekeyLifetime, "prekey-lifetime", "", "how long each new prekey is valid for: a `time`, as dromas prekey lifetime --help says")
-	f.StringVar(&g.certLifetime, "certificate-lifetime", "", "how long each certificate this mailbox makes runs, valid before less valid after: a `time` above 7d1h and at most 45d1h, as in 30d: $DROMAS_CERTIFICATE_LIFETIME, or the longest its server takes")
+	f.StringVar(&g.prekeyLifetime, "prekey-lifetime", "", "how long each new prekey is valid: a `time`, as dromas prekey lifetime --help describes")
+	f.StringVar(&g.certLifetime, "certificate-lifetime", "", "how long each certificate this mailbox makes is valid (valid before minus valid after): a `time` above 7d1h and at most 45d1h, as in 30d: $DROMAS_CERTIFICATE_LIFETIME, or the longest the server accepts")
 	f.StringVar(&g.agent, "agent", "", "the `socket` of the ssh-agent that holds the identity's key, read as ssh_config's IdentityAgent (a path, $VAR, SSH_AUTH_SOCK or none): $DROMAS_AGENT, or "+agentDefaultWords)
 	f.StringVar(&g.askpass, "askpass", "", "a `program` that prints the identity key's passphrase, as ssh's SSH_ASKPASS: $DROMAS_ASKPASS")
 	f.BoolVar(&g.noPrompt, "no-prompt", false, "never ask for the identity key's passphrase at a terminal: $DROMAS_NO_PROMPT")
-	f.BoolVar(&g.unsafeInbox, "unsafe-inbox-permissions", false, "read inbox-dir and held/ where others can write them, and the messages they keep where others can reach them, though whoever can write there can put in a message that reads as delivered: $DROMAS_UNSAFE_INBOX_PERMISSIONS")
-	f.BoolVar(&g.unsafeState, "unsafe-state-permissions", false, "open state, gate, partial and the lists where others can reach them or another user owns them; never a private key: $DROMAS_UNSAFE_STATE_PERMISSIONS")
-	f.StringVar(&g.addKeysToAgent, "add-keys-to-agent", "", "once a passphrase unlocks the identity's key, add it to the agent: no, yes, or the `time` it stays, as ssh_config's AddKeysToAgent: $DROMAS_ADD_KEYS_TO_AGENT")
+	f.BoolVar(&g.unsafeInbox, "unsafe-inbox-permissions", false, "read inbox-dir and held/ even when others can write to them or another user owns them, and their messages even when others can access them, although anyone who can write there can add a message that reads as delivered: $DROMAS_UNSAFE_INBOX_PERMISSIONS")
+	f.BoolVar(&g.unsafeState, "unsafe-state-permissions", false, "open state, gate, partial and the lists even when others can access them or another user owns them; never a private key: $DROMAS_UNSAFE_STATE_PERMISSIONS")
+	f.StringVar(&g.addKeysToAgent, "add-keys-to-agent", "", "after a passphrase unlocks the identity's key, add the key to the agent: no, yes, or the `time` the agent keeps it, as ssh_config's AddKeysToAgent: $DROMAS_ADD_KEYS_TO_AGENT")
 }
 
 // fileConfig is what a config file may say. A key it does not name is an error.
@@ -696,11 +696,14 @@ func writeConfigFile(file, text string) error {
 
 // configCmd prints every setting as this run resolved it.
 func (e *cli) configCmd() *cobra.Command {
-	return command("config", "print every setting as resolved, and where each came from",
-		`Print a "config" line: the config file, the profile, and each setting's value and
-where it came from, "flag", "environment", "file" or "default". Each comes from the
-first of those that says it. The policy this client takes from a restore is the
-state file's, and status says the policy in force. Nothing here touches the mailbox.`,
+	return command("config", "print every setting and where it came from",
+		`Print a "config" line: the config file, the profile, and each setting's value
+and where it came from, "flag", "environment", "file" or "default". Each setting
+comes from the first of those that sets it.
+
+A [policy] key that the config file does not set comes from the state file, as
+after a restore, and status reports the policy in force. config does not touch
+the mailbox.`,
 		nargs(0, 0), func(*cobra.Command, []string) error {
 			return e.out(line("config", "file", omit(e.cfg.file), "profile", omit(e.cfg.profile), "values", e.cfg.values))
 		})

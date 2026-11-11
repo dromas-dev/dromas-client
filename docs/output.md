@@ -6,7 +6,7 @@ A command prints what it did, and what it met on the way, to stdout, messages an
 
 - `error`, when the command failed
 - `usage_error`, when the command line was invalid
-- `config_error`, when the config file was invalid
+- `config_error`, when a setting was invalid, in the config file, a flag or an environment variable
 - `waiting`, while the command waits
 
 A `detail` member is the client's own words, never a sender's or a server's.
@@ -36,7 +36,7 @@ A `detail` member is the client's own words, never a sender's or a server's.
 | `prekey_lifetime` | `prekey lifetime` | `lifetime_seconds`, `lifetime` (the same, as a duration such as `8d`), and `detail`, a warning when the lifetime is short enough that one missed daily check-in leaves the mailbox unable to receive |
 | `waiting` | any, on stderr, while it waits | `reason`: `lock`, for this mailbox's lock, which another of its commands holds; `passphrase`, for the identity's (`identity_file`); `server`, for a server answer a wait may mend, with the members of an `error` line; `connection`, for a held list that dropped, with `held_seconds`, how long it was held, `wait_seconds` and `keep_alive_seconds`; and `detail` |
 | `config` | `config` | `file` and `profile`, when there is one, and `values`: each setting in force, by its key, with its `value` and `from`, where it came from |
-| `config_error` | any, on stderr, where the config file is wrong and nothing ran (exit `2`) | `file`, `key` when one is at fault, `detail` |
+| `config_error` | any, on stderr, where a setting is invalid, in the config file, a flag or an environment variable, and nothing ran (exit `2`) | `file`, `key` when one is at fault, `detail` |
 | `usage_error` | any, on stderr, where the command line is wrong (exit `2`) | `usage`, the command's, `help`, the command that shows it, and `detail` |
 | `error` | any, on stderr | `detail`; from `recv`, and from any command refused as `restore_required`, `fatal` where no wait mends the refusal (exit `4`); from a server's answer, `status`, its `code` when this client knows it, `retry_after`, and the values the code carries, each checked to its type; otherwise, from a mailbox in another format than this client's, its `code` (below), `format` and `client_format`; from a refusal with a code of its own, that `code` (below); from a locked identity, `code` `identity_locked`, `identity_file` and `agent`. One failure a line: a flush's, of several entries, has its first server answer's, and its `detail` names each. |
 
@@ -48,7 +48,7 @@ Other line types are named for what they report, and `allowed` and `blocked` car
 |---|---|
 | `0` | Success. Refused and held messages do not change the exit code, because any sender can cause either |
 | `1` | Failure |
-| `2` | Invalid command line or config file, so nothing ran. Help that you ask for exits `0` |
+| `2` | Invalid command line, or an invalid setting, so nothing ran. Help that you ask for exits `0` |
 | `3` | Success, and the mailbox needs attention: from `recv`, messages were received, and the prekey was not renewed, its server served a prekey the mailbox did not make (`prekey_not_made`), the mailbox's ACL was not sent to its server, the server held an ACL the mailbox had not sent, or an `--exec` program ran out of tries (`exec_failed`); from `send` and `outbox flush`, the post went ahead though the mailbox's ACL was not sent (`acl_sync_failed`); from `prekey renew`, `prekey_not_made`; from any command that called a server, a `sunset` line, or a `deprecated` line whose date has passed. Later runs retry; if `dromas status` still reports it a day later, the server is refusing the change or cannot be reached. From `status`, its `attention` list is not empty |
 | `4` | From `recv`, a refusal no wait mends, and its `error` line has `fatal`: a revocation, no mailbox at this address with its registration refused, a mailbox in another format, a folder of the mailbox missing, this machine's clock behind, or any other refusal of a server's or of this client's. Under the systemd unit, which does not restart on `4`, the service stays failed until its owner puts it right and starts it again. Exit `4` also comes from any command that receives, sends, delivers or renews, `init` and `peer allow` among them, refused as `restore_required`. A process started again meets it again. Exit `1` from `recv` is a failure that a later run may pass, and `recv --follow` makes again by itself a call that a wait may mend |
 

@@ -31,60 +31,74 @@ import (
 )
 
 // about is the end of the top-level help: what holds for every command.
-const about = `A config file says where the mailbox's files are: <profile>.toml in
-${XDG_CONFIG_HOME:-~/.config}/dromas, where --profile or $DROMAS_PROFILE names the
-profile and default is the one with neither, or the file --config or
-$DROMAS_CONFIG names. dromas init writes a profile's. A flag beats a variable and
-a variable the file, and dromas config prints every setting and where it came from.
-Its inbox/ keeps each message received and its sent/ each message sent, with
-the server's receipt: both are yours to prune.
-The server is https, or http only to a server on this machine, and a redirect
-is never followed.
-The file's [policy] says where a message from a sender the mailbox has not allowed
-lands, unknown = "held" (the default) or "inbox", and whom its server takes
-messages from, server = "all" (the default: everyone it has not blocked) or
-"allowed" (only those it allowed, which tells the server who they are).
+const about = `Configuration: a config file says where the mailbox's files are. dromas reads
+<profile>.toml in ${XDG_CONFIG_HOME:-~/.config}/dromas, where --profile or
+$DROMAS_PROFILE names the profile, which is "default" without either; --config
+or $DROMAS_CONFIG names any file instead. dromas init writes a profile's file. A
+flag overrides an environment variable, and an environment variable overrides
+the file. dromas config prints every setting and where it came from.
 
-dromas help <command> and dromas <command> --help print a command's help,
-and dromas <group> help a group's. --help after a command prints its help
-and runs nothing, read as any flag is: after a flag that takes a value, it is
-that value.
+inbox/ keeps each message received, and sent/ each message sent, with the
+server's receipt. dromas deletes neither: delete a file to forget a message.
 
-Every command prints JSON lines, one object a line, whose "type" says what
-the line is. What it did and what it met on the way go to stdout, messages and
-refusals alike. Stderr has the line that says it failed ("error") or that its
-command line was wrong ("usage_error"), and one that says it is waiting
-("waiting"). A "detail" is this client's own words, never a sender's or a
-server's. Help is the one thing printed as text.
+The server URL is https, or http only to a server on this machine, and dromas
+never follows a redirect.
 
-Exit status: 0, done. 1, the command failed. 2, the command line or the config
-was wrong ("config_error") and nothing ran. 3, the command did its work and the mailbox needs a look: from
-recv, messages were received as printed and the prekey, due for renewal, was not
-renewed ("renewal_failed"), its server served a prekey the mailbox did not make
-("prekey_not_made"), the mailbox's ACL was not sent to its server
-("acl_sync_failed"), its server held an ACL the mailbox had not sent, which it
-replaced ("acl_replaced"), or a callback ran out of attempts ("exec_failed"); from send and outbox flush, the post went ahead
-though the mailbox's ACL was not sent ("acl_sync_failed"); from prekey renew, its
-server served a prekey the mailbox did not make ("prekey_not_made"); from any
-command that called a server, the server stops taking this client's version
-from a date ("sunset"), or deems it deprecated from a date that has passed
-("deprecated"); from status, its "attention" list is not empty. 4, recv met a refusal no wait
-mends, and its "error" line says "fatal": a process started again meets it
-again. Once a day, a
-command that calls the server reads its document, and says when it names a
-later version of this client ("upgrade_available"), which needs no look. recv prints
-a "refused" line for each message it refused, keeping it in refused/, a
-"held" line for each it held in held/, and a "dropped" line for each from a
-sender this mailbox blocked: none of them changes its exit status, since any
-sender can cause them. A refusal's code is from a closed list, and its words
-are this client's own: it never quotes a message.
+The config file's [policy] table sets who reaches the inbox. unknown = "held"
+(the default) holds a message from a sender the mailbox has not allowed in
+held/, and unknown = "inbox" delivers it. admit = "all" (the default) has the
+server accept every sender the mailbox has not blocked, and admit = "allowed"
+only the senders it allowed, which tells the server who they are.
 
-To try the whole loop, send anything to dromas.dev's echo mailbox,
+Help: dromas help <command> or dromas <command> --help prints a command's help,
+and dromas <group> help a group's. --help after a command prints its help and
+runs nothing. --help is read as any flag is: after a flag that takes a value, it
+is that value.
+
+Output: every command prints JSON Lines, one object per line, with "type" naming
+the line. What a command did, and what it met on the way, goes to stdout,
+messages and refusals alike. The only JSON lines on stderr are "error" when the
+command failed, "usage_error" when its command line was invalid, "config_error"
+when a setting was invalid, in the config file, a flag or an environment
+variable, and "waiting" while it waits. A "detail" is this client's own wording,
+never a sender's or a server's. Help, and the notice that the one-letter form of
+--help is deprecated, are the only output in plain text.
+
+Exit status:
+  0  success
+  1  failure
+  2  invalid command line, or an invalid setting ("config_error"); nothing ran
+  3  success, and the mailbox needs attention. From recv: the messages were
+     received as printed, and the prekey, due for renewal, was not renewed
+     ("renewal_failed"), the server served a prekey the mailbox did not make
+     ("prekey_not_made"), the mailbox's ACL was not sent to its server
+     ("acl_sync_failed"), the server held an ACL the mailbox had not sent, which
+     recv replaced ("acl_replaced"), or an --exec program ran out of attempts
+     ("exec_failed"). From send and outbox flush: the post went ahead, but the
+     mailbox's ACL was not sent ("acl_sync_failed"). From prekey renew:
+     "prekey_not_made". From any command that called a server: the server stops
+     accepting this client's version from a date ("sunset"), or deems it
+     deprecated from a date that has passed ("deprecated"). From status: its
+     "attention" list is not empty.
+  4  a refusal that no wait fixes: from recv, with "fatal" in its "error" line,
+     and from any command that receives, sends, delivers or renews, refused as
+     "restore_required". A restarted process meets it again.
+
+Once a day, a command that calls the server reads the server's document, and
+prints "upgrade_available" when it names a later version of this client, which
+needs no attention. recv prints a "refused" line for each message it refused,
+keeping the message in refused/, a "held" line for each message it held in
+held/, and a "dropped" line for each message from a sender this mailbox blocked.
+None of them changes recv's exit status, because any sender can cause them. A
+refusal's code comes from a closed list, and its wording is this client's own: a
+refusal never quotes a message.
+
+To try the whole loop, send anything to dromas.dev's echo mailbox:
 ` + client.DefaultBase + protocol.LinkPath + client.EchoAddress + `
-It answers within two minutes, signed, saying what it checked. A message to it
-is readable by dromas.dev's operator.
+It answers within two minutes with a signed reply saying what it checked.
+dromas.dev's operator can read what you send it.
 
-The README has the rest, with what this client checks and how to test it:
+The README has the rest, including what this client checks and how to test it:
 ` + readme + `
 `
 
