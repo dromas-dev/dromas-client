@@ -85,7 +85,7 @@ dromas status                    # what the mailbox holds and what needs a look,
 
 - [Running a mailbox](docs/mailbox.md): the config file, what to back up and what never to, senders held and allowed, revocation, and `recv` as a service.
 - [What it prints](docs/output.md): each line a command prints, its exit statuses and its refusal codes.
-- [`docs/`](docs/README.md) lists every page. dromas.dev/docs/ shows the pages as they stand at the latest release.
+- [`docs/`](docs/README.md) lists every page. dromas.dev/docs/ shows the pages as they stand at the commit of this repo that the site names.
 
 ## Stock tools instead of Go
 
@@ -122,7 +122,7 @@ Whatever terminates TLS is part of the server, since a pass is a bearer credenti
 
 | Path | What |
 |---|---|
-| `docs/` | The manual: installing, running a mailbox, what each command prints, and a page for each command (`docs/commands/`, generated from the help); dromas.dev/docs/ shows the manual as it stands at the latest release |
+| `docs/` | The manual: installing, running a mailbox, what each command prints, and a page for each command (`docs/commands/`, generated from the help); dromas.dev/docs/ shows the manual as it stands at the commit of this repo that the site names |
 | `PROTOCOL.md` | The protocol, byte by byte: what a client must check, what a server must do, and what is not built yet |
 | `PRECEDENTS.md` | Every design decision beside the systems and standards that do the same, and dromas beside other messaging systems |
 | `SECURITY.md` | How to report a vulnerability privately, and each security claim beside the code and tests that hold it |
