@@ -7,10 +7,9 @@ import (
 	"strconv"
 )
 
-// A mailbox's state file may be lost, or put back from an older copy, and its
-// prekeys/ is never backed up (PROTOCOL.md §12.1). Either is a failure of the
-// mailbox, and its owner is told once: a key in prekeys/ that the state names
-// nowhere (unnamedKeys) stops every command that receives, sends, renews or
+// A mailbox's state file may be lost, or put back from an older copy. Either is
+// a failure of the mailbox, and its owner is told once: a key in prekeys/ that
+// the state names nowhere (unnamedKeys) stops every command that receives, sends, renews or
 // hands over a message, before it lists, acks or renews anything (keysMatch),
 // with the refusal RestoreRequired, which no wait mends. Its owner's
 // acknowledgement, dromas init --restore (Options.Restore), adopts the keys

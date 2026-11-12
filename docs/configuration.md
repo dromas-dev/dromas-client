@@ -96,7 +96,7 @@ The identity's private key, an OpenSSH key file. The identity is the mailbox's a
 - Default: `<base-dir>/keys`
 - Flag: `--rotating-keys-dir`
 
-The directory of `prekeys/`, `work/` and `tls-ticket`. Never back up or sync this directory: a copy of `prekeys/` undoes forward secrecy.
+The directory of `prekeys/`, `work/` and `tls-ticket`. It needs no backup, since a restored mailbox makes new keys. A backup that holds `prekeys/` can still decrypt mail after the mailbox deletes its keys.
 
 ### `inbox-dir`
 

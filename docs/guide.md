@@ -258,7 +258,7 @@ Back up these files:
 - your config file
 - the lists `allowed`, `blocked` and `aliases`
 
-Never back up or sync `prekeys/` or `tls-ticket`. A copy of `prekeys/` undoes forward secrecy. Anyone who reads `tls-ticket` and is on the network path can pose as your server to this mailbox. Deleting `tls-ticket` is safe. `state` needs no backup.
+`prekeys/`, `work/` and `tls-ticket` need no backup, since a restored mailbox makes new ones. A backup that holds `prekeys/` can still decrypt mail after the mailbox deletes its keys. Anyone who reads `tls-ticket` and is on the network path can pose as your server to this mailbox. Deleting `tls-ticket` is safe. `state` needs no backup.
 
 To restore a mailbox:
 
