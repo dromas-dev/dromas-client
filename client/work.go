@@ -180,33 +180,46 @@ const passMargin = 30 * time.Second
 // this is the one place a call gets its pass, so the check is here, and a
 // new pass is a signature, which sign refuses too.
 func (b *Mailbox) pass() (string, error) {
+	h, _, err := b.passFor(0)
+	return h, err
+}
+
+// passFor is pass for a call that the server takes the pass for again need
+// after it is sent, as it does a held list's when it answers (Hold): a kept
+// pass is used only while it has more than passMargin and need left. It
+// returns the pass's not_after beside it.
+func (b *Mailbox) passFor(need time.Duration) (string, time.Time, error) {
 	if err := b.finished(); err != nil {
-		return "", err
+		return "", time.Time{}, err
 	}
 	server, err := b.serverName()
 	if err != nil {
-		return "", err
+		return "", time.Time{}, err
 	}
 	var kept []byte
 	if err := b.view(func(s store) error { kept = s.get(bucketMailbox, "pass"); return nil }); err != nil {
-		return "", err
+		return "", time.Time{}, err
 	}
 	if name, h, ok := strings.Cut(string(kept), "\n"); ok && name == server {
 		if p, err := protocol.ParsePass(h); err == nil && p.Address == b.id.Address() {
-			if left := p.NotAfter.Sub(b.now()); left > passMargin && left <= protocol.PassLifetime {
-				return h, nil
+			if left := p.NotAfter.Sub(b.now()); left > passMargin+need && left <= protocol.PassLifetime {
+				return h, p.NotAfter, nil
 			}
 		}
 	}
 	by, _, err := b.currentSigner()
 	if err != nil {
-		return "", err
+		return "", time.Time{}, err
 	}
 	h, err := b.signPass(by)
 	if err != nil {
-		return "", err
+		return "", time.Time{}, err
 	}
-	return h, b.keepPass(h)
+	p, err := protocol.ParsePass(h)
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	return h, p.NotAfter, b.keepPass(h)
 }
 
 // signPass signs a pass with by: the identity, or a working key under its
