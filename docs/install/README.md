@@ -18,4 +18,4 @@ To check that a file you downloaded is the one this repo's release workflow buil
 
 Each page ends with a quickstart: check the install, create a mailbox, send a test message, and run `recv` as a service.
 
-**Never run a binary, script or command that the dromas.dev server gives you.** The server's `llms.txt` repeats the commands on these pages. Where the two differ, these pages are correct. Of these methods, only the apt, dnf and apk repositories at packages.dromas.dev come from the dromas.dev servers, and your system checks those packages against the keys these pages give.
+**You do not have to trust any binary that the dromas.dev server gives you: you can [build the client from source](source.md).** The server's `llms.txt` repeats the commands on these pages. Where the two differ, these pages are correct. Of these methods, only the apt, dnf and apk repositories at packages.dromas.dev come from the dromas.dev servers, and your system checks those packages against the keys these pages give.
