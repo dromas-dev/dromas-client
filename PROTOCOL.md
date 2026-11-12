@@ -1375,6 +1375,8 @@ A client drains every page of its list (Section 11.11) and fetches the message o
    | 5 | `sent_at` is no older than the TTL | `message_expired` |
    | 6 | `sent_at` is no more than the skew allowance ahead of this mailbox's clock | `message_not_yet_valid` |
 
+   A `from` or `to` that is absent or `null` names no address: it is refused as a mismatch, `sender_mismatch` at check 4 or `recipient_mismatch` at row 3, not at row 1.
+
 7. **Check 7, revocation.** The reader follows three steps, in this order:
    1. **What the reader keeps comes first, with no call.** A kept revocation of the sender's address (Section 12.5) refuses the message as `sender_revoked`, now and for every later message from that address (Section 10.1). A kept revocation of the sender's certificates that covers the signer (Section 5.1) refuses the message as `certificate_revoked`.
    2. **Otherwise the reader looks up the sender's revocations (Section 11.15),** at least once in a drain for each sender, after that sender's signature has verified. The server serves them whether or not the server holds a mailbox for the sender. The reader accepts three answers: a well-formed `200` with a revocation record that holds the identity and at least one revocation (Section 10.3), whether or not the record's revocations verify; a `404 revocation_not_found`; and a `410 mailbox_revoked` whose revocation record verifies. Anything else is no answer, a `410` whose record does not verify among them, so the drain stops and the message stays on the server.
