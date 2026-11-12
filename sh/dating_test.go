@@ -208,13 +208,12 @@ func TestTheScriptTakesAStretchedRetryAtHonestClocks(t *testing.T) {
 			if err != nil {
 				t.Fatalf("dr_recv 50 minutes fast: %q, %v", out, err)
 			}
-			floor, _ := sh(server, "cat $DR/seen-floor 2> /dev/null")
 			server += time.Second
 			clk.Set(server)
 			id := sha256.Sum256(retry)
 			srv.Inject(to, hex.EncodeToString(id[:]), retry)
 			out, err = sh(server-(9*time.Minute+59*time.Second), "dr_recv")
-			t.Logf("floor %q (W %d); the retry, the script 9m59s slow: %q, %v", strings.TrimSpace(floor), clk.base.Unix(), out, err)
+			t.Logf("W %d; the retry, the script 9m59s slow: %q, %v", clk.base.Unix(), out, err)
 			if strings.Contains(out, `"type":"message"`) {
 				t.Error("the script delivered a message already delivered, at clocks an honest server takes")
 			}

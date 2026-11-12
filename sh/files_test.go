@@ -377,7 +377,7 @@ mv(){ printf '%s mv %s\n' "${FUNCNAME[1]}" "$*" >> "$LOG"; command mv "$@"; }
 	if want := []string{"sync seen.new", "mv seen.new seen", "sync ."}; !slices.Equal(got, want) {
 		t.Errorf("dr_forget's syncs and moves:\n%q\nwant\n%q", got, want)
 	}
-	if !strings.HasPrefix(b.read("seen"), "bb ") || strings.Count(b.read("seen"), "\n") != 1 || b.has("seen-floor") {
+	if !strings.HasPrefix(b.read("seen"), "bb ") || strings.Count(b.read("seen"), "\n") != 1 {
 		t.Errorf("dr_forget left the set %q", b.read("seen"))
 	}
 
@@ -579,7 +579,7 @@ func TestAddrNeedsAMailbox(t *testing.T) {
 // The script refuses a mailbox directory that is not its user's alone, before
 // the command runs, as the Go client refuses its private files and its kept
 // directories (checkPrivateFileAs, checkKeptDirAs): whoever can write there
-// could rewrite seen and seen-floor, after which the mailbox takes a replay.
+// could rewrite seen, after which the mailbox takes a replay.
 // A directory others may read is taken. A directory group or others can
 // write is refused, as is a file group or others can read or write, and a
 // file or directory owned by a user other than the one checking or root.
