@@ -113,7 +113,8 @@ func (v *versioned) documentReads() int {
 }
 
 // Every request the dromas command makes names the client's version, in
-// Dromas-Version (PROTOCOL.md §11.17): every call of a run of commands that
+// Dromas-Version (PROTOCOL.md §11.17), and in User-Agent as dromas/<version>
+// (RFC 9110 §10.1.5): every call of a run of commands that
 // registers, sends, posts again, renews, asks, allows, holds the list and
 // receives, the read of the server's document among them. TestStateTable holds
 // every command of the library to it in every state.
@@ -142,8 +143,8 @@ func TestEveryRequestNamesTheClientsVersion(t *testing.T) {
 	seen := map[string]bool{}
 	for _, q := range v.srv.Requests() {
 		seen[q.Method+" "+q.Path] = true
-		if q.Version != ownVersion {
-			t.Errorf("%s %s names %q, not %q", q.Method, q.Path, q.Version, ownVersion)
+		if q.Version != ownVersion || q.UserAgent != "dromas/"+ownVersion {
+			t.Errorf("%s %s names %q in Dromas-Version and %q in User-Agent, not %q", q.Method, q.Path, q.Version, q.UserAgent, ownVersion)
 		}
 	}
 	if !seen["GET "+protocol.DocumentPath] || len(seen) < 8 {
