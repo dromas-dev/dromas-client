@@ -113,6 +113,27 @@ func TestScriptRenews(t *testing.T) {
 	}
 }
 
+// A later statement that verifies raises the floor even where it is refused as
+// ended, so an earlier one served after it is a rollback (PROTOCOL.md §6).
+func TestScriptKeepsTheFloorOfAStatementRefusedAsEnded(t *testing.T) {
+	w := newWorld(t)
+	a, b := w.mailbox(), w.mailbox()
+	first := w.prekey(b)
+	n := b.num()
+	ended := time.Now().Add(-time.Minute).UTC().Format(protocol.TimeLayout)
+	w.serving(b, w.statement(b, n+1, w.operator().recipient(), ended, b.file("identity")))
+	if r := a.send(b.addr.String(), "to the ended statement"); r.rc == 0 || !strings.Contains(r.err, "expired") {
+		t.Fatalf("a later statement that has ended: %v", r)
+	}
+	if got := a.read("peers/" + b.addr.String() + "/serial"); got != fmt.Sprintln(n+1) {
+		t.Errorf("the floor after a statement refused as ended: %q, want %d", got, n+1)
+	}
+	w.serving(b, first)
+	if r := a.send(b.addr.String(), "secret"); r.rc == 0 || !strings.Contains(r.err, "rollback") || w.posts(b.addr) != 0 {
+		t.Errorf("the earlier statement served after it: %v, %d posted", r, w.posts(b.addr))
+	}
+}
+
 // A statement served in the mailbox's name that its identity signed and it
 // did not make means its identity is in other hands: the renewal says so,
 // recommending that the address be revoked, and goes above it, and the

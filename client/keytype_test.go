@@ -150,7 +150,8 @@ func TestSendToAnIdentityOfAnUnknownType(t *testing.T) {
 // A send to a mailbox whose prekey statement is good in every way, its key a
 // well-formed age recipient of a type this client cannot encrypt to, is
 // refused with its own code, unsupported_prekey_type, never as a statement
-// that does not verify, and nothing is posted or kept of the peer. The keys are
+// that does not verify, and nothing is posted: the sender keeps of the peer
+// only the floor the statement raises (PROTOCOL.md §6). The keys are
 // the prekey/unsupported-type vectors': a published test key under a
 // human-readable part nobody uses, and an X25519 recipient, which is no
 // prekey's type.
@@ -194,8 +195,8 @@ func TestSendToAPrekeyOfATypeThisClientLacks(t *testing.T) {
 			if !errors.As(err, &refused) || refused.Code != client.RefusedPrekeyType || !strings.Contains(refused.Reason, "a type this client cannot encrypt to") {
 				t.Fatalf("send: %v", err)
 			}
-			if strings.Contains(refused.Reason, "nosuchtype") || strings.Contains(refused.Reason, key[:16]) || posted || pinnedPeer(a, b.Address()) {
-				t.Errorf("the refusal quotes the key, something was posted, or the peer was pinned: %s", refused.Reason)
+			if strings.Contains(refused.Reason, "nosuchtype") || strings.Contains(refused.Reason, key[:16]) || posted {
+				t.Errorf("the refusal quotes the key, or something was posted: %s", refused.Reason)
 			}
 			// The type is the last thing a statement is held to (#167): one that has
 			// expired is refused for that, whatever its key's type.
