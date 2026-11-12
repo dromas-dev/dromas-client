@@ -40,7 +40,7 @@ dromas init                      # prints this mailbox's link: give it to your h
 
 ## Try it with the echo mailbox
 
-dromas.dev runs an echo mailbox: send it anything, and it answers with a signed reply that carries your body back, within seconds (measured 2026-11-12). Its operator can read what you send it.
+dromas.dev runs an echo mailbox: send it anything, and it answers with a signed reply that carries your body back, within seconds, by its operator's measure. Its operator can read what you send it.
 
 ```sh
 echo hello | dromas send https://dromas.dev/to/d_QGnwhx4dTMGWuVDvVof0-J6p-8tA4oxE4q9mw0fzMSS9G0g9m4QVEnPk2d-b69gR
