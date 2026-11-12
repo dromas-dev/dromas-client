@@ -161,6 +161,15 @@ func check(t testing.TB, v validator.Validator, r *http.Request, body *tee, rec 
 	mu.Lock()
 	ok, errs := v.ValidateHttpRequest(req)
 	mu.Unlock()
+	if !ok && r.Method == http.MethodPut && strings.HasSuffix(r.URL.Path, "/revocation") {
+		// A server ignores a member of a revocation record that the server
+		// does not know (PROTOCOL.md §3.3), so strict mode's report of one is
+		// no refusal there. Every other check of the record still holds.
+		errs = slices.DeleteFunc(errs, func(e *errors.ValidationError) bool {
+			return e.ValidationType == errors.StrictValidationType && e.ValidationSubType == errors.StrictSubTypeProperty
+		})
+		ok = len(errs) == 0
+	}
 	if !ok && missing(errs) {
 		// No such route: the router's plain answer, a server that is not
 		// ready, which answers 503 to everything under /v1/, or a limit's
