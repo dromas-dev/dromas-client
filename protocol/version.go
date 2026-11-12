@@ -41,9 +41,9 @@ type Version struct {
 // leading zero.
 var versionGrammar = regexp.MustCompile(`\A(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-((?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*))?\z`)
 
-// policyGrammar is a version as a policy writes one: MAJOR.MINOR or
-// MAJOR.MINOR.PATCH (PROTOCOL.md §11.17).
-var policyGrammar = regexp.MustCompile(`\A(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:\.(0|[1-9][0-9]*))?\z`)
+// policyGrammar is a version as a policy writes one: MAJOR.MINOR
+// (PROTOCOL.md §11.17).
+var policyGrammar = regexp.MustCompile(`\A(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\z`)
 
 // errVersion is a value that is not a version of its form. Its words never
 // quote the value, which may be a server's or a caller's.
@@ -138,13 +138,12 @@ func compareIdentifiers(a, b string) int {
 // numeric reports whether a pre-release identifier is digits alone.
 func numeric(s string) bool { return s != "" && strings.Trim(s, "0123456789") == "" }
 
-// PolicyVersion is a version as a server's policy writes one: MAJOR.MINOR or
-// MAJOR.MINOR.PATCH (PROTOCOL.md §11.17), in a floor, a sunset or the latest
-// version a server names.
+// PolicyVersion is a version as a server's policy writes one: MAJOR.MINOR
+// (PROTOCOL.md §11.17), in a floor, a deprecation, a sunset or the latest
+// version a server names. A policy compares a client's major and minor alone:
+// the patch and any pre-release are the client's own.
 type PolicyVersion struct {
-	Major, Minor, Patch uint64
-	// HasPatch is set where the patch is written.
-	HasPatch bool
+	Major, Minor uint64
 }
 
 // ParsePolicyVersion reads s as a policy's version, exactly.
@@ -161,53 +160,30 @@ func ParsePolicyVersion(s string) (PolicyVersion, error) {
 	if p.Minor, err = strconv.ParseUint(m[2], 10, 64); err != nil {
 		return PolicyVersion{}, errVersion
 	}
-	if m[3] != "" {
-		if p.Patch, err = strconv.ParseUint(m[3], 10, 64); err != nil {
-			return PolicyVersion{}, errVersion
-		}
-		p.HasPatch = true
-	}
 	return p, nil
 }
 
 // String writes p as the policy writes it.
-func (p PolicyVersion) String() string {
-	if p.HasPatch {
-		return fmt.Sprintf("%d.%d.%d", p.Major, p.Minor, p.Patch)
-	}
-	return fmt.Sprintf("%d.%d", p.Major, p.Minor)
+func (p PolicyVersion) String() string { return fmt.Sprintf("%d.%d", p.Major, p.Minor) }
+
+// compare orders v's major and minor against p's.
+func (p PolicyVersion) compare(v Version) int {
+	return cmp.Or(cmp.Compare(v.Major, p.Major), cmp.Compare(v.Minor, p.Minor))
 }
 
-// Release is the version p stands for where versions are ordered, a floor's
-// and a sunset's below: MAJOR.MINOR.0 when it writes no patch.
-func (p PolicyVersion) Release() Version {
-	return Version{Major: p.Major, Minor: p.Minor, Patch: p.Patch}
-}
-
-// Below reports whether SemVer orders v before p (Release), as a floor and a
+// Below reports whether v's major and minor are before p's, as a floor and a
 // sunset's below cover a version.
-func (p PolicyVersion) Below(v Version) bool { return v.Compare(p.Release()) < 0 }
+func (p PolicyVersion) Below(v Version) bool { return p.compare(v) < 0 }
 
-// Names reports whether v's major, minor and, where p writes one, patch are
-// p's own, as a sunset's version covers a version: a pre-release of them
-// among them.
-func (p PolicyVersion) Names(v Version) bool {
-	return v.Major == p.Major && v.Minor == p.Minor && (!p.HasPatch || v.Patch == p.Patch)
-}
+// Names reports whether v's major and minor are p's own, as a sunset's
+// version covers a version: every patch and pre-release of that minor.
+func (p PolicyVersion) Names(v Version) bool { return p.compare(v) == 0 }
 
 // Upgrade reports whether p, the latest version a server names, is an upgrade
-// for a client of version v (PROTOCOL.md §11.17): the two compared in the
-// parts p writes, from the major on, p higher in one of them. Equal in every
-// part p writes is no upgrade, whatever v writes past them: 1.5.2 against 1.5
-// is none, against 1.5.3 or 1.6 one. Nor is a v higher than p: a client may be
-// released before its server names that release.
-func (p PolicyVersion) Upgrade(v Version) bool {
-	c := cmp.Or(cmp.Compare(p.Major, v.Major), cmp.Compare(p.Minor, v.Minor))
-	if c == 0 && p.HasPatch {
-		c = cmp.Compare(p.Patch, v.Patch)
-	}
-	return c > 0
-}
+// for a client of version v (PROTOCOL.md §11.17): v's major and minor are
+// before p's. A v at or after p is none: a client may be released before its
+// server names that release.
+func (p PolicyVersion) Upgrade(v Version) bool { return p.Below(v) }
 
 // The most deprecations, sunsets and capabilities a server's document lists,
 // and a reader reads (PROTOCOL.md §11.18): past any, a document breaks its
@@ -263,7 +239,7 @@ var implementationText = regexp.MustCompile(`\A[\x21-\x7e]{1,128}\z`)
 // Scheduled is a deprecation or a sunset of versions, and its date: a
 // deprecation, a date from which the server deems them deprecated (RFC
 // 9745), and a sunset, the date it stops taking them (RFC 8594). It covers
-// every version SemVer orders before Below, or every version Version names
+// every version whose major and minor come before Below's, or every version Version names
 // ([PolicyVersion.Names]); exactly one of the two is set. At is its date, a
 // time (PROTOCOL.md §2.2).
 type Scheduled struct {

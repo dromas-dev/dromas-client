@@ -2293,9 +2293,9 @@ components:
 
   schemas:
     PolicyVersion:
-      description: A version as a server's policy writes one, `MAJOR.MINOR` or `MAJOR.MINOR.PATCH` (`PROTOCOL.md` §11.17).
+      description: A version as a server's policy writes one, `MAJOR.MINOR` (`PROTOCOL.md` §11.17).
       type: string
-      pattern: '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(\.(0|[1-9][0-9]*))?$'
+      pattern: '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
     Scheduled:
       description: A deprecation or a sunset of the versions `below` or `version` names, exactly one of the two, from `effective_at` (`PROTOCOL.md` §11.17, §11.18).
       type: object
@@ -2353,7 +2353,6 @@ components:
       description: The implementation that answers, informational (`PROTOCOL.md` §11.18).
       type: object
       required: [name, version]
-      additionalProperties: false
       properties:
         name:
           $ref: '#/components/schemas/ImplementationText'
@@ -2495,7 +2494,6 @@ components:
         messages:
           description: One page, oldest first by `received_at`.
           type: array
-          maxItems: 50
           items:
             $ref: '#/components/schemas/MessageInfo'
         next_cursor:
@@ -2520,9 +2518,10 @@ components:
     RevocationRecord:
       description: |
         A revocation record (`PROTOCOL.md` §10.3): a revocation of the
-        address, of its certificates through a serial, or both.
+        address, of its certificates through a serial, or both. Every
+        reader, a server included, ignores a member it does not know
+        (`PROTOCOL.md` §3.3).
       type: object
-      additionalProperties: false
       required: [identity]
       anyOf:
         - required: [revocation_signature]
@@ -2714,7 +2713,7 @@ components:
           description: '`invalid_request`: the request member or query parameter that is missing, unknown or given twice, or holds a value its call does not take, a byte member not base64 in its one encoding among them. A send''s body that is not an age file names none.'
           type: [string, 'null']
         min_version:
-          description: '`client_version_unsupported`: the lowest version the server takes, where it sets a floor, `MAJOR.MINOR` or `MAJOR.MINOR.PATCH` (`PROTOCOL.md` §11.17).'
+          description: '`client_version_unsupported`: the lowest version the server takes, where it sets a floor, `MAJOR.MINOR` (`PROTOCOL.md` §11.17).'
           type: [string, 'null']
         record:
           description: '`mailbox_revoked`: the revocation record the server holds (`PROTOCOL.md` §10.3), on the read of a mailbox always and on any other call where the server answers from it.'

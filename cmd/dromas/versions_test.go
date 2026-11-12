@@ -179,8 +179,8 @@ func TestASunsetIsSaidAndNeedsALook(t *testing.T) {
 	if ls, status, _ := v.run("inbox list"); len(ls) != 0 || status != 0 {
 		t.Fatalf("inbox list: exit %d, %v", status, ls)
 	}
-	// Control: another version is not covered.
-	v.srv.SetPolicy(protocol.ServerDocument{Sunsets: []protocol.Scheduled{{Version: "1.5.3", At: at.Format(protocol.TimeLayout)}}})
+	// Control: another minor is not covered.
+	v.srv.SetPolicy(protocol.ServerDocument{Sunsets: []protocol.Scheduled{{Version: "1.6", At: at.Format(protocol.TimeLayout)}}})
 	ls, status, _ = v.run("recv")
 	if status != 0 || lineOf(ls, "sunset") != nil {
 		t.Fatalf("recv once no sunset covers it: exit %d, %v", status, ls)
