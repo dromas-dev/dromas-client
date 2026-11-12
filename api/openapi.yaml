@@ -2494,7 +2494,6 @@ components:
         messages:
           description: One page, oldest first by `received_at`.
           type: array
-          maxItems: 50
           items:
             $ref: '#/components/schemas/MessageInfo'
         next_cursor:

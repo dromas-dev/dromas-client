@@ -217,7 +217,7 @@ Where this document uses a term below as a defined term, the term has the sense 
 | SHA-256 | a message id; the hash of a prekey statement that a send names (Section 11.10) | FIPS 180-4 |
 | UUID | an envelope's `msg_id` | RFC 9562 |
 
-The draft that the table names for age's KEM, draft-ietf-hpke-pq-03, is the version that C2SP age v1.1.0 cites. The conformance vectors and age's own output fix the KEM's bytes for this protocol (Section 16), whatever a later draft says.
+The draft that the table names for age's KEM, draft-ietf-hpke-pq-03, is the version that C2SP age v1.1.0 cites. The conformance vectors and C2SP age v1.1.0 fix the KEM's bytes for this protocol (Section 16), whatever a later draft says.
 
 Inside age, every keyed hash is HMAC or HKDF. Outside age, the protocol defines no keyed function. The protocol applies plain SHA-384 and SHA-256 only to public inputs: the identity document, a prekey statement and the ciphertext.
 
@@ -549,7 +549,7 @@ server-port    = %x31-39 *4DIGIT   ; no leading zero, at most 65535,
   The exception: on a registration (Section 11.7) and on a renewal (Section 11.9), the server accepts a pass by the certificate of the prekey statement that the call brings, in place of the current certificate.
 
   A server accepts a pass only where the pass's server name is one of the server's names (Section 11.1). A server reads a pass by the form of the pass's signer (Section 5).
-- **A client whose pass a server refuses MAY sign another pass and try once more.** A refusal of that second pass is final. The client MUST NOT retry at all after a `certificate_revoked` that the client finds final when the mailbox looks itself up (Section 12.5). When a server refuses both passes for their time, the cause is the mailbox's clock (Section 15.7).
+- **A client whose pass a server refuses MAY sign another pass and try once more.** A refusal of that second pass is the call's answer. The client MUST NOT retry at all after a `certificate_revoked` that the client finds final when the mailbox looks itself up (Section 12.5). When a server refuses both passes for their time, the cause is the mailbox's clock (Section 15.7).
 - **A lookup (Section 11.8), the link page (Section 4.3), publishing a revocation and looking up revocations (Section 11.15) accept no pass.** A server reads no pass on these calls, whatever `Authorization` they carry.
 
 **Refusals.** Each refusal below is a `401`. `certificate_revoked` comes first, and otherwise this table gives the code:
@@ -913,7 +913,7 @@ The `subject` column of the table below gives the exceptions. A registration is 
 | `misses_range` | `ip` | the same, from an IPv6 /48 |
 | `sends_before_pass` | `ip` | sends, counted before the server reads their pass |
 | `sends_before_pass_range` | `ip` | the same, from an IPv6 /48 |
-| `requests` | `ip` | the IP address's requests, which a server MAY leave uncounted once a pass has verified; registrations, renewals and requests that match no route are counted |
+| `requests` | `ip` | the IP address's requests, which a server MAY leave uncounted when the request carries a pass that the server has already verified; registrations, renewals and requests that match no route are counted |
 | `requests_range` | `ip` | the same, from an IPv6 /48 |
 
 A quota counted against `ip` counts an IPv4 address by itself and an IPv6 address by its /64. Each quota ending in `_range` counts the same calls by their IPv6 /48 as well, beside the quota of the row above it; an IPv4 address has no /48 count. A call is refused when either count is spent, and the refusal names the count that sets its `Retry-After`.
@@ -1102,7 +1102,7 @@ The server checks the steps below. Only step 9 stores anything.
 - **A list with a cursor is a continuation only if the list meets all three of these conditions:**
   - the list is a `GET` whose preconditions are true;
   - the mailbox stores messages after the cursor;
-  - the cursor is a `next_cursor` that the server handed the mailbox.
+  - the cursor is the `next_cursor` that the server last handed the mailbox.
 
   A continuation spends `pages`. Only a `GET` answered `200` uses up the cursor it carries and gets the next cursor. After a false precondition, a refusal or a `HEAD`, the mailbox still has the cursor it had. The server still answers a list with any other cursor that the server can read. The server counts that list as a poll. If the mailbox stores no message after that cursor, the page is empty.
 - **The server checks:**
@@ -1326,10 +1326,10 @@ A server lists at most 64 deprecations, 64 sunsets and 64 capabilities. A client
     - the `not_after` not passed;
     - the prekey statement not earlier than any prekey statement the sender has seen (Section 5.3).
 
-  The sender records the prekey statement's `(c, p)` once the statement is not earlier than any prekey statement the sender has seen. Before that, the statement's signature, form, namespace, address and rank have checked, and no revocation that the sender keeps covers the statement's signer. The sender records the value even when a later check refuses the statement, for example as ended.
+  The sender records the prekey statement's `(c, p)` once the statement's signature, form, namespace, address and rank have checked, and no revocation that the sender keeps covers its signer. The statement must also be not earlier than any the sender has seen. The sender records the value whatever the checks of the key and the `not_after` then find.
 - **Revocations:**
   - The sender verifies any revocation of the recipient's address or certificates that the lookup carries, and keeps each one that verifies (Section 12.5).
-  - The sender posts nothing to an address if the sender keeps a revocation of that address.
+  - The sender posts nothing to an address if the sender keeps a revocation of that address, and makes no call about that address.
   - The sender refuses a prekey statement under a certificate that the recipient's revocation of certificates covers, and seals nothing. The revocation of certificates that counts here is the one the sender keeps at that point (Section 5.1).
 - **No answer is not "no revocation shown."** If the lookup fails, or serves no mailbox (`404 mailbox_not_found`, or `410 mailbox_revoked` with nothing that verifies), the sender seals nothing and posts nothing.
 
@@ -1346,7 +1346,7 @@ A server lists at most 64 deprecations, 64 sunsets and 64 capabilities. A client
 
 A client drains every page of its list (Section 11.11) and fetches the message of each list entry (Section 11.12):
 
-- **The client accepts only a body of the listed `size`.** An answer whose body has another length is malformed, and the client judges nothing and acks nothing on that answer.
+- **The client accepts only a body of the listed `size`, and reads at most one byte past it.** An answer whose body has another length is malformed, and the client judges nothing and acks nothing on that answer.
 - **A fetch that resumes a cut fetch by range (Section 11.12) is checked as a whole.** The client checks the bytes kept and the range together against the listed `size` and the message id (check 8), as for a body read whole.
 - **A `206` is malformed if the `Content-Range` is not the range asked for, or is not of the listed size.**
 
@@ -1379,8 +1379,8 @@ A client drains every page of its list (Section 11.11) and fetches the message o
 
 7. **Check 7, revocation.** The reader follows three steps, in this order:
    1. **What the reader keeps comes first, with no call.** A kept revocation of the sender's address (Section 12.5) refuses the message as `sender_revoked`, now and for every later message from that address (Section 10.1). A kept revocation of the sender's certificates that covers the signer (Section 5.1) refuses the message as `certificate_revoked`.
-   2. **Otherwise the reader looks up the sender's revocations (Section 11.15),** at least once in a drain for each sender, after that sender's signature has verified. The server serves them whether or not the server holds a mailbox for the sender. The reader accepts three answers: a well-formed `200` with a revocation record that holds the identity and at least one revocation (Section 10.3), whether or not the record's revocations verify; a `404 revocation_not_found`; and a `410 mailbox_revoked` whose revocation record verifies. Anything else is no answer, a `410` whose record does not verify among them, so the drain stops and the message stays on the server.
-   3. **On an answer, the reader keeps each revocation that verifies, and applies step 1 again.** If nothing refuses the message, the message passes this check. A revocation that does not verify counts as nothing shown, as Section 12.5 says. The reader applies step 1 to a later message from that sender by what the reader then keeps.
+   2. **Otherwise the reader looks up the sender's revocations (Section 11.15),** once in a drain for each sender, after that sender's signature has verified. The server serves them whether or not the server holds a mailbox for the sender. The reader accepts three answers: a well-formed `200` with a revocation record that holds the identity and at least one revocation (Section 10.3), whether or not the record's revocations verify; a `404 revocation_not_found`; and a `410 mailbox_revoked` whose revocation record verifies. Anything else is no answer, a `410` whose record does not verify among them, so the drain stops and the message stays on the server.
+   3. **On an answer, the reader keeps each revocation that verifies, and applies step 1 again.** If nothing refuses the message, the message passes this check. A revocation that does not verify counts as nothing shown, as Section 12.5 says. A later message from that sender in the drain makes no second call, and the reader applies step 1 to the later message by what the reader then keeps.
 
 8. **Check 8, replay.** The reader computes the SHA-256 of the ciphertext. That hash is not in the replay set (`message_already_received`).
    - The reader refuses a message whose listed `id` differs from that hash (`id_mismatch`).

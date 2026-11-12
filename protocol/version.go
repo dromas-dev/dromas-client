@@ -239,7 +239,7 @@ var implementationText = regexp.MustCompile(`\A[\x21-\x7e]{1,128}\z`)
 // Scheduled is a deprecation or a sunset of versions, and its date: a
 // deprecation, a date from which the server deems them deprecated (RFC
 // 9745), and a sunset, the date it stops taking them (RFC 8594). It covers
-// every version SemVer orders before Below, or every version Version names
+// every version whose major and minor come before Below's, or every version Version names
 // ([PolicyVersion.Names]); exactly one of the two is set. At is its date, a
 // time (PROTOCOL.md §2.2).
 type Scheduled struct {
