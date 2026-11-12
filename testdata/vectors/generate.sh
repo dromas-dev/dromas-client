@@ -774,6 +774,7 @@ at list-bad-cursor-a-slash '{"total_count":2,"messages":[],"next_cursor":"a/b"}'
 at list-bad-cursor-a-percent '{"total_count":2,"messages":[],"next_cursor":"a%%2Fb"}'
 at list-bad-cursor-empty '{"total_count":2,"messages":[],"next_cursor":""}'
 at list-bad-id-a-number '{"total_count":1,"messages":[{"id":5,"size":%s}],"next_cursor":null}' "$(wc -c < message/a-to-b.age)" # the id names what is fetched and acked
+at list-bad-id-not-a-message-id '{"total_count":1,"messages":[{"id":"../acl","size":%s}],"next_cursor":null}' "$(wc -c < message/a-to-b.age)" # a client writes the id into a fetch's and an ack's path
 at receipt-ok '{"id":"%s","received_at":"%s","expires_at":"2026-10-16T22:58:00Z"}' "$HASH" "$NOW"
 at receipt-bad-id-an-array '{"id":["%s"],"received_at":"%s"}' "$HASH" "$NOW"
 at problem-ok '{"type":"tag:dromas.dev,2026-10-26:errors/revocation_not_found","title":"Not revoked","status":404,"detail":"no revocation of this address is held here","code":"revocation_not_found","hint":"nothing to do"}'

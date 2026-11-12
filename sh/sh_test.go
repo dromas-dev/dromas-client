@@ -858,8 +858,8 @@ func TestVectorsAnswer(t *testing.T) {
 	t.Parallel()
 	need(t, scriptTools...)
 	files, _ := filepath.Glob(filepath.Join(vectors, "answer", "*.json"))
-	if len(files) != 63 {
-		t.Fatalf("%d answer/ vectors, want 63", len(files))
+	if len(files) != 64 {
+		t.Fatalf("%d answer/ vectors, want 64", len(files))
 	}
 	for name := range answerRead {
 		if _, err := os.Stat(filepath.Join(vectors, "answer", name+".json")); err != nil {

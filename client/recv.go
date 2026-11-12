@@ -412,9 +412,6 @@ func (b *Mailbox) drainPages(ctx context.Context, asked *lookups, res *Result) e
 			}
 		}
 		for _, m := range list.Messages {
-			if !hexID.MatchString(m.ID) {
-				continue
-			}
 			if messages == maxDrainMessages || fetched >= maxDrainBytes || errors.Is(context.Cause(ctx), errDrainTime) {
 				res.More = true
 				return nil
