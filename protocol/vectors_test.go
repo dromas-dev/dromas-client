@@ -1421,6 +1421,8 @@ func TestVectorEnvelopes(t *testing.T) {
 				"refuse-from-not-signer":     RefusedSenderMismatch,
 				"refuse-from-null":           RefusedSenderMismatch, // null is a member left out
 				"refuse-to-another-mailbox":  RefusedRecipientMismatch,
+				"refuse-no-to":               RefusedRecipientMismatch, // a to left out names no recipient
+				"refuse-to-null":             RefusedRecipientMismatch, // null is a member left out
 			}[name]
 			if want == "" {
 				want = RefusedInvalidEnvelope // an uppercase from or to is no address at all
