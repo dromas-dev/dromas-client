@@ -217,6 +217,8 @@ Where this document uses a term below as a defined term, the term has the sense 
 | SHA-256 | a message id; the hash of a prekey statement that a send names (Section 11.10) | FIPS 180-4 |
 | UUID | an envelope's `msg_id` | RFC 9562 |
 
+The draft that the table names for age's KEM, draft-ietf-hpke-pq-03, is the version that C2SP age v1.1.0 cites. The conformance vectors and age's own output fix the KEM's bytes for this protocol (Section 16), whatever a later draft says.
+
 Inside age, every keyed hash is HMAC or HKDF. Outside age, the protocol defines no keyed function. The protocol applies plain SHA-384 and SHA-256 only to public inputs: the identity document, a prekey statement and the ciphertext.
 
 ### 3.2. Signatures
@@ -1778,7 +1780,6 @@ Dromas protects a message's content from everyone but the message's recipient. D
 
 ### 17.1. Normative References
 
-- **[AEP-193]** API Enhancement Proposals, "Errors", AEP-193, <https://aep.dev/193/>.
 - **[age]** C2SP, "age", v1.1.0, read 2026-11-02, <https://c2sp.org/age@v1.1.0>.
 - **[BIP 173]** Wuille, P. and G. Maxwell, "Base32 address format for native v0-16 witness outputs", BIP 173, March 2017, <https://github.com/bitcoin/bips/blob/master/bip-0173.mediawiki>.
 - **[draft-ietf-hpke-pq-03]** Barnes, R. and D. Connolly, "Post-Quantum and Post-Quantum/Traditional Hybrid Algorithms for HPKE", Work in Progress, Internet-Draft, draft-ietf-hpke-pq-03, 6 November 2025, <https://datatracker.ietf.org/doc/html/draft-ietf-hpke-pq-03>.
@@ -1815,6 +1816,7 @@ Dromas protects a message's content from everyone but the message's recipient. D
 
 - **[ADR]** An, J. H., Dodis, Y., and T. Rabin, "On the Security of Joint Signature and Encryption", EUROCRYPT 2002, LNCS 2332, <https://cims.nyu.edu/~dodis/ps/signcrypt.pdf>.
 - **[AEP-158]** API Enhancement Proposals, "Pagination", AEP-158, <https://aep.dev/158/>.
+- **[AEP-193]** API Enhancement Proposals, "Errors", AEP-193, <https://aep.dev/193/>.
 - **[BCJZ]** Brendel, J., Cremers, C., Jackson, D., and M. Zhao, "The Provable Security of Ed25519: Theory and Practice", IEEE S&P 2021, <https://dennis-jackson.uk/assets/pdfs/ed25519.pdf>.
 - **[Davis]** Davis, D., "Defective Sign & Encrypt in S/MIME, PKCS#7, MOSS, PEM, PGP, and XML", USENIX Annual Technical Conference 2001, <https://www.usenix.org/legacy/publications/library/proceedings/usenix01/full_papers/davis/davis.pdf>.
 - **[RFC 6648]** Saint-Andre, P., Crocker, D., and M. Nottingham, "Deprecating the "X-" Prefix and Similar Constructs in Application Protocols", RFC 6648, DOI 10.17487/RFC6648, June 2012, <https://www.rfc-editor.org/info/rfc6648/>.
