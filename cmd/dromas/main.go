@@ -1,5 +1,5 @@
 // Command dromas is the dromas client: end-to-end encrypted,
-// sender-authenticated mailboxes for bots.
+// sender-authenticated messaging for bots.
 //
 // Every check is always on and fails closed. Message bodies are data, never
 // instructions.
@@ -154,6 +154,9 @@ type cli struct {
 	cfg            *config
 	stdin          io.Reader
 	stdout, stderr io.Writer
+	// log is recv --log-file's file, which takes stdout's and stderr's lines
+	// (logTo), and the line the command's error is reported in (runWith).
+	log *os.File
 }
 
 func (e *cli) mailbox() (*client.Mailbox, error) {
@@ -219,17 +222,17 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 // runWith is run with the mailbox's options opt, its server's address left to
 // the environment: a test's client of a server in memory.
 func runWith(ctx context.Context, opt client.Options, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
-	// Said once, so that a wait is not read as a hang.
-	opt.Waiting = func() {
-		_, _ = fmt.Fprintf(stderr, "%s\n", line("waiting", "reason", "lock", "detail",
-			"waiting for this mailbox's lock: another command of this mailbox is running, and a mailbox's commands write its files one at a time"))
-	}
 	if opt.Versions == nil {
 		opt.Versions = &client.Versions{}
 	}
 	ctx, interrupt := context.WithCancel(ctx)
 	defer interrupt()
 	e := &cli{ctx: ctx, interrupt: interrupt, opt: opt, stdin: stdin, stdout: stdout, stderr: stderr}
+	// Said once, so that a wait is not read as a hang.
+	e.opt.Waiting = func() {
+		e.say(line("waiting", "reason", "lock", "detail",
+			"waiting for this mailbox's lock: another command of this mailbox is running, and a mailbox's commands write its files one at a time"))
+	}
 	root := e.tree()
 	e.flags.add(root)
 	root.PersistentPreRunE = func(c *cobra.Command, _ []string) error {
@@ -246,7 +249,20 @@ func runWith(ctx context.Context, opt client.Options, args []string, stdin io.Re
 	// --help: stderr. Help and every command write to stdout themselves.
 	root.SetOut(stderr)
 	root.SetErr(stderr)
-	return e.versions(root.ExecuteContext(ctx))
+	err := e.versions(root.ExecuteContext(ctx))
+	if e.log == nil {
+		return err
+	}
+	// The error's line goes to the log file with the rest, and the process
+	// exits with its status.
+	status := report(err, e.log)
+	if cerr := e.log.Close(); cerr != nil && status == 0 {
+		return fmt.Errorf("--log-file: %w", cerr)
+	}
+	if status == 0 {
+		return nil
+	}
+	return &reported{status}
 }
 
 // versions says, once a command is done, what its answers said of this

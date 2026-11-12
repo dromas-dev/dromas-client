@@ -19,7 +19,7 @@ import (
 	"github.com/spf13/cobra/doc"
 )
 
-var updateDocs = flag.Bool("update", false, "write docs/commands from the command tree")
+var updateDocs = flag.Bool("update", false, "write docs/commands from the command tree, and the Windows resource files from the manifest")
 
 // commandsDir is the command reference, a page for each command.
 var commandsDir = filepath.Join("..", "..", "docs", "commands")

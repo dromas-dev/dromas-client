@@ -94,6 +94,7 @@ type fileConfig struct {
 		Headers     *bool    `toml:"headers"`
 		Exec        []string `toml:"exec"`
 		ExecTimeout string   `toml:"exec-timeout"`
+		LogFile     string   `toml:"log-file"`
 	} `toml:"recv"`
 	Inbox struct {
 		List struct {
@@ -572,6 +573,16 @@ func (cfg *config) resolve(g *globals, fc *fileConfig, rel string, noMailbox boo
 			return bad("recv.exec-timeout", "recv.exec-timeout goes with recv.exec")
 		}
 		table("recv", "exec-timeout", v)
+	}
+	if v := fc.Recv.LogFile; v != "" {
+		p, err := expand(v, rel)
+		if err == nil {
+			p, err = filepath.Abs(p)
+		}
+		if err != nil {
+			return bad("recv.log-file", "recv.log-file: %v", err)
+		}
+		table("recv", "log-file", p)
 	}
 	headers := func(command string, v *bool) {
 		if v != nil {

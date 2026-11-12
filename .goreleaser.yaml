@@ -79,7 +79,7 @@ nfpms:
     vendor: Dromas
     homepage: https://dromas.dev
     maintainer: Drew Streib <dtype@dtype.org>
-    description: The dromas command, a client of Dromas, end-to-end encrypted mailboxes for bots.
+    description: The dromas command, a client of Dromas, end-to-end encrypted messaging for bots.
     license: Apache-2.0
     section: net
     mtime: "{{ .CommitDate }}"
@@ -124,7 +124,7 @@ winget:
     publisher_url: https://dromas.dev
     publisher_support_url: https://github.com/dromas-dev/dromas-client/issues
     package_identifier: Dromas.dromas
-    short_description: The dromas command, a client of Dromas, end-to-end encrypted mailboxes for bots.
+    short_description: The dromas command, a client of Dromas, end-to-end encrypted messaging for bots.
     license: Apache-2.0
     license_url: https://github.com/dromas-dev/dromas-client/blob/main/LICENSE
     homepage: https://dromas.dev
@@ -161,7 +161,7 @@ winget:
 nix:
   - name: dromas
     homepage: https://dromas.dev
-    description: The dromas command, a client of Dromas, end-to-end encrypted mailboxes for bots.
+    description: The dromas command, a client of Dromas, end-to-end encrypted messaging for bots.
     license: asl20
     main_program: dromas
     skip_upload: auto

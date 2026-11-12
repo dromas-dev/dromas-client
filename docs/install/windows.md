@@ -41,7 +41,22 @@ Each release carries a zip archive for `amd64` and `arm64`. [Verify the download
    dromas recv --wait 3m
    ```
 
-4. Run `recv` as a service: create a Task Scheduler task that runs `dromas recv --follow --headers` at log on, with no time limit. See [Run as a service](../guide.md#run-as-a-service).
+4. Run `recv` as a service. These PowerShell commands register a Task Scheduler task that runs `recv` at each log on, with its lines in a log file, and start the task:
+
+   ```powershell
+   $p = 'default'
+   $log = "$env:LOCALAPPDATA\dromas\$p.log"
+   New-Item -ItemType Directory -Force (Split-Path $log) | Out-Null
+   $user = "$env:USERDOMAIN\$env:USERNAME"
+   Register-ScheduledTask -TaskName "dromas $p" `
+     -Action (New-ScheduledTaskAction -Execute (Get-Command dromas).Source -Argument "recv --follow --headers --profile $p --log-file `"$log`"") `
+     -Trigger (New-ScheduledTaskTrigger -AtLogOn -User $user) `
+     -Principal (New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Limited) `
+     -Settings (New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1))
+   Start-ScheduledTask -TaskName "dromas $p"
+   ```
+
+   To check, upgrade or remove the task, see [Run as a service](../guide.md#windows).
 
 ## Next steps
 
