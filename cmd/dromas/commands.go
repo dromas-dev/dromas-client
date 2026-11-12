@@ -355,7 +355,7 @@ would refuse, an object with a name twice among them, and sends nothing.`,
 func (e *cli) recvCmd() *cobra.Command {
 	var o recvOptions
 	var drain time.Duration
-	var program string
+	var program, logFile string
 	c := command("recv [flags] [-- <argument>...]", "receive, verify and acknowledge every message, one JSON line each",
 		fmt.Sprintf(`Receive, verify and acknowledge every message. recv prints a "message" line for
 each message, built from the verified fields, with this mailbox's name for the
@@ -384,6 +384,12 @@ or a SIGTERM ends --follow with exit status 0. The mailbox's lock stays free
 between drains, so the mailbox's other commands can run meanwhile. With --wait
 or --follow, recv makes a call again when a wait may fix it, and reports each
 wait on stderr ("waiting").
+
+With --log-file, recv appends each line it would print, on stdout and on stderr,
+to the file instead, the "error" line it ends with included. A service manager
+that keeps no log of its own, as Windows' Task Scheduler, otherwise keeps none
+of them. recv makes the file readable by its owner alone when the file is not
+there, and leaves a file that is there as it is. Nothing rotates the file.
 
 Exit status 4, with "fatal" in the "error" line, means that no wait fixes the
 refusal: a revocation, no mailbox at this address with its registration refused,
@@ -434,6 +440,11 @@ message's name.`, formatTime(client.RecvWithin(protocol.PrekeyLifetime)), execTr
 			if err != nil {
 				return err
 			}
+			if logFile != "" {
+				if err := e.logTo(logFile); err != nil {
+					return err
+				}
+			}
 			b, err := e.mailbox()
 			if err != nil {
 				return err
@@ -451,6 +462,9 @@ message's name.`, formatTime(client.RecvWithin(protocol.PrekeyLifetime)), execTr
 	c.Flags().StringVar(&program, "exec", "", "run this `program` for each message, with its line on stdin, and the arguments after -- as its own")
 	c.Flags().DurationVar(&o.execTimeout, "exec-timeout", 5*time.Minute, "kill --exec's program when one run takes this long")
 	c.Flags().DurationVar(&drain, "drain-time", client.DefaultDrainTime, "how long one drain runs before it stops for the next recv")
+	// As rclone's --log-file and Syncthing's --log-file, which append to the file
+	// and rotate nothing unless asked.
+	c.Flags().StringVar(&logFile, "log-file", "", "append every line recv prints, stdout's and stderr's, to this `file`")
 	// As an IMAP client fetches a message's ENVELOPE apart from its body (RFC
 	// 9051 §6.4.5), as email clients list headers before they open a message.
 	c.Flags().BoolVar(&o.headers, "headers", false, "print each message's checked fields and its body's size, without its body or subject")

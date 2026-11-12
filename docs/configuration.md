@@ -248,6 +248,14 @@ A program to run for each message, then its arguments, for example `exec = ["/us
 
 How long one run of the `recv.exec` program may take before `recv` kills the run. `recv.exec-timeout` without `recv.exec` is an error.
 
+### `recv.log-file`
+
+- Type: path
+- Default: none
+- Flag: `dromas recv --log-file`
+
+A file that `recv` appends its lines to, the lines it would print on stdout and on stderr. Use it where the service manager keeps no log of its own, as Windows' Task Scheduler. When the file is not there, `recv` creates the file readable only by you. `recv` leaves a file that is there as it is. Nothing rotates the file. See [Run as a service](guide.md#run-as-a-service).
+
 ### `inbox.list.headers`
 
 - Type: boolean

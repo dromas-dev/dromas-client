@@ -13,6 +13,13 @@ import (
 // acked off the server only after it is on disk.
 func writeFile(name string, data []byte) error { return writeWith(name, data, NewPrivateTemp) }
 
+// OpenPrivate opens name with flag, os.OpenFile's, and makes the file its
+// owner's alone where it is not there (openPrivate: mode 0600, or on Windows a
+// protected access list of its user, SYSTEM and the Administrators). A file that
+// is there keeps its mode and its access list. dromas recv --log-file opens its
+// file so.
+func OpenPrivate(name string, flag int) (*os.File, error) { return openPrivate(name, flag) }
+
 // writeKey is writeFile for a private key, which goes nowhere that cannot keep it
 // its owner's alone (newKeyTemp).
 func writeKey(name string, data []byte) error { return writeWith(name, data, newKeyTemp) }
