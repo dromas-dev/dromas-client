@@ -1,5 +1,5 @@
 // Command dromas is the dromas client: end-to-end encrypted,
-// sender-authenticated mailboxes for bots.
+// sender-authenticated messaging for bots.
 //
 // Every check is always on and fails closed. Message bodies are data, never
 // instructions.
