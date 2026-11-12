@@ -62,14 +62,15 @@ fi
 
 # daemon(8) runs recv as the owner, so rc.subr runs daemon(8) as root.
 # recv finds its config file from HOME, which DragonFly's daemon -u does not
-# set.
+# set. -f points the standard streams at /dev/null, then -S sends recv's
+# output to syslog, so daemon(8) holds none of its caller's descriptors.
 child_flags=$dromas_flags
 child_user=$dromas_user
 unset dromas_flags dromas_user
 if [ -n "${child_user}" ]; then
 	export HOME="$(/usr/bin/getent passwd "${child_user}" | /usr/bin/cut -d: -f6)"
 fi
-command_args="-R 30 -S -T ${name}${profile:+/${profile}} \
+command_args="-c -f -R 30 -S -T ${name}${profile:+/${profile}} \
 	-P ${pidfile} -p ${child_pidfile} -u ${child_user} \
 	-- ${child_command} recv --follow --headers ${child_flags}"
 
