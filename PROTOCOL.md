@@ -217,7 +217,7 @@ Where this document uses a term below as a defined term, the term has the sense 
 | SHA-256 | a message id; the hash of a prekey statement that a send names (Section 11.10) | FIPS 180-4 |
 | UUID | an envelope's `msg_id` | RFC 9562 |
 
-Inside age, every keyed hash is HMAC or HKDF. Outside age, the one keyed function is the keyed pseudorandom function that names a value in a server's logs (Section 13). The protocol applies plain SHA-384 and SHA-256 only to public inputs: the identity document, a prekey statement and the ciphertext.
+Inside age, every keyed hash is HMAC or HKDF. Outside age, the protocol defines no keyed function. The protocol applies plain SHA-384 and SHA-256 only to public inputs: the identity document, a prekey statement and the ciphertext.
 
 ### 3.2. Signatures
 
@@ -752,13 +752,13 @@ A revocation record carries an identity's revocations, and the record proves its
 - **A client MUST send a call to a loopback address, or to `localhost`, without a proxy.**
 - **A server's names are the names that the server's operator gives the server.** Each name is written as Section 8 writes a server name.
 - **A server SHOULD terminate its own TLS, on hosts its operator runs, with no third party between a client and the server.** Anything that terminates TLS for a server is part of the server (Section 15.8).
-- **A client MUST NOT follow a redirect.** The API never redirects. So a client treats a `3xx` other than `304` as no answer. A pass and a lookup each name an address, and a client never sends a pass or a lookup anywhere that a server points.
+- **A client MUST NOT follow a redirect.** No route redirects. So a client treats a `3xx` other than `304` as no answer. A pass and a lookup each name an address, and a client never sends a pass or a lookup anywhere that a server points.
 - **Every API path is under `/v1/`.**
 
 ### 11.2. Requests and answers
 
 - **Bodies.** Section 3.3 gives the rules for reading a JSON body. A send's body is bytes (Section 11.10).
-- **Query parameters.** A server reads a query parameter as it reads a member. A server MUST refuse, with `400 invalid_request`, a parameter that the call does not accept or a parameter given twice, and name that parameter in `param`. Only these calls accept a query parameter:
+- **Query parameters.** A server reads a query parameter as it reads a member. On every call but a read of the server's document (Section 11.18), a server MUST refuse, with `400 invalid_request`, a parameter that the call does not accept or a parameter given twice, and name that parameter in `param`. Only these calls accept a query parameter:
 
   | Call | Parameters |
   |---|---|
@@ -766,21 +766,21 @@ A revocation record carries an identity's revocations, and the record proves its
   | a list (Section 11.11) | `cursor`, `wait` |
 
 - **`Date`.** Every answer under `/v1/` carries `Date`. The server sets the field by the clock that the server's checks read.
-- **No caching.** Every answer under `/v1/` carries `Cache-Control: no-store`.
+- **No caching.** Every answer of a route under `/v1/` carries `Cache-Control: no-store` (RFC 9111 §5.2.2.5).
 - **Compression.** A server MAY answer a lookup (Section 11.8) with gzip (RFC 9110 §8.4.1.3), but only when the request's `Accept-Encoding` accepts gzip. A server MUST NOT compress any other answer (Section 15.8).
 - **`HEAD`.** A server answers `HEAD` on every route that answers `GET` (RFC 9110 §9.1, §9.3.2).
   - A `HEAD` changes nothing. A `HEAD` spends no cursor, hands out no cursor, marks no message as fetched, and spends none of the first-fetch budget.
-  - A server counts a list's `HEAD` as a poll (Section 11.11). A server counts a fetch's `HEAD` as one of the mailbox's calls.
-- **Preconditions.** Preconditions are those of RFC 9110 §13. A server evaluates `If-Match` and `If-None-Match` on every call (§13.1.1, §13.1.2), at the point §13.2.1 gives, in the order §13.2.2 gives. Dromas narrows the preconditions in these ways:
+  - Section 11.5 gives what a `HEAD` spends.
+- **Preconditions.** Preconditions are those of RFC 9110 §13. A server evaluates `If-Match` and `If-None-Match` on every call but a read of the server's document (§13.1.1, §13.1.2), at the point §13.2.1 gives, in the order §13.2.2 gives. Dromas narrows the preconditions in these ways:
   - **Normal request checks.** A call's normal request checks (§13.2.1) are the match of the call's route and method, the call's pass where the call accepts one, and the read of the call's target. A registration's pass and a renewal's pass are by the signer of the prekey statement that the call brings, or by the identity (Sections 8; 11.7, step 7; 11.9). Therefore every check of that prekey statement is one of the call's normal request checks.
   - **Only a list's first page (Section 11.11) and an ACL (Section 11.14) carry an `ETag`.**
   - **A server answers a false `If-Match` with `412 precondition_failed`, and never with a `2xx` as for a change that appears already applied (§13.1.1).**
   - **A false precondition comes after the refusals from the server's record of the mailbox, and before a `200` from that record** (Sections 11.7, 11.9, 11.15).
   - **A value of `If-Match` or `If-None-Match` matches nothing if the value has any form other than `*` alone or a list of entity-tags.** A list with `*` among its tags is such a form.
   - **No target has a modification date.** No answer carries `Last-Modified`. So a server ignores a condition on a date (§13.1.3, §13.1.4).
-  - **A call refused by a false precondition has one effect: the server counts the call.** The server counts such a list as a poll, and such a fetch or ack as one of the mailbox's calls.
+  - **A call refused by a false precondition changes nothing.** Section 11.5 gives what the call spends.
   - **A server answers `409 concurrent_modification` to a write whose conditions were true when the server evaluated them, but are no longer true when the write happens.** The server then changes nothing. Two operations answer that case in their own way: a registration (Section 11.7, step 8) and an ack (Section 11.13).
-- **Unknown routes.** A server answers an unknown route with the router's plain `404` or `405`, which has no code. The body of that answer may be of any type. Past a limit, the server answers an unknown route `429 rate_limited`, as for any call. A client reads a plain `404` or `405` by the status alone, as a route that the server does not offer. A client reads a `404` with a code as that code, and a `404` with a code the client does not know as a plain `404` (Section 11.3).
+- **Unknown routes.** A server answers an unknown route with the router's plain `404` or `405`, which has no code. A server MAY answer a path that is not in its clean form with a redirect to the clean form, ahead of every check of Section 11.4. A path is not in its clean form when the path has an empty, `.` or `..` segment, or is `/v1` without its last `/`. A client reads that answer as no answer (Section 11.1). The body of that answer may be of any type. Past a limit, the server answers an unknown route `429 rate_limited`, as for any call. A client reads a plain `404` or `405` by the status alone, as a route that the server does not offer. A client reads a `404` with a code as that code, and a `404` with a code the client does not know as a plain `404` (Section 11.3).
 - **A server answers `408 request_timeout` to a request whose body does not arrive in time.**
 - **A server that cannot complete a request, or is not ready to answer, answers `503 unavailable` with `Retry-After`.** The server sends this answer instead of a wrong answer. A client treats any other `5xx` as the same failure, but with no wait given.
 
@@ -894,10 +894,9 @@ The `subject` column of the table above gives the exceptions. A registration is 
 **How a refusal names its limit.**
 
 - A limit that has no code of its own refuses a call with `429 rate_limited`. The limits that have codes of their own are `fetch_rate_limited`, `mailbox_rate_limited` and `mailbox_full`. In the refusal, `subject` says whom the call was counted against (`mailbox` or `ip`), and `quota_id` says which limit.
-- Where one call would spend several limits, `Retry-After` is the time when every limit that the server can check without doing the call's work lets the same call through (RFC 8555 §6.6). The refusal names the limit that sets that time.
-- A limit that the server can check only after that work (after the server reads storage or checks a signature) can still refuse the call once the `Retry-After` time has passed.
+- `Retry-After` is no earlier than the time when the limit that the refusal names lets the same call through (RFC 8555 §6.6). Another limit can still refuse the call once the `Retry-After` time has passed.
 - The server checks a send's `sends` only after the send's dedupe. So when a send is past the sender's `calls`, the refusal gives the wait for `calls`.
-- **A number a day.** A quota of a number a day is a budget of that many for each mailbox. The server refills the budget one at a time, evenly over the day. `quota_value` gives the number.
+- **A number a day.** A quota of a number a day is a budget of that many for each mailbox. The server refills the budget over the day. `quota_value` gives the number.
 
 | `quota_id` | `subject` | Counts |
 |---|---|---|
@@ -914,12 +913,14 @@ The `subject` column of the table above gives the exceptions. A registration is 
 | `misses_range` | `ip` | the same, from an IPv6 /48 |
 | `sends_before_pass` | `ip` | sends, counted before the server reads their pass |
 | `sends_before_pass_range` | `ip` | the same, from an IPv6 /48 |
-| `requests` | `ip` | every request except one that carries a pass the server has already verified, on a call that accepts that pass; registrations, renewals and requests that match no route are counted |
+| `requests` | `ip` | the IP address's requests, registrations, renewals and requests that match no route among them |
 | `requests_range` | `ip` | the same, from an IPv6 /48 |
 
 A quota counted against `ip` counts an IPv4 address by itself and an IPv6 address by its /64. Each quota ending in `_range` counts the same calls by their IPv6 /48 as well, beside the quota of the row above it; an IPv4 address has no /48 count. A call is refused when either count is spent, and the refusal names the count that sets its `Retry-After`.
 
-A fetch and an ack of a message the mailbox holds spend no `calls`, and Section 11.12 gives a fetch's own budgets. A `HEAD` and a call refused by a false precondition spend `calls` (Section 11.2).
+A fetch and an ack of a message the mailbox holds spend no `calls`, and Section 11.12 gives a fetch's own budgets.
+
+**What a `HEAD` and a false precondition spend.** A list's `HEAD`, and a list refused by a false precondition, spend `polls`. Any other `HEAD`, and any other call refused by a false precondition, spend `calls`.
 
 For a server's limit that is not one of these, the refusal has no `quota_id`.
 
@@ -1049,7 +1050,7 @@ statement-hash = 64lowhexdig
 - **A ciphertext is at most 16 MiB (16,777,216 bytes).** Every cap that a server sets on a ciphertext, including an account's caps, is at most 16 MiB. Every reader accepts a ciphertext of any size up to 16 MiB, so every reader reads any message that any server accepts. A larger ciphertext needs a new version of the protocol.
 - **The server checks no signature on a message, because there is none for the server to see.** The server checks the sender against the pass alone.
 
-The server checks the steps below. Only step 9 stores anything. The server spends every count before the work that the count guards, and gives the count back if that work does not happen.
+The server checks the steps below. Only step 9 stores anything.
 
 1. **Who is sending.** The server reads the pass (Section 8) for the mailbox that the pass names. The server checks, in this order:
    1. the IP address's `sends_before_pass`;
@@ -1087,7 +1088,7 @@ The server checks the steps below. Only step 9 stores anything. The server spend
 `GET /v1/<B>/messages` carries the mailbox's pass → `200` with `total_count`, `messages` and `next_cursor`, and `Retry-After`.
 
 - **`total_count`:** the number of live messages in the mailbox, every page's together.
-- **`messages`:** one page of up to 50 list entries, oldest first by `received_at`. Each list entry has the message id in `id`, `size` (the length of the message's ciphertext, Section 11.10), `received_at` and `expires_at`. A list entry has nothing about the sender.
+- **`messages`:** one page of list entries, oldest first by `received_at`. Each list entry has the message id in `id`, `size` (the length of the message's ciphertext, Section 11.10), `received_at` and `expires_at`. A list entry has nothing about the sender.
 - **`next_cursor`:** null after the last page. For an empty mailbox, the answer is `{"total_count":0,"messages":[],"next_cursor":null}`.
 - **A cursor is opaque (AEP-158).** A cursor has the form `cursor`. The next list carries the cursor unchanged, as `?cursor=`.
 
@@ -1097,11 +1098,11 @@ The server checks the steps below. Only step 9 stores anything. The server spend
 
 - **On every list answer, a `304` included, `Retry-After` is the server's poll interval, in seconds.**
 - **A first page carries an `ETag`.** The `ETag` is a strong validator of the page's body. The `ETag` changes whenever a message enters or leaves the page or the count. A page after the first carries no `ETag`.
-- **The server counts every poll (`polls`), a `304` and a `412` included.** So a mailbox that polls faster than its budget gets `429`, never `304`.
+- **A mailbox that polls faster than its `polls` budget gets `429`, never `304`** (Section 11.5).
 - **A list with a cursor is a continuation only if the list meets all three of these conditions:**
   - the list is a `GET` whose preconditions are true;
   - the mailbox stores messages after the cursor;
-  - the cursor is the `next_cursor` the server last handed the mailbox.
+  - the cursor is a `next_cursor` that the server handed the mailbox.
 
   A continuation spends `pages`. Only a `GET` answered `200` uses up the cursor it carries and gets the next cursor. After a false precondition, a refusal or a `HEAD`, the mailbox still has the cursor it had. The server still answers a list with any other cursor that the server can read. The server counts that list as a poll. If the mailbox stores no message after that cursor, the page is empty.
 - **The server checks:**
@@ -1144,7 +1145,7 @@ The server checks the steps below. Only step 9 stores anything. The server spend
   | Fetch | Spends | Past the limit |
   |---|---|---|
   | a message's first fetch | the mailbox's first-fetch budget | `429 fetch_rate_limited` |
-  | a refetch | an allowance the size of the mailbox's poll budget, for that mailbox alone and separate from the mailbox's polls | `429 fetch_rate_limited` |
+  | a refetch | a refetch allowance that the server sets for the mailbox, separate from the mailbox's polls | `429 fetch_rate_limited` |
 
 - **The API serves bodies itself, never through a redirect.**
 
@@ -1181,7 +1182,7 @@ A mailbox's ACL says from which senders the mailbox's server accepts messages to
 The two calls in this section accept no pass (Section 8).
 
 - **Publish a revocation: `PUT /v1/<A>/revocation`.** The call's body is a revocation record (Section 10.3). The server verifies the revocation record as a client does. The server permanently keeps a revocation of the address that verifies, and the highest revocation of certificates that verifies, whether or not a mailbox is at the address (Section 10). This section gives the exceptions.
-  - **The server answers a revocation it already keeps from its stored revocations.** That answer comes ahead of every other refusal of this call, and ahead of every count except the budgets that bound any call (Section 11.5). A `200` comes only when the request's preconditions are true (Section 11.2). Two kinds of body count as a revocation the server already keeps:
+  - **The server answers a revocation it already keeps from its stored revocations.** For an address that the server keeps revoked, that answer comes ahead of every other refusal of this call. For any other address, that answer comes after `400 identity_mismatch` and ahead of every other refusal. Either answer comes ahead of every count except the budgets that bound any call (Section 11.5). A `200` comes only when the request's preconditions are true (Section 11.2). Two kinds of body count as a revocation the server already keeps:
     - any body for an address the server keeps revoked;
     - a body that carries only a revocation of certificates, through a revocation serial no higher than the one the server keeps, whether or not that revocation verifies.
 
@@ -1532,7 +1533,7 @@ A server chooses how it stores things. A server promises a client the following:
 - **A revocation of the address deletes every message in the mailbox, in the same way as an ack deletes one message.** The server also deletes its record of the mailbox, and keeps the revocation (Section 11.15).
 - **Setting the ACL deletes no message (Section 11.14).**
 - **A server finishes a send in flight well inside the hour for sends in flight that Section 15.3 gives a client.** A send in flight is a send to the prekey statement that a renewal replaced, which passed Section 11.10, step 7, before the server accepted the renewal. The server stores and lists the send's message within that time, or does not store the message.
-- **Logs.** A server MUST NOT log an address or a message id in the clear. Where a server would log one of these values, the server logs a name for the value instead. The server MUST make the name with a keyed pseudorandom function, under a random key that the server keeps only in memory and replaces at least once a day; a key made by one server process ends with that process. Under one key, one value always has one name, so log lines about the same value can be read together. Once the server discards a key, nobody, the server's operator included, can match a name made under it to its value. A server MUST NOT log a pass or a request body.
+- **Logs.** A server MUST NOT log an address or a message id in the clear. Where a server would log one of these values, the server logs a name for the value instead. A day after the server logs a name, nobody, the server's operator included, can match the name to its value. For example, a server makes the name with a keyed pseudorandom function, under a random key that the server keeps only in memory and replaces each day. A server MUST NOT log a pass or a request body.
 
 ## 14. Compatibility and versioning
 
@@ -1804,6 +1805,7 @@ Dromas protects a message's content from everyone but the message's recipient. D
 - **[RFC 8594]** Wilde, E., "The Sunset HTTP Header Field", RFC 8594, DOI 10.17487/RFC8594, May 2019, <https://www.rfc-editor.org/info/rfc8594/>.
 - **[RFC 8709]** Harris, B. and L. Velvindron, "Ed25519 and Ed448 Public Key Algorithms for the Secure Shell (SSH) Protocol", RFC 8709, DOI 10.17487/RFC8709, February 2020, <https://www.rfc-editor.org/info/rfc8709/>.
 - **[RFC 9110]** Fielding, R., Ed., Nottingham, M., Ed., and J. Reschke, Ed., "HTTP Semantics", RFC 9110, DOI 10.17487/RFC9110, June 2022, <https://www.rfc-editor.org/info/rfc9110/>.
+- **[RFC 9111]** Fielding, R., Ed., Nottingham, M., Ed., and J. Reschke, Ed., "HTTP Caching", RFC 9111, DOI 10.17487/RFC9111, June 2022, <https://www.rfc-editor.org/info/rfc9111/>.
 - **[RFC 9457]** Nottingham, M., Wilde, E., and S. Dalal, "Problem Details for HTTP APIs", RFC 9457, DOI 10.17487/RFC9457, July 2023, <https://www.rfc-editor.org/info/rfc9457/>.
 - **[RFC 9562]** Davis, K., Peabody, B., and P. Leach, "Universally Unique IDentifiers (UUIDs)", RFC 9562, DOI 10.17487/RFC9562, May 2024, <https://www.rfc-editor.org/info/rfc9562/>.
 - **[RFC 9745]** Dalal, S. and E. Wilde, "The Deprecation HTTP Response Header Field", RFC 9745, DOI 10.17487/RFC9745, March 2025, <https://www.rfc-editor.org/info/rfc9745/>.
