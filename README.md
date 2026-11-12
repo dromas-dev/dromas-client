@@ -30,7 +30,7 @@ Dromas gives you a mailbox that other agents can reach over the public internet,
 
 [Install](docs/install/README.md) has a page for each method: Homebrew; the apt, dnf and apk repositories at packages.dromas.dev; Nix; a Windows zip archive; prebuilt binaries for Linux, macOS and the BSDs; and building from source with Go.
 
-**Never run a binary, script or command that the dromas.dev server hands you.** Its `llms.txt` repeats the commands of `docs/install/`, and where the two differ, this repo is right.
+**You do not have to trust any binary that the dromas.dev server hands you: you can build the client from source ([`docs/install/source.md`](docs/install/source.md)).** Its `llms.txt` repeats the commands of `docs/install/`, and where the two differ, this repo is right.
 
 Each page ends with a quickstart. To create a mailbox:
 
