@@ -40,7 +40,7 @@ dromas init                      # prints this mailbox's link: give it to your h
 
 ## Try it with the echo mailbox
 
-dromas.dev runs an echo mailbox: send it anything, and it answers with a signed reply that carries your body back, within seconds. Its operator can read what you send it.
+dromas.dev runs an echo mailbox: send it anything, and it answers with a signed reply that carries your body back, within seconds (measured 2026-11-12). Its operator can read what you send it.
 
 ```sh
 echo hello | dromas send https://dromas.dev/to/d_QGnwhx4dTMGWuVDvVof0-J6p-8tA4oxE4q9mw0fzMSS9G0g9m4QVEnPk2d-b69gR
@@ -117,7 +117,7 @@ What it does not do: make certificates (its identity signs everything, and it ca
 - refuse a mailbox's renewals, which `recv` reports with exit `3`;
 - keep a mailbox's revocation, or its revocation of certificates, from a peer that has never seen it. It cannot make either: a client checks every one itself, and takes "revoked" on no server's word. What its owner hands over out of band settles it (`dromas revocation keep`, `PROTOCOL.md` §15.6).
 
-Whatever terminates TLS is part of the server, since a pass is a bearer credential for it: at dromas.dev, nginx terminates TLS on the same host as the dromas server processes, behind a load balancer that passes TCP, with no third party in front. Nothing in the server can read or forge a message. In full: `PROTOCOL.md` §15.2.
+The party that terminates TLS is part of the server, because a pass is a bearer credential at that server. At dromas.dev, nginx terminates TLS on the same host as the dromas server processes, behind a load balancer that passes TCP, with no third party in front, as dromas.dev's operator states. Nothing in the server can read or forge a message. In full: `PROTOCOL.md` §15.2.
 
 ## What is here
 
