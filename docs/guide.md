@@ -77,9 +77,10 @@ To receive messages as they arrive, run `dromas recv --follow --headers` under y
 
 The `.deb` and `.rpm` packages install a systemd user unit, `dromas@.service`, and leave it disabled. The instance name is the profile: `dromas@default` runs the default mailbox.
 
-1. If you installed a prebuilt binary, copy the unit from the archive:
+1. If you installed a prebuilt binary, take the unit from the archive, in the directory that holds the archive:
 
    ```sh
+   tar -xzf dromas_*_linux_*.tar.gz packaging/systemd/dromas@.service
    mkdir -p ~/.config/systemd/user
    cp packaging/systemd/dromas@.service ~/.config/systemd/user/
    systemctl --user daemon-reload
@@ -87,7 +88,7 @@ The `.deb` and `.rpm` packages install a systemd user unit, `dromas@.service`, a
 
    The unit runs `/usr/bin/dromas`. If you installed `dromas` somewhere else, edit `ExecStart` in the copy.
 
-2. Enable the service, to start it now and at each login:
+2. Enable the service, to start it now and at each login. For another profile, use `dromas@<profile>`:
 
    ```sh
    systemctl --user enable --now dromas@default
@@ -122,7 +123,7 @@ The `.apk` package installs an OpenRC user service, `/etc/user/init.d/dromas`, a
    ln -s dromas /etc/user/init.d/dromas.<profile>
    ```
 
-3. As the mailbox's owner, enable the service, to start it now and with the owner's user services. If your shell does not set `XDG_RUNTIME_DIR`, set it first:
+3. As the mailbox's owner, enable the service, to start it now and at each boot. For another profile, use `dromas.<profile>` in place of `dromas`. If your shell does not set `XDG_RUNTIME_DIR`, set it first:
 
    ```sh
    export XDG_RUNTIME_DIR=/run/user/$(id -u)
@@ -132,7 +133,7 @@ The `.apk` package installs an OpenRC user service, `/etc/user/init.d/dromas`, a
 
 To check the service, run `rc-service -U dromas status`. The service sends `recv`'s output to syslog with the tag `dromas`, in `/var/log/messages` by default.
 
-The service starts `recv` again 30 seconds after `recv` exits, whatever the exit status, and stops after 5 starts within 30 minutes. Fix the cause, then run `rc-service -U dromas restart`.
+The service starts `recv` again 30 seconds after `recv` exits, whatever the exit status. After 5 starts within 30 minutes, the service stops and stays stopped. Fix the cause, then run `rc-service -U dromas restart`.
 
 ### macOS
 
@@ -144,12 +145,13 @@ brew services start dromas
 
 This runs `dromas recv --follow --headers` for the default profile at each login, and logs to `$(brew --prefix)/var/log/dromas.log`. launchd restarts it after every exit, including exit status 2 and 4. After `brew upgrade dromas`, run `brew services restart dromas`.
 
-Without Homebrew, install the launchd agent that the macOS archive carries, `packaging/launchd/dev.dromas.recv.plist`. The agent runs `/usr/local/bin/dromas`: if you installed `dromas` somewhere else, add `-e 's|/usr/local/bin/dromas|<path>|'` to the `sed` command. Set `profile` to the mailbox's profile:
+Without Homebrew, install the launchd agent that the macOS archive carries, `packaging/launchd/dev.dromas.recv.plist`. The agent runs `/usr/local/bin/dromas`: if you installed `dromas` somewhere else, add `-e 's|/usr/local/bin/dromas|<path>|'` to the `sed` command. Set `profile` to the mailbox's profile, and run these commands in the directory that holds the archive:
 
 ```sh
 profile=default
 label=dev.dromas.recv.$profile
 tar -xzf dromas_*_darwin_*.tar.gz packaging/launchd/dev.dromas.recv.plist
+mkdir -p ~/Library/LaunchAgents
 sed -e "s|PROFILE|$profile|g" -e "s|/Users/USERNAME|$HOME|g" packaging/launchd/dev.dromas.recv.plist > ~/Library/LaunchAgents/$label.plist
 launchctl enable gui/$(id -u)/$label
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/$label.plist
@@ -157,13 +159,14 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/$label.plist
 
 The agent starts `recv` now and at each login, runs only while you are logged in, and logs to `~/Library/Logs/dromas.<profile>.log`. To check the agent, run `launchctl print gui/$(id -u)/dev.dromas.recv.<profile>`. launchd starts `recv` again after every exit, including exit status 2 and 4, at most once every 10 seconds. To remove the agent, run `launchctl bootout gui/$(id -u)/dev.dromas.recv.<profile>`, then delete the file.
 
-Run one service for each mailbox: the agent and `brew services` each run their own `recv`.
+For one mailbox, use the agent or `brew services`, not both: each runs its own `recv`.
 
 ### FreeBSD and DragonFly BSD
 
-The archive carries an rc.d script, `packaging/rc.d/freebsd/dromas`, which runs `/usr/local/bin/dromas recv` as the mailbox's owner under daemon(8). As root, replace `<user>` with the owner:
+The FreeBSD and DragonFly BSD archives carry an rc.d script, `packaging/rc.d/freebsd/dromas`. The script runs `/usr/local/bin/dromas recv` as the mailbox's owner under daemon(8). [Install a prebuilt binary](install/binaries.md) puts `dromas` there. As root, in the directory that holds the archive, replace `<user>` with the owner:
 
 ```sh
+tar -xzf dromas_*_freebsd_*.tar.gz packaging/rc.d/freebsd/dromas   # dragonfly on DragonFly BSD
 install -m 0755 packaging/rc.d/freebsd/dromas /usr/local/etc/rc.d/dromas
 sysrc dromas_enable=YES dromas_user=<user>
 service dromas start
@@ -171,39 +174,41 @@ service dromas start
 
 DragonFly BSD has no `sysrc`: add `dromas_enable="YES"` and `dromas_user="<user>"` to `/etc/rc.conf` instead.
 
-For a mailbox other than the default, set `dromas_flags="--profile <profile>"`. To run several mailboxes, list them in `dromas_profiles`, as the script's comments show. To check the service, run `service dromas status`. The script sends `recv`'s output to syslog with the tag `dromas`, in `/var/log/messages` by default.
+For a mailbox other than the default, also set `dromas_flags="--profile <profile>"` before `service dromas start`, with `sysrc` or in `/etc/rc.conf`. To run several mailboxes, list them in `dromas_profiles` and give each its own settings, as the script's comments show. To check the service, run `service dromas status`. The script sends `recv`'s output to syslog with the tag `dromas`, in `/var/log/messages` by default.
 
-daemon(8) starts `recv` again 30 seconds after every exit, whatever the exit status. Fix the cause, then run `service dromas restart`.
+daemon(8) starts `recv` again 30 seconds after every exit, whatever the exit status, without end. Fix the cause, then run `service dromas restart`.
 
 ### NetBSD
 
-The archive carries an rc.d script, `packaging/rc.d/netbsd/dromas`, which runs `/usr/local/bin/dromas recv` as the mailbox's owner. As root, replace `<user>` with the owner:
+The NetBSD archive carries an rc.d script, `packaging/rc.d/netbsd/dromas`. The script runs `/usr/local/bin/dromas recv` as the mailbox's owner. [Install a prebuilt binary](install/binaries.md) puts `dromas` there. As root, in the directory that holds the archive, replace `<user>` with the owner:
 
 ```sh
+tar -xzf dromas_*_netbsd_*.tar.gz packaging/rc.d/netbsd/dromas
 install -m 0755 packaging/rc.d/netbsd/dromas /etc/rc.d/dromas
 echo 'dromas=YES' >> /etc/rc.conf
 echo 'dromas_user=<user>' >> /etc/rc.conf
 /etc/rc.d/dromas start
 ```
 
-For a mailbox other than the default, add `dromas_flags="--profile <profile>"` to `/etc/rc.conf`. The script runs one mailbox for each host. It writes `recv`'s output to `/var/log/dromas.log`.
+For a mailbox other than the default, also add `dromas_flags="--profile <profile>"` to `/etc/rc.conf` before `/etc/rc.d/dromas start`. The script runs at most one mailbox on a host. The script creates `/var/log/dromas.log`, owned by the mailbox's owner, and writes `recv`'s output there.
 
-Nothing in NetBSD's base system starts `recv` again after `recv` exits. To check whether `recv` runs, run `/etc/rc.d/dromas status`.
+Nothing in NetBSD's base system starts `recv` again after `recv` exits: start it again with `/etc/rc.d/dromas start`. To check whether `recv` runs, run `/etc/rc.d/dromas status`.
 
 ### OpenBSD
 
-The archive carries an rc.d script, `packaging/rc.d/openbsd/dromas`, which runs `/usr/local/bin/dromas recv` as the mailbox's owner. As root, replace `<user>` with the owner:
+The OpenBSD archive carries an rc.d script, `packaging/rc.d/openbsd/dromas`. The script runs `/usr/local/bin/dromas recv` as the mailbox's owner. [Install a prebuilt binary](install/binaries.md) puts `dromas` there. As root, in the directory that holds the archive, replace `<user>` with the owner:
 
 ```sh
+tar -xzf dromas_*_openbsd_*.tar.gz packaging/rc.d/openbsd/dromas
 install -m 0755 packaging/rc.d/openbsd/dromas /etc/rc.d/dromas
 rcctl set dromas user <user>
 rcctl enable dromas
 rcctl start dromas
 ```
 
-For a mailbox other than the default, run `rcctl set dromas flags --profile <profile>`. For a second mailbox, link the script under another name, as the script's comments show. The script sends `recv`'s output to syslog's `daemon` facility, in `/var/log/daemon` by default.
+For a mailbox other than the default, also run `rcctl set dromas flags --profile <profile>` before `rcctl start dromas`. For a second mailbox, link the script under another name and set that name's user and flags, as the script's comments show. The script sends `recv`'s output to syslog's `daemon` facility, in `/var/log/daemon` by default.
 
-Nothing starts `recv` again after `recv` exits. `rcctl check dromas` says whether `recv` runs, and `rcctl ls failed` lists the service once `recv` has exited.
+Nothing starts `recv` again after `recv` exits: start it again with `rcctl start dromas`. `rcctl check dromas` says whether `recv` runs, and `rcctl ls failed` lists the service once `recv` has exited.
 
 ### Windows
 
