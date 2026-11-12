@@ -1,0 +1,84 @@
+#!/bin/sh
+
+# PROVIDE: dromas
+# REQUIRE: LOGIN
+# KEYWORD: shutdown
+
+# The resident recv of one mailbox, run as the mailbox's owner by daemon(8),
+# on FreeBSD and DragonFly BSD. daemon(8) starts recv again 30 seconds after
+# every exit, whatever its exit status. Add these lines to /etc/rc.conf:
+#
+# dromas_enable="YES"
+# dromas_user="<the mailbox's owner>"
+#
+# dromas_flags is added to recv's command line: "--profile <name>" runs that
+# profile's mailbox. For several mailboxes, list them as profiles of this
+# script, and the settings without a profile become each profile's defaults:
+#
+# dromas_profiles="alice work"
+# dromas_alice_user="alice"
+# dromas_work_user="bob"
+# dromas_work_flags="--profile work"
+#
+# recv's output goes to syslog, tagged dromas, or dromas/<profile>.
+
+. /etc/rc.subr
+
+name='dromas'
+desc='Dromas mailbox: receive each message, and run the profile callback'
+rcvar='dromas_enable'
+
+load_rc_config "${name}"
+
+: ${dromas_enable:='NO'}
+
+command='/usr/sbin/daemon'
+pidprefix="/var/run/${name}"
+pidfile="${pidprefix}.pid"
+
+child_command='/usr/local/bin/dromas'
+child_pidfile="${pidprefix}.child.pid"
+
+if [ -n "$2" ]; then
+	profile=$2
+	if [ -n "${dromas_profiles}" ]; then
+		pidfile="${pidprefix}.${profile}.pid"
+		child_pidfile="${pidprefix}.${profile}.child.pid"
+		eval dromas_enable="\${dromas_${profile}_enable:-${dromas_enable}}"
+		eval dromas_flags="\${dromas_${profile}_flags:-${dromas_flags}}"
+		eval dromas_user="\${dromas_${profile}_user:-${dromas_user}}"
+	else
+		echo "$0: extra argument ignored"
+	fi
+else
+	if [ -n "${dromas_profiles}" -a -n "$1" ]; then
+		for profile in ${dromas_profiles}; do
+			echo "===> ${name} profile: ${profile}"
+			/usr/local/etc/rc.d/${name} "$1" "${profile}" || exit "$?"
+		done
+		exit
+	fi
+fi
+
+# daemon(8) runs recv as the owner, so rc.subr runs daemon(8) as root.
+# recv finds its config file from HOME, which DragonFly's daemon -u does not
+# set.
+child_flags=$dromas_flags
+child_user=$dromas_user
+unset dromas_flags dromas_user
+if [ -n "${child_user}" ]; then
+	export HOME="$(/usr/bin/getent passwd "${child_user}" | /usr/bin/cut -d: -f6)"
+fi
+command_args="-R 30 -S -T ${name}${profile:+/${profile}} \
+	-P ${pidfile} -p ${child_pidfile} -u ${child_user} \
+	-- ${child_command} recv --follow --headers ${child_flags}"
+
+start_precmd='dromas_precmd'
+dromas_precmd()
+{
+	case "${child_user}" in
+	''|root) err 1 "set dromas_user to the mailbox's owner, never root" ;;
+	esac
+}
+
+run_rc_command "$1"

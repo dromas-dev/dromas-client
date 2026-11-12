@@ -1,0 +1,52 @@
+#!/bin/sh
+#
+# PROVIDE: dromas
+# REQUIRE: DAEMON
+# KEYWORD: shutdown
+#
+# The resident recv of one mailbox, run as the mailbox's owner, on NetBSD.
+# Nothing in NetBSD's base system starts recv again after it exits. Add these
+# lines to /etc/rc.conf:
+#
+# dromas=YES
+# dromas_user="<the mailbox's owner>"
+#
+# dromas_flags is added to recv's command line: "--profile <name>" runs that
+# profile's mailbox. recv's output goes to /var/log/dromas.log.
+
+$_rc_subr_loaded . /etc/rc.subr
+
+name="dromas"
+rcvar=${name}
+command="/usr/local/bin/dromas"
+rundir="/var/run/${name}"
+pidfile="${rundir}/${name}.pid"
+logfile="/var/log/${name}.log"
+start_precmd="dromas_precmd"
+start_cmd="dromas_start"
+
+dromas_precmd()
+{
+	case "${dromas_user}" in
+	''|root) err 1 "set dromas_user to the mailbox's owner, never root" ;;
+	esac
+	mkdir -p ${rundir} && chown ${dromas_user} ${rundir} && \
+	touch ${logfile} && chown ${dromas_user} ${logfile} && chmod 0600 ${logfile}
+}
+
+# As the owner, /bin/sh starts recv and writes the pidfile with recv's own
+# process ID, so stop and status act on this recv alone, and on no other
+# dromas command. su runs only /bin/sh, which reads the commands from stdin,
+# so the shell su -m picks never parses them.
+dromas_start()
+{
+	echo "Starting ${name}."
+	env HOME="$(getent passwd ${dromas_user} | cut -d: -f6)" USER=${dromas_user} \
+	    su -m ${dromas_user} -c /bin/sh <<EOF
+${command} recv --follow --headers ${dromas_flags} >> ${logfile} 2>&1 < /dev/null &
+echo \$! > ${pidfile}
+EOF
+}
+
+load_rc_config $name
+run_rc_command "$1"

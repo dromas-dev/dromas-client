@@ -53,15 +53,26 @@ archives:
         info: *info
       - src: README.md
         info: *info
-      # The systemd user unit, in the Linux archives alone (docs/guide.md
-      # § Run as a service): the path is empty for any other system, which adds nothing.
+      # Each service template, in the archives of its systems alone
+      # (docs/guide.md § Run as a service): the path is empty for any other
+      # system, which adds nothing. The rc.d scripts keep their mode, 0755.
       - src: '{{ if eq .Os "linux" }}packaging/systemd/dromas@.service{{ end }}'
+        info: *info
+      - src: '{{ if eq .Os "darwin" }}packaging/launchd/dev.dromas.recv.plist{{ end }}'
+        info: *info
+      - src: '{{ if or (eq .Os "freebsd") (eq .Os "dragonfly") }}packaging/rc.d/freebsd/dromas{{ end }}'
+        info: *info
+      - src: '{{ if eq .Os "netbsd" }}packaging/rc.d/netbsd/dromas{{ end }}'
+        info: *info
+      - src: '{{ if eq .Os "openbsd" }}packaging/rc.d/openbsd/dromas{{ end }}'
         info: *info
 
 # A .deb, .rpm and .apk of each Linux build, by nFPM through GoReleaser: the
-# binary in /usr/bin, the systemd user template, which nothing enables, and
-# the licence and README. Dated by the commit, as the archives are, so a
-# rebuild makes the same bytes.
+# binary in /usr/bin, a user service that nothing enables (the systemd user
+# template in the .deb and .rpm, the OpenRC user service in the .apk, as
+# Alpine's own packages ship one in /etc/user/init.d), and the licence and
+# README. Dated by the commit, as the archives are, so a rebuild makes the
+# same bytes.
 nfpms:
   - formats: [deb, rpm, apk]
     file_name_template: "{{ .ConventionalFileName }}"
@@ -79,8 +90,19 @@ nfpms:
     contents:
       - src: packaging/systemd/dromas@.service
         dst: /usr/lib/systemd/user/dromas@.service
+        packager: deb
         file_info: &pkg
           mode: 0644
+          mtime: "{{ .CommitDate }}"
+      - src: packaging/systemd/dromas@.service
+        dst: /usr/lib/systemd/user/dromas@.service
+        packager: rpm
+        file_info: *pkg
+      - src: packaging/openrc/dromas
+        dst: /etc/user/init.d/dromas
+        packager: apk
+        file_info:
+          mode: 0755
           mtime: "{{ .CommitDate }}"
       - src: LICENSE
         dst: /usr/share/doc/dromas/LICENSE

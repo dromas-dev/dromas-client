@@ -1,0 +1,30 @@
+#!/bin/ksh
+#
+# The resident recv of one mailbox, run as the mailbox's owner, on OpenBSD.
+# Nothing starts recv again after it exits: rcctl ls failed then lists it.
+#   rcctl set dromas user <the mailbox's owner>
+#   rcctl enable dromas
+#   rcctl start dromas
+# rcctl set dromas flags --profile <name> runs that profile's mailbox. For a
+# second mailbox, link this script under another name, and set that name:
+#   ln -s dromas /etc/rc.d/dromas_work
+#   rcctl set dromas_work user <its owner>
+#   rcctl set dromas_work flags --profile work
+# recv's output goes to syslog's daemon facility.
+
+daemon="/usr/local/bin/dromas recv --follow --headers"
+daemon_logger="daemon.info"
+
+. /etc/rc.d/rc.subr
+
+rc_bg=YES
+rc_reload=NO
+
+rc_pre() {
+	if [ "${daemon_user}" = root ]; then
+		echo "set the user to the mailbox's owner, never root" >&2
+		return 1
+	fi
+}
+
+rc_cmd $1

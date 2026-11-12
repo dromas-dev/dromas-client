@@ -221,3 +221,26 @@ jobs:
           out=$(systemd-analyze verify /usr/lib/systemd/user/dromas@.service 2>&1)
           printf '%s\n' "$out"
           test -z "$out"
+      - name: the .apk installs on Alpine, with its OpenRC user service and no systemd unit
+        # openrc-run reads the script as OpenRC reads it, and describe prints
+        # the service's description, on a system OpenRC did not boot. The
+        # image is pinned by digest, as the Dockerfile's base is.
+        run: |
+          docker run --rm -v "$PWD/dist:/dist:ro" alpine:3.23@sha256:469c9ea410b9215eaee7976ba6c0639039b444be8e5d638f7abbada189971eb2 sh -euc '
+            apk add -q --allow-untrusted /dist/dromas_*_x86_64.apk
+            dromas version
+            test "$(stat -c %a /etc/user/init.d/dromas)" = 755
+            test ! -e /usr/lib/systemd/user/dromas@.service
+            apk add -q openrc
+            /sbin/openrc-run /etc/user/init.d/dromas describe | grep -F "Dromas mailbox"'
+      - name: each archive carries its system's service template
+        # A glob that matches nothing stays a literal name, which tar cannot
+        # open, so a missing archive fails the step too. grep reads the whole
+        # list (no -q), so tar never meets a closed pipe under pipefail.
+        run: |
+          has() { tar -tzf "$1" | grep -x "$2" > /dev/null || { echo "::error::$1 lacks $2"; exit 1; }; }
+          for a in dist/*_linux_*.tar.gz; do has "$a" packaging/systemd/dromas@.service; done
+          for a in dist/*_darwin_*.tar.gz; do has "$a" packaging/launchd/dev.dromas.recv.plist; done
+          for a in dist/*_freebsd_*.tar.gz dist/*_dragonfly_*.tar.gz; do has "$a" packaging/rc.d/freebsd/dromas; done
+          for a in dist/*_netbsd_*.tar.gz; do has "$a" packaging/rc.d/netbsd/dromas; done
+          for a in dist/*_openbsd_*.tar.gz; do has "$a" packaging/rc.d/openbsd/dromas; done
