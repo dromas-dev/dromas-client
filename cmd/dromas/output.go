@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"time"
@@ -158,6 +160,32 @@ func (e *cli) out(b []byte) error {
 // say prints a line on stderr, where nothing waits on whether it was written.
 func (e *cli) say(b []byte) { _, _ = e.stderr.Write(append(b, '\n')) }
 
+// logTo sends stdout's and stderr's lines to the file name from here on, appended
+// to it, and the line runWith reports the command's error in. The file is its
+// owner's alone where logTo makes it (client.OpenPrivate). A relative name is
+// the working directory's, and ~/ the home directory's (expand).
+func (e *cli) logTo(name string) error {
+	p, err := expand(name, ".")
+	if err == nil {
+		p, err = filepath.Abs(p)
+	}
+	var f *os.File
+	if err == nil {
+		f, err = client.OpenPrivate(p, os.O_WRONLY|os.O_APPEND)
+	}
+	if err != nil {
+		return fmt.Errorf("--log-file: %w", err)
+	}
+	e.stdout, e.stderr, e.log = f, f, f
+	return nil
+}
+
+// reported is an error whose line runWith wrote already, to the log file: the
+// process exits with its status, and prints nothing more.
+type reported struct{ status int }
+
+func (e *reported) Error() string { return fmt.Sprintf("exit status %d", e.status) }
+
 // omit is s, or nil for line to leave out when s is empty.
 func omit(s string) any {
 	if s == "" {
@@ -238,9 +266,12 @@ func report(err error, stderr io.Writer) int {
 	var fatal *fatalEnd
 	var wrong *usageError
 	var badConfig *configError
+	var done *reported
 	switch {
 	case err == nil:
 		return 0
+	case errors.As(err, &done):
+		return done.status
 	case errors.As(err, &badConfig):
 		_, _ = fmt.Fprintf(stderr, "%s\n", line("config_error", "file", omit(badConfig.file), "key", omit(badConfig.key), "detail", badConfig.msg))
 		return 2

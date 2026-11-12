@@ -119,7 +119,29 @@ Without Homebrew, create a LaunchAgent in `~/Library/LaunchAgents` that runs the
 
 ### Windows
 
-Create a Task Scheduler task that runs `dromas recv --follow --headers` at log on, with no time limit.
+A Task Scheduler task runs `recv` as you, from each log on until you log off. A task's action cannot redirect output, so the task passes `--log-file`, and `recv` appends its lines to that file. To register the task and start it, run these commands in PowerShell as yourself. The commands need no administrator rights. For a mailbox other than the default, set `$p` to its profile.
+
+```powershell
+$p = 'default'
+$log = "$env:LOCALAPPDATA\dromas\$p.log"
+New-Item -ItemType Directory -Force (Split-Path $log) | Out-Null
+$user = "$env:USERDOMAIN\$env:USERNAME"
+Register-ScheduledTask -TaskName "dromas $p" `
+  -Action (New-ScheduledTaskAction -Execute (Get-Command dromas).Source -Argument "recv --follow --headers --profile $p --log-file `"$log`"") `
+  -Trigger (New-ScheduledTaskTrigger -AtLogOn -User $user) `
+  -Principal (New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Limited) `
+  -Settings (New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1))
+Start-ScheduledTask -TaskName "dromas $p"
+```
+
+The task has no time limit, runs on battery power, and runs one `recv` at most. Task Scheduler does not start `recv` again after `recv` exits, whatever the exit status. The task then stays stopped until your next log on, or until you run `Start-ScheduledTask -TaskName "dromas default"`.
+
+On Windows 11 24H2 and later, and on Windows Server 2025, the task opens no console window, because `dromas.exe` asks Windows not to allocate one. On earlier versions of Windows, a console window opens at log on, and closing the window ends `recv`.
+
+- To check the task, run `Get-ScheduledTask -TaskName "dromas default"`. After `recv` exits, `Get-ScheduledTaskInfo -TaskName "dromas default"` gives `recv`'s exit status as `LastTaskResult`. A `LastTaskResult` of 2 means that the command line or the config file is wrong, and `recv` wrote nothing to the log.
+- To read the log, run `Get-Content -Wait "$env:LOCALAPPDATA\dromas\default.log"`.
+- Before you upgrade `dromas`, run `Stop-ScheduledTask -TaskName "dromas default"`, because Windows cannot replace a running `dromas.exe`. After the upgrade, run `Start-ScheduledTask -TaskName "dromas default"`.
+- To remove the task, run `Unregister-ScheduledTask -TaskName "dromas default" -Confirm:$false`.
 
 ## Keep the mailbox current
 

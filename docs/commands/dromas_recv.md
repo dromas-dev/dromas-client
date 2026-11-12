@@ -32,6 +32,12 @@ between drains, so the mailbox's other commands can run meanwhile. With --wait
 or --follow, recv makes a call again when a wait may fix it, and reports each
 wait on stderr ("waiting").
 
+With --log-file, recv appends each line it would print, on stdout and on stderr,
+to the file instead, the "error" line it ends with included. A service manager
+that keeps no log of its own, as Windows' Task Scheduler, otherwise keeps none
+of them. recv makes the file readable by its owner alone when the file is not
+there, and leaves a file that is there as it is. Nothing rotates the file.
+
 Exit status 4, with "fatal" in the "error" line, means that no wait fixes the
 refusal: a revocation, no mailbox at this address with its registration refused,
 a mailbox in another format, a missing folder of the mailbox, as on an unmounted
@@ -84,6 +90,7 @@ dromas recv [flags] [-- <argument>...]
       --follow[=true|false]     continue after each message, without end or for --wait's duration
       --headers[=true|false]    print each message's checked fields and its body's size, without its body or subject
       --help[=true|false]       print this help, and run nothing
+      --log-file file           append every line recv prints, stdout's and stderr's, to this file
       --wait duration           hold the list open until a message arrives, for at most this long, however many held requests that needs
 ```
 

@@ -9,6 +9,8 @@ A command prints what it did, and what it met on the way, to stdout, messages an
 - `config_error`, when a setting was invalid, in the config file, a flag or an environment variable
 - `waiting`, while the command waits
 
+`dromas recv --log-file <file>` appends the lines it would print, on stdout and on stderr, to the file instead. The `error` line it ends with goes to the file too. A `usage_error` or `config_error` line still goes to stderr, because `recv` stops before it opens the file.
+
 A `detail` member is the client's own words, never a sender's or a server's.
 
 ## Line types
