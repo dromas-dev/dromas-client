@@ -554,7 +554,7 @@ server-port    = %x31-39 *4DIGIT   ; no leading zero, at most 65535,
 
 | Code | When |
 |---|---|
-| `certificate_revoked` | the call accepts a pass by the current certificate, and the identity has revoked that certificate (Section 11.4, rule 1); or the call brings a prekey statement under a certificate that the identity revoked |
+| `certificate_revoked` | the call accepts a pass by the current certificate, the identity has revoked that certificate, and the pass does not name the identity's key (Section 11.4, rule 1); or the call brings a prekey statement under a certificate that the identity revoked |
 | `pass_expired` | at the server's clock, the pass has ended or ends more than the skew allowance ahead, or the pass's certificate has not begun or has ended |
 | `certificate_superseded` | the pass is by any certificate other than the one the call accepts a pass by, or the certificate that the server keeps for the mailbox does not verify |
 | `invalid_pass` | there is no pass, or the pass is not this mailbox's, or the pass is not for this server, or the pass does not verify |
@@ -603,7 +603,7 @@ lowhexdig = DIGIT / %x61-66   ; HEXDIG in lowercase
 - **`v` changes only for a breaking change.** A reader MUST refuse a `v` that the reader does not know.
 - **A reader ignores a member that this version does not define (Section 3.3).** So two clients can agree on members of their own.
   - A member that this protocol defines has a plain name.
-  - Any other member SHOULD have a collision-resistant name that contains a domain its writer controls (`example.com/compress`), and never an `x-` prefix (RFC 6648). RFC 7519 §4.2 names a public claim in the same way.
+  - Any other member SHOULD have a collision-resistant name that contains a domain its writer controls (`example.com/compress`), and never an `x-` prefix (RFC 6648).
   - Such a member adds to a message. Such a member never changes the meaning of a member this protocol defines. Therefore content that two clients transform between themselves goes inside `body`.
 
 ### 9.2. The plaintext: envelope, signature and padding
@@ -887,7 +887,7 @@ A server chooses what it limits and by how much. No limit's value is part of the
 | A lookup, whatever it carries | the call's IP address |
 | A check that fails, or a call that names no mailbox | the call's IP address |
 
-The `subject` column of the table above gives the exceptions. A registration is counted against the IP address, and a revocation of certificates through a higher revocation serial is counted against the mailbox.
+The `subject` column of the table below gives the exceptions. A registration is counted against the IP address, and a revocation of certificates through a higher revocation serial is counted against the mailbox.
 
 **How a refusal names its limit.**
 
@@ -1151,6 +1151,8 @@ The server checks the steps below. Only step 9 stores anything.
 
 `DELETE /v1/<B>/messages/<id>` carries the mailbox's pass → `204`. The ack deletes the message. The server keeps nothing of the deleted message (Section 11.10, step 6). A message that is gone → `404 message_not_found`. Reading a message does not delete the message.
 
+- **An ack whose message another call deletes first answers `404 message_not_found`, never `409`.**
+
 ### 11.14. ACL
 
 A mailbox's ACL says from which senders the mailbox's server accepts messages to the mailbox.
@@ -1350,7 +1352,7 @@ A client drains every page of its list (Section 11.11) and fetches the message o
 
 1. **Check 1, decryption.** The reader decrypts the file, trying every retained prekey (`decrypt_error`). A reader MAY refuse a file without exactly one native stanza as `decrypt_error`, before any key agreement. No server accepts such a file as a send (Section 11.10, step 7).
 2. **Check 2, layout.** The plaintext has the layout of Section 9.2: the envelope on line 1, then a signature block from line 2 to the first END line, followed by LF (`malformed_message`).
-3. **Check 3, JSON.** The envelope is one JSON object, read by the rules of Section 3.3, and the envelope's body meets the same rules (`invalid_envelope`). The client passes the body on unchanged.
+3. **Check 3, JSON.** The envelope is one JSON object, read by Section 3.3's rules for a JSON text, the rule on types aside, and the envelope's body meets the same rules (`invalid_envelope`). Check 6 reads the types of the envelope's members. The client passes the body on unchanged.
 4. **Check 4, identity.** The sender's identity document comes from the envelope's `identity`.
    - The document is base64, has the form of Section 4.1, and has a key that meets the key checks of the key's type (`invalid_identity`).
    - `from` MUST be the document's hash (`sender_mismatch`).
@@ -1526,6 +1528,7 @@ A server chooses how it stores things. A server promises a client the following:
       TTL − skew allowance − 2 minutes
 
   The two minutes are for the post's own time: from when the sender dates the post until the server receives the post. `expires_at` is the authority, and a server MUST NOT serve a message past it.
+- **`received_at` is the server's clock no later than the server's check of the send's pass.** A server that stamps the message later, for example once the body has arrived or is stored, can serve a message near its expiry that a fast reader refuses as older than 7 days (Section 12.3, check 6).
 - **An ack deletes the message.** The server keeps nothing of the message (Section 11.10, step 6).
 - **A revocation of the address deletes every message in the mailbox, in the same way as an ack deletes one message.** The server also deletes its record of the mailbox, and keeps the revocation (Section 11.15).
 - **Setting the ACL deletes no message (Section 11.14).**
@@ -1636,7 +1639,7 @@ Dromas protects a message's content from everyone but the message's recipient. D
 ### 15.3. Forward secrecy
 
 - **Every mailbox has forward secrecy, given a client that deletes retired prekeys (Section 12.4).** How often the mailbox renews and deletes sets the bound on that forward secrecy.
-  - A message cannot be recovered from the mailbox's keys once every prekey that the message could be encrypted to is deleted. That time comes, at the latest, at the first answered call (Section 12.4) at or past the `not_after` of the prekey statement that the message is sealed to, plus the TTL. That is at most 15 days after the prekey statement was made (Section 6), by the mailbox's clock. A server that refuses every pass keeps the prekeys on the mailbox's disk for as long as the server refuses.
+  - A message cannot be recovered from the mailbox's keys once every prekey that the message could be encrypted to is deleted. For a retired prekey, that time comes, at the latest, at the first answered call (Section 12.4) at or past the `not_after` of the prekey statement that the message is sealed to, plus the TTL. That is at most 15 days after the prekey statement was made (Section 6), by the mailbox's clock. A server that refuses every pass, or refuses the mailbox's renewals, keeps the prekeys on the mailbox's disk for as long as the server refuses.
   - Suppose a client deletes every retired prekey after a drain that empties its mailbox. For that client, that time comes at the first such drain whose list is answered more than an hour after the server accepted the mailbox's next renewal, both by the mailbox's clock. For example, that time comes this long after the message arrives:
     - about a day, for a mailbox that renews daily and polls between renewals;
     - about two days, for a mailbox whose only drain is a daily one and which renews at the start of that drain;
@@ -1655,7 +1658,7 @@ Dromas protects a message's content from everyone but the message's recipient. D
 - **The signature is bound to the recipient by the namespace and by the envelope's `to`.** So a recipient cannot forward a signed message to a third mailbox as a message from the sender. That forwarding is the known flaw of signing before encrypting [Davis]. The sender's signature names the recipient, the encrypted plaintext names the sender, and the reader refuses a name that does not match [ADR].
 - **The signature is not deniable toward a recipient.** A recipient can show anyone what a sender signed. That is both an audit trail for programs that act on messages and a privacy cost. The server keeps no message signature, and can prove nothing about who sent what.
 - **A message that a mailbox cannot decrypt has no sender at all.** The server keeps no sender (Section 13). So a mailbox restored without its prekeys cannot learn whom to ask to send the message again.
-- **A reader decrypts before it verifies.** Until the signature is checked, the reader handles bytes that nobody vouched for: first age's, then the envelope's. By design, age accepts files from anyone, and a reader acks a refused message whatever the reason for the refusal, so neither the server nor the sender learns which check failed. Each part of the plaintext has one place, and nothing is searched for (Section 9.2).
+- **A reader decrypts before it verifies.** Until the signature is checked, the reader handles bytes that nobody vouched for: first age's, then the envelope's. By design, age accepts files from anyone, and a reader acks a refused message whatever the reason for the refusal, so neither the server nor the sender learns which check failed. The one exception is check 7's read of a sender's revocations, which tells the server which senders the reader has verified (Section 15.8). Each part of the plaintext has one place, and nothing is searched for (Section 9.2).
 - **Encryption with age to a public key authenticates nobody.** Only the signature inside makes a message the sender's. The padding after the signature is unsigned, and is never read.
 - **A malformed identity document is evidence of tampering, and so is an identity document that does not hash to the address.** A well-formed identity document of a key type that a reader does not verify is not evidence of tampering (Section 4.1).
 - **A refusal blocks no sender, because the sender may not have written the message.** A forgery may be the operator framing the sender. A message under a revoked certificate may be a thief's, and the thief's signature verifies.
@@ -1769,7 +1772,7 @@ Dromas protects a message's content from everyone but the message's recipient. D
 
 ## 16. Test vectors
 
-`testdata/vectors/` has the conformance vectors. Each file is one scenario, with the scenario's expected outcome, and each file is named for the scenario's verdict. `testdata/vectors/README.md` describes the vectors' format and how each vector is checked. A conforming client meets every vector of the parts it implements. The crypto and container vectors are checked by `age`, `ssh-keygen` and `sha256sum`, which are tools written outside this project. The keys of the crypto and container vectors are published test keys.
+`testdata/vectors/` has the conformance vectors. Each file is one scenario, with the scenario's expected outcome, and each file is named for the scenario's verdict. `testdata/vectors/README.md` describes the vectors' format and how each vector is checked. A conforming client meets every vector of the parts it implements. The crypto and container vectors are checked by `age`, `head`, `sed`, `ssh-keygen` and `openssl`, which are tools written outside this project. The keys of the crypto and container vectors are published test keys.
 
 ## 17. References
 
@@ -1816,7 +1819,6 @@ Dromas protects a message's content from everyone but the message's recipient. D
 - **[Davis]** Davis, D., "Defective Sign & Encrypt in S/MIME, PKCS#7, MOSS, PEM, PGP, and XML", USENIX Annual Technical Conference 2001, <https://www.usenix.org/legacy/publications/library/proceedings/usenix01/full_papers/davis/davis.pdf>.
 - **[RFC 6648]** Saint-Andre, P., Crocker, D., and M. Nottingham, "Deprecating the "X-" Prefix and Similar Constructs in Application Protocols", RFC 6648, DOI 10.17487/RFC6648, June 2012, <https://www.rfc-editor.org/info/rfc6648/>.
 - **[RFC 7457]** Sheffer, Y., Holz, R., and P. Saint-Andre, "Summarizing Known Attacks on Transport Layer Security (TLS) and Datagram TLS (DTLS)", RFC 7457, DOI 10.17487/RFC7457, February 2015, <https://www.rfc-editor.org/info/rfc7457/>.
-- **[RFC 7519]** Jones, M., Bradley, J., and N. Sakimura, "JSON Web Token (JWT)", RFC 7519, DOI 10.17487/RFC7519, May 2015, <https://www.rfc-editor.org/info/rfc7519/>.
 - **[RFC 8555]** Barnes, R., Hoffman-Andrews, J., McCarney, D., and J. Kasten, "Automatic Certificate Management Environment (ACME)", RFC 8555, DOI 10.17487/RFC8555, March 2019, <https://www.rfc-editor.org/info/rfc8555/>.
 - **[RFC 9180]** Barnes, R., Bhargavan, K., Lipp, B., and C. Wood, "Hybrid Public Key Encryption", RFC 9180, DOI 10.17487/RFC9180, February 2022, <https://www.rfc-editor.org/info/rfc9180/>.
 - **[RFC 9266]** Whited, S., "Channel Bindings for TLS 1.3", RFC 9266, DOI 10.17487/RFC9266, July 2022, <https://www.rfc-editor.org/info/rfc9266/>.
@@ -1894,6 +1896,7 @@ dromas-version-value       = version-number "." version-number "." version-numbe
 envelope-line              = 1*( %x00-09 / %x0B-FF ) LF   ; the envelope (Section 9.1)
 full-date                  = <full-date, see [RFC 3339], Section 5.6>
 identity-document          = %s"dromas-v1" LF key-type SP base64-nonempty LF
+implementation-text        = 1*128%x21-7E
 IPv6address                = <IPv6address, see [RFC 3986], Section 3.2.2>
 key-name                   = 1*( %x21-2B / %x2D-3F / %x41-7E )   ; printable ASCII, no "," or "@"
 key-type                   = key-name [ "@" domain ]   ; at most 64 characters
