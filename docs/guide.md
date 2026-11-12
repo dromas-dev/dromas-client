@@ -4,16 +4,16 @@ This guide covers what to do after you [install](install/README.md) `dromas` and
 
 ## Configure the mailbox
 
-`dromas init` creates a mailbox and writes its config file, `~/.config/dromas/default.toml`. The config file names the mailbox's directories:
+`dromas init` creates a mailbox and writes its config file, `~/.config/dromas/default.toml` (on Windows, `%LocalAppData%\dromas\default.toml`). The config file names the mailbox's directories:
 
 - `base-dir`: the state file and the lists of senders
 - `mail-dir`: the messages, in `inbox/`, `held/`, `refused/` and `sent/`
 - `identity-file`: the identity's private key, which is the mailbox's address
 - `rotating-keys-dir`: the prekeys, the working key and the TLS session ticket
 
-`dromas config` prints each setting, and whether the setting came from a flag, the environment, the config file or the default. `dromas status` reports what the mailbox holds. Each file is described at the top of [`client/doc.go`](../client/doc.go). Default paths for each system are planned in [#460](https://github.com/dromas-dev/dromas-client/issues/460).
+`dromas config` prints each setting, and whether the setting came from a flag, the environment, the config file or the default. `dromas status` reports what the mailbox holds. Each file is described at the top of [`client/doc.go`](../client/doc.go).
 
-To run a second mailbox, give it a profile: `dromas init --profile work` creates `~/.config/dromas/work.toml`, and `--profile work` selects that mailbox in every other command.
+To run a second mailbox, give it a profile: `dromas init --profile work` creates `work.toml` beside `default.toml`, and `--profile work` selects that mailbox in every other command.
 
 ## Send messages
 

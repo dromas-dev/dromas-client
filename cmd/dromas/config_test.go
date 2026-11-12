@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"testing"
@@ -41,11 +42,21 @@ func cleanEnv(t *testing.T) string {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
+	t.Setenv("LOCALAPPDATA", filepath.Join(home, "AppData", "Local"))
 	for _, v := range []string{"XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "DROMAS_CONFIG", "DROMAS_PROFILE", "DROMAS_SERVER_URL", "DROMAS_CA_FILE",
 		"DROMAS_AGENT", "DROMAS_ASKPASS", "DROMAS_NO_PROMPT", "DROMAS_ADD_KEYS_TO_AGENT", "DROMAS_REVOCATION_FILE", "XDG_RUNTIME_DIR", "XDG_CACHE_HOME"} {
 		t.Setenv(v, "")
 	}
 	return home
+}
+
+// confDir is the config directory under the home cleanEnv gives: %LocalAppData%\dromas
+// on Windows, ~/.config/dromas elsewhere.
+func confDir(home string) string {
+	if runtime.GOOS == "windows" {
+		return filepath.Join(home, "AppData", "Local", "dromas")
+	}
+	return filepath.Join(home, ".config", "dromas")
 }
 
 // writeConfig writes a config file, its owner's alone, and returns its path.
@@ -116,7 +127,7 @@ func TestEachSettingComesFromTheFirstPlaceThatSaysIt(t *testing.T) {
 // variable. Two that each name a file are refused, never ranked.
 func TestTheConfigFileIsChosen(t *testing.T) {
 	home := cleanEnv(t)
-	dir := filepath.Join(home, ".config", "dromas")
+	dir := confDir(home)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -216,7 +227,7 @@ func TestAConfigThatIsWrongIsFatal(t *testing.T) {
 			t.Errorf("%s: %v", name, err)
 		}
 	}
-	if es, _ := os.ReadDir(filepath.Join(home, ".config")); len(es) != 0 {
+	if es, _ := os.ReadDir(confDir(home)); len(es) != 0 {
 		t.Errorf("a command that is not init wrote a config: %v", es)
 	}
 	if es, _ := os.ReadDir(root); len(es) != 0 {
@@ -277,6 +288,7 @@ func TestTheWorkingDirectoryIsNeverRead(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", "")
 	t.Setenv("HOME", ".")
 	t.Setenv("USERPROFILE", ".")
+	t.Setenv("LOCALAPPDATA", ".")
 	if err := do(t.Context(), "config", nil, nil, io.Discard, io.Discard); !errors.As(err, &bad) {
 		t.Errorf("a relative home: %v", err)
 	}
@@ -317,18 +329,25 @@ func TestInitWritesAProfilesFileAndRunsFromIt(t *testing.T) {
 	if err := do(t.Context(), "init", []string{"--profile", "bot", "--server", srv.URL}, nil, &out, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	file := filepath.Join(home, ".config", "dromas", "bot.toml")
+	file := filepath.Join(confDir(home), "bot.toml")
 	raw, err := os.ReadFile(file)
 	if err != nil {
 		t.Fatal(err)
 	}
 	text := string(raw)
+	// The mailbox is under ~/.local/share and its keys under ~/.local/state; on
+	// Windows the mailbox is under %LocalAppData%, its keys in its keys\.
+	base, keys, sep := "~/.local/share/dromas/bot", "~/.local/state/dromas/bot/keys", "/"
+	if runtime.GOOS == "windows" {
+		base = filepath.Join(home, "AppData", "Local", "dromas", "bot")
+		keys, sep = filepath.Join(base, "keys"), `\`
+	}
 	for _, want := range []string{
-		`base-dir = "~/.local/share/dromas/bot"`,
-		`mail-dir = "~/.local/share/dromas/bot/mail"`,
-		`identity-file = "~/.local/share/dromas/bot/identity"`,
-		`rotating-keys-dir = "~/.local/state/dromas/bot/keys"`,
-		`# inbox-dir = "~/.local/share/dromas/bot/mail/inbox"`,
+		"base-dir = " + tomlString(base),
+		"mail-dir = " + tomlString(base+sep+"mail"),
+		"identity-file = " + tomlString(base+sep+"identity"),
+		"rotating-keys-dir = " + tomlString(keys),
+		"# inbox-dir = " + tomlString(base+sep+"mail"+sep+"inbox"),
 		`server = "` + srv.URL + `"`,
 		`# prekey-lifetime = "8d"`,
 		`# [policy]`,
@@ -337,12 +356,18 @@ func TestInitWritesAProfilesFileAndRunsFromIt(t *testing.T) {
 			t.Errorf("the file does not say %s:\n%s", want, text)
 		}
 	}
-	for _, want := range []string{".local/share/dromas/bot/identity", ".local/state/dromas/bot/keys/prekeys"} {
-		if _, err := os.Stat(filepath.Join(home, filepath.FromSlash(want))); err != nil {
+	onDisk := func(p string) string {
+		if strings.HasPrefix(p, "~/") {
+			return filepath.Join(home, filepath.FromSlash(p[2:]))
+		}
+		return p
+	}
+	for _, want := range []string{onDisk(base + sep + "identity"), onDisk(keys + sep + "prekeys")} {
+		if _, err := os.Stat(want); err != nil {
 			t.Errorf("%s: %v", want, err)
 		}
 	}
-	if _, err := os.Stat(filepath.Join(home, ".local/share/dromas/bot/.gitignore")); err == nil {
+	if _, err := os.Stat(filepath.Join(onDisk(base), ".gitignore")); err == nil {
 		t.Error("a .gitignore was written")
 	}
 	var st bytes.Buffer
@@ -564,7 +589,7 @@ func TestARefusedInitWritesNoFile(t *testing.T) {
 		if err := do(t.Context(), "init", append([]string{"--profile", "bot"}, args...), nil, io.Discard, io.Discard); !errors.As(err, &bad) {
 			t.Errorf("%s: %v", name, err)
 		}
-		if _, err := os.Stat(filepath.Join(home, ".config", "dromas", "bot.toml")); err == nil {
+		if _, err := os.Stat(filepath.Join(confDir(home), "bot.toml")); err == nil {
 			t.Errorf("%s: the file was written", name)
 		}
 	}
