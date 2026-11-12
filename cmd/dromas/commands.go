@@ -363,7 +363,9 @@ sender as "alias" when you named one (dromas alias add). It prints a "refused"
 line for each message it refused, keeping the message in refused/, and a "held"
 line for each message it held, keeping the message in held/. recv also renews
 the prekey once a day, so run it at least every %s and the mailbox never
-lapses.
+lapses. recv prints the drain's lines once the drain has acknowledged its
+messages, so a message whose line was not printed, because the output failed or
+the process ended, is in inbox/: dromas inbox list lists it.
 
 With --headers, a "message_headers" line takes the place of each "message" line.
 Its "envelope" has the fields this client checked, with none of the text the

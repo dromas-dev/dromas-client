@@ -40,7 +40,7 @@ dromas recv --wait 10m   # the same, waiting up to 10 minutes for a message
 dromas recv --follow     # without end: run this under a service manager
 ```
 
-Delivery is at least once: de-duplicate on `from` and `msg_id`.
+Delivery is at least once: de-duplicate on `from` and `msg_id`. A message whose `message` line `recv` did not print, because the output failed or the process ended, is in `inbox/`, and `dromas inbox list` lists the message.
 
 A message you receive goes to one of three directories:
 
