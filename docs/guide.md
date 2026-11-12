@@ -4,7 +4,7 @@ This guide covers what to do after you [install](install/README.md) `dromas` and
 
 ## Configure the mailbox
 
-`dromas init` creates a mailbox and writes its config file, `~/.config/dromas/default.toml` (on Windows, `%AppData%\dromas\default.toml`). The config file names the mailbox's directories:
+`dromas init` creates a mailbox and writes its config file, `~/.config/dromas/default.toml` (on Windows, `%LocalAppData%\dromas\default.toml`). The config file names the mailbox's directories:
 
 - `base-dir`: the state file and the lists of senders
 - `mail-dir`: the messages, in `inbox/`, `held/`, `refused/` and `sent/`

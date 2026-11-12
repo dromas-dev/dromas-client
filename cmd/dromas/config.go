@@ -167,17 +167,21 @@ func homeDir() (string, error) {
 }
 
 // configDir is the directory a profile's file is in: $XDG_CONFIG_HOME/dromas,
-// else %AppData%\dromas on Windows, as gh keeps its own there, else
-// ~/.config/dromas. A relative $XDG_CONFIG_HOME or %AppData% is ignored, as the
-// XDG Base Directory spec has it: it would read the working directory.
+// else %LocalAppData%\dromas on Windows, else ~/.config/dromas. On Windows a
+// profile's file is beside its mailbox, not in %AppData%, which a roaming
+// profile copies to each machine its user signs in to: the file names one
+// mailbox, which runs in one place, and a copy elsewhere would name a mailbox
+// that machine does not have. A relative $XDG_CONFIG_HOME or %LocalAppData% is
+// ignored, as the XDG Base Directory spec has it: it would read the working
+// directory.
 func configDir() (string, error) {
 	if d := os.Getenv("XDG_CONFIG_HOME"); filepath.IsAbs(d) {
 		return filepath.Join(d, "dromas"), nil
 	}
 	if runtime.GOOS == "windows" {
-		d := os.Getenv("APPDATA")
+		d := os.Getenv("LOCALAPPDATA")
 		if !filepath.IsAbs(d) {
-			return "", fmt.Errorf("%%AppData%% is not an absolute path: %q", d)
+			return "", fmt.Errorf("%%LocalAppData%% is not an absolute path: %q", d)
 		}
 		return filepath.Join(d, "dromas"), nil
 	}
@@ -186,32 +190,6 @@ func configDir() (string, error) {
 		return "", err
 	}
 	return filepath.Join(home, ".config", "dromas"), nil
-}
-
-// profileFile is a profile's file in configDir. On Windows, a profile with no
-// file in %AppData%\dromas and one in ~/.config/dromas is read from
-// ~/.config/dromas, so a mailbox whose file is there keeps running.
-func profileFile(profile string) (string, error) {
-	dir, err := configDir()
-	if err != nil {
-		return "", err
-	}
-	file := filepath.Join(dir, profile+".toml")
-	if runtime.GOOS != "windows" || filepath.IsAbs(os.Getenv("XDG_CONFIG_HOME")) {
-		return file, nil
-	}
-	if _, err := os.Stat(file); !errors.Is(err, fs.ErrNotExist) { //nolint:gosec // a profile's file, its name held to profileGrammar
-		return file, nil
-	}
-	home, err := homeDir()
-	if err != nil {
-		return file, nil //nolint:nilerr // no home has no file under it
-	}
-	dot := filepath.Join(home, ".config", "dromas", profile+".toml")
-	if _, err := os.Stat(dot); err == nil { //nolint:gosec // a profile's file, its name held to profileGrammar
-		return dot, nil
-	}
-	return file, nil
 }
 
 // expand makes a path absolute: a leading ~/ is the home directory, and any
@@ -269,8 +247,8 @@ func loadConfig(c *cobra.Command, g *globals, isInit, noMailbox bool) (*config, 
 			return nil, &configError{file: named, msg: err.Error()}
 		}
 		file = abs
-	} else if f, err := profileFile(cfg.profile); err == nil {
-		file = f
+	} else if dir, err := configDir(); err == nil {
+		file = filepath.Join(dir, cfg.profile+".toml")
 	}
 	var fc fileConfig
 	found, template := false, ""
@@ -668,9 +646,8 @@ func homeBase(env, def string) string {
 // default would hold its value through an upgrade. What the command line says
 // goes in as it says it. The mailbox is under the XDG data directory, its keys
 // under the XDG state directory. On Windows, where an XDG variable is not set,
-// the mailbox is under %LocalAppData% and its keys in the mailbox's keys\: a
-// Windows roaming profile copies %AppData% to each machine its user logs on to,
-// and a mailbox runs in one place.
+// the mailbox is under %LocalAppData%, beside its file (configDir), and its keys
+// in the mailbox's keys\.
 func templateFor(profile string, g *globals) string {
 	// Under ~/ a path is written with / on every system, which expand reads.
 	join := func(a string, elem ...string) string {

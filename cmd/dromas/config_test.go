@@ -42,7 +42,6 @@ func cleanEnv(t *testing.T) string {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
-	t.Setenv("APPDATA", filepath.Join(home, "AppData", "Roaming"))
 	t.Setenv("LOCALAPPDATA", filepath.Join(home, "AppData", "Local"))
 	for _, v := range []string{"XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "DROMAS_CONFIG", "DROMAS_PROFILE", "DROMAS_SERVER_URL", "DROMAS_CA_FILE",
 		"DROMAS_AGENT", "DROMAS_ASKPASS", "DROMAS_NO_PROMPT", "DROMAS_ADD_KEYS_TO_AGENT", "DROMAS_REVOCATION_FILE", "XDG_RUNTIME_DIR", "XDG_CACHE_HOME"} {
@@ -51,11 +50,11 @@ func cleanEnv(t *testing.T) string {
 	return home
 }
 
-// confDir is the config directory under the home cleanEnv gives: %AppData%\dromas
+// confDir is the config directory under the home cleanEnv gives: %LocalAppData%\dromas
 // on Windows, ~/.config/dromas elsewhere.
 func confDir(home string) string {
 	if runtime.GOOS == "windows" {
-		return filepath.Join(home, "AppData", "Roaming", "dromas")
+		return filepath.Join(home, "AppData", "Local", "dromas")
 	}
 	return filepath.Join(home, ".config", "dromas")
 }
@@ -289,7 +288,7 @@ func TestTheWorkingDirectoryIsNeverRead(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", "")
 	t.Setenv("HOME", ".")
 	t.Setenv("USERPROFILE", ".")
-	t.Setenv("APPDATA", ".")
+	t.Setenv("LOCALAPPDATA", ".")
 	if err := do(t.Context(), "config", nil, nil, io.Discard, io.Discard); !errors.As(err, &bad) {
 		t.Errorf("a relative home: %v", err)
 	}
@@ -593,35 +592,5 @@ func TestARefusedInitWritesNoFile(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(confDir(home), "bot.toml")); err == nil {
 			t.Errorf("%s: the file was written", name)
 		}
-	}
-}
-
-// A profile's file in ~/.config/dromas is read: it is the config directory, and
-// on Windows, where the config directory is %AppData%\dromas, it is read while
-// %AppData%\dromas holds no file for the profile.
-func TestAProfilesFileInDotConfigIsRead(t *testing.T) {
-	home := cleanEnv(t)
-	write := func(dir string) string {
-		t.Helper()
-		if err := os.MkdirAll(dir, 0o700); err != nil {
-			t.Fatal(err)
-		}
-		file, base := filepath.Join(dir, "bot.toml"), filepath.Join(dir, "box")
-		body := "base-dir = " + tomlString(base) + "\nmail-dir = " + tomlString(filepath.Join(base, "mail")) + "\n"
-		if err := os.WriteFile(file, []byte(body), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		return file
-	}
-	dot := write(filepath.Join(home, ".config", "dromas"))
-	if _, file := configLine(t, "--profile", "bot"); file != dot {
-		t.Errorf("read %s, not %s", file, dot)
-	}
-	if runtime.GOOS != "windows" {
-		return
-	}
-	appData := write(confDir(home))
-	if _, file := configLine(t, "--profile", "bot"); file != appData {
-		t.Errorf("with a file in each, read %s, not %s", file, appData)
 	}
 }
