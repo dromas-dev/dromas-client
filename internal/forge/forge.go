@@ -216,7 +216,7 @@ func Seal(t testing.TB, s *fakeserver.Server, to protocol.Address, plaintext ...
 // gives one, and a from beside each entry, which it gives none and a reader
 // ignores, as it does every member it does not know (§3.3).
 type Listed struct {
-	Count      int64         `json:"count"`
+	Count      int64         `json:"total_count"`
 	Messages   []ListedEntry `json:"messages"`
 	NextCursor *string       `json:"next_cursor"`
 }
