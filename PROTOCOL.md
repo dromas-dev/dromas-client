@@ -1772,20 +1772,55 @@ Dromas protects a message's content from everyone but the message's recipient. D
 
 ## 17. References
 
-- **[ADR]** J. H. An, Y. Dodis, T. Rabin, "On the Security of Joint Signature and Encryption", EUROCRYPT 2002, LNCS 2332, https://cims.nyu.edu/~dodis/ps/signcrypt.pdf
-- **[BCJZ]** J. Brendel, C. Cremers, D. Jackson, M. Zhao, "The Provable Security of Ed25519: Theory and Practice", IEEE S&P 2021, https://dennis-jackson.uk/assets/pdfs/ed25519.pdf
-- **[Davis]** D. Davis, "Defective Sign & Encrypt in S/MIME, PKCS#7, MOSS, PEM, PGP, and XML", USENIX Annual Technical Conference 2001, https://www.usenix.org/legacy/publications/library/proceedings/usenix01/full_papers/davis/davis.pdf
-- **[X-Wing]** M. Barbosa, D. Connolly, J. D. Duarte, A. Kaiser, P. Schwabe, K. Varner, B. Westerbaan, "X-Wing: The Hybrid KEM You've Been Looking For", IACR Communications in Cryptology 1(1), 2024, https://doi.org/10.62056/a3qj89n4e
-- **[age]** C2SP, "age", v1.1.0, https://c2sp.org/age@v1.1.0, read 2026-11-02
-- **[draft-ietf-hpke-pq-03]** Barnes, Connolly, "Post-Quantum and Post-Quantum/Traditional Hybrid Algorithms for HPKE", draft-ietf-hpke-pq-03: the MLKEM768-X25519 KEM that [age] names
-- **[draft-ietf-sshm-cert-01]** Miller, "SSH Certificate Format", draft-ietf-sshm-cert-01
-- **[PROTOCOL.sshsig]** OpenSSH 10.6p1, `PROTOCOL.sshsig`
-- **[AEP-158]**, **[AEP-193]** API Enhancement Proposals: pagination; errors
-- **[BIP 173]** Bech32
-- **[FIPS 180-4]**, **[FIPS 186-5]**
-- **[RFC 2119]**, **[RFC 8174]** BCP 14
-- **[RFC 3339]** timestamps · **[RFC 3986]** URIs · **[RFC 4151]** the `tag` URI scheme · **[RFC 4251]**, **[RFC 4253]** SSH · **[RFC 4648]** base64 and base64url · **[RFC 5234]** ABNF · **[RFC 5656]** ECDSA in SSH · **[RFC 6648]** deprecating the `X-` prefix · **[RFC 7405]** case-sensitive strings in ABNF · **[RFC 7457]** TLS attacks · **[RFC 7493]** I-JSON · **[RFC 7519]** JSON Web Token · **[RFC 8032]** EdDSA · **[RFC 8259]** JSON · **[RFC 8555]** ACME · **[RFC 8594]** the `Sunset` header field · **[RFC 8709]** Ed25519 in SSH · **[RFC 9110]** HTTP semantics · **[RFC 9180]** HPKE · **[RFC 9266]** channel bindings for TLS 1.3 · **[RFC 9421]** HTTP message signatures · **[RFC 9449]** DPoP · **[RFC 9457]** problem details · **[RFC 9562]** UUIDs · **[RFC 9651]** Structured Field Values · **[RFC 9745]** the `Deprecation` header field
-- **[SemVer]** Semantic Versioning 2.0.0, https://semver.org/spec/v2.0.0.html
+### 17.1. Normative References
+
+- **[AEP-193]** API Enhancement Proposals, "Errors", AEP-193, <https://aep.dev/193/>.
+- **[age]** C2SP, "age", v1.1.0, read 2026-11-02, <https://c2sp.org/age@v1.1.0>.
+- **[BIP 173]** Wuille, P. and G. Maxwell, "Base32 address format for native v0-16 witness outputs", BIP 173, March 2017, <https://github.com/bitcoin/bips/blob/master/bip-0173.mediawiki>.
+- **[draft-ietf-hpke-pq-03]** Barnes, R. and D. Connolly, "Post-Quantum and Post-Quantum/Traditional Hybrid Algorithms for HPKE", Work in Progress, Internet-Draft, draft-ietf-hpke-pq-03, 6 November 2025, <https://datatracker.ietf.org/doc/html/draft-ietf-hpke-pq-03>.
+- **[draft-ietf-sshm-cert-01]** Miller, D., "SSH Certificate Format", Work in Progress, Internet-Draft, draft-ietf-sshm-cert-01, 14 June 2026, <https://datatracker.ietf.org/doc/html/draft-ietf-sshm-cert-01>.
+- **[FIPS 180-4]** National Institute of Standards and Technology, "Secure Hash Standard (SHS)", FIPS PUB 180-4, DOI 10.6028/NIST.FIPS.180-4, August 2015, <https://csrc.nist.gov/pubs/fips/180-4/upd1/final>.
+- **[FIPS 186-5]** National Institute of Standards and Technology, "Digital Signature Standard (DSS)", FIPS PUB 186-5, DOI 10.6028/NIST.FIPS.186-5, February 2023, <https://csrc.nist.gov/pubs/fips/186-5/final>.
+- **[PROTOCOL.sshsig]** OpenSSH, "PROTOCOL.sshsig", OpenSSH 10.6p1, <https://github.com/openssh/openssh-portable/blob/V_10_6_P1/PROTOCOL.sshsig>.
+- **[RFC 1123]** Braden, R., Ed., "Requirements for Internet Hosts - Application and Support", RFC 1123, DOI 10.17487/RFC1123, October 1989, <https://www.rfc-editor.org/info/rfc1123/>.
+- **[RFC 2119]** Bradner, S., "Key words for use in RFCs to Indicate Requirement Levels", RFC 2119, DOI 10.17487/RFC2119, March 1997, <https://www.rfc-editor.org/info/rfc2119/>.
+- **[RFC 3339]** Klyne, G. and C. Newman, "Date and Time on the Internet: Timestamps", RFC 3339, DOI 10.17487/RFC3339, July 2002, <https://www.rfc-editor.org/info/rfc3339/>.
+- **[RFC 3986]** Berners-Lee, T., Fielding, R., and L. Masinter, "Uniform Resource Identifier (URI): Generic Syntax", RFC 3986, DOI 10.17487/RFC3986, January 2005, <https://www.rfc-editor.org/info/rfc3986/>.
+- **[RFC 4151]** Kindberg, T. and S. Hawke, "The 'tag' URI Scheme", RFC 4151, DOI 10.17487/RFC4151, October 2005, <https://www.rfc-editor.org/info/rfc4151/>.
+- **[RFC 4251]** Ylonen, T. and C. Lonvick, Ed., "The Secure Shell (SSH) Protocol Architecture", RFC 4251, DOI 10.17487/RFC4251, January 2006, <https://www.rfc-editor.org/info/rfc4251/>.
+- **[RFC 4253]** Ylonen, T. and C. Lonvick, Ed., "The Secure Shell (SSH) Transport Layer Protocol", RFC 4253, DOI 10.17487/RFC4253, January 2006, <https://www.rfc-editor.org/info/rfc4253/>.
+- **[RFC 4648]** Josefsson, S., "The Base16, Base32, and Base64 Data Encodings", RFC 4648, DOI 10.17487/RFC4648, October 2006, <https://www.rfc-editor.org/info/rfc4648/>.
+- **[RFC 5234]** Crocker, D., Ed. and P. Overell, "Augmented BNF for Syntax Specifications: ABNF", RFC 5234, DOI 10.17487/RFC5234, January 2008, <https://www.rfc-editor.org/info/rfc5234/>.
+- **[RFC 5656]** Stebila, D. and J. Green, "Elliptic Curve Algorithm Integration in the Secure Shell Transport Layer", RFC 5656, DOI 10.17487/RFC5656, December 2009, <https://www.rfc-editor.org/info/rfc5656/>.
+- **[RFC 6585]** Nottingham, M. and R. Fielding, "Additional HTTP Status Codes", RFC 6585, DOI 10.17487/RFC6585, April 2012, <https://www.rfc-editor.org/info/rfc6585/>.
+- **[RFC 7405]** Kyzivat, P., "Case-Sensitive String Support in ABNF", RFC 7405, DOI 10.17487/RFC7405, December 2014, <https://www.rfc-editor.org/info/rfc7405/>.
+- **[RFC 7493]** Bray, T., Ed., "The I-JSON Message Format", RFC 7493, DOI 10.17487/RFC7493, March 2015, <https://www.rfc-editor.org/info/rfc7493/>.
+- **[RFC 8032]** Josefsson, S. and I. Liusvaara, "Edwards-Curve Digital Signature Algorithm (EdDSA)", RFC 8032, DOI 10.17487/RFC8032, January 2017, <https://www.rfc-editor.org/info/rfc8032/>.
+- **[RFC 8174]** Leiba, B., "Ambiguity of Uppercase vs Lowercase in RFC 2119 Key Words", RFC 8174, DOI 10.17487/RFC8174, May 2017, <https://www.rfc-editor.org/info/rfc8174/>.
+- **[RFC 8259]** Bray, T., Ed., "The JavaScript Object Notation (JSON) Data Interchange Format", RFC 8259, DOI 10.17487/RFC8259, December 2017, <https://www.rfc-editor.org/info/rfc8259/>.
+- **[RFC 8594]** Wilde, E., "The Sunset HTTP Header Field", RFC 8594, DOI 10.17487/RFC8594, May 2019, <https://www.rfc-editor.org/info/rfc8594/>.
+- **[RFC 8709]** Harris, B. and L. Velvindron, "Ed25519 and Ed448 Public Key Algorithms for the Secure Shell (SSH) Protocol", RFC 8709, DOI 10.17487/RFC8709, February 2020, <https://www.rfc-editor.org/info/rfc8709/>.
+- **[RFC 9110]** Fielding, R., Ed., Nottingham, M., Ed., and J. Reschke, Ed., "HTTP Semantics", RFC 9110, DOI 10.17487/RFC9110, June 2022, <https://www.rfc-editor.org/info/rfc9110/>.
+- **[RFC 9457]** Nottingham, M., Wilde, E., and S. Dalal, "Problem Details for HTTP APIs", RFC 9457, DOI 10.17487/RFC9457, July 2023, <https://www.rfc-editor.org/info/rfc9457/>.
+- **[RFC 9562]** Davis, K., Peabody, B., and P. Leach, "Universally Unique IDentifiers (UUIDs)", RFC 9562, DOI 10.17487/RFC9562, May 2024, <https://www.rfc-editor.org/info/rfc9562/>.
+- **[RFC 9745]** Dalal, S. and E. Wilde, "The Deprecation HTTP Response Header Field", RFC 9745, DOI 10.17487/RFC9745, March 2025, <https://www.rfc-editor.org/info/rfc9745/>.
+- **[SemVer]** Preston-Werner, T., "Semantic Versioning 2.0.0", <https://semver.org/spec/v2.0.0.html>.
+
+### 17.2. Informative References
+
+- **[ADR]** An, J. H., Dodis, Y., and T. Rabin, "On the Security of Joint Signature and Encryption", EUROCRYPT 2002, LNCS 2332, <https://cims.nyu.edu/~dodis/ps/signcrypt.pdf>.
+- **[AEP-158]** API Enhancement Proposals, "Pagination", AEP-158, <https://aep.dev/158/>.
+- **[BCJZ]** Brendel, J., Cremers, C., Jackson, D., and M. Zhao, "The Provable Security of Ed25519: Theory and Practice", IEEE S&P 2021, <https://dennis-jackson.uk/assets/pdfs/ed25519.pdf>.
+- **[Davis]** Davis, D., "Defective Sign & Encrypt in S/MIME, PKCS#7, MOSS, PEM, PGP, and XML", USENIX Annual Technical Conference 2001, <https://www.usenix.org/legacy/publications/library/proceedings/usenix01/full_papers/davis/davis.pdf>.
+- **[RFC 6648]** Saint-Andre, P., Crocker, D., and M. Nottingham, "Deprecating the "X-" Prefix and Similar Constructs in Application Protocols", RFC 6648, DOI 10.17487/RFC6648, June 2012, <https://www.rfc-editor.org/info/rfc6648/>.
+- **[RFC 7457]** Sheffer, Y., Holz, R., and P. Saint-Andre, "Summarizing Known Attacks on Transport Layer Security (TLS) and Datagram TLS (DTLS)", RFC 7457, DOI 10.17487/RFC7457, February 2015, <https://www.rfc-editor.org/info/rfc7457/>.
+- **[RFC 7519]** Jones, M., Bradley, J., and N. Sakimura, "JSON Web Token (JWT)", RFC 7519, DOI 10.17487/RFC7519, May 2015, <https://www.rfc-editor.org/info/rfc7519/>.
+- **[RFC 8555]** Barnes, R., Hoffman-Andrews, J., McCarney, D., and J. Kasten, "Automatic Certificate Management Environment (ACME)", RFC 8555, DOI 10.17487/RFC8555, March 2019, <https://www.rfc-editor.org/info/rfc8555/>.
+- **[RFC 9180]** Barnes, R., Bhargavan, K., Lipp, B., and C. Wood, "Hybrid Public Key Encryption", RFC 9180, DOI 10.17487/RFC9180, February 2022, <https://www.rfc-editor.org/info/rfc9180/>.
+- **[RFC 9266]** Whited, S., "Channel Bindings for TLS 1.3", RFC 9266, DOI 10.17487/RFC9266, July 2022, <https://www.rfc-editor.org/info/rfc9266/>.
+- **[RFC 9421]** Backman, A., Ed., Richer, J., Ed., and M. Sporny, "HTTP Message Signatures", RFC 9421, DOI 10.17487/RFC9421, February 2024, <https://www.rfc-editor.org/info/rfc9421/>.
+- **[RFC 9449]** Fett, D., Campbell, B., Bradley, J., Lodderstedt, T., Jones, M., and D. Waite, "OAuth 2.0 Demonstrating Proof of Possession (DPoP)", RFC 9449, DOI 10.17487/RFC9449, September 2023, <https://www.rfc-editor.org/info/rfc9449/>.
+- **[X-Wing]** Barbosa, M., Connolly, D., Duarte, J. D., Kaiser, A., Schwabe, P., Varner, K., and B. Westerbaan, "X-Wing: The Hybrid KEM You've Been Looking For", IACR Communications in Cryptology 1(1), 2024, DOI 10.62056/a3qj89n4e, <https://doi.org/10.62056/a3qj89n4e>.
 
 ## Appendix A. Where `ssh-keygen` differs (informative)
 
