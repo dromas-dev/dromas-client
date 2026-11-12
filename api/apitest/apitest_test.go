@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -289,5 +290,35 @@ func TestAHeadIsCheckedWithoutItsContent(t *testing.T) {
 	}
 	if errs := head(http.StatusOK, false); len(errs) == 0 {
 		t.Error("a HEAD of a mailbox's read without Cache-Control passes")
+	}
+}
+
+// A revocation record's publish that carries a member the description does
+// not name is taken, as PROTOCOL.md §3.3 has a server take it; the same
+// member on any other request a server takes still fails.
+func TestARecordsUnknownMemberIsNoRefusal(t *testing.T) {
+	addr := "/v1/" + "d_" + strings.Repeat("ab", 32)
+	put := func(path, body string) []string {
+		r := &reported{TB: t}
+		srv := apitest.Handler(r, http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			_, _ = io.ReadAll(req.Body) // a request is judged once its body is read
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Date", time.Now().UTC().Format(http.TimeFormat))
+			w.Header().Set("Cache-Control", "no-store")
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte("{}\n"))
+		}))
+		srv.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, path, strings.NewReader(body)))
+		return r.errs
+	}
+	record := `{"type":"revocation_record","identity":"c3NoLWVkMjU1MTk=","revocation_signature":"c2ln","later_statement":"eA=="}`
+	if errs := put(addr+"/revocation", record); len(errs) > 0 {
+		t.Errorf("a record with a member the description does not name: %q", errs)
+	}
+	if errs := put(addr+"/revocation", `{"type":"revocation_record","identity":"c3NoLWVkMjU1MTk=","revocation_signature":3}`); len(errs) == 0 {
+		t.Error("a record whose member is of the wrong type passes")
+	}
+	if errs := put(addr+"/acl", `{"allow":["*"],"deny":[],"extra":"x"}`); len(errs) == 0 {
+		t.Error("an ACL with a member the description does not name passes")
 	}
 }
