@@ -170,16 +170,6 @@ paths:
               $ref: '#/components/headers/Sunset'
             Cache-Control:
               $ref: '#/components/headers/Cache-Control'
-            Content-Security-Policy:
-              $ref: '#/components/headers/Content-Security-Policy'
-            X-Content-Type-Options:
-              $ref: '#/components/headers/X-Content-Type-Options'
-            Referrer-Policy:
-              $ref: '#/components/headers/Referrer-Policy'
-            Cross-Origin-Resource-Policy:
-              $ref: '#/components/headers/Cross-Origin-Resource-Policy'
-            Cross-Origin-Opener-Policy:
-              $ref: '#/components/headers/Cross-Origin-Opener-Policy'
             Vary:
               $ref: '#/components/headers/Vary'
         '400':
@@ -278,16 +268,6 @@ paths:
               $ref: '#/components/headers/Sunset'
             Cache-Control:
               $ref: '#/components/headers/Cache-Control'
-            Content-Security-Policy:
-              $ref: '#/components/headers/Content-Security-Policy'
-            X-Content-Type-Options:
-              $ref: '#/components/headers/X-Content-Type-Options'
-            Referrer-Policy:
-              $ref: '#/components/headers/Referrer-Policy'
-            Cross-Origin-Resource-Policy:
-              $ref: '#/components/headers/Cross-Origin-Resource-Policy'
-            Cross-Origin-Opener-Policy:
-              $ref: '#/components/headers/Cross-Origin-Opener-Policy'
             Vary:
               $ref: '#/components/headers/Vary'
         '400':
@@ -440,16 +420,6 @@ paths:
               $ref: '#/components/headers/Sunset'
             Cache-Control:
               $ref: '#/components/headers/Cache-Control'
-            Content-Security-Policy:
-              $ref: '#/components/headers/Content-Security-Policy'
-            X-Content-Type-Options:
-              $ref: '#/components/headers/X-Content-Type-Options'
-            Referrer-Policy:
-              $ref: '#/components/headers/Referrer-Policy'
-            Cross-Origin-Resource-Policy:
-              $ref: '#/components/headers/Cross-Origin-Resource-Policy'
-            Cross-Origin-Opener-Policy:
-              $ref: '#/components/headers/Cross-Origin-Opener-Policy'
         '400':
           $ref: '#/components/responses/BadRequest'
         '404':
@@ -504,16 +474,6 @@ paths:
               $ref: '#/components/headers/Sunset'
             Cache-Control:
               $ref: '#/components/headers/Cache-Control'
-            Content-Security-Policy:
-              $ref: '#/components/headers/Content-Security-Policy'
-            X-Content-Type-Options:
-              $ref: '#/components/headers/X-Content-Type-Options'
-            Referrer-Policy:
-              $ref: '#/components/headers/Referrer-Policy'
-            Cross-Origin-Resource-Policy:
-              $ref: '#/components/headers/Cross-Origin-Resource-Policy'
-            Cross-Origin-Opener-Policy:
-              $ref: '#/components/headers/Cross-Origin-Opener-Policy'
         '400':
           $ref: '#/components/responses/HeadRefused'
         '404':
@@ -653,16 +613,6 @@ paths:
               $ref: '#/components/headers/Sunset'
             Cache-Control:
               $ref: '#/components/headers/Cache-Control'
-            Content-Security-Policy:
-              $ref: '#/components/headers/Content-Security-Policy'
-            X-Content-Type-Options:
-              $ref: '#/components/headers/X-Content-Type-Options'
-            Referrer-Policy:
-              $ref: '#/components/headers/Referrer-Policy'
-            Cross-Origin-Resource-Policy:
-              $ref: '#/components/headers/Cross-Origin-Resource-Policy'
-            Cross-Origin-Opener-Policy:
-              $ref: '#/components/headers/Cross-Origin-Opener-Policy'
             ETag:
               $ref: '#/components/headers/ACLETag'
         '400':
@@ -733,16 +683,6 @@ paths:
               $ref: '#/components/headers/Sunset'
             Cache-Control:
               $ref: '#/components/headers/Cache-Control'
-            Content-Security-Policy:
-              $ref: '#/components/headers/Content-Security-Policy'
-            X-Content-Type-Options:
-              $ref: '#/components/headers/X-Content-Type-Options'
-            Referrer-Policy:
-              $ref: '#/components/headers/Referrer-Policy'
-            Cross-Origin-Resource-Policy:
-              $ref: '#/components/headers/Cross-Origin-Resource-Policy'
-            Cross-Origin-Opener-Policy:
-              $ref: '#/components/headers/Cross-Origin-Opener-Policy'
             ETag:
               $ref: '#/components/headers/ACLETag'
         '400':
@@ -1027,16 +967,6 @@ paths:
               $ref: '#/components/headers/Sunset'
             Cache-Control:
               $ref: '#/components/headers/Cache-Control'
-            Content-Security-Policy:
-              $ref: '#/components/headers/Content-Security-Policy'
-            X-Content-Type-Options:
-              $ref: '#/components/headers/X-Content-Type-Options'
-            Referrer-Policy:
-              $ref: '#/components/headers/Referrer-Policy'
-            Cross-Origin-Resource-Policy:
-              $ref: '#/components/headers/Cross-Origin-Resource-Policy'
-            Cross-Origin-Opener-Policy:
-              $ref: '#/components/headers/Cross-Origin-Opener-Policy'
             Retry-After:
               $ref: '#/components/headers/PollInterval'
             ETag:
@@ -1128,16 +1058,6 @@ paths:
               $ref: '#/components/headers/Sunset'
             Cache-Control:
               $ref: '#/components/headers/Cache-Control'
-            Content-Security-Policy:
-              $ref: '#/components/headers/Content-Security-Policy'
-            X-Content-Type-Options:
-              $ref: '#/components/headers/X-Content-Type-Options'
-            Referrer-Policy:
-              $ref: '#/components/headers/Referrer-Policy'
-            Cross-Origin-Resource-Policy:
-              $ref: '#/components/headers/Cross-Origin-Resource-Policy'
-            Cross-Origin-Opener-Policy:
-              $ref: '#/components/headers/Cross-Origin-Opener-Policy'
             Retry-After:
               $ref: '#/components/headers/PollInterval'
             ETag:
@@ -1250,16 +1170,6 @@ paths:
               $ref: '#/components/headers/Sunset'
             Cache-Control:
               $ref: '#/components/headers/Cache-Control'
-            Content-Security-Policy:
-              $ref: '#/components/headers/Content-Security-Policy'
-            X-Content-Type-Options:
-              $ref: '#/components/headers/X-Content-Type-Options'
-            Referrer-Policy:
-              $ref: '#/components/headers/Referrer-Policy'
-            Cross-Origin-Resource-Policy:
-              $ref: '#/components/headers/Cross-Origin-Resource-Policy'
-            Cross-Origin-Opener-Policy:
-              $ref: '#/components/headers/Cross-Origin-Opener-Policy'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -1331,16 +1241,6 @@ paths:
               $ref: '#/components/headers/Sunset'
             Cache-Control:
               $ref: '#/components/headers/Cache-Control'
-            Content-Security-Policy:
-              $ref: '#/components/headers/Content-Security-Policy'
-            X-Content-Type-Options:
-              $ref: '#/components/headers/X-Content-Type-Options'
-            Referrer-Policy:
-              $ref: '#/components/headers/Referrer-Policy'
-            Cross-Origin-Resource-Policy:
-              $ref: '#/components/headers/Cross-Origin-Resource-Policy'
-            Cross-Origin-Opener-Policy:
-              $ref: '#/components/headers/Cross-Origin-Opener-Policy'
         '400':
           $ref: '#/components/responses/HeadRefused'
         '401':
@@ -1620,27 +1520,27 @@ components:
       schema:
         const: no-store
     Content-Security-Policy:
-      description: For a browser, on every answer under `/v1/`, which is never a page - render nothing it names, frame it nowhere. A client ignores it.
+      description: For a browser, on every answer under `/v1/` but a `304`, which is never a page - render nothing it names, frame it nowhere. A client ignores it.
       required: false
       schema:
         const: "default-src 'none'; frame-ancestors 'none'"
     X-Content-Type-Options:
-      description: For a browser, on every answer under `/v1/` - never sniff its type. A client ignores it.
+      description: For a browser, on every answer under `/v1/` but a `304` - never sniff its type. A client ignores it.
       required: false
       schema:
         const: nosniff
     Referrer-Policy:
-      description: For a browser, on every answer under `/v1/` - send no Referer from it. A client ignores it.
+      description: For a browser, on every answer under `/v1/` but a `304` - send no Referer from it. A client ignores it.
       required: false
       schema:
         const: no-referrer
     Cross-Origin-Resource-Policy:
-      description: For a browser, on every answer under `/v1/` - no other origin loads it. A client ignores it.
+      description: For a browser, on every answer under `/v1/` but a `304` - no other origin loads it. A client ignores it.
       required: false
       schema:
         const: same-origin
     Cross-Origin-Opener-Policy:
-      description: For a browser, on every answer under `/v1/` - nothing of another origin opens it. A client ignores it.
+      description: For a browser, on every answer under `/v1/` but a `304` - nothing of another origin opens it. A client ignores it.
       required: false
       schema:
         const: same-origin
