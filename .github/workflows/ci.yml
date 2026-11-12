@@ -218,11 +218,12 @@ jobs:
           OpenBSD)
             sudo useradd -m dromasci
             sudo install -m 0755 packaging/rc.d/openbsd/dromas /etc/rc.d/dromas
+            sudo rcctl enable dromas
             sudo rcctl set dromas user dromasci
             sudo rcctl set dromas flags --profile ci
             # rc.subr reports a start as failed when recv has already exited,
             # as it does here.
-            sudo rcctl -f start dromas || true
+            sudo rcctl start dromas || true
             log=/var/log/daemon ;;
           esac
           want="\"file\":\"$(getent passwd dromasci | cut -d: -f6)/.config/dromas/ci.toml\""

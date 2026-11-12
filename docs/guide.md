@@ -201,12 +201,12 @@ The OpenBSD archive carries an rc.d script, `packaging/rc.d/openbsd/dromas`. The
 ```sh
 tar -xzf dromas_*_openbsd_*.tar.gz packaging/rc.d/openbsd/dromas
 install -m 0755 packaging/rc.d/openbsd/dromas /etc/rc.d/dromas
-rcctl set dromas user <user>
 rcctl enable dromas
+rcctl set dromas user <user>
 rcctl start dromas
 ```
 
-For a mailbox other than the default, also run `rcctl set dromas flags --profile <profile>` before `rcctl start dromas`. For a second mailbox, link the script under another name and set that name's user and flags, as the script's comments show. The script sends `recv`'s output to syslog's `daemon` facility, in `/var/log/daemon` by default.
+For a mailbox other than the default, also run `rcctl set dromas flags --profile <profile>` before `rcctl start dromas`. For a second mailbox, link the script under another name, then enable that name and set its user and flags, as the script's comments show. rcctl sets a service's user and flags only once the service is enabled. The script sends `recv`'s output to syslog's `daemon` facility, in `/var/log/daemon` by default.
 
 Nothing starts `recv` again after `recv` exits: start it again with `rcctl start dromas`. `rcctl check dromas` says whether `recv` runs, and `rcctl ls failed` lists the service once `recv` has exited.
 
