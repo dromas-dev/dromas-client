@@ -68,39 +68,37 @@ func TestVersionsAreInSemVersOrder(t *testing.T) {
 	}
 }
 
-// A policy writes MAJOR.MINOR or MAJOR.MINOR.PATCH, exactly.
-func TestAPolicysVersionIsMajorMinorAndAPatch(t *testing.T) {
-	for _, s := range []string{"1.5", "1.5.3", "0.0", "0.1.0"} {
+// A policy writes MAJOR.MINOR, exactly.
+func TestAPolicysVersionIsMajorMinor(t *testing.T) {
+	for _, s := range []string{"1.5", "0.0", "0.1", "10.20"} {
 		if p, err := ParsePolicyVersion(s); err != nil || p.String() != s {
 			t.Errorf("%q: %v %v", s, p, err)
 		}
 	}
-	for _, s := range []string{"", "1", "v1.5", "1.5.3-rc.1", "1.5.3+x", "01.5", "1.05", "1.5.03", "1.5.", "1.5.3.4", " 1.5"} {
+	for _, s := range []string{"", "1", "v1.5", "1.5.3", "0.1.0", "1.5-rc.1", "1.5.3-rc.1", "1.5.3+x", "01.5", "1.05", "1.5.03", "1.5.", "1.5.3.4", " 1.5"} {
 		if p, err := ParsePolicyVersion(s); err == nil {
 			t.Errorf("%q read as %v", s, p)
 		}
 	}
 }
 
-// The latest version is compared in the parts it writes, from the major on:
-// an upgrade only where it is higher in one of them (PROTOCOL.md §11.17).
-func TestAnUpgradeIsHigherInAPartTheLatestWrites(t *testing.T) {
+// The latest version is an upgrade only where its major and minor are after
+// the client's; the client's patch and pre-release are its own (PROTOCOL.md
+// §11.17).
+func TestAnUpgradeIsALaterMinor(t *testing.T) {
 	for _, c := range []struct {
 		own, latest string
 		upgrade     bool
 	}{
 		{"1.5.2", "1.5", false},
-		{"1.5.2", "1.5.2", false},
-		{"1.5.2", "1.5.3", true},
-		{"1.5.2", "1.6", true},
+		{"1.5.0", "1.5", false},
+		{"1.5.9", "1.6", true},
 		{"1.5.2", "2.0", true},
-		{"1.5.2", "1.4.9", false},
-		{"1.5.2", "1.5.1", false},
+		{"1.5.2", "1.4", false},
 		{"1.6.0", "1.5", false},
-		{"1.5.3-rc.1", "1.5.3", false}, // equal in every part it writes
-		{"1.5.3-rc.1", "1.5", false},
+		{"1.5.0-rc.1", "1.5", false}, // a pre-release of the same minor
 		{"0.0.0-devel", "0.1", true},
-		{"2.0.0", "1.9.9", false},
+		{"2.0.0", "1.9", false},
 	} {
 		p, err := ParsePolicyVersion(c.latest)
 		if err != nil {
@@ -112,8 +110,8 @@ func TestAnUpgradeIsHigherInAPartTheLatestWrites(t *testing.T) {
 	}
 }
 
-// A deprecation or a sunset covers every version below it, or every version
-// whose parts are the ones it writes; a version is retired below the floor or
+// A deprecation or a sunset covers every version whose minor is below it, or
+// every version of its minor; a version is retired below the floor or
 // once a sunset that covers it has its date; an answer carries the earliest
 // date of those that cover its version (PROTOCOL.md §11.17).
 func TestAPolicyCoversItsVersions(t *testing.T) {
@@ -123,7 +121,7 @@ func TestAPolicyCoversItsVersions(t *testing.T) {
 		Sunsets: []Scheduled{
 			{Below: "1.4", At: day(20)},
 			{Version: "1.4", At: day(25)},
-			{Version: "1.5.2", At: day(10)},
+			{Version: "1.5", At: day(10)},
 			{Below: "1.3", At: day(15)},
 		},
 		Deprecations:           []Scheduled{{Below: "1.4", At: day(1)}, {Version: "1.6", At: day(5)}},
@@ -139,18 +137,17 @@ func TestAPolicyCoversItsVersions(t *testing.T) {
 		retiredOnDay1 bool
 		retiredDay16  bool
 	}{
-		{"1.1.9", day(15), day(1), true, true},        // below the floor, below 1.3 and below 1.4: the earliest
-		{"1.2.0-rc.1", day(15), day(1), true, true},   // a pre-release is below its release, the floor's 1.2.0
-		{"1.2.0", day(15), day(1), false, true},       // at the floor
-		{"1.3.9", day(20), day(1), false, false},      // below 1.4 alone
-		{"1.4.0-rc.1", day(20), day(1), false, false}, // below 1.4, and version 1.4 names it too: the earliest
-		{"1.4.0", day(25), "", false, false},          // version 1.4
-		{"1.4.1", day(25), "", false, false},          // version 1.4: it writes no patch
-		{"1.5.2", day(10), "", false, true},           // the patch it writes
-		{"1.5.2-beta", day(10), "", false, true},      // a pre-release of it
-		{"1.5.3", "", "", false, false},               // another patch
-		{"1.6.7", "", day(5), false, false},           // deprecated, with no sunset
-		{"0.0.0", day(15), day(1), true, true},        // what a request with no version is read as
+		{"1.1.9", day(15), day(1), true, true},       // below the floor, below 1.3 and below 1.4: the earliest
+		{"1.2.0-rc.1", day(15), day(1), false, true}, // a pre-release of the floor's minor is at the floor
+		{"1.2.0", day(15), day(1), false, true},      // at the floor
+		{"1.3.9", day(20), day(1), false, false},     // below 1.4 alone
+		{"1.4.0-rc.1", day(25), "", false, false},    // version 1.4: a pre-release is of its minor
+		{"1.4.0", day(25), "", false, false},         // version 1.4
+		{"1.4.1", day(25), "", false, false},         // version 1.4, at any patch
+		{"1.5.2", day(10), "", false, true},          // version 1.5
+		{"1.5.9-beta", day(10), "", false, true},     // version 1.5, a pre-release of a patch
+		{"1.6.7", "", day(5), false, false},          // deprecated, with no sunset
+		{"0.0.0", day(15), day(1), true, true},       // what a request with no version is read as
 	} {
 		v := RequestVersion(c.version)
 		at, ok := d.SunsetFor(v)
@@ -190,9 +187,9 @@ func TestAPolicyCoversItsVersions(t *testing.T) {
 // which every document carries, from 1 to MaxInteger seconds, and the
 // implementation's members, where it names one, each of its text.
 func TestTheServersDocumentBreaksItsFormAsItSays(t *testing.T) {
-	good := `{"min_version":"0.1","latest_version":"0.1.8","deprecations":[{"below":"0.1.5","effective_at":"2027-01-01T00:00:00Z"}],"sunsets":[{"below":"0.1.5","effective_at":"2027-01-01T00:00:00Z"},{"version":"0.1.6","effective_at":"2027-02-01T00:00:00Z"}],"capabilities":[{"name":"long_poll2"}],"max_certificate_lifetime_seconds":3891600,"server":{"name":"dromas-server","version":"v0.5.1","revision":"c4258bc37344474025fe2c2d6420476eb617450a"},"later":1}`
+	good := `{"min_version":"0.1","latest_version":"0.8","deprecations":[{"below":"0.5","effective_at":"2027-01-01T00:00:00Z"}],"sunsets":[{"below":"0.5","effective_at":"2027-01-01T00:00:00Z"},{"version":"0.6","effective_at":"2027-02-01T00:00:00Z"}],"capabilities":[{"name":"long_poll2"}],"max_certificate_lifetime_seconds":3891600,"server":{"name":"dromas-server","version":"v0.5.1","revision":"c4258bc37344474025fe2c2d6420476eb617450a"},"later":1}`
 	var d ServerDocument
-	if err := Unmarshal([]byte(good), &d); err != nil || d.LatestVersion != "0.1.8" || len(d.Sunsets) != 2 || d.Capabilities[0].Name != "long_poll2" || d.MaxCertificateLifetime != 3891600 || d.Server == nil || d.Server.Version != "v0.5.1" {
+	if err := Unmarshal([]byte(good), &d); err != nil || d.LatestVersion != "0.8" || len(d.Sunsets) != 2 || d.Capabilities[0].Name != "long_poll2" || d.MaxCertificateLifetime != 3891600 || d.Server == nil || d.Server.Version != "v0.5.1" {
 		t.Fatalf("%+v %v", d, err)
 	}
 	// withMax is a document's text with a maximum it takes, so that the
@@ -213,6 +210,8 @@ func TestTheServersDocumentBreaksItsFormAsItSays(t *testing.T) {
 		many("capabilities", MaxCapabilities+1, `{"name":"a"}`):                               "capabilities",
 		`{"min_version":"v1.0"}`:                                                              "min_version",
 		`{"latest_version":"1.0.0-rc.1"}`:                                                     "latest_version",
+		`{"min_version":"1.0.1"}`:                                                             "min_version",
+		`{"sunsets":[{"version":"1.0.1","effective_at":"2027-01-01T00:00:00Z"}]}`:             "version",
 		`{"sunsets":[{"effective_at":"2027-01-01T00:00:00Z"}]}`:                               "below",
 		`{"sunsets":[{"below":"1.0","version":"1.0","effective_at":"2027-01-01T00:00:00Z"}]}`: "below",
 		`{"sunsets":[{"version":"1","effective_at":"2027-01-01T00:00:00Z"}]}`:                 "version",
@@ -238,7 +237,7 @@ func TestTheServersDocumentBreaksItsFormAsItSays(t *testing.T) {
 	// sunset earlier than a deprecation.
 	for _, text := range []string{
 		`{"deprecations":[{"version":"1.0","effective_at":"2027-02-01T00:00:00Z"}],"sunsets":[{"version":"1.0","effective_at":"2027-02-01T00:00:00Z"}]}`,
-		`{"deprecations":[{"version":"1.0","effective_at":"2027-02-01T00:00:00Z"}],"sunsets":[{"below":"1.0","effective_at":"2027-01-01T00:00:00Z"},{"version":"1.0.1","effective_at":"2027-01-01T00:00:00Z"}]}`,
+		`{"deprecations":[{"version":"1.0","effective_at":"2027-02-01T00:00:00Z"}],"sunsets":[{"below":"1.0","effective_at":"2027-01-01T00:00:00Z"},{"version":"1.1","effective_at":"2027-01-01T00:00:00Z"}]}`,
 	} {
 		var d ServerDocument
 		if err := Unmarshal([]byte(withMax(text)), &d); err != nil {

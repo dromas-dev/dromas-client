@@ -1250,15 +1250,16 @@ A mailbox may belong to one account at its server. The protocol fixes how a mail
   - the server's **sunsets**: the versions that the server has scheduled to stop accepting;
   - the **latest version** the server names, if the server names one.
 
-  A version in the policy has the form `policy-version`: a major and a minor, and a patch where written.
+  A version in the policy has the form `policy-version`: a major and a minor.
 
   ```abnf
-  policy-version = version-number "." version-number [ "." version-number ]
+  policy-version = version-number "." version-number
   ```
 
-  A deprecation or a sunset is a date and one of:
-  - `below` a version, which covers every version that SemVer orders before that version (here a version written `MAJOR.MINOR` stands for `MAJOR.MINOR.0`);
-  - `version` a version, which covers every version whose major, minor and, where written, patch are that version's.
+  - **A policy compares the major and minor of a request's version, and nothing else.** The patch and the pre-release are the client's own, so a server compares neither.
+  - A deprecation or a sunset is a date and one of:
+    - `below` a version, which covers every version whose major and minor come before that version's major and minor;
+    - `version` a version, which covers every version whose major and minor are that version's.
 
   A server MUST NOT schedule a sunset earlier than a deprecation of the same `below` or `version` (RFC 9745 §4).
 - **`Deprecation`.** An answer under `/v1/` carries `Deprecation` (RFC 9745 §2.1) when a deprecation covers the request's version. The field's date is the earliest date among the deprecations that cover the version.
@@ -1269,7 +1270,7 @@ A mailbox may belong to one account at its server. The protocol fixes how a mail
 - **A retired version.** The server answers `410 client_version_unsupported` to a request whose version is below the version floor, or is covered by a sunset whose date has passed at the server's clock. Where the server sets a version floor, the answer carries `min_version`. Section 11.4, rule 0, places this refusal first. The server accepts a request for the server's document at every version.
 - **A client reads `Deprecation` and `Sunset` on every answer, and reads nothing more of them.** A `Deprecation` value in a form other than RFC 9745 §2.1's counts as absent, and so does a `Sunset` value in a form other than RFC 8594 §3's. A client shows neither field as the server's words (Section 11.3).
 - **A client SHOULD get the server's document (Section 11.18) at most once a day.**
-- **A client SHOULD tell its owner of a deprecation or a sunset of the client's own version, and of a `latest_version` higher than the client's own version.** The client compares `latest_version` with its own version in the parts that `latest_version` writes, from the major on.
+- **A client SHOULD tell its owner of a deprecation or a sunset of the client's own version, and of a `latest_version` higher than the client's own version.** The client compares `latest_version` with the major and minor of the client's own version.
 
 ### 11.18. The server's document
 
@@ -1919,7 +1920,7 @@ pass-params                = address-param pass-gap not-after-param pass-gap sig
 pass-scheme                = "dromas-pass"
 pass-statement             = %s"dromas-pass-v1" LF address LF server-name LF time LF
 plaintext                  = envelope-line ssh-signature padding
-policy-version             = version-number "." version-number [ "." version-number ]
+policy-version             = version-number "." version-number
 pre-release                = pre-release-id *( "." pre-release-id )
 pre-release-id             = version-number
                              / *DIGIT ( ALPHA / "-" ) *( ALPHA / DIGIT / "-" )
