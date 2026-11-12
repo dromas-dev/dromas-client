@@ -913,7 +913,7 @@ The `subject` column of the table below gives the exceptions. A registration is 
 | `misses_range` | `ip` | the same, from an IPv6 /48 |
 | `sends_before_pass` | `ip` | sends, counted before the server reads their pass |
 | `sends_before_pass_range` | `ip` | the same, from an IPv6 /48 |
-| `requests` | `ip` | the IP address's requests, registrations, renewals and requests that match no route among them |
+| `requests` | `ip` | the IP address's requests, which a server MAY leave uncounted once a pass has verified; registrations, renewals and requests that match no route are counted |
 | `requests_range` | `ip` | the same, from an IPv6 /48 |
 
 A quota counted against `ip` counts an IPv4 address by itself and an IPv6 address by its /64. Each quota ending in `_range` counts the same calls by their IPv6 /48 as well, beside the quota of the row above it; an IPv4 address has no /48 count. A call is refused when either count is spent, and the refusal names the count that sets its `Retry-After`.
