@@ -1721,8 +1721,8 @@ Dromas protects a message's content from everyone but the message's recipient. D
   - if the mailbox's clock is more than the skew allowance ahead when the mailbox makes a certificate, when the server checks that certificate (`400 invalid_validity_period`).
 - **A certificate that a server accepts need not have begun at every reader.** A reader refuses a message under a certificate whose start is after the reader's clock (`invalid_signature`). The reader acks that message, and the message is lost. The maker of a certificate dates the certificate back by the skew allowance, and that covers this case (Section 5.2).
 - **If a server accepts passes from two clocks, the two clocks are less than an hour apart.** A server accepts a pass from a mailbox whose clock is less than 10 minutes behind the server's clock, or up to 50 minutes ahead.
-- **What this does not cover.** A server checks a pass when the pass is first shown, and a server MAY remember the pass for the pass's ten minutes (Section 8). Two cases escape:
-  - a clock that moves by minutes inside those ten minutes;
+- **What this does not cover.** A server checks a pass when the pass is first shown, and a server MAY remember the pass until the pass ends, at most an hour (Section 8). Two cases escape:
+  - a clock that moves by minutes while the server remembers the pass;
   - a clock that goes back by more than an hour in the middle of a drain.
 
   Either case can put a `sent_at` past a reader's skew allowance, or have a reader judge messages by a clock that no server accepted a pass from. The reader then refuses the message, and keeps the message with the findings of the reader's checks, the reader's clock among them. Each case needs a clock that is already wrong.
