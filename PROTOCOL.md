@@ -1614,7 +1614,7 @@ Dromas protects a message's content from everyone but the message's recipient. D
   - ciphertext;
   - each mailbox's passes;
   - which account a mailbox is in;
-  - each mailbox's ACL. The ACL's allow list names senders that the mailbox accepts messages from, and a sender on that list may never have written to the mailbox. The ACL's deny list names the senders that the mailbox blocked.
+  - each mailbox's ACL. The ACL's allow list names senders that the mailbox accepts messages from, and a sender on that list may never have written to the mailbox. The ACL's deny list names the senders that the mailbox blocked. The entries are addresses in the clear, because a server can hash every address that the server holds. So hashed entries would hide only an allowed sender that the server has never seen.
 - **A hostile server never sees:** plaintext, a private key, an age file key, or any message's signature.
 - **A hostile server keeps nothing signed that says who wrote to whom.** A pass names a mailbox and a time, and names no recipient and no message.
 - **A hostile server can:**
@@ -1662,6 +1662,7 @@ Dromas protects a message's content from everyone but the message's recipient. D
 - **The signature is not deniable toward a recipient.** A recipient can show anyone what a sender signed. That is both an audit trail for programs that act on messages and a privacy cost. The server keeps no message signature, and can prove nothing about who sent what.
 - **A message that a mailbox cannot decrypt has no sender at all.** The server keeps no sender (Section 13). So a mailbox restored without its prekeys cannot learn whom to ask to send the message again.
 - **A reader decrypts before it verifies.** Until the signature is checked, the reader handles bytes that nobody vouched for: first age's, then the envelope's. By design, age accepts files from anyone, and a reader acks a refused message whatever the reason for the refusal, so neither the server nor the sender learns which check failed. The one exception is check 7's read of a sender's revocations, which tells the server which senders the reader has verified (Section 15.8). Each part of the plaintext has one place, and nothing is searched for (Section 9.2).
+- **A verifier accepts both (r, s) and (r, n − s) as a P-256 signature, and nothing depends on a signature having one set of bytes (Section 3.2).** A message's id is the ciphertext's hash, and a send names a prekey statement by the hash of the statement alone (Section 11.10).
 - **Encryption with age to a public key authenticates nobody.** Only the signature inside makes a message the sender's. The padding after the signature is unsigned, and is never read.
 - **A malformed identity document is evidence of tampering, and so is an identity document that does not hash to the address.** A well-formed identity document of a key type that a reader does not verify is not evidence of tampering (Section 4.1).
 - **A refusal blocks no sender, because the sender may not have written the message.** A forgery may be the operator framing the sender. A message under a revoked certificate may be a thief's, and the thief's signature verifies.
@@ -1682,27 +1683,27 @@ Dromas protects a message's content from everyone but the message's recipient. D
   - The identity's own signature on a pass or a message could be carried under a certificate of the identity key. That signature would then read as a working key's signature.
   - A working key's signature on a pass or a message under a certificate of certificate serial s1 could be carried under a certificate of the same key at a higher certificate serial, s2. A verifier would then accept that signature past a revocation of certificates through s1.
 - **A server counts the identity's acts apart from a working key's acts (Section 11.5).** So the holder of a stolen working key cannot stop the identity from revoking that key's certificate, or from renewing under a new certificate.
-- **A stolen working key signs as the mailbox until the key's certificate ends, if a server delivers the messages, or until the certificate is revoked.**
+- **A stolen working key signs messages that every reader accepts until the key's certificate ends, through any server, or until a reader sees a revocation of that certificate.**
   - A server accepts a prekey statement under a certificate that runs at most the server's maximum (Section 11.18).
   - A reader accepts a certificate within the certificate's validity window, and only one that runs at most the protocol's maximum (Section 5.2). So a stolen working key signs for at most 45 days and the skew allowance after its certificate began, whatever a hostile server served the maker as its maximum.
   - A certificate that no server accepted signs messages while it lasts. Such a certificate can also register its address at a server that has forgotten the address.
-  - A renewal under a new certificate ends the stolen key at the server at once, and at every sender that has seen the new certificate.
+  - A renewal under a new certificate ends the stolen key's passes and prekey statements at the server at once, and at every sender that has seen the new certificate. A renewal ends nothing at a reader.
   - A revocation of the stolen key's certificate ends the key wherever the revocation is seen (Section 12.6).
   - Messages that the owner sent under a revoked certificate, and that are still unread, are refused along with the thief's messages.
 - **The party that has the identity key chooses how long a certificate runs, up to the server's maximum and never past the protocol's maximum.** A shorter certificate ends a stolen working key sooner, and needs the identity more often. A reader checks a certificate at the reader's own clock, because nothing vouches for when a signature was made. A message may also wait the TTL before it is read. So a certificate signs messages that every reader accepts until the certificate's `valid before`, less the message margin (Section 2.3). For a certificate of the full maximum, that is the server's maximum less the skew allowance and the message margin, counted from when the maker made the certificate.
-- **A stolen pass works only for the minutes that the pass has left, and only at the server that the pass names.** A stolen pass:
+- **A stolen pass works only for the time that the pass has left, at most an hour, and only at the server that the pass names.** A stolen pass:
   - gives the mailbox's metadata and ciphertext;
   - gives control of the mailbox's availability: deleting unacked messages permanently, leaving the mailbox's account, and setting the mailbox's ACL, with which the stolen pass can pause the mailbox until the owner sets the next ACL;
   - gives sending in the mailbox's name, which verifies at no recipient;
   - never gives plaintext, signs no message and no prekey statement, and cannot revoke the address.
 
-  All of this is within a hostile server's powers (Section 15.2), at the one server that the pass names. So a pass lasts ten minutes, and is kept in a directory that only the owner reads.
+  All of this is within a hostile server's powers (Section 15.2), at the one server that the pass names. So a pass lasts at most an hour, and is kept in a directory that only the owner reads.
 - **A pass is not bound to the request that carries the pass.** A binding of the pass to each request, such as an HTTP message signature (RFC 9421) or a proof of possession (RFC 9449), costs one of these properties:
   - A signature over a send would cover the recipient and the ciphertext. A hostile server would then keep a signed record of who wrote to whom, which Section 15.2 rules out.
   - A signature over an ack or an ACL has the same cost, because a message id is the ciphertext's hash and an ACL names the mailbox's peers.
   - A binding to the TLS connection (RFC 9266) needs the TLS session's exporter where the server checks the pass. The party that terminates TLS can be a process other than the one that checks the pass.
 
-  So the pass is bounded by its ten minutes and its one server, and a stolen pass gives only what a hostile server can do (Section 15.2).
+  So the pass is bounded by at most an hour and its one server, and a stolen pass gives only what a hostile server can do (Section 15.2).
 - **A stolen prekey decrypts every message encrypted to it, until the mailbox renews.** A sender that has seen no later prekey statement can still be served the old statement until the old statement's `not_after`. So a mailbox that renews often MAY set a shorter prekey lifetime (Section 12.4).
 
 ### 15.6. Revocation's limits
@@ -1734,10 +1735,11 @@ Dromas protects a message's content from everyone but the message's recipient. D
 - **The server sees the social graph, times, IP addresses and each message's size to within a padding block.** Padding hides a length, not a pattern of traffic: who writes to whom, when and how often. A sender other than the reference clients may pad differently or not at all, and the server cannot tell.
 - **Once a message is stored, the server keeps no sender beside the message's recipient (Section 13).** The server sees the sender at the send, with the sender's IP address and the time. The server also sees the message while the message is live. A server that turns hostile can record all of this from then on.
 - **A lookup shows anyone who has the address when the mailbox renews.** A prekey serial and a `not_after` read the clock of the prekey statement's maker, and a lookup needs no pass (Section 11.8).
+  - A lookup needs no pass because a lookup returns only the documents that a sender verifies before a post.
 - **A sender that keeps its ciphertext learns, on the server's word, whether the recipient's mailbox still holds the message.** A post of the same ciphertext is answered `200` while the mailbox holds the message unacked (Section 11.10, step 6). Once the message is gone (acked, expired or deleted), the same post is a new message, answered `201`.
   - The sender knows the message's `expires_at`, so the sender can tell an expiry from an earlier end.
   - The sender's `calls` bound how often the sender can ask. A post answered `200` spends none of the mailbox's intake budget.
-  - A conforming sender never posts a sealed file twice (Section 12.2), so only a sender that breaks that rule can ask.
+  - A conforming sender posts the same sealed file a second time only after the server rejected the first post's pass (Section 8), so only a sender that breaks that rule can ask.
   - The answer is the server's word, and a server can give either answer whatever the recipient did.
   - Removing the signal would need a record of each acked message, which Section 13 rules out.
 - **The lookup before a post tells the server that the mailbox is about to be written to.** The post tells the server the same thing a moment later.
