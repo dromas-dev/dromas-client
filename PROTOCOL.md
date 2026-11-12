@@ -1326,7 +1326,7 @@ A server lists at most 64 deprecations, 64 sunsets and 64 capabilities. A client
     - the `not_after` not passed;
     - the prekey statement not earlier than any prekey statement the sender has seen (Section 5.3).
 
-  The sender records the prekey statement's `(c, p)` only after the prekey statement clears every check.
+  The sender records the prekey statement's `(c, p)` once the statement is not earlier than any prekey statement the sender has seen. Before that, the statement's signature, form, namespace, address and rank have checked, and no revocation that the sender keeps covers the statement's signer. The sender records the value even when a later check refuses the statement, for example as ended.
 - **Revocations:**
   - The sender verifies any revocation of the recipient's address or certificates that the lookup carries, and keeps each one that verifies (Section 12.5).
   - The sender posts nothing to an address if the sender keeps a revocation of that address.
@@ -1406,8 +1406,9 @@ A client drains every page of its list (Section 11.11) and fetches the message o
 - **A client SHOULD keep a list's `ETag` only from the answer for an empty mailbox.** With such a tag, a `304` means the mailbox is still empty. A client that keeps the tag of a page with messages MUST act on the page it kept when the client is answered `304`.
 - **A `304` whose `ETag`, compared weakly, is not the tag the poll sent is no answer.** The drain stops.
 - **A `304` to a list that sent no `If-None-Match` is malformed.** A list answer without `Retry-After` is malformed too.
-- **A client treats a list's answer as no answer in either of these cases:**
+- **A client treats a list's answer as no answer in any of these cases:**
   - the answer's cursor does not have the form Section 11.11 gives;
+  - a list entry's `id` does not have the form `message-id` (Section 11.10);
   - a list entry's `size` is over the largest ciphertext (Section 11.10).
 
   The client does so before the client fetches anything.
