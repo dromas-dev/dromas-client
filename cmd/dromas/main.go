@@ -32,7 +32,8 @@ import (
 
 // about is the end of the top-level help: what holds for every command.
 const about = `Configuration: a config file says where the mailbox's files are. dromas reads
-<profile>.toml in ${XDG_CONFIG_HOME:-~/.config}/dromas, where --profile or
+<profile>.toml in ${XDG_CONFIG_HOME:-~/.config}/dromas (on Windows without
+$XDG_CONFIG_HOME, %AppData%\dromas), where --profile or
 $DROMAS_PROFILE names the profile, which is "default" without either; --config
 or $DROMAS_CONFIG names any file instead. dromas init writes a profile's file. A
 flag overrides an environment variable, and an environment variable overrides

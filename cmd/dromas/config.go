@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -165,11 +166,19 @@ func homeDir() (string, error) {
 	return home, nil
 }
 
-// configDir is the directory a profile's file is in. A relative
-// $XDG_CONFIG_HOME is ignored, as the XDG Base Directory spec has it: it would
-// read the working directory.
+// configDir is the directory a profile's file is in: $XDG_CONFIG_HOME/dromas,
+// else %AppData%\dromas on Windows, as gh keeps its own there, else
+// ~/.config/dromas. A relative $XDG_CONFIG_HOME or %AppData% is ignored, as the
+// XDG Base Directory spec has it: it would read the working directory.
 func configDir() (string, error) {
 	if d := os.Getenv("XDG_CONFIG_HOME"); filepath.IsAbs(d) {
+		return filepath.Join(d, "dromas"), nil
+	}
+	if runtime.GOOS == "windows" {
+		d := os.Getenv("APPDATA")
+		if !filepath.IsAbs(d) {
+			return "", fmt.Errorf("%%AppData%% is not an absolute path: %q", d)
+		}
 		return filepath.Join(d, "dromas"), nil
 	}
 	home, err := homeDir()
@@ -177,6 +186,32 @@ func configDir() (string, error) {
 		return "", err
 	}
 	return filepath.Join(home, ".config", "dromas"), nil
+}
+
+// profileFile is a profile's file in configDir. On Windows, a profile with no
+// file in %AppData%\dromas and one in ~/.config/dromas is read from
+// ~/.config/dromas, so a mailbox whose file is there keeps running.
+func profileFile(profile string) (string, error) {
+	dir, err := configDir()
+	if err != nil {
+		return "", err
+	}
+	file := filepath.Join(dir, profile+".toml")
+	if runtime.GOOS != "windows" || filepath.IsAbs(os.Getenv("XDG_CONFIG_HOME")) {
+		return file, nil
+	}
+	if _, err := os.Stat(file); !errors.Is(err, fs.ErrNotExist) { //nolint:gosec // a profile's file, its name held to profileGrammar
+		return file, nil
+	}
+	home, err := homeDir()
+	if err != nil {
+		return file, nil //nolint:nilerr // no home has no file under it
+	}
+	dot := filepath.Join(home, ".config", "dromas", profile+".toml")
+	if _, err := os.Stat(dot); err == nil { //nolint:gosec // a profile's file, its name held to profileGrammar
+		return dot, nil
+	}
+	return file, nil
 }
 
 // expand makes a path absolute: a leading ~/ is the home directory, and any
@@ -234,8 +269,8 @@ func loadConfig(c *cobra.Command, g *globals, isInit, noMailbox bool) (*config, 
 			return nil, &configError{file: named, msg: err.Error()}
 		}
 		file = abs
-	} else if dir, err := configDir(); err == nil {
-		file = filepath.Join(dir, cfg.profile+".toml")
+	} else if f, err := profileFile(cfg.profile); err == nil {
+		file = f
 	}
 	var fc fileConfig
 	found, template := false, ""
@@ -631,7 +666,11 @@ func homeBase(env, def string) string {
 // templateFor is a profile's config file where it has none: every path in full,
 // and every default commented out, as OpenSSH ships sshd_config, since an active
 // default would hold its value through an upgrade. What the command line says
-// goes in as it says it.
+// goes in as it says it. The mailbox is under the XDG data directory, its keys
+// under the XDG state directory. On Windows, where an XDG variable is not set,
+// the mailbox is under %LocalAppData% and its keys in the mailbox's keys\: a
+// Windows roaming profile copies %AppData% to each machine its user logs on to,
+// and a mailbox runs in one place.
 func templateFor(profile string, g *globals) string {
 	// Under ~/ a path is written with / on every system, which expand reads.
 	join := func(a string, elem ...string) string {
@@ -656,10 +695,20 @@ func templateFor(profile string, g *globals) string {
 		}
 		return b
 	}
-	base := first(g.baseDir, join(homeBase("XDG_DATA_HOME", ".local/share"), "dromas", profile))
+	data, state := homeBase("XDG_DATA_HOME", ".local/share"), homeBase("XDG_STATE_HOME", ".local/state")
+	local := os.Getenv("LOCALAPPDATA")
+	useLocal := runtime.GOOS == "windows" && filepath.IsAbs(local)
+	if useLocal && !filepath.IsAbs(os.Getenv("XDG_DATA_HOME")) {
+		data = local
+	}
+	base := first(g.baseDir, join(data, "dromas", profile))
 	mail := first(g.mailDir, join(base, "mail"))
 	identity := first(g.identityFile, join(base, "identity"))
-	keys := first(g.rotatingKeysDir, join(homeBase("XDG_STATE_HOME", ".local/state"), "dromas", profile, "keys"))
+	keysDir := join(state, "dromas", profile, "keys")
+	if useLocal && !filepath.IsAbs(os.Getenv("XDG_STATE_HOME")) {
+		keysDir = join(base, "keys")
+	}
+	keys := first(g.rotatingKeysDir, keysDir)
 	var b strings.Builder
 	fmt.Fprintf(&b, "# dromas profile %q. Commented lines show the default: uncomment to change.\n", profile)
 	b.WriteString("# `dromas config` prints every value as resolved.\n")

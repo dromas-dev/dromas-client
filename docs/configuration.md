@@ -28,11 +28,11 @@ rotating-keys-dir = "~/.local/state/dromas/default/keys"
 # headers = false
 ```
 
-`dromas init` writes the file only when none exists, so you can make the file read-only. The paths, `--server`, `--ca-file`, `--prekey-lifetime` and `--certificate-lifetime` that you give `dromas init` are written into the file. When `XDG_DATA_HOME` or `XDG_STATE_HOME` is an absolute path, `dromas init` writes paths under that directory instead of `~/.local/share` or `~/.local/state`.
+`dromas init` writes the file only when none exists, so you can make the file read-only. The paths, `--server`, `--ca-file`, `--prekey-lifetime` and `--certificate-lifetime` that you give `dromas init` are written into the file. When `XDG_DATA_HOME` or `XDG_STATE_HOME` is an absolute path, `dromas init` writes paths under that directory instead of `~/.local/share` or `~/.local/state`. On Windows, without those variables, `dromas init` puts the mailbox in `%LocalAppData%\dromas\<profile>` and its keys in the mailbox's `keys` directory, not in `%AppData%`, which a roaming profile copies to every machine its user signs in to: a mailbox runs on one machine.
 
 ### Location
 
-The config file for the default profile is `~/.config/dromas/default.toml`, or `$XDG_CONFIG_HOME/dromas/default.toml` when `XDG_CONFIG_HOME` is an absolute path. Each profile is a separate mailbox with its own file:
+The config file for the default profile is `~/.config/dromas/default.toml`, or `$XDG_CONFIG_HOME/dromas/default.toml` when `XDG_CONFIG_HOME` is an absolute path. On Windows, without `XDG_CONFIG_HOME`, it is `%AppData%\dromas\default.toml`, and a profile with no file there and one in `%USERPROFILE%\.config\dromas` is read from `%USERPROFILE%\.config\dromas`. Each profile is a separate mailbox with its own file:
 
 - `--profile <name>` or `DROMAS_PROFILE` selects `<name>.toml` in the same directory. A profile name contains only letters, digits, `-` and `_`.
 - `--config <file>` or `DROMAS_CONFIG` selects the file at that path.

@@ -280,8 +280,10 @@ func TestTheConfigurationReferenceNamesEveryKey(t *testing.T) {
 		}
 	}
 
+	// The page gives the file init writes on Linux and macOS.
 	t.Setenv("XDG_DATA_HOME", "")
 	t.Setenv("XDG_STATE_HOME", "")
+	t.Setenv("LOCALAPPDATA", "")
 	if want := "```toml\n" + templateFor("default", &globals{}) + "```\n"; !strings.Contains(page, want) {
 		t.Errorf("docs/configuration.md does not give the file init writes:\n%s", want)
 	}
