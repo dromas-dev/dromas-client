@@ -413,7 +413,7 @@ func (b *Mailbox) lookupRevocation(ctx context.Context, a protocol.Address, l *l
 // with nothing that verifies among them.
 func (b *Mailbox) readRevocations(ctx context.Context, a protocol.Address, l *lookups) (bool, error) {
 	var rec protocol.Revocations
-	path := "/v1/" + a.String() + "/revocation"
+	path := revocationPath(a)
 	resp, err := b.call(ctx, http.MethodGet, path, nil, nil, &rec)
 	var gone *RevokedError
 	switch {
@@ -965,7 +965,17 @@ func named(method, path string) (a protocol.Address, read, ok bool) {
 	if err != nil {
 		return a, false, false
 	}
-	return a, method == http.MethodGet && (sub == "" || sub == "revocations"), true
+	return a, method == http.MethodGet && (sub == "" || sub == revocationRoute), true
+}
+
+// revocationRoute is the last segment of the route that reads and publishes
+// an address's revocations, /v1/<address>/revocation (api/openapi.yaml):
+// named reads it as a read, and every call writes it through revocationPath.
+const revocationRoute = "revocation"
+
+// revocationPath is the route of address a's revocations.
+func revocationPath(a protocol.Address) string {
+	return "/v1/" + a.String() + "/" + revocationRoute
 }
 
 // lookups is what one command has asked as it went: one send, one flush,
@@ -1074,7 +1084,7 @@ func served(a protocol.Address, err error) error {
 // checking the record (PROTOCOL.md §11.15): taken only once what it shows
 // verifies (proved).
 func (b *Mailbox) publishRecord(ctx context.Context, a protocol.Address, rec *protocol.Revocations) error {
-	_, err := b.call(ctx, http.MethodPut, "/v1/"+a.String()+"/revocation", rec, nil, nil)
+	_, err := b.call(ctx, http.MethodPut, revocationPath(a), rec, nil, nil)
 	return err
 }
 

@@ -93,6 +93,49 @@ func TestARevokedReadWhoseRecordDoesNotVerifyIsNotReadAgain(t *testing.T) {
 	}
 }
 
+// A read of an address's revocations is a read: an answer to it at any code
+// proved checks, with no record that verifies, is that read's answer, and
+// nothing more is asked of it, about the mailbox itself or a peer.
+func TestAReadOfRevocationsIsNotProvedAgain(t *testing.T) {
+	t.Parallel()
+	for _, of := range []string{"a peer", "itself"} {
+		for _, c := range client.ProvedCodes() {
+			t.Run(of+"/"+string(c), func(t *testing.T) {
+				t.Parallel()
+				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				defer cancel()
+				e := newEnv(t)
+				a, b := e.mailbox(), e.mailbox()
+				read := b
+				if of == "itself" {
+					read = a
+				}
+				var revs, boxes atomic.Int32
+				e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
+					switch {
+					// Bounded, so that a mailbox that reads again still ends.
+					case r.Method == http.MethodGet && r.URL.Path == mailboxPath(read)+"/revocation" && revs.Add(1) <= 10:
+						forge.Refuse(w, c)
+					case r.Method == http.MethodGet && r.URL.Path == mailboxPath(read):
+						boxes.Add(1)
+						forge.Refuse(w, protocol.CodeMailboxNotFound)
+					default:
+						next.ServeHTTP(w, r)
+					}
+				})
+				_, err := a.Ask(ctx, read.Address())
+				wantBoxes := int32(0)
+				if of == "itself" {
+					wantBoxes = 1 // known reads the mailbox, then its revocations
+				}
+				if err == nil || finishedOwn(err) || revs.Load() != 1 || boxes.Load() != wantBoxes {
+					t.Errorf("a read of %s's revocations answered %s with no record: %v, after %d reads of the revocations and %d of the mailbox, want 1 and %d", of, c, err, revs.Load(), boxes.Load(), wantBoxes)
+				}
+			})
+		}
+	}
+}
+
 // Every command a mailbox runs under its lock, in the states that reach each of
 // its paths, against a server made hostile at its 1st call, then its 2nd, and
 // on through every call an honest run makes: the crash tests' kill at each
