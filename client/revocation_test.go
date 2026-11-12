@@ -897,3 +897,33 @@ func TestARecordHandedOverKeepsEachPartThatVerifies(t *testing.T) {
 		t.Fatalf("%d records with a bad part reached the server", n)
 	}
 }
+
+// Check 7 of a message a mailbox wrote to itself reads the mailbox's own
+// state (known), and a 410 there with no record that verifies is no answer,
+// as it is of a peer: the drain stops, and the message stays on the server.
+func TestABare410AboutItselfAtCheck7IsNoAnswer(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	e := newEnv(t)
+	a := e.mailbox()
+	if _, err := a.Send(ctx, a.Address(), "to itself"); err != nil {
+		t.Fatal(err)
+	}
+	var forged atomic.Bool
+	forged.Store(true)
+	e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
+		if forged.Load() && r.Method == http.MethodGet && r.URL.Path == mailboxPath(a) {
+			forge.Refuse(w, protocol.CodeMailboxRevoked)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+	res, err := a.Receive(ctx)
+	if err == nil || len(res.Delivered) != 0 || client.Code(err) != protocol.CodeMailboxRevoked {
+		t.Fatalf("check 7 of its own message, answered a bare 410: %v, delivered %d", err, len(res.Delivered))
+	}
+	forged.Store(false)
+	if res, err := a.Receive(ctx); err != nil || len(res.Delivered) != 1 {
+		t.Fatalf("the message waits on the server for a drain that has its answer: %v, delivered %d", err, len(res.Delivered))
+	}
+}

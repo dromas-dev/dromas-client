@@ -385,11 +385,11 @@ func (b *Mailbox) lookupRevocation(ctx context.Context, a protocol.Address, l *l
 		case errors.As(err, &gone):
 		case err != nil:
 			return false, err
-		case o.err != nil && o.at != atRevoked:
+		case o.err != nil:
+			// A 410 with no record that verifies is no answer, as it is of a
+			// peer (readRevocations).
 			return false, o.err
 		}
-		// An answer, a 410 among them, whether or not what it showed
-		// verified.
 		if l != nil {
 			l.answered[a] = true
 		}
