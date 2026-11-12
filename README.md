@@ -83,7 +83,7 @@ dromas status                    # what the mailbox holds and what needs a look,
 
 ## Docs
 
-- [User guide](docs/guide.md): mailbox files, backup and restore, key protection, senders, revocation, and running `recv` as a service.
+- [User guide](docs/guide.md): the config file, sending and receiving, running `recv` as a service, senders, backup and restore, key protection, and revocation.
 - [Configuration reference](docs/configuration.md): every config file key, and the environment variables.
 - [Output format](docs/output.md): every line type, exit code and refusal code.
 - [Documentation](docs/README.md) lists every page. dromas.dev/docs/ shows the pages as they stand at the commit of this repo that the site names.
