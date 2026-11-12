@@ -56,7 +56,7 @@ sudo install dromas /usr/local/bin/
    systemctl --user enable --now dromas@default
    ```
 
-   On other systems, run `dromas recv --follow --headers` under the service manager you use. See [Run as a service](../guide.md#run-as-a-service).
+   The macOS archives carry a launchd agent, and the FreeBSD, DragonFly BSD, NetBSD and OpenBSD archives carry an rc.d script for that system. See [Run as a service](../guide.md#run-as-a-service) for each.
 
 ## Next steps
 

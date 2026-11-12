@@ -52,7 +52,24 @@ apk add --allow-untrusted ./dromas_*_x86_64.apk
    dromas recv --wait 3m
    ```
 
-4. Run `recv` as a service. OpenRC does not read the systemd unit that the package installs: run `dromas recv --follow --headers` under the service manager you use. See [Run as a service](../guide.md#run-as-a-service).
+4. Run `recv` as a service. The package installs the OpenRC user service `dromas`, disabled, which needs Alpine Linux 3.22 or later. As root, start your user services at boot, replacing `<user>` with your user:
+
+   ```sh
+   apk add openrc-user-pam pam-rundir
+   ln -s user /etc/init.d/user.<user>
+   rc-update add user.<user> default
+   rc-service user.<user> start
+   ```
+
+   Then, as your user, enable the service to start `recv` now and with your user services:
+
+   ```sh
+   export XDG_RUNTIME_DIR=/run/user/$(id -u)
+   rc-update -U add dromas default
+   rc-service -U dromas start
+   ```
+
+   See [Run as a service](../guide.md#alpine-linux) for another profile and the service's log.
 
 ## Next steps
 

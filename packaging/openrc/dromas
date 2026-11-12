@@ -1,0 +1,28 @@
+#!/sbin/openrc-run
+# The resident recv of one mailbox, as an OpenRC user service. The service
+# dromas runs the default profile. dromas.<profile> runs that profile, from
+# a symlink that root makes beside this script:
+#   ln -s dromas /etc/user/init.d/dromas.<profile>
+# The mailbox's owner enables the service, never root:
+#   rc-update -U add dromas default
+#   rc-service -U dromas start
+# The profile's config file names the program recv runs for each message
+# ([recv] exec).
+
+description="Dromas mailbox: receive each message, and run the profile's callback"
+supervisor=supervise-daemon
+command=/usr/bin/dromas
+# --headers: the log gets who wrote each message and when, and none of the
+# text a sender chose. inbox/ keeps each message, and the callback gets its
+# whole line.
+command_args="recv --follow --headers"
+if [ "${RC_SVCNAME}" != dromas ]; then
+	command_args="${command_args} --profile ${RC_SVCNAME#dromas.}"
+fi
+output_logger="logger -t '${RC_SVCNAME}' -p daemon.info"
+error_logger="logger -t '${RC_SVCNAME}' -p daemon.error"
+# supervise-daemon starts recv again 30 seconds after every exit, whatever
+# its exit status, and gives up after 5 starts within 30 minutes.
+respawn_delay=30
+respawn_max=5
+respawn_period=1800

@@ -63,6 +63,26 @@ jobs:
         # gofmt, vet, every test (a skip fails the job, since this runner has
         # every tool), and the race test: scripts/check.sh, which a laptop runs too.
         run: scripts/check.sh full
+      - name: the launchd agent runs recv as the user
+        if: runner.os == 'macOS'
+        # Installed by the commands docs/guide.md gives, for a profile with no
+        # config file: recv exits 2, and its config_error line names the
+        # profile's file under the user's HOME. That line in the agent's log
+        # shows launchd ran the template's command as the user, with HOME set
+        # and the output where the template sends it.
+        run: |
+          go build -o "$RUNNER_TEMP/dromas" ./cmd/dromas
+          profile=ci-template
+          label=dev.dromas.recv.$profile
+          mkdir -p ~/Library/LaunchAgents ~/Library/Logs
+          sed -e "s|PROFILE|$profile|g" -e "s|/Users/USERNAME|$HOME|g" -e "s|/usr/local/bin/dromas|$RUNNER_TEMP/dromas|" packaging/launchd/dev.dromas.recv.plist > ~/Library/LaunchAgents/$label.plist
+          plutil -lint ~/Library/LaunchAgents/$label.plist
+          launchctl enable "gui/$(id -u)/$label"
+          launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/$label.plist
+          want="\"file\":\"$HOME/.config/dromas/$profile.toml\""
+          for _ in $(seq 30); do grep -F "$want" ~/Library/Logs/dromas.$profile.log 2>/dev/null && break; sleep 1; done
+          launchctl bootout "gui/$(id -u)/$label"
+          grep -F "$want" ~/Library/Logs/dromas.$profile.log
 
   windows-accounts:
     # The test job's Windows user is the built-in Administrator. Here every test
@@ -169,6 +189,47 @@ jobs:
         run: |
           for d in /usr/pkg/bin /usr/pkg/go1*/bin; do if [ -d "$d" ]; then PATH=$d:$PATH; fi; done
           scripts/check.sh ${{ github.event_name == 'schedule' && 'full' || 'norace' }}
+      - name: the rc.d script runs recv as its user
+        shell: cpa.sh {0}
+        # Installed by the commands docs/guide.md gives, for a user and a
+        # profile with no config file: recv exits 2, and its config_error line
+        # names the profile's file under that user's HOME. That line in the
+        # log shows the script ran recv as the user, with HOME set, the flags
+        # passed, and the output where the script sends it.
+        run: |
+          for d in /usr/pkg/bin /usr/pkg/go1*/bin; do if [ -d "$d" ]; then PATH=$d:$PATH; fi; done
+          go build -o dromas ./cmd/dromas
+          sudo install -d /usr/local/bin
+          sudo install -m 0755 dromas /usr/local/bin/dromas
+          case $(uname) in
+          FreeBSD|DragonFly)
+            sudo pw useradd dromasci -m
+            sudo install -d /usr/local/etc/rc.d
+            sudo install -m 0755 packaging/rc.d/freebsd/dromas /usr/local/etc/rc.d/dromas
+            printf '%s\n' 'dromas_user="dromasci"' 'dromas_flags="--profile ci"' | sudo tee -a /etc/rc.conf
+            sudo service dromas onestart
+            log=/var/log/messages ;;
+          NetBSD)
+            sudo useradd -m dromasci
+            sudo install -m 0755 packaging/rc.d/netbsd/dromas /etc/rc.d/dromas
+            printf '%s\n' 'dromas_user=dromasci' 'dromas_flags="--profile ci"' | sudo tee -a /etc/rc.conf
+            sudo /etc/rc.d/dromas onestart
+            log=/var/log/dromas.log ;;
+          OpenBSD)
+            sudo useradd -m dromasci
+            sudo install -m 0755 packaging/rc.d/openbsd/dromas /etc/rc.d/dromas
+            sudo rcctl enable dromas
+            sudo rcctl set dromas user dromasci
+            sudo rcctl set dromas flags --profile ci
+            # rc.subr reports a start as failed when recv has already exited,
+            # as it does here.
+            sudo rcctl start dromas || true
+            log=/var/log/daemon ;;
+          esac
+          want="\"file\":\"$(getent passwd dromasci | cut -d: -f6)/.config/dromas/ci.toml\""
+          for _ in $(seq 30); do sudo grep -F "$want" "$log" && exit 0; sleep 1; done
+          sudo tail -20 "$log"
+          exit 1
 
   lint:
     runs-on: ubuntu-26.04

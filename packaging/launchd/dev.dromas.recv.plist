@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+The resident recv of one mailbox, as a launchd agent of its owner. Replace
+PROFILE with the mailbox's profile, /Users/USERNAME with your home directory,
+and /usr/local/bin/dromas with where you installed dromas, and install the
+file as ~/Library/LaunchAgents/dev.dromas.recv.PROFILE.plist:
+https://github.com/dromas-dev/dromas-client/blob/main/docs/guide.md#run-as-a-service
+launchd starts recv again after every exit, whatever its exit status, at most
+once every 10 seconds.
+-->
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>dev.dromas.recv.PROFILE</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/usr/local/bin/dromas</string>
+		<string>recv</string>
+		<string>--follow</string>
+		<string>--headers</string>
+		<string>--profile</string>
+		<string>PROFILE</string>
+	</array>
+	<key>KeepAlive</key>
+	<true/>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>StandardOutPath</key>
+	<string>/Users/USERNAME/Library/Logs/dromas.PROFILE.log</string>
+	<key>StandardErrorPath</key>
+	<string>/Users/USERNAME/Library/Logs/dromas.PROFILE.log</string>
+</dict>
+</plist>
