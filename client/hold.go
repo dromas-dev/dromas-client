@@ -325,6 +325,11 @@ func (h *holding) turn(ctx context.Context, wait time.Duration) (bool, error) {
 // of the mailbox's state: an answer about a revocation is proved under the lock
 // once it comes (provedLocked).
 //
+// A hold ends before the pass it carries does, because the server checks the
+// pass again when it answers: a kept pass with no more than MinHold left past
+// passMargin is replaced (passFor), and the wait is cut to what the pass has
+// left past passMargin. Two holds at DefaultHold fit in one pass.
+//
 // A mailbox with no tag kept, one whose last list found messages, whose pass the
 // server refused, that the server holds no mailbox for, or whose certificate in
 // use its server shows revoked (renewalMends), is Changed at once, for a
@@ -341,7 +346,10 @@ func (b *Mailbox) Hold(ctx context.Context, wait time.Duration) (*HoldResult, er
 		}
 		return &HoldResult{}, nil
 	}
-	type kept struct{ pass, tag, path string }
+	type kept struct {
+		pass, tag, path string
+		ends            time.Time
+	}
 	k, err := locked(ctx, b, func() (kept, error) {
 		if err := b.keysMatch(); err != nil {
 			return kept{}, err
@@ -350,8 +358,8 @@ func (b *Mailbox) Hold(ctx context.Context, wait time.Duration) (*HoldResult, er
 		if err != nil || hdr == nil {
 			return kept{}, err
 		}
-		pass, err := b.pass()
-		return kept{pass, hdr.Get("If-None-Match"), b.mailboxPath("/messages")}, err
+		pass, ends, err := b.passFor(MinHold)
+		return kept{pass, hdr.Get("If-None-Match"), b.mailboxPath("/messages"), ends}, err
 	})
 	if err != nil {
 		return nil, err
@@ -359,6 +367,7 @@ func (b *Mailbox) Hold(ctx context.Context, wait time.Duration) (*HoldResult, er
 	if k.tag == "" {
 		return &HoldResult{Changed: true}, nil
 	}
+	wait = min(wait, k.ends.Sub(b.now())-passMargin)
 	hdr := http.Header{"If-None-Match": {k.tag}, "Authorization": {k.pass}}
 	path := k.path + "?wait=" + strconv.FormatInt(int64(wait/time.Second), 10)
 	// How long the request was held is timed from the connection it got

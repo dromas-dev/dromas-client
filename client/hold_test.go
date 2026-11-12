@@ -70,6 +70,72 @@ func TestAHeldListWithNothingNewEndsAtTheMailboxsWait(t *testing.T) {
 	})
 }
 
+// A hold ends before the pass it carries, which the server checks again when
+// it answers: a kept pass is held to what it has left, one with no more than
+// MinHold left past the margin is replaced, and holds one after another still
+// sign a pass every two holds.
+func TestAHoldEndsBeforeItsPass(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		e := newMemEnv(t)
+		b := e.mailbox()
+		type seen struct {
+			pass   string
+			answer time.Time // by the clock the mailbox and the server share: when the server answers it with nothing new
+			ends   time.Time
+		}
+		var mu sync.Mutex
+		var holds []seen
+		var last string
+		e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
+			a := r.Header.Get("Authorization")
+			mu.Lock()
+			if r.URL.Query().Has("wait") {
+				s, _ := strconv.Atoi(r.URL.Query().Get("wait"))
+				p, err := protocol.ParsePass(a)
+				if err != nil {
+					t.Errorf("a held list's pass: %v", err)
+				}
+				holds = append(holds, seen{a, e.clock.Now().Add(time.Duration(s) * time.Second), p.NotAfter})
+			} else if a != "" {
+				last = a
+			}
+			mu.Unlock()
+			next.ServeHTTP(w, r)
+		})
+		// hold holds the list once, the shared clock moved on as the hold ran.
+		hold := func() *client.HoldResult {
+			t.Helper()
+			h := <-held(b, time.Hour)
+			if h == nil || h.Changed {
+				t.Fatalf("a hold came to %+v", h)
+			}
+			e.clock.Add(h.After)
+			return h
+		}
+		receive(t, b) // its tag kept, and a pass signed
+		e.clock.Add(protocol.PassLifetime - 2*time.Minute)
+		if h := hold(); h.After > 2*time.Minute-30*time.Second || holds[0].pass != last {
+			t.Fatalf("a hold on a kept pass with 2 minutes left came to %+v, want that pass, ended before it", h)
+		}
+		if h := hold(); h.After != client.DefaultHold || holds[1].pass == last {
+			t.Fatalf("a hold on a pass with too little left came to %+v, want a new pass and the whole wait", h)
+		}
+		for range 6 {
+			hold()
+		}
+		passes := map[string]bool{}
+		for i, h := range holds {
+			if h.answer.After(h.ends) {
+				t.Errorf("hold %d is answered at %v, after its pass ends at %v", i, h.answer, h.ends)
+			}
+			passes[h.pass] = true
+		}
+		if len(passes) > 1+(len(holds)-1+1)/2 {
+			t.Errorf("%d holds carried %d passes, want a pass every two holds", len(holds), len(passes))
+		}
+	})
+}
+
 func TestAHoldLetsTheMailboxsOtherCommandsGoOn(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		e := newMemEnv(t)
