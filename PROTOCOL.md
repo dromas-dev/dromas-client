@@ -291,7 +291,8 @@ A server and a client read every JSON text that the protocol carries by the rule
 - **Depth.** The depth is at most 32, with objects and arrays counted together and the outermost counted as one.
 - **Types.** A member that the protocol defines is of the type defined for that member. A member that the protocol defines and whose value is null is the same as that member left out, except for the envelope's `body` (Section 9.1). An integer member is written in digits alone, from 0 to 2^53 − 1. For example, `1.0` and `1e0` are not integers.
 - **Bytes.** A byte member is base64 (Section 2.2).
-- **Unknown members.** An unknown member is a member that the reader does not know. A server MUST refuse an unknown member in anything sent to the server. Every other reader MUST ignore an unknown member: a client in an answer, and a mailbox in an envelope. The rules above still apply inside an unknown member.
+- **Unknown members.** An unknown member is a member that the reader does not know. A server MUST refuse an unknown member in anything sent to the server, except in a revocation record. Every other reader MUST ignore an unknown member: a client in an answer, and a mailbox in an envelope. The rules above still apply inside an unknown member.
+  - **A server MUST ignore an unknown member of a revocation record, as a client does.** A revocation record grows by a statement under a new tag (Section 14), and a record made in advance is published byte for byte (Section 12.5). So a server that refused the record whole would leave a revoked address live. The server still verifies each member that the server knows, or refuses the record.
 
 ### 3.4. Clocks
 
@@ -734,6 +735,7 @@ A revocation record carries an identity's revocations, and the record proves its
 - **`revocation_signature`.** If present, this member is the revocation of the address (Section 10.1): the revocation's armoured signature, in base64.
 - **`revoked_certificates` and `revoked_certificates_signature`.** If present, these two members are the revocation of certificates (Section 10.2): the revocation statement's three lines and the armoured signature over those lines, each in base64. The revocation statement MUST have exactly that form, with the address as its line 2.
 - **The members are in any order.** A revocation record carries at least one of the two revocations.
+- **A reader ignores an unknown member of a revocation record, a server among them (Section 3.3).**
 - **A revocation record from a file counts the same as one from a server.**
   - A verifier rebuilds the revocation statement of the address from the address.
   - The verifier checks that the revocation of certificates has the form `revocation-of-certificates`, with the address as its line 2.

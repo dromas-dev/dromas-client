@@ -2353,7 +2353,6 @@ components:
       description: The implementation that answers, informational (`PROTOCOL.md` §11.18).
       type: object
       required: [name, version]
-      additionalProperties: false
       properties:
         name:
           $ref: '#/components/schemas/ImplementationText'
@@ -2520,9 +2519,10 @@ components:
     RevocationRecord:
       description: |
         A revocation record (`PROTOCOL.md` §10.3): a revocation of the
-        address, of its certificates through a serial, or both.
+        address, of its certificates through a serial, or both. Every
+        reader, a server included, ignores a member it does not know
+        (`PROTOCOL.md` §3.3).
       type: object
-      additionalProperties: false
       required: [identity]
       anyOf:
         - required: [revocation_signature]
