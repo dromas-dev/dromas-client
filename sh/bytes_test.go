@@ -60,13 +60,6 @@ func TestPatternsReadBytes(t *testing.T) {
 	if _, err := bash(t, nil, "dr_hex "+strings.Repeat("a", 63)+"١"); err == nil {
 		t.Error("dr_hex takes a digit that is not ASCII")
 	}
-	home := t.TempDir()
-	if err := os.WriteFile(filepath.Join(home, "seen-floor"), []byte("1١\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if out, err := bash(t, []string{"DR_HOME=" + home}, "dr_floor"); err == nil {
-		t.Errorf("dr_floor takes a floor of 1١: %q", out)
-	}
 	_, setNow := vectorNow(t)
 	a, aDoc := identity(t, "a")
 	st := filepath.Join(vectors, "prekey", "bad-serial-a-digit-not-ascii.txt")

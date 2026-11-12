@@ -270,16 +270,24 @@ func CheckCursor(s string) error {
 	return nil
 }
 
+// messageIDGrammar is a message id as a list names it: the SHA-256 of the
+// ciphertext, 64 lowercase hex digits (PROTOCOL.md §11.11).
+var messageIDGrammar = regexp.MustCompile(`\A[0-9a-f]{64}\z`)
+
 // checkType refuses a list whose next_cursor is not a cursor (CheckCursor),
-// or that gives a message a size past MaxCiphertext, which is no
-// ciphertext's (PROTOCOL.md §11.10): either breaks the list's form, as a
-// member of another type does, so it is no answer, and a reader allocates
-// nothing by a size it gives that is not held here first.
+// that names a message by an id that is not a message id, or that gives a
+// message a size past MaxCiphertext, which is no ciphertext's (PROTOCOL.md
+// §11.10): each breaks the list's form, as a member of another type does, so
+// it is no answer, a reader writes no id of the server's into a path, and a
+// reader allocates nothing by a size it gives that is not held here first.
 func (l *MessageList) checkType() error {
 	if l.NextCursor != nil && CheckCursor(*l.NextCursor) != nil {
 		return &memberError{name: "next_cursor", known: true}
 	}
 	for _, m := range l.Messages {
+		if !messageIDGrammar.MatchString(m.ID) {
+			return &memberError{name: "id", known: true}
+		}
 		if m.Size > MaxCiphertext {
 			return &memberError{name: "size", known: true}
 		}

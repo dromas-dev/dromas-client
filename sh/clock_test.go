@@ -188,17 +188,17 @@ func TestScriptKeepsItsReplaySetByItsClock(t *testing.T) {
 		t.Fatalf("a drain 50 minutes fast: %v", d)
 	}
 	w.inject(q, oid, l, sig)
-	if d := (at{q, -9 * time.Minute}).recv(); len(d.messages) != 0 || d.rc != 0 || !strings.Contains(q.read("seen"), oid+" ") || q.has("seen-floor") {
+	if d := (at{q, -9 * time.Minute}).recv(); len(d.messages) != 0 || d.rc != 0 || !strings.Contains(q.read("seen"), oid+" ") {
 		t.Errorf("the server's replay of it after the clock stepped back: %v", d)
 	}
 	seen := q.read("seen")
-	if d := (at{q, 70 * 24 * time.Hour}).recv(); d.rc == 0 || q.read("seen") != seen || q.has("seen-floor") {
+	if d := (at{q, 70 * 24 * time.Hour}).recv(); d.rc == 0 || q.read("seen") != seen {
 		t.Errorf("a recv refused for a clock 70 days fast pruned: %v", d)
 	}
 	old := fmt.Sprintf("%064d", 7)
 	q.must(fmt.Sprintf(`printf '%%s %%s %%s %%s\n' %s %d %s 00000000-0000-4000-8000-0000000000f3 >> "$DR/seen"`, old, time.Now().Add(-protocol.SeenFor-24*time.Hour).Unix(), p.addr))
 	q.recv()
-	if strings.Contains(q.read("seen"), old+" ") || !strings.Contains(q.read("seen"), oid+" ") || q.has("seen-floor") {
+	if strings.Contains(q.read("seen"), old+" ") || !strings.Contains(q.read("seen"), oid+" ") {
 		t.Errorf("the replay set after a prune: %q", q.read("seen"))
 	}
 }
@@ -215,19 +215,19 @@ func TestScriptStopsAfterItsStateIsLostAndAcceptsItsCost(t *testing.T) {
 	l := p.line(q.addr, "00000000-0000-4000-8000-0000000000f6", "pay invoice 8 once", 0)
 	ct := forge.Encrypt(t, w.srv, q.addr, l, p.sign(q.addr, l))
 	w.put(q, "", ct)
-	if d := q.recv(); d.rc != 0 || !slices.Equal(d.bodies(), []string{"pay invoice 8 once"}) || q.has("seen-floor") {
+	if d := q.recv(); d.rc != 0 || !slices.Equal(d.bodies(), []string{"pay invoice 8 once"}) {
 		t.Fatalf("the first delivery: %v", d)
 	}
 	q.must(`rm "$DR/seen" "$DR/seen-keys"`)
 	w.put(q, "", ct) // the server kept its copy
-	if d := q.recv(); d.rc != 4 || len(d.messages) != 0 || !strings.Contains(d.said, "restore_required") || w.srv.Count(q.addr) != 1 || q.has("seen-floor") {
+	if d := q.recv(); d.rc != 4 || len(d.messages) != 0 || !strings.Contains(d.said, "restore_required") || w.srv.Count(q.addr) != 1 {
 		t.Fatalf("the drain before init --restore: %v", d)
 	}
 	serial := q.read("serial")
 	if out := q.must("dr_init --restore"); !strings.Contains(out, `"type":"restore","acknowledged":true`) || q.read("serial") == serial {
 		t.Fatalf("init --restore: %q, serial %q from %q: it renewed nothing", out, q.read("serial"), serial)
 	}
-	if d := q.recv(); !slices.Equal(d.bodies(), []string{"pay invoice 8 once"}) || q.has("seen-floor") {
+	if d := q.recv(); !slices.Equal(d.bodies(), []string{"pay invoice 8 once"}) {
 		t.Fatalf("the server's copy after the state was lost: %v, want it delivered again", d)
 	}
 	now := p.line(q.addr, "00000000-0000-4000-8000-0000000002fa", "to the new prekey", 0)
@@ -294,7 +294,7 @@ func TestScriptAKeyMountedDuringADrainDecryptsNothingUntilNamed(t *testing.T) {
 		}
 		next.ServeHTTP(rw, r)
 	})
-	if d := q.recv(); !mounted.Load() || len(d.messages) != 0 || d.refused("decrypt_error") != 1 || q.has("seen-floor") {
+	if d := q.recv(); !mounted.Load() || len(d.messages) != 0 || d.refused("decrypt_error") != 1 {
 		t.Fatalf("the drain the volume came back in: %v", d)
 	}
 	w.honest()

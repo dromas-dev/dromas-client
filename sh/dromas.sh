@@ -177,7 +177,7 @@ dr_lock(){ # <command> [args] → runs that dr_ command with $DR/lock, the mailb
   dr_dirs && dr_identity && "$@"; rc=$?
   rmdir "$me/lock"; DR_HELD=$outer; eval "${trap:-trap - EXIT}"; trap - TERM INT HUP; eval "$sigs"; return $rc      # and the caller's own traps back
 }
-dr_ours(){ # [uid] → 0 only where $DR is this user's alone, as the Go client holds a mailbox's files and kept directories (checkPrivateFileAs, checkKeptDirAs in client/keyfile_unix.go): $DR and every directory in it owned by this user (or the uid given) or root, and writable by neither group nor others, and every other file in it owned so, with no permission for group or others but on identity.pub and identity.doc, which are public. Whoever can write there could rewrite seen and seen-floor, after which this mailbox takes a replay. One find walk, by -user and -perm, which POSIX defines, where stat -c is GNU's alone. A walk find could not finish is refused too
+dr_ours(){ # [uid] → 0 only where $DR is this user's alone, as the Go client holds a mailbox's files and kept directories (checkPrivateFileAs, checkKeptDirAs in client/keyfile_unix.go): $DR and every directory in it owned by this user (or the uid given) or root, and writable by neither group nor others, and every other file in it owned so, with no permission for group or others but on identity.pub and identity.doc, which are public. Whoever can write there could rewrite seen, after which this mailbox takes a replay. One find walk, by -user and -perm, which POSIX defines, where stat -c is GNU's alone. A walk find could not finish is refused too
   local me=${1:-$UID} bad
   bad=$(find -H "$DR" \( \( ! -user "$me" ! -user 0 \) -o \( -type d \( -perm -020 -o -perm -002 \) \) -o \( ! -type d ! -name identity.pub ! -name identity.doc \( -perm -040 -o -perm -020 -o -perm -010 -o -perm -004 -o -perm -002 -o -perm -001 \) \) \) -print 2> /dev/null) ||
     dr_refuse "$DR could not be read whole, to check that it is this user's alone" || return 1
@@ -412,10 +412,11 @@ dr_resolve(){ # <address> [the mailbox dr_lookup read] → prints "<serial> <age
     0) dr_refuse "$B's prekey is signed under a certificate its identity has revoked: its owner must publish a new one"; return 1 ;;
     3) dr_refuse "the revocation of certificates kept for $B does not verify"; return 1 ;;
   esac
+  dr_meet "$B" "$f" && dr_putline "$d/serial" "$s" && dr_putline "$d/rank" "$c" || return 1      # the floor is the latest (c, p) seen on a statement that verified (PROTOCOL.md §6), so a statement refused below as ended still stops an earlier one
   [ "$na" -gt "$(dr_now)" ] || dr_refuse "$B's prekey has expired: its owner must publish a new one" || return 1
   [ "$na" -le $(($(dr_now) + 8*86400 + 3600)) ] || dr_refuse "$B's prekey ends further ahead than any server takes, 8 days and an hour" || return 1      # a statement no server takes, so a stolen working key's statement lasts no longer than an honest one (PROTOCOL.md §6)
   h=$(sha256sum < "$DR/peer.txt" | cut -c1-64) && dr_hex "$h" || return 1      # the statement's bytes as served, never its signature, which another encoding of an ECDSA signature changes (PROTOCOL.md §11.10)
-  dr_meet "$B" "$f" && dr_putline "$d/serial" "$s" && dr_putline "$d/rank" "$c" && dr_put "$DR/peer.txt" "$d/prekey.txt" && dr_put "$DR/peer.sig" "$d/prekey.sig" || return 1      # recorded only after every check passed
+  dr_put "$DR/peer.txt" "$d/prekey.txt" && dr_put "$DR/peer.sig" "$d/prekey.sig" || return 1      # the statement accepted, recorded only after every check passed
   echo "$s $k $c $h"
 }
 dr_put(){ local d; d=$(dirname "$2") && cp "$1" "$2.new" && sync "$2.new" && mv "$2.new" "$2" && sync "$d"; }      # <file> <path> → <path> holds the file's bytes, on disk before this returns: written beside it, synced, moved into place, and its directory synced, as the Go client's writeFile does. A crash leaves the old file or the new one, never an empty one

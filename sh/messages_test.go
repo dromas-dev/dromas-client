@@ -603,14 +603,19 @@ age-keygen -pq -o agekey 2> /dev/null`)
 	// What B's identity could sign, with the server's help.
 	bi := b.file("identity")
 	key := keyOf(string(st))
-	for _, c := range []struct{ what, notAfter, signer, want string }{
-		{"an expired prekey, validly signed, at a higher serial", "2020-01-01T00:00:00Z", bi, "expired"},
-		{"a not_after of never", "never", bi, "no valid not_after"},
+	// A statement that verifies raises the floor, refused as expired or not
+	// (PROTOCOL.md §6); one with no valid not_after does not verify.
+	for _, c := range []struct {
+		what, notAfter, signer, want string
+		serial, floor                uint64
+	}{
+		{"a not_after of never", "never", bi, "no valid not_after", b1 + 9, b1},
+		{"an expired prekey, validly signed, at a higher serial", "2020-01-01T00:00:00Z", bi, "expired", b1 + 9, b1 + 9},
 	} {
-		w.serving(b, w.statement(b, b1+9, key, c.notAfter, c.signer))
+		w.serving(b, w.statement(b, c.serial, key, c.notAfter, c.signer))
 		refused(c.what, a, b.addr.String(), c.want)
-		if s := strings.TrimSpace(a.read("peers/" + b.addr.String() + "/serial")); s != fmt.Sprint(b1) {
-			t.Errorf("%s: its serial was recorded, %s", c.what, s)
+		if s := strings.TrimSpace(a.read("peers/" + b.addr.String() + "/serial")); s != fmt.Sprint(c.floor) {
+			t.Errorf("%s: the serial recorded is %s, want %d", c.what, s, c.floor)
 		}
 	}
 	// An age recipient of a type nobody defines, a published test key, and an
@@ -620,7 +625,7 @@ age-keygen -pq -o agekey 2> /dev/null`)
 		w.serving(b, w.statement(b, b1+9, other, notAfter(), bi))
 		want := fmt.Sprintf(`{"type":"error","code":"unsupported_prekey_type","detail":"REFUSED: %s's prekey is an age recipient of a type this script cannot encrypt to, so nothing is sent"}`+"\n", b.addr)
 		refused(v, a, b.addr.String(), want)
-		if a.read("peers/"+b.addr.String()+"/serial") != fmt.Sprintln(b1) {
+		if a.read("peers/"+b.addr.String()+"/serial") != fmt.Sprintln(b1+9) {
 			t.Errorf("%s: a prekey of a type the script lacks was recorded", v)
 		}
 	}

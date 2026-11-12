@@ -279,6 +279,38 @@ func TestForgeries(t *testing.T) {
 		}
 	})
 
+	t.Run("an earlier prekey served after a later one was refused as ended", func(t *testing.T) {
+		e := newEnv(t)
+		a, b := e.mailbox(), e.mailbox()
+		st, sig := e.srv.Prekey(b.Address())
+		short := e.opts()
+		short.PrekeyLifetime = client.MinPrekeyLifetime
+		b2, err := client.Open(b.Dir(), short)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := b2.Rekey(ctx); err != nil {
+			t.Fatal(err)
+		}
+		e.clock.Add(client.MinPrekeyLifetime + 2*time.Hour)
+		if _, err := a.Send(ctx, b.Address(), "to the later prekey"); err == nil || !strings.Contains(err.Error(), "expired") {
+			t.Fatalf("send: %v, want a refusal of the ended prekey", err)
+		}
+		e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
+			if r.Method == http.MethodGet && r.URL.Path == "/v1/"+b.Address().String() {
+				fakeserver.WriteJSON(w, http.StatusOK, protocol.MailboxResponse{Identity: b.Identity().Document(), Prekey: st, PrekeySignature: sig})
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+		if _, err := a.Send(ctx, b.Address(), "secret"); err == nil || !strings.Contains(err.Error(), "rollback") {
+			t.Fatalf("send: %v, want a rollback refusal", err)
+		}
+		if e.srv.Count(b.Address()) != 0 {
+			t.Fatal("something was sent")
+		}
+	})
+
 	t.Run("a stolen working key, replaced since", func(t *testing.T) {
 		e := newWorkEnv(t)
 		a, b := e.mailbox(), e.mailbox()

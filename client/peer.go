@@ -118,26 +118,42 @@ func (b *Mailbox) resolve(ctx context.Context, peer protocol.Address, l *lookups
 		}
 		return nil, refuse("rollback: %s's prekey serial %d is below %d, already seen", peer, p.Serial, seen)
 	}
+	// A statement that verified and is not earlier raises the floor, whatever
+	// refuses it below: the floor is the latest (c, p) seen (PROTOCOL.md §6),
+	// so a statement refused as ended still stops an earlier one.
+	floor := func(refusal error) (*resolved, error) {
+		if err := b.update(func(s store) error {
+			kept, err := b.pinned(s, id)
+			if err != nil {
+				return err
+			}
+			kept.Serial, kept.Rank = p.Serial, by.Rank()
+			return b.keepPeer(s, peer, kept)
+		}); err != nil {
+			return nil, err
+		}
+		return nil, refusal
+	}
 	if p.Expired(b.now()) {
-		return nil, refuse("%s's prekey has expired: its owner must publish a new one", peer)
+		return floor(refuse("%s's prekey has expired: its owner must publish a new one", peer))
 	}
 	// A statement no server takes, ending further ahead than
 	// protocol.MaxPrekeyLifetime, is refused: a stolen working key's statement
 	// lasts no longer than an honest one (PROTOCOL.md §6).
 	if p.NotAfter.After(b.now().Add(protocol.MaxPrekeyLifetime)) {
-		return nil, refuse("%s's prekey ends further ahead than any server takes, 8 days and an hour", peer)
+		return floor(refuse("%s's prekey ends further ahead than any server takes, 8 days and an hour", peer))
 	}
 	if typeErr {
-		return nil, &RefusedError{Code: RefusedPrekeyType, Reason: fmt.Sprintf("%s's prekey is an age recipient of a type this client cannot encrypt to, so nothing is sent", peer)}
+		return floor(&RefusedError{Code: RefusedPrekeyType, Reason: fmt.Sprintf("%s's prekey is an age recipient of a type this client cannot encrypt to, so nothing is sent", peer)})
 	}
 	// Whether the peer can verify this mailbox is the one thing here that
 	// nothing signs: the server says what the peer declared. A server that
 	// misstates it can only stop a message, as it can without it.
 	if !protocol.AcceptsSender(ir.SenderKeyTypes, b.id.Type()) {
-		return nil, refuse("%s's client does not verify identities of this mailbox's key type, %s, so it would refuse this mailbox's messages: nothing is sent", peer, b.id.Type())
+		return floor(refuse("%s's client does not verify identities of this mailbox's key type, %s, so it would refuse this mailbox's messages: nothing is sent", peer, b.id.Type()))
 	}
-	// The pin, the order and the statement they came from, in one value,
-	// written together (#68).
+	// The pin, the order and the statement accepted, in one value, written
+	// together (#68).
 	r := &resolved{prekey: p, signer: by, statement: ir.Prekey}
 	return r, b.update(func(s store) error {
 		kept, err := b.pinned(s, id)
@@ -182,8 +198,8 @@ func (b *Mailbox) identityOf(peer protocol.Address, served []byte) (*protocol.Id
 
 // peerRecord is what this mailbox keeps of a peer, one value of the peers
 // bucket by its address: the identity document it pinned, the highest prekey
-// serial and its signer's rank it has seen, with the statement they came
-// from, and the revocation of the address and of its certificates, once
+// serial and its signer's rank it has seen on a statement that verified, the
+// last statement it accepted, and the revocation of the address and of its certificates, once
 // either has verified. One value, so what goes together is never left half
 // written (#68).
 type peerRecord struct {

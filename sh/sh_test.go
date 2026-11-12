@@ -694,7 +694,7 @@ func TestVectorsPrekey(t *testing.T) {
 // client).
 var envelopeFive = map[string]bool{
 	"refuse-from-not-signer": true, "refuse-from-null": true, "refuse-from-uppercase": true,
-	"refuse-to-another-mailbox": true, "refuse-to-uppercase": true,
+	"refuse-to-another-mailbox": true, "refuse-to-uppercase": true, "refuse-no-to": true, "refuse-to-null": true,
 	"refuse-duplicate-key": true, "refuse-key-twice-in-the-body": true, "refuse-not-json": true, "refuse-two-objects": true,
 	"refuse-no-msg-id": true, "refuse-msg-id-grouped-wrongly": true, "refuse-msg-id-newline": true, "refuse-msg-id-uppercase": true,
 	"refuse-sent-at-ending-in-a-line-feed": true, "refuse-sent-at-ending-in-a-nul": true, "refuse-sent-at-malformed": true, "refuse-sent-at-second-60": true,
@@ -858,8 +858,8 @@ func TestVectorsAnswer(t *testing.T) {
 	t.Parallel()
 	need(t, scriptTools...)
 	files, _ := filepath.Glob(filepath.Join(vectors, "answer", "*.json"))
-	if len(files) != 63 {
-		t.Fatalf("%d answer/ vectors, want 63", len(files))
+	if len(files) != 64 {
+		t.Fatalf("%d answer/ vectors, want 64", len(files))
 	}
 	for name := range answerRead {
 		if _, err := os.Stat(filepath.Join(vectors, "answer", name+".json")); err != nil {

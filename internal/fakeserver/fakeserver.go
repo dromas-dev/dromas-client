@@ -64,6 +64,7 @@ type Request struct {
 	Method, Path, Query string // the path and the raw query apart
 	Pass                bool   // it carried an Authorization header
 	Version             string // its Dromas-Version, as sent: "" for none
+	UserAgent           string // its User-Agent, as sent: "" for none
 }
 
 type mailbox struct {
@@ -189,7 +190,7 @@ func newServer(t testing.TB, now func() time.Time) (*Server, http.Handler) {
 		// compares an answer's Date with its clock when a pass is refused.
 		w.Header().Set("Date", s.now().UTC().Format(http.TimeFormat))
 		s.mu.Lock()
-		s.log = append(s.log, Request{Method: r.Method, Path: r.URL.Path, Query: r.URL.RawQuery, Pass: r.Header.Get("Authorization") != "", Version: r.Header.Get(protocol.VersionHeader)})
+		s.log = append(s.log, Request{Method: r.Method, Path: r.URL.Path, Query: r.URL.RawQuery, Pass: r.Header.Get("Authorization") != "", Version: r.Header.Get(protocol.VersionHeader), UserAgent: r.Header.Get("User-Agent")})
 		m := s.middle
 		s.mu.Unlock()
 		if m != nil {
