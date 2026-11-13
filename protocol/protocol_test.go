@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -122,6 +123,54 @@ func TestEnvelopeRoundTrip(t *testing.T) {
 	}
 	if _, err := (&Envelope{From: from, To: to}).Marshal(); err == nil {
 		t.Error("marshalled an envelope with no body")
+	}
+}
+
+// A group is written as PROTOCOL.md §9.1 has a sender write it: SetGroup
+// adds the sender and the recipient, sorts and takes each once; Marshal
+// refuses a group set by hand that breaks a rule; and the group reads back
+// as written.
+func TestAGroupIsWrittenSortedWithBothEnds(t *testing.T) {
+	from, to, c := Address{3}, Address{1}, Address{2}
+	now := time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC)
+	e, err := NewEnvelope(from, to, "hi", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.SetGroup([]Address{c, c, from}); err != nil {
+		t.Fatal(err)
+	}
+	want := sortedGroup([]Address{from, to, c})
+	if !slices.Equal(e.Group, want) || len(e.Group) != 3 {
+		t.Fatalf("SetGroup gave %v, want %v", e.Group, want)
+	}
+	b, err := e.Marshal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := OpenEnvelope(b, from, to, now)
+	if err != nil || !slices.Equal(got.Group, want) {
+		t.Fatalf("read back as %v, %v", got, err)
+	}
+	for name, g := range map[string][]Address{
+		"unsorted":       {want[2], want[1], want[0]},
+		"a duplicate":    {want[0], want[0], want[1], want[2]},
+		"no sender":      {to, c},
+		"no recipient":   {from, c},
+		"one address":    {from},
+		"empty, non-nil": {},
+	} {
+		e.Group = g
+		if _, err := e.Marshal(); err == nil {
+			t.Errorf("a group %s marshalled", name)
+		}
+	}
+	self, err := NewEnvelope(from, from, "hi", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := self.SetGroup(nil); err == nil || self.Group != nil {
+		t.Errorf("a group of the sender alone was set: %v", self.Group)
 	}
 }
 

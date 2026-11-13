@@ -1413,6 +1413,14 @@ func TestVectorEnvelopes(t *testing.T) {
 			if name == "accept-case-variant-key" && err == nil && string(env.Body) != `"benign"` {
 				t.Errorf("%s: body %s: BODY is an unknown key, never the body", name, env.Body)
 			}
+			// The group read: the three, sorted, each once, or none (PROTOCOL.md §9.1).
+			var want []Address
+			if name == "accept-group" || name == "accept-group-unsorted-with-a-duplicate" {
+				want = sortedGroup([]Address{a.Address(), b.Address(), vectorIdentity(t, "c").Address()})
+			}
+			if err == nil && !slices.Equal(env.Group, want) {
+				t.Errorf("%s: group %v, want %v", name, env.Group, want)
+			}
 		case strings.HasPrefix(name, "refuse-"):
 			// Every refusal has its code: invalid_envelope, but for these.
 			want := map[string]string{
