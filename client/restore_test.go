@@ -18,7 +18,7 @@ import (
 // mailCommands are the commands of lockingCommands that receive, send, renew or
 // hand over a message, which a state that does not match prekeys/ stops; every
 // other command there runs on it.
-var mailCommands = []string{"Receive", "Hold", "Await", "Follow", "Rekey", "RenewAndRevoke", "RenewUnderCertificate", "SendWith", "SendJSON", "Flush", "Allow"}
+var mailCommands = []string{"Receive", "Hold", "Await", "Follow", "Rekey", "RenewAndRevoke", "RenewUnderCertificate", "SendWith", "SendJSON", "Flush", "FlushReport", "Allow"}
 
 // notMail are the commands of lockingCommands that touch no message, which run
 // on a state that does not match prekeys/.

@@ -101,7 +101,7 @@ func (e *fatalEnd) Unwrap() error { return e.err }
 // as fatalEnd, and interrupted under --follow with no error.
 func (e *cli) recv(c *cobra.Command, b *client.Mailbox, o recvOptions) error {
 	ctx := c.Context()
-	f := client.FollowOptions{Owed: o.exec != nil}
+	f := client.FollowOptions{Owed: o.exec != nil, Flush: o.follow}
 	if !o.endless {
 		f.Until = time.Now().Add(o.wait)
 	}
@@ -214,6 +214,10 @@ func (r *recvRun) handle(ctx context.Context, ev client.Event) error {
 	case client.EventConnectionDropped:
 		r.say(line("waiting", "reason", "connection", "held_seconds", seconds(ev.Hold.After), "wait_seconds", seconds(ev.Hold.Wait), "keep_alive_seconds", seconds(ev.Hold.KeepAlive),
 			"detail", "the connection dropped while the list was held: the next one keeps alive, and the wait shortens only if that one drops too"))
+	case client.EventSent:
+		r.print(sent(ev.Sent, r.names))
+	case client.EventSendFailed:
+		r.print(line("send_failed", failure(fmt.Errorf("messages wait in the outbox: recv --follow posts each again once it is due, and dromas outbox flush does it now: %w", ev.Err))...))
 	case client.EventOwedGone:
 		r.print(line("exec_skipped", "id", ev.ID, "detail", "this message was owed its callback, and inbox/ no longer keeps it as recv wrote it: the callback did not run"))
 	}

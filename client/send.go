@@ -205,26 +205,63 @@ func (b *Mailbox) replyWaits(peer protocol.Address, aclErr error) error {
 	return nil
 }
 
-// Flush posts again every message still in the outbox, each sealed afresh
-// to what the mailbox holds now, as a send seals it: a seal is made for one post
-// and never kept. A message the server took whose answer was lost is posted
-// again as a new ciphertext, which the server stores and counts again and
-// its reader drops by its msg_id (PROTOCOL.md §12.2). It tries every entry;
-// one that fails never stops the others, and the error names each that
-// failed. The server is asked about the recipient before each post, as a
-// send asks ([Mailbox.SendWith]).
-func (b *Mailbox) Flush(ctx context.Context) ([]*Sent, error) {
-	return lockedFinished(ctx, b, func() ([]*Sent, error) {
+// FlushReport posts again every message in the outbox now, each sealed
+// afresh to what the mailbox holds now, as a send seals it: a seal is made for
+// one post and never kept. A message the server took whose answer was lost is
+// posted again as a new ciphertext, which the server stores and counts again
+// and its reader drops by its msg_id (PROTOCOL.md §12.2). The server is asked
+// about the recipient before each post, as a send asks ([Mailbox.SendWith]).
+//
+// It is the owner's flush, so it posts every entry, whatever wait a refusal
+// left it: the server's Retry-After, kept in the mailbox's state, is what
+// [FollowOptions.Flush] waits for. A post refused for a reason about one
+// recipient leaves that entry waiting, and the flush goes on; one refused
+// for a reason about the sender or the path to the server (aboutTheSender)
+// leaves every entry not yet tried waiting as long, in [Flushed.Queued], and
+// the flush stops. The error names each entry that failed.
+func (b *Mailbox) FlushReport(ctx context.Context) (*Flushed, error) {
+	return lockedFinished(ctx, b, func() (*Flushed, error) {
 		if err := b.keysMatch(); err != nil {
 			return nil, err
 		}
-		return b.flush(ctx)
+		return b.flush(ctx, false)
 	})
 }
 
-func (b *Mailbox) flush(ctx context.Context) ([]*Sent, error) {
-	names, err := matching(b.path("outbox", "*.P"))
+// Flush is [Mailbox.FlushReport], returning the messages the server accepted
+// alone.
+func (b *Mailbox) Flush(ctx context.Context) ([]*Sent, error) {
+	fl, err := b.FlushReport(ctx)
+	if fl == nil {
+		return nil, err
+	}
+	return fl.Sent, err
+}
+
+func (b *Mailbox) flush(ctx context.Context, due bool) (*Flushed, error) {
+	all, err := matching(b.path("outbox", "*.P"))
 	if err != nil {
+		return nil, err
+	}
+	// With due, only the entries due are tried; the rest wait, with nothing
+	// asked.
+	out := &Flushed{}
+	var names []string
+	now := b.now()
+	if err := b.view(func(s store) error {
+		for _, n := range all {
+			stem := strings.TrimSuffix(n, ".P")
+			if at := waitOf(s, stem); due && at.After(now) {
+				to, msgID, _ := strings.Cut(filepath.Base(stem), ".")
+				if peer, err := protocol.ParseAddress(to); err == nil && protocol.IsMsgID(msgID) {
+					out.Queued = append(out.Queued, Queued{To: peer, MsgID: msgID, At: at})
+					continue
+				}
+			}
+			names = append(names, n)
+		}
+		return nil
+	}); err != nil {
 		return nil, err
 	}
 	// A mailbox that holds its own revocation can never deliver what waits:
@@ -236,7 +273,7 @@ func (b *Mailbox) flush(ctx context.Context) ([]*Sent, error) {
 			return nil, err
 		}
 		errs := []error{err}
-		for _, n := range names {
+		for _, n := range all {
 			errs = append(errs, fmt.Errorf("%s: %w", filepath.Base(n), b.undelivered(strings.TrimSuffix(n, ".P"), err)))
 		}
 		return nil, errors.Join(errs...)
@@ -245,12 +282,11 @@ func (b *Mailbox) flush(ctx context.Context) ([]*Sent, error) {
 	if len(names) > 0 {
 		aclErr = b.syncACL(ctx)
 	}
-	var sent []*Sent
 	var errs []error
 	// The recipients the server has answered about in this flush. Each post
 	// reads its recipient's mailbox whatever is marked here (resolve).
 	asked := newLookups()
-	for _, n := range names {
+	for i, n := range names {
 		stem := strings.TrimSuffix(n, ".P")
 		to, msgID, _ := strings.Cut(filepath.Base(stem), ".")
 		peer, err := protocol.ParseAddress(to)
@@ -276,12 +312,43 @@ func (b *Mailbox) flush(ctx context.Context) ([]*Sent, error) {
 		s, err := b.post(ctx, peer, stem, asked)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", filepath.Base(stem), err))
+			// Refused for a reason about the sender or the path, every entry
+			// after this one waits as long, untried.
+			if aboutTheSender(err) {
+				if werr := b.waitRest(names[i+1:], waitAfter(err), out); werr != nil {
+					errs = append(errs, werr)
+				}
+				break
+			}
 			continue
 		}
 		s.ACLErr = aclErr
-		sent = append(sent, s)
+		out.Sent = append(out.Sent, s)
 	}
-	return sent, errors.Join(errs...)
+	return out, errors.Join(errs...)
+}
+
+// waitRest leaves each entry of names waiting d, untried, and adds it to
+// out's queued; with no wait they are due at the next flush, and nothing is
+// kept.
+func (b *Mailbox) waitRest(names []string, d time.Duration, out *Flushed) error {
+	if d <= 0 {
+		return nil
+	}
+	at := b.now().Add(d)
+	for _, n := range names {
+		stem := strings.TrimSuffix(n, ".P")
+		to, msgID, _ := strings.Cut(filepath.Base(stem), ".")
+		peer, err := protocol.ParseAddress(to)
+		if err != nil || !protocol.IsMsgID(msgID) {
+			continue
+		}
+		if err := b.waitFor(stem, at); err != nil {
+			return err
+		}
+		out.Queued = append(out.Queued, Queued{To: peer, MsgID: msgID, At: at})
+	}
+	return nil
 }
 
 // undeliverable are the answers that never change for this message: retrying
@@ -327,6 +394,9 @@ func (b *Mailbox) post(ctx context.Context, to protocol.Address, stem string, as
 	// a failed one carries, the entry stays.
 	var unread *lookupError
 	if errors.As(err, &unread) {
+		if werr := b.waitAfter(stem, err); werr != nil {
+			return nil, errors.Join(err, werr)
+		}
 		return nil, fmt.Errorf("the mailbox %s could not be read, so nothing is posted: %w (kept in the outbox: retry with dromas outbox flush)", to, err)
 	}
 	if err != nil {
@@ -335,6 +405,9 @@ func (b *Mailbox) post(ctx context.Context, to protocol.Address, stem string, as
 		// entry then waits for the renewal, as a seal under a certificate the
 		// mailbox holds revoked does.
 		if !slices.Contains(undeliverable, code(err)) {
+			if werr := b.waitAfter(stem, err); werr != nil {
+				return nil, errors.Join(err, werr)
+			}
 			return nil, fmt.Errorf("%w (kept in the outbox: retry with dromas outbox flush)", err)
 		}
 		return nil, b.undelivered(stem, err)
@@ -350,7 +423,7 @@ func (b *Mailbox) post(ctx context.Context, to protocol.Address, stem string, as
 	if err := removeIfExists(stem + ".P"); err != nil {
 		return sent, err
 	}
-	return sent, nil
+	return sent, b.unwait(stem)
 }
 
 // recordSent keeps a sent message in sent/, named <address>.<msg_id> by the
@@ -398,6 +471,9 @@ func (b *Mailbox) recordSent(stem string, signed []byte, r *protocol.Receipt) (*
 // and returns why with that said.
 func (b *Mailbox) undelivered(stem string, why error) error {
 	if err := b.moveToFailed(stem); err != nil {
+		return errors.Join(why, err)
+	}
+	if err := b.unwait(stem); err != nil {
 		return errors.Join(why, err)
 	}
 	return fmt.Errorf("%w (it can never be delivered: moved to outbox/failed/)", why)

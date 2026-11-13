@@ -868,28 +868,46 @@ name and its address.`,
 
 func (e *cli) flushCmd() *cobra.Command {
 	return command("flush", "post again every message still in the outbox",
-		`Post again every message still in the outbox, each one signed and encrypted
-afresh as send does it, and print a "sent" line for each message the server
-accepts, as send does. A message that can never be delivered moves to
-outbox/failed/.`,
+		`Post again every message still in the outbox now, each one signed and
+encrypted afresh as send does it, and print a "sent" line for each message the
+server accepts, as send does. A refusal about this mailbox or the path to its
+server (a rate limit, a server error, no answer) stops the flush: each message
+not yet tried gets a "queued" line, with when it is due, and the exit status is
+3. A message that can never be delivered moves to outbox/failed/. dromas recv
+--follow flushes the outbox by itself, each message once the server's
+Retry-After for it has passed.`,
 		nargs(0, 0), func(c *cobra.Command, _ []string) error {
 			b, err := e.mailbox()
 			if err != nil {
 				return err
 			}
-			ss, err := b.Flush(c.Context())
+			fl, err := b.FlushReport(c.Context())
+			if fl == nil {
+				return err
+			}
 			n := namesOf(c.Context(), b)
 			var aclErr error
-			for _, s := range ss {
+			for _, s := range fl.Sent {
 				if werr := e.out(sent(s, n)); werr != nil && err == nil {
 					err = werr
 				}
 				aclErr = s.ACLErr
 			}
+			for _, q := range fl.Queued {
+				if werr := e.out(queued(q, n)); werr != nil && err == nil {
+					err = werr
+				}
+			}
 			if err != nil {
 				return err
 			}
-			return e.aclNotSent(aclErr)
+			if err := e.aclNotSent(aclErr); err != nil {
+				return err
+			}
+			if len(fl.Queued) > 0 {
+				return &needsALook{}
+			}
+			return nil
 		})
 }
 
@@ -1474,6 +1492,12 @@ func (e *cli) sayHeld(a protocol.Address, held *client.Held) error {
 // its recipient (names).
 func sent(s *client.Sent, n names) []byte {
 	return line("sent", "id", s.ID, "msg_id", s.MsgID, "to", s.To, "alias", n.of(s.To))
+}
+
+// queued is the line for an outbox entry that waits: the mailbox it goes to,
+// its msg_id, and when it is due.
+func queued(q client.Queued, n names) []byte {
+	return line("queued", "msg_id", q.MsgID, "to", q.To, "alias", n.of(q.To), "at", q.At.UTC().Format(protocol.TimeLayout))
 }
 
 // prekey is the line for a prekey this mailbox published.

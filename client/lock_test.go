@@ -358,16 +358,17 @@ func waits(b, c *client.Mailbox, rec *protocol.Revocations, opt client.Options) 
 			_, err := b.SendJSON(ctx, c.Address(), []byte(`{"waits":true}`), client.Fields{})
 			return err
 		},
-		"Flush":   func(ctx context.Context) error { _, err := b.Flush(ctx); return err },
-		"Allow":   func(ctx context.Context) error { _, err := b.Allow(ctx, c.Address()); return err },
-		"Block":   func(ctx context.Context) error { _, err := b.Block(ctx, c.Address()); return err },
-		"SyncACL": func(ctx context.Context) error { return b.SyncACL(ctx) },
-		"Adopt":   func(ctx context.Context) error { _, err := b.Adopt(ctx, "key"); return err },
-		"Leave":   func(ctx context.Context) error { return b.Leave(ctx) },
-		"Resolve": func(ctx context.Context) error { _, err := b.Resolve(ctx, c.Address()); return err },
-		"Ask":     func(ctx context.Context) error { _, err := b.Ask(ctx, c.Address()); return err },
-		"Publish": func(ctx context.Context) error { _, err := b.Publish(ctx, rec); return err },
-		"Revoke":  func(ctx context.Context) error { _, err := b.Revoke(ctx, rec); return err },
+		"Flush":       func(ctx context.Context) error { _, err := b.Flush(ctx); return err },
+		"FlushReport": func(ctx context.Context) error { _, err := b.FlushReport(ctx); return err },
+		"Allow":       func(ctx context.Context) error { _, err := b.Allow(ctx, c.Address()); return err },
+		"Block":       func(ctx context.Context) error { _, err := b.Block(ctx, c.Address()); return err },
+		"SyncACL":     func(ctx context.Context) error { return b.SyncACL(ctx) },
+		"Adopt":       func(ctx context.Context) error { _, err := b.Adopt(ctx, "key"); return err },
+		"Leave":       func(ctx context.Context) error { return b.Leave(ctx) },
+		"Resolve":     func(ctx context.Context) error { _, err := b.Resolve(ctx, c.Address()); return err },
+		"Ask":         func(ctx context.Context) error { _, err := b.Ask(ctx, c.Address()); return err },
+		"Publish":     func(ctx context.Context) error { _, err := b.Publish(ctx, rec); return err },
+		"Revoke":      func(ctx context.Context) error { _, err := b.Revoke(ctx, rec); return err },
 		"client.Init": func(ctx context.Context) error {
 			_, err := client.Init(ctx, b.Dir(), opt)
 			return err
