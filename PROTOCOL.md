@@ -599,12 +599,12 @@ lowhexdig = DIGIT / %x61-66   ; HEXDIG in lowercase
 
 - **An empty string in `subject`, `in_reply_to` or `supersedes` is the same as the member left out.** A writer leaves out `subject`, `in_reply_to` or `supersedes` when the member's value would be an empty string.
 - **A sender MUST refuse an `in_reply_to` or `supersedes` that is not a `msg_id`.** A reader checks only that each is a string.
-- **A sender MUST write `group` with at least two addresses, `from` and `to` among them, each address once, in ascending byte order.**
+- **A sender MUST write `group` with at least two addresses, `from` and `to` among them, each address once, in ascending byte order of the addresses' text.**
 - **A reader reads `group` in these steps:**
   1. A value that is not an array of addresses is malformed, as any member of the wrong type is (Section 12.3, check 6).
   2. A `null` value is the member left out (Section 3.3).
-  3. An array that lacks `from` or `to`, an empty array or an array of one address among them, is read as no group, and the message as sent to one mailbox.
-  4. Otherwise the reader reads the array's addresses as a set: sorted in ascending byte order, each address once.
+  3. An array that lacks `from` or `to` is read as no group, and the message as sent to one mailbox. An empty array and an array of one address are such arrays.
+  4. Otherwise the reader reads the array's addresses as a set: sorted in ascending byte order of their text, each address once. A reader accepts an array out of order or with an address twice.
 - **The set of addresses is the group.** A group's members never change. A message to another set of addresses is a message to another group. A conversation that goes on with another set names a message of the earlier group in its first message's `in_reply_to`.
 - **The line is compact UTF-8 JSON.** The JSON text contains no line feed, so the LF that ends the line is the line's only LF.
 - **A sender MUST check the envelope against the rules that the envelope's reader applies:** Section 3.3, and Section 12.3, check 3 (JSON). The body is nested at most 31 deep, so the envelope is nested at most 32 deep.
@@ -1374,9 +1374,9 @@ A server lists at most 64 deprecations, 64 sunsets and 64 capabilities. A client
 
 **A message to a group:**
 
-- **The sender posts one copy to each member of the group but itself.** Each copy is an outbox entry of its own, with `to` naming that member, and is sealed to that member's prekey after that member's lookup.
-- **Every copy carries the same `msg_id`, the same `group` and the same `body`.** A reply to every member is a message to the same group.
-- **The sender writes every copy's outbox entry before the sender posts the first copy.** So each entry's TTL counts from that entry's own envelope.
+- **The sender sends the message to each member of the group but itself.** Each member's message is an outbox entry of its own, with `to` naming that member, and each post of it is sealed to that member's prekey after that member's lookup.
+- **Every member's message carries the same `msg_id`, the same `group` and the same `body`.** A reply to every member is a message to the same group.
+- **The sender writes every member's outbox entry before the sender posts any of them.** Each entry waits, and its TTL counts, on its own.
 
 ### 12.3. Receiving
 
@@ -1705,8 +1705,8 @@ Dromas protects a message's content from everyone but the message's recipient. D
 - **A malformed identity document is evidence of tampering, and so is an identity document that does not hash to the address.** A well-formed identity document of a key type that a reader does not verify is not evidence of tampering (Section 4.1).
 - **A refusal blocks no sender, because the sender may not have written the message.** A forgery may be the operator framing the sender. A message under a revoked certificate may be a thief's, and the thief's signature verifies.
 
-- **A group is what each copy says it is.** A sender can write a different `group` in each member's copy, and each member sees only the copy sealed to that member. No member can check another member's copy. A copy proves only that its sender sent that copy to that member.
-- **`sent_at` does not order a group's messages.** A copy that waited in the outbox is dated at its post, so two members can receive two messages in different orders. `in_reply_to` is the only link between two messages that a sender signs.
+- **A group is what each member's message says it is.** A sender can write a different `group` in each member's message, and each member sees only the message sealed to that member. No member can check another member's message. A message proves only that its sender sent it to that member.
+- **`sent_at` does not order a group's messages.** A member's message that waited in the outbox is dated at its post, so two members can receive two messages in different orders. `in_reply_to` is the only link between two messages that a sender signs.
 
 ### 15.5. Stolen keys
 
