@@ -10,6 +10,8 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
+	"strings"
 	"time"
 	"unicode/utf8"
 )
@@ -99,6 +101,12 @@ type Envelope struct {
 	Subject    string // optional
 	InReplyTo  string // optional: the msg_id replied to
 	Supersedes string // optional: a msg_id of the same sender this replaces
+	// Group is every member's address of the group the message is sent to,
+	// From and To among them, each once, in ascending byte order of their
+	// text (PROTOCOL.md §9.1): nil for a message to one mailbox. A reader's
+	// is the group as §9.1 has it read, sorted and each once; one that lacks
+	// From or To is read as none.
+	Group []Address
 
 	// Identity is the sender's identity document, exactly as hashed: it is
 	// how a recipient checks a sender it has never met without asking the
@@ -120,6 +128,7 @@ type wireEnvelope struct {
 	Subject    string          `json:"subject,omitempty"`
 	InReplyTo  string          `json:"in_reply_to,omitempty"`
 	Supersedes string          `json:"supersedes,omitempty"`
+	Group      []Address       `json:"group,omitempty"`
 }
 
 // NewEnvelope returns an envelope from one mailbox to another with a string body,
@@ -173,6 +182,9 @@ func (e *Envelope) Marshal() ([]byte, error) {
 	if e.Body == nil {
 		return nil, errors.New("an envelope needs a body")
 	}
+	if e.Group != nil && !isGroup(e.Group, e.From, e.To) {
+		return nil, errors.New("a group is at least two addresses, the sender's and the recipient's among them, each once, in ascending order: SetGroup writes one")
+	}
 	return marshalCompact(wireEnvelope{
 		V:          json.Number("1"),
 		From:       e.From,
@@ -184,7 +196,46 @@ func (e *Envelope) Marshal() ([]byte, error) {
 		Subject:    e.Subject,
 		InReplyTo:  e.InReplyTo,
 		Supersedes: e.Supersedes,
+		Group:      e.Group,
 	})
+}
+
+// SetGroup sets the envelope's group to members with its From and To added,
+// each once, in ascending byte order of their text, as PROTOCOL.md §9.1 has a
+// sender write it. A group of fewer than two addresses is refused, and
+// nothing is set.
+func (e *Envelope) SetGroup(members []Address) error {
+	g := sortedGroup(append(slices.Clone(members), e.From, e.To))
+	if len(g) < 2 {
+		return errors.New("a group is at least two mailboxes: the sender and one other")
+	}
+	e.Group = g
+	return nil
+}
+
+// sortedGroup is members, each once, in ascending byte order of their text.
+func sortedGroup(members []Address) []Address {
+	g := slices.Clone(members)
+	slices.SortFunc(g, func(a, b Address) int { return strings.Compare(a.String(), b.String()) })
+	return slices.Compact(g)
+}
+
+// isGroup reports whether g is a group as a sender writes one: at least two
+// addresses, from and to among them, each once, in ascending order.
+func isGroup(g []Address, from, to Address) bool {
+	return len(g) >= 2 && slices.Contains(g, from) && slices.Contains(g, to) &&
+		slices.IsSortedFunc(g, func(a, b Address) int { return strings.Compare(a.String(), b.String()) }) &&
+		len(slices.Compact(slices.Clone(g))) == len(g)
+}
+
+// readGroup is a group as PROTOCOL.md §9.1 has a reader take it: none where
+// it lacks from or to, an empty or one-entry group among them; otherwise
+// sorted, each address once.
+func readGroup(g []Address, from, to Address) []Address {
+	if !slices.Contains(g, from) || !slices.Contains(g, to) {
+		return nil
+	}
+	return sortedGroup(g)
 }
 
 // Line returns the envelope as the one line that is signed and sent: Marshal,
@@ -252,6 +303,7 @@ func OpenEnvelopeRecord(plaintext []byte, signer, me Address) (*Envelope, error)
 	for key, dst := range map[string]any{
 		"from": &w.From, "to": &w.To, "sent_at": &w.SentAt, "msg_id": &w.MsgID,
 		"subject": &w.Subject, "in_reply_to": &w.InReplyTo, "supersedes": &w.Supersedes, "identity": &w.Identity,
+		"group": &w.Group,
 	} {
 		if raw, ok := fields[key]; ok {
 			if err := jsonv2.Unmarshal(raw, dst); err != nil {
@@ -288,6 +340,7 @@ func OpenEnvelopeRecord(plaintext []byte, signer, me Address) (*Envelope, error)
 		Subject:    w.Subject,
 		InReplyTo:  w.InReplyTo,
 		Supersedes: w.Supersedes,
+		Group:      readGroup(w.Group, w.From, w.To),
 		Identity:   w.Identity,
 	}
 	return e, nil

@@ -523,6 +523,17 @@ case_env refuse-not-json "not json"
 case_env refuse-msg-id-newline "{$H,\"sent_at\":\"$NOW\",\"msg_id\":\"$MSG_ID\\\\n\",\"body\":\"hello\"}" "$A" "$B"
 case_env refuse-subject-number "{$H,\"sent_at\":\"$NOW\",\"msg_id\":\"$MSG_ID\",\"body\":\"hello\",\"subject\":5}" "$A" "$B"
 case_env refuse-sent-at-second-60 "{$H,\"sent_at\":\"2026-10-09T23:59:60Z\",\"msg_id\":\"$MSG_ID\",\"body\":\"hello\"}" "$A" "$B"
+# group (PROTOCOL.md §9.1): every member's address, from and to among them, as a sender writes it, sorted, each once; a reader
+# sorts and takes each once, and reads a group that lacks from or to, an empty or one-entry one among them, as none.
+G=$(printf '%s\n' "$A" "$B" "$C" | LC_ALL=C sort | sed 's/.*/"&"/' | paste -sd, -)
+case_env accept-group "{$H,\"sent_at\":\"$NOW\",\"msg_id\":\"$MSG_ID\",\"body\":\"hello\",\"group\":[$G]}" "$A" "$B"
+case_env accept-group-unsorted-with-a-duplicate "{$H,\"sent_at\":\"$NOW\",\"msg_id\":\"$MSG_ID\",\"body\":\"hello\",\"group\":[\"$C\",\"$B\",\"$A\",\"$B\"]}" "$A" "$B"
+case_env accept-group-without-the-sender "{$H,\"sent_at\":\"$NOW\",\"msg_id\":\"$MSG_ID\",\"body\":\"hello\",\"group\":[\"$B\",\"$C\"]}" "$A" "$B"
+case_env accept-group-empty "{$H,\"sent_at\":\"$NOW\",\"msg_id\":\"$MSG_ID\",\"body\":\"hello\",\"group\":[]}" "$A" "$B"
+case_env accept-group-of-one "{$H,\"sent_at\":\"$NOW\",\"msg_id\":\"$MSG_ID\",\"body\":\"hello\",\"group\":[\"$A\"]}" "$A" "$B"
+case_env accept-group-null "{$H,\"sent_at\":\"$NOW\",\"msg_id\":\"$MSG_ID\",\"body\":\"hello\",\"group\":null}" "$A" "$B"
+case_env refuse-group-not-an-array "{$H,\"sent_at\":\"$NOW\",\"msg_id\":\"$MSG_ID\",\"body\":\"hello\",\"group\":\"$A\"}" "$A" "$B"
+case_env refuse-group-member-not-an-address "{$H,\"sent_at\":\"$NOW\",\"msg_id\":\"$MSG_ID\",\"body\":\"hello\",\"group\":[\"$A\",\"$B\",5]}" "$A" "$B"
 # Parser differentials: every reader must take the same values from one envelope.
 case_env accept-case-variant-key "{$H,\"sent_at\":\"$NOW\",\"msg_id\":\"$MSG_ID\",\"body\":\"benign\",\"BODY\":\"evil\"}" "$A" "$B"
 case_env refuse-version-string "{\"v\":\"1\",\"from\":\"%s\",\"to\":\"%s\",\"sent_at\":\"$NOW\",\"msg_id\":\"$MSG_ID\",\"body\":\"hello\"}" "$A" "$B"
