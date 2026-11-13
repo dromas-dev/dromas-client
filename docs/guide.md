@@ -21,8 +21,17 @@ To send a message, give `dromas send` the recipient's link, and the body on stdi
 
 ```sh
 echo hello | dromas send <link>
-dromas send <link> report.txt
+dromas send --file report.txt <link>
 ```
+
+To send one message to a group, name every other member; to answer every member of a group message you received, give its id:
+
+```sh
+echo "the plan" | dromas send <link> <link> <alias>
+echo "agreed" | dromas send --reply-all <id>
+```
+
+Each member gets a message of its own, with the same `msg_id` and the whole group in its envelope's `group`. The members are the group: adding or leaving out a member makes another group. A group needs one of your mailbox's sends for each other member, so keep groups small; where your budget of sends does not hold every member still to go, `send` prints a `queued` line for each, and `dromas recv --follow` sends them together once it does.
 
 `send` prints a `sent` line with the server's `id` for the message and the message's `msg_id`. To name a peer, run `dromas alias add bob <link>`, and then `dromas send bob`. To answer a message, run `dromas send --in-reply-to <msg_id> <from>`.
 

@@ -315,6 +315,14 @@ func lockingCommands(ctx context.Context, a, b *client.Mailbox, rec *protocol.Re
 			_, err := a.SendJSON(ctx, b.Address(), []byte(`{"from":"a finished mailbox"}`), client.Fields{})
 			return err
 		}},
+		{"SendGroup", func() error {
+			_, err := a.SendGroup(ctx, []protocol.Address{b.Address()}, "from a finished mailbox", client.Fields{})
+			return err
+		}},
+		{"SendGroupJSON", func() error {
+			_, err := a.SendGroupJSON(ctx, []protocol.Address{b.Address()}, []byte(`{"from":"a finished mailbox"}`), client.Fields{})
+			return err
+		}},
 		{"Allow", func() error { _, err := a.Allow(ctx, b.Address()); return err }},
 		{"Block", func() error { _, err := a.Block(ctx, b.Address()); return err }},
 		{"SyncACL", func() error { return a.SyncACL(ctx) }},

@@ -297,11 +297,26 @@ whoever will write to this mailbox.`,
 func (e *cli) sendCmd() *cobra.Command {
 	var f client.Fields
 	var asJSON bool
-	c := command("send [flags] <link, address or alias> [file]", "send a message, with the body from a file or stdin",
-		`Send one message to a link, a bare address or an alias, with the body from the
-file, or from stdin, and print the server's id for it and its msg_id. The
-message waits in outbox/ until a server accepts it (dromas outbox flush posts it
-again), and is then kept in sent/ with the server's receipt.
+	var file, replyAll string
+	c := command("send [flags] <link, address or alias>...", "send a message to one mailbox or a group, with the body from stdin or a file",
+		`Send one message to a link, a bare address or an alias, with the body from
+stdin, or from the file --file names, and print the server's id for it and its
+msg_id. The message waits in outbox/ until a server accepts it (dromas outbox
+flush posts it again, and dromas recv --follow posts it once the server's
+Retry-After for it has passed), and is then kept in sent/ with the server's
+receipt.
+
+Name several recipients, or --reply-all with the id of a message in inbox/, and
+the message goes to a group: every recipient gets a message of its own, each
+with the same msg_id and with every member's address in its group, this
+mailbox's among them. The group is its members: a reply to every member of a
+group is a message to the same group, and adding or leaving out a member makes
+another group. send prints a "sent" line for each member the server accepts, and
+a "queued" line, with when it is due, for each that waits: where this mailbox's
+budget of sends at its server does not hold the members still to go, they wait
+together, and the exit status is 3. A group needs one send for each member but
+this mailbox, so a group larger than that budget holds at once is refused, with
+nothing written.
 
 Sending to a mailbox allows it, so a message that talks you into a send also
 lets that address's messages past held/: decide a send as you would decide
@@ -310,42 +325,98 @@ dromas peer allow.
 The body is text, unless --json says it is one JSON value: then an object
 arrives as that object, not as a string. send refuses a JSON value its reader
 would refuse, an object with a name twice among them, and sends nothing.`,
-		nargs(1, 2), func(c *cobra.Command, args []string) error {
+		checked(nargs(0, math.MaxInt), func(c *cobra.Command, args []string) error {
+			if len(args) == 0 && replyAll == "" {
+				return wrong(c, "%s takes at least one recipient, or --reply-all", c.CommandPath())
+			}
+			return nil
+		}), func(c *cobra.Command, args []string) error {
 			b, err := e.mailbox()
 			if err != nil {
 				return err
 			}
-			to, err := b.Destination(args[0])
-			if err != nil {
-				return err
+			var to []protocol.Address
+			for _, a := range args {
+				d, err := b.Destination(a)
+				if err != nil {
+					return err
+				}
+				to = append(to, d)
+			}
+			if replyAll != "" {
+				m, err := b.InboxMessage(c.Context(), replyAll)
+				if err != nil {
+					return err
+				}
+				to = append(to, m.Envelope.From)
+				to = append(to, m.Envelope.Group...)
+				if f.InReplyTo == "" {
+					f.InReplyTo = m.Envelope.MsgID
+				}
 			}
 			var body []byte
-			if len(args) == 2 {
-				body, err = os.ReadFile(args[1]) //nolint:gosec // the file the user named
+			if file != "" {
+				body, err = os.ReadFile(file) //nolint:gosec // the file the user named
 			} else {
 				body, err = io.ReadAll(e.stdin)
 			}
 			if err != nil {
 				return err
 			}
-			var s *client.Sent
+			n := namesOf(c.Context(), b)
+			if len(to) == 1 && replyAll == "" {
+				var s *client.Sent
+				if asJSON {
+					s, err = b.SendJSON(c.Context(), to[0], body, f)
+				} else {
+					s, err = b.SendWith(c.Context(), to[0], string(body), f)
+				}
+				if err != nil {
+					return err
+				}
+				if err := e.out(sent(s, n)); err != nil {
+					return err
+				}
+				return e.aclNotSent(s.ACLErr)
+			}
+			var fl *client.Flushed
 			if asJSON {
-				s, err = b.SendJSON(c.Context(), to, body, f)
+				fl, err = b.SendGroupJSON(c.Context(), to, body, f)
 			} else {
-				s, err = b.SendWith(c.Context(), to, string(body), f)
+				fl, err = b.SendGroup(c.Context(), to, string(body), f)
+			}
+			if fl == nil {
+				return err
+			}
+			var aclErr error
+			for _, s := range fl.Sent {
+				if werr := e.out(sent(s, n)); werr != nil && err == nil {
+					err = werr
+				}
+				aclErr = s.ACLErr
+			}
+			for _, q := range fl.Queued {
+				if werr := e.out(queued(q, n)); werr != nil && err == nil {
+					err = werr
+				}
 			}
 			if err != nil {
 				return err
 			}
-			if err := e.out(sent(s, namesOf(c.Context(), b))); err != nil {
+			if err := e.aclNotSent(aclErr); err != nil {
 				return err
 			}
-			return e.aclNotSent(s.ACLErr)
+			if len(fl.Queued) > 0 {
+				return &needsALook{}
+			}
+			return nil
 		})
 	// curl's --json posts what it is given with no check that it is JSON; this
 	// one holds the body to its reader's rules first, so a name given twice is
 	// refused, never kept once.
 	c.Flags().BoolVar(&asJSON, "json", false, "the body is one JSON value, sent as that value and not as text")
+	c.Flags().StringVar(&file, "file", "", "the `path` of a file whose bytes are the body, in place of stdin")
+	c.Flags().StringVar(&replyAll, "reply-all", "", "the `id` of a message in inbox/, as recv printed it: send to its sender and every other member of its group, in reply to it")
 	c.Flags().StringVar(&f.Subject, "subject", "", "the message's subject: any `text`")
 	c.Flags().StringVar(&f.InReplyTo, "in-reply-to", "", "the `msg_id` of the message this answers, as recv printed it")
 	c.Flags().StringVar(&f.Supersedes, "supersedes", "", "the `msg_id` of an earlier message of yours that this replaces, as sent/ names it")

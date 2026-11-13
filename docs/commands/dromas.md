@@ -47,7 +47,7 @@ dromas
 * [dromas recv](dromas_recv.md)	 - receive, verify and acknowledge every message, one JSON line each
 * [dromas refused](dromas_refused.md)	 - messages that failed a check: list, rm
 * [dromas revocation](dromas_revocation.md)	 - permanently ending an address: make, publish, keep, ask
-* [dromas send](dromas_send.md)	 - send a message, with the body from a file or stdin
+* [dromas send](dromas_send.md)	 - send a message to one mailbox or a group, with the body from stdin or a file
 * [dromas status](dromas_status.md)	 - report what this mailbox holds and what needs attention
 * [dromas version](dromas_version.md)	 - print this client's version, commit, Go release and platform
 

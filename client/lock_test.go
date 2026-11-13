@@ -358,6 +358,14 @@ func waits(b, c *client.Mailbox, rec *protocol.Revocations, opt client.Options) 
 			_, err := b.SendJSON(ctx, c.Address(), []byte(`{"waits":true}`), client.Fields{})
 			return err
 		},
+		"SendGroup": func(ctx context.Context) error {
+			_, err := b.SendGroup(ctx, []protocol.Address{c.Address()}, "waits", client.Fields{})
+			return err
+		},
+		"SendGroupJSON": func(ctx context.Context) error {
+			_, err := b.SendGroupJSON(ctx, []protocol.Address{c.Address()}, []byte(`{"waits":true}`), client.Fields{})
+			return err
+		},
 		"Flush":       func(ctx context.Context) error { _, err := b.Flush(ctx); return err },
 		"FlushReport": func(ctx context.Context) error { _, err := b.FlushReport(ctx); return err },
 		"Allow":       func(ctx context.Context) error { _, err := b.Allow(ctx, c.Address()); return err },
