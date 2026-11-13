@@ -582,6 +582,12 @@ None was a flaw in the layout: each was a verifier that read an object different
 
 ---
 
+## 6. A sender's sends a day, in a store every process shares
+
+**Ours** (dromas-server's `ARCHITECTURE.md` § The shared store): with `--valkey`, each sender's sends a day are one GCRA bucket in Valkey, which every process of a deployment reaches. A key's value is its bucket's time in microseconds, and the key expires at that time. A take and a give back are each one Lua script. A call that fails or runs past its deadline is counted by the process alone. The store runs with its persistence off.
+
+**The precedent** (read 2026-11-13; § Sources). Let's Encrypt's Boulder keeps each bucket key's TAT in Redis, in nanoseconds since the epoch, with a TTL past it, read and written by every instance (`ratelimits/source_redis.go`, `BatchSet` and `BatchIncrement`, at `7a93d5945d`). Envoy's rate limit filter calls a shared rate limit service and, unless `failure_mode_deny` is set, lets a request through when that service does not respond (`rate_limit.proto`). **Where ours differs:** a take is checked and written in one step of the store, so sends in flight at once on several processes cannot all pass on one token. A failed call falls back to the process's own count, not to no limit. Nothing is written to disk: a bucket's time can give a send's moment, and the messages table keeps each `received_at` beside its recipient, so a copy at rest could pair a sender with a recipient (§13).
+
 # Sources
 
 For rows marked `review 2026-10-10`, and for Part 3. A row of Part 2 marked `read` carries its own link.
@@ -603,6 +609,7 @@ For rows marked `review 2026-10-10`, and for Part 3. A row of Part 2 marked `rea
 - Part 3 § 3: [`tdlib/telegram-bot-api`, `telegram-bot-api/Client.cpp` at `e3e9dd8e5b`](https://github.com/tdlib/telegram-bot-api/blob/e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1/telegram-bot-api/Client.cpp) (`Client::abort_long_poll`, `Client::fail_query_conflict`)
 - Part 3 § 4: [Linux `lib/vsprintf.c` at `d48723711b`](https://github.com/torvalds/linux/blob/d48723711bae9b8cdc56719c448ba42fef28cbee/lib/vsprintf.c) · [Plausible — Data policy](https://plausible.io/data-policy)
 - Part 3 § 5: [etcd `server/embed/config.go` at `e6b7e73d6f`](https://github.com/etcd-io/etcd/blob/e6b7e73d6f0759f3aacb5d6a6fbd9598ee413441/server/embed/config.go) · [Consul `agent/config/flags.go` at `02e8de99fe`](https://github.com/hashicorp/consul/blob/02e8de99fe0ed8362431358a0b185f4b15095796/agent/config/flags.go) · [Nomad `command/agent/command.go` at `aba089c4fa`](https://github.com/hashicorp/nomad/blob/aba089c4fa1c57b4caa4b362582ab6e1185509fe/command/agent/command.go) · [Prometheus `docs/storage.md` at `5ee21818d8`](https://github.com/prometheus/prometheus/blob/5ee21818d8abd5677381d9d0e7bca27352e4f46b/docs/storage.md) · [MinIO `cmd/xl-storage.go` at `b8631cf531`](https://github.com/minio/minio/blob/b8631cf5316c613fa08f4c38334de19870facf2f/cmd/xl-storage.go) (`deleteFile`)
+- Part 3 § 6: [Boulder `ratelimits/source_redis.go` at `7a93d5945d`](https://github.com/letsencrypt/boulder/blob/7a93d5945d88c7e24e5da998a7194233c3d783cd/ratelimits/source_redis.go) · [Envoy — the rate limit filter's `rate_limit.proto`](https://www.envoyproxy.io/docs/envoy/latest/api-v3/extensions/filters/http/ratelimit/v3/rate_limit.proto)
 
 # Open in this file
 
