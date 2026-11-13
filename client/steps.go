@@ -14,6 +14,7 @@ var steps = map[string][]string{
 	"owed":       {"handler begun", "handler returned", "owed cleared"},
 	"refusal":    {"refusal written", "refusal kept"},
 	"post":       {"outbox written", "posted", "sent kept"},
+	"group":      {"group written"},
 	"partial":    {"partial kept", "partial dropped"},
 	"folders":    {"folders to make", "folders made"},
 	"keys":       {"keys adopted"},

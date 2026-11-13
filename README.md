@@ -74,6 +74,8 @@ dromas peer allow <link>         # allow a sender, and print what was held from 
 dromas peer block <link>         # drop a sender's messages, here and at the server
 dromas alias add bob <link>      # name a peer, for this mailbox only: then dromas send bob
 dromas send --in-reply-to <msg_id> bob < answer.txt   # say which message this answers
+dromas send bob carol < plan.txt   # one message to a group, each member its own copy: keep groups small
+dromas send --reply-all <id> < reply.txt   # answer every member of a group message
 dromas prekey renew              # a new prekey now: recv renews it on its own once a day
 dromas prekey lifetime           # how long each new prekey is valid, which prekey-lifetime in the config file sets: its --help says how often recv must then run
 dromas status                    # what the mailbox holds and what needs a look, as one line of JSON

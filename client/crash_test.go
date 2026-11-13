@@ -81,6 +81,18 @@ var crashCommands = map[string]func(ctx context.Context, b *client.Mailbox, o cr
 		_, err = b.Send(ctx, to, "sent by a process killed on its way")
 		return err
 	},
+	"send to a group": func(ctx context.Context, b *client.Mailbox, o crashOrder) error {
+		var to []protocol.Address
+		for _, a := range strings.Split(o.To, ",") {
+			m, err := protocol.ParseAddress(a)
+			if err != nil {
+				return err
+			}
+			to = append(to, m)
+		}
+		_, err := b.SendGroup(ctx, to, "sent to a group by a process killed on its way", client.Fields{})
+		return err
+	},
 	"allow": func(ctx context.Context, b *client.Mailbox, o crashOrder) error {
 		to, err := protocol.ParseAddress(o.To)
 		if err != nil {
@@ -132,7 +144,14 @@ func crash(t *testing.T, e *env, b *client.Mailbox, command, step string, to pro
 // crashIn is crash, by the mailbox's directory.
 func crashIn(t *testing.T, e *env, dir, command, step string, to protocol.Address) {
 	t.Helper()
-	order, err := json.Marshal(crashOrder{Step: step, Dir: dir, Base: e.srv.URL, Command: command, To: to.String(), Now: e.clock.Now().Unix()})
+	crashTo(t, e, dir, command, step, to.String())
+}
+
+// crashTo is crashIn, with the order's To as written: several addresses
+// joined by commas for a group.
+func crashTo(t *testing.T, e *env, dir, command, step, to string) {
+	t.Helper()
+	order, err := json.Marshal(crashOrder{Step: step, Dir: dir, Base: e.srv.URL, Command: command, To: to, Now: e.clock.Now().Unix()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -901,6 +920,36 @@ func TestAnAllowKilledAtEachStepFinishesWhenRunAgain(t *testing.T) {
 				t.Fatalf("held/ holds %q, want %q", got, want)
 			}
 			whole(t, e, x, a, "first", "second")
+		})
+	}
+}
+
+// A send to a group killed at each of its steps, the members' entries
+// written and the first member's post: the next flush posts what waits,
+// and each member takes the message once.
+func TestAGroupSendKilledAtEachStepIsReadOnceByEachMember(t *testing.T) {
+	t.Parallel()
+	for _, step := range append(slices.Clone(client.Steps("group")), "posted", "sent kept") {
+		t.Run(step, func(t *testing.T) {
+			e := newEnv(t)
+			a, b, c := e.mailbox(), e.mailbox(), e.mailbox()
+			crashTo(t, e, a.Dir(), "send to a group", step, b.Address().String()+","+c.Address().String())
+			x, err := client.Open(a.Dir(), e.opts())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := x.Flush(context.Background()); err != nil {
+				t.Fatalf("the flush after the crash: %v", err)
+			}
+			for _, m := range []*client.Mailbox{b, c} {
+				receive(t, m)
+				if got, want := inbox(t, m), []string{"sent to a group by a process killed on its way"}; !slices.Equal(got, want) {
+					t.Fatalf("%s's inbox/ holds %q, want %q", m.Address(), got, want)
+				}
+			}
+			if left, _ := filepath.Glob(filepath.Join(x.Dir(), "outbox", "*.P")); len(left) != 0 {
+				t.Fatalf("the outbox keeps %v", left)
+			}
 		})
 	}
 }

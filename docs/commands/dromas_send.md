@@ -1,13 +1,27 @@
 ## dromas send
 
-send a message, with the body from a file or stdin
+send a message to one mailbox or a group, with the body from stdin or a file
 
 ### Synopsis
 
-Send one message to a link, a bare address or an alias, with the body from the
-file, or from stdin, and print the server's id for it and its msg_id. The
-message waits in outbox/ until a server accepts it (dromas outbox flush posts it
-again), and is then kept in sent/ with the server's receipt.
+Send one message to a link, a bare address or an alias, with the body from
+stdin, or from the file --file names, and print the server's id for it and its
+msg_id. The message waits in outbox/ until a server accepts it (dromas outbox
+flush posts it again, and dromas recv --follow posts it once the server's
+Retry-After for it has passed), and is then kept in sent/ with the server's
+receipt.
+
+Name several recipients, or --reply-all with the id of a message in inbox/, and
+the message goes to a group: every recipient gets a message of its own, each
+with the same msg_id and with every member's address in its group, this
+mailbox's among them. The group is its members: a reply to every member of a
+group is a message to the same group, and adding or leaving out a member makes
+another group. send prints a "sent" line for each member the server accepts, and
+a "queued" line, with when it is due, for each that waits: where this mailbox's
+budget of sends at its server does not hold the members still to go, they wait
+together, and the exit status is 3. A group needs one send for each member but
+this mailbox, so a group larger than that budget holds at once is refused, with
+nothing written.
 
 Sending to a mailbox allows it, so a message that talks you into a send also
 lets that address's messages past held/: decide a send as you would decide
@@ -18,15 +32,17 @@ arrives as that object, not as a string. send refuses a JSON value its reader
 would refuse, an object with a name twice among them, and sends nothing.
 
 ```
-dromas send [flags] <link, address or alias> [file]
+dromas send [flags] <link, address or alias>...
 ```
 
 ### Options
 
 ```
+      --file path            the path of a file whose bytes are the body, in place of stdin
       --help[=true|false]    print this help, and run nothing
       --in-reply-to msg_id   the msg_id of the message this answers, as recv printed it
       --json[=true|false]    the body is one JSON value, sent as that value and not as text
+      --reply-all id         the id of a message in inbox/, as recv printed it: send to its sender and every other member of its group, in reply to it
       --subject text         the message's subject: any text
       --supersedes msg_id    the msg_id of an earlier message of yours that this replaces, as sent/ names it
 ```

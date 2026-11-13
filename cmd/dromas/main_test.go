@@ -1294,7 +1294,7 @@ func TestSendJSONFlag(t *testing.T) {
 		stdin string
 	}{
 		{[]string{"--json", b.Link()}, `{"action": "approve", "id": 7}`},
-		{[]string{b.Link(), file, "--json"}, ""},
+		{[]string{b.Link(), "--file", file, "--json"}, ""},
 		{[]string{b.Link()}, `{"action": "approve", "id": 7}`},
 	} {
 		if err := do(ctx, "send", s.args, strings.NewReader(s.stdin), io.Discard, io.Discard); err != nil {
@@ -2773,5 +2773,77 @@ func TestCertificatesOnTheCommandLine(t *testing.T) {
 	}
 	if l, err := line("status"); err != nil || l["signer"] != "certificate" || l["certificate_serial"] == nil {
 		t.Fatalf("status after the switch: %v, %v", l, err)
+	}
+}
+
+// send to two recipients is one message to a group: a "sent" line for each,
+// one msg_id, and each member delivered the whole group; --reply-all with the
+// id a member received sends to every other member, in reply to it.
+func TestSendToAGroupAndReplyAll(t *testing.T) {
+	ctx := context.Background()
+	srv := fakeserver.New(t, time.Now)
+	opt := client.Options{Base: srv.URL}
+	var ms []*client.Mailbox
+	for range 3 {
+		m, err := client.Init(ctx, t.TempDir(), opt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ms = append(ms, m)
+	}
+	a, b, c := ms[0], ms[1], ms[2]
+	for _, x := range ms {
+		for _, y := range ms {
+			if x != y {
+				allows(t, x, y)
+			}
+		}
+	}
+	t.Setenv("DROMAS_SERVER_URL", srv.URL)
+	useMailbox(t, a.Dir())
+	var out bytes.Buffer
+	if err := do(ctx, "send", []string{b.Address().String(), c.Address().String()}, strings.NewReader("the plan"), &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	type sentLine struct {
+		Type  string `json:"type"`
+		MsgID string `json:"msg_id"`
+	}
+	var lines []sentLine
+	for _, l := range strings.Split(strings.TrimSpace(out.String()), "\n") {
+		var v sentLine
+		if err := json.Unmarshal([]byte(l), &v); err != nil || v.Type != "sent" {
+			t.Fatalf("a line %q, want a sent line", l)
+		}
+		lines = append(lines, v)
+	}
+	if len(lines) != 2 || lines[0].MsgID != lines[1].MsgID {
+		t.Fatalf("lines %+v, want two sent lines with one msg_id", lines)
+	}
+	res, err := b.Receive(ctx)
+	if err != nil || len(res.Delivered) != 1 || len(res.Delivered[0].Envelope.Group) != 3 {
+		t.Fatalf("b received %+v, %v; want the message with a group of three", res, err)
+	}
+	useMailbox(t, b.Dir())
+	if err := do(ctx, "send", []string{"--reply-all", res.Delivered[0].ID}, strings.NewReader("agreed"), io.Discard, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range []*client.Mailbox{a, c} {
+		got, err := m.Receive(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var reply *client.Delivery
+		for i := range got.Delivered {
+			if got.Delivered[i].Envelope.From == b.Address() {
+				reply = &got.Delivered[i]
+			}
+		}
+		if reply == nil || reply.Envelope.InReplyTo != lines[0].MsgID || len(reply.Envelope.Group) != 3 {
+			t.Errorf("%s: the reply %+v, want one in reply to %s with the same group", m.Address(), reply, lines[0].MsgID)
+		}
+	}
+	if err := do(ctx, "send", nil, strings.NewReader("x"), io.Discard, io.Discard); err == nil {
+		t.Error("send with no recipient and no --reply-all ran")
 	}
 }
