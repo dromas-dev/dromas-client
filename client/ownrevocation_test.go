@@ -324,6 +324,7 @@ func lockingCommands(ctx context.Context, a, b *client.Mailbox, rec *protocol.Re
 		{"KeepRevocation", func() error { _, _, err := a.KeepRevocation(ctx, rec); return err }},
 		{"Publish", func() error { _, err := a.Publish(ctx, rec); return err }},
 		{"Flush", func() error { _, err := a.Flush(ctx); return err }},
+		{"FlushReport", func() error { _, err := a.FlushReport(ctx); return err }},
 		{"SetAlias", func() error { return a.SetAlias(ctx, "peer", b.Address()) }},
 		{"RemoveAlias", func() error { return a.RemoveAlias(ctx, "peer") }},
 		{"RemoveRefused", func() error { _, err := a.RemoveRefused(ctx, nil); return err }},
@@ -418,7 +419,7 @@ func TestAMailboxThatKeepsItsOwnRevocationSignsNothingMore(t *testing.T) {
 		name, f := c.name, c.f
 		calls.Store(0)
 		err := f()
-		if name == "Flush" {
+		if name == "Flush" || name == "FlushReport" {
 			if !errors.As(err, &gone) || !gone.Own || calls.Load() != 0 {
 				t.Errorf("a flush: %v, with %d calls to the server", err, calls.Load())
 			}

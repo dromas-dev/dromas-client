@@ -4,10 +4,14 @@ post again every message still in the outbox
 
 ### Synopsis
 
-Post again every message still in the outbox, each one signed and encrypted
-afresh as send does it, and print a "sent" line for each message the server
-accepts, as send does. A message that can never be delivered moves to
-outbox/failed/.
+Post again every message still in the outbox now, each one signed and
+encrypted afresh as send does it, and print a "sent" line for each message the
+server accepts, as send does. A refusal about this mailbox or the path to its
+server (a rate limit, a server error, no answer) stops the flush: each message
+not yet tried gets a "queued" line, with when it is due, and the exit status is
+3. A message that can never be delivered moves to outbox/failed/. dromas recv
+--follow flushes the outbox by itself, each message once the server's
+Retry-After for it has passed.
 
 ```
 dromas outbox flush

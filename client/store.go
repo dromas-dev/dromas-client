@@ -37,6 +37,7 @@ import (
 //	refused      what this client's checks found of each message it refused, by its id: refused/ keeps the message as served
 //	owed         each message [Mailbox.Follow] kept and whose handling has not ended, by a number that rises in delivery order: its id
 //	gave-up      each message whose handling gave up ([ErrGaveUp]), by its id, until [Mailbox.ClearFailed] or a Follow that finds inbox/ no longer keeps it
+//	waits        each outbox entry a refusal left waiting, by its name in outbox/ less ".P": when it is due (waits.go)
 //	meta         the mailbox's format, under "format", and the address it belongs to, under "address" (format.go)
 const (
 	bucketMailbox    = "box" // the name stored in every state file, kept as it was

@@ -52,6 +52,12 @@ const (
 	// EventOwedGone is an owed message that inbox/ no longer keeps as recv wrote
 	// it, so the handler is not handed it: [Event.ID].
 	EventOwedGone
+	// EventSent is a message of the outbox that a flush posted, under
+	// [FollowOptions.Flush]: [Event.Sent].
+	EventSent
+	// EventSendFailed is a flush that left messages in the outbox, under
+	// [FollowOptions.Flush]: [Event.Err] names each.
+	EventSendFailed
 )
 
 // Event is one thing a mailbox's receive-and-hold loop met.
@@ -67,8 +73,11 @@ type Event struct {
 	Refusal *Refusal
 	// Hold is what the held list of an EventConnectionDropped came to.
 	Hold *HoldResult
-	// Err is why, in an EventRenewFailed, an EventACLFailed or an EventRetry.
+	// Err is why, in an EventRenewFailed, an EventACLFailed, an EventRetry or
+	// an EventSendFailed.
 	Err error
+	// Sent is the message of an EventSent.
+	Sent *Sent
 	// Result is the drain an event belongs to, in every event a drain hands
 	// over, and nil otherwise.
 	Result *Result
@@ -111,6 +120,11 @@ type FollowOptions struct {
 	// crash before the record is cleared hands the message over again. Any
 	// other error from the handler leaves the message owed.
 	Owed bool
+	// Flush posts the outbox's messages that are due after each drain that
+	// succeeds, as [Mailbox.FlushReport] does but for the entries whose wait is not over, and ends a hold when the next waiting one
+	// comes due, so a message a refusal left waiting goes once its
+	// Retry-After has passed.
+	Flush bool
 }
 
 // Follow is the mailbox's receive-and-hold loop: it drains, hands the handler
@@ -175,6 +189,14 @@ func (b *Mailbox) Follow(ctx context.Context, o FollowOptions, h Handler) error 
 				}
 			}
 		}
+		// The outbox's due entries, after a drain that succeeded, and when the
+		// next one is due.
+		var due time.Time
+		if o.Flush && err == nil && stopped == nil {
+			var ferr error
+			due, ferr = b.flushFollowing(ctx, h)
+			keep(ferr)
+		}
 		pause := pauseAfter(res, err)
 		switch {
 		case ctx.Err() != nil:
@@ -192,7 +214,11 @@ func (b *Mailbox) Follow(ctx context.Context, o FollowOptions, h Handler) error 
 		}
 		again := between(ctx)
 		if err == nil && !res.More && res.Paced == 0 {
-			if err := b.holdNext(ctx, o, between, again, pause, time.Now().Add(drainWithin(res)), h); err != nil {
+			latest := time.Now().Add(drainWithin(res))
+			if !due.IsZero() && due.Before(latest) {
+				latest = due
+			}
+			if err := b.holdNext(ctx, o, between, again, pause, latest, h); err != nil {
 				return ended(err)
 			}
 			continue
@@ -206,6 +232,48 @@ func (b *Mailbox) Follow(ctx context.Context, o FollowOptions, h Handler) error 
 		case <-time.After(pause):
 		}
 	}
+}
+
+// flushFollowing flushes the outbox for Follow, and hands h an EventSent for
+// each message posted and an EventSendFailed for what the flush left. It
+// returns when the next entry left waiting is due, zero for none, and h's
+// first error.
+func (b *Mailbox) flushFollowing(ctx context.Context, h Handler) (time.Time, error) {
+	// Of the entries whose wait is over alone, each other one queued with
+	// when it is due, and nothing asked about it.
+	fl, err := lockedFinished(ctx, b, func() (*Flushed, error) {
+		if err := b.keysMatch(); err != nil {
+			return nil, err
+		}
+		return b.flush(ctx, true)
+	})
+	var stopped error
+	keep := func(e error) {
+		if e != nil && stopped == nil {
+			stopped = e
+		}
+	}
+	var due time.Time
+	if fl != nil {
+		for _, s := range fl.Sent {
+			keep(h(ctx, Event{Kind: EventSent, Sent: s}))
+		}
+		for _, q := range fl.Queued {
+			if due.IsZero() || q.At.Before(due) {
+				due = q.At
+			}
+		}
+	}
+	if err != nil {
+		keep(h(ctx, Event{Kind: EventSendFailed, Err: err}))
+	}
+	// Never sooner than the poll budget lets a drain follow: an entry left
+	// waiting with no Retry-After is due at once, and is tried again at the
+	// next drain.
+	if soonest := time.Now().Add(MinHold); !due.IsZero() && due.Before(soonest) {
+		due = soonest
+	}
+	return due, stopped
 }
 
 // ended is what Follow returns for a handler's error.
