@@ -622,10 +622,22 @@ func (s *Server) getMailbox(w http.ResponseWriter, r *http.Request) {
 		problem(w, protocol.CodeMailboxNotFound, "no mailbox has this address")
 		return
 	}
-	WriteJSON(w, http.StatusOK, protocol.MailboxResponse{
+	body, _ := json.Marshal(protocol.MailboxResponse{
 		Identity: b.identity, Prekey: b.statement, PrekeySignature: b.signature, SenderKeyTypes: b.senders,
 		RevokedCertificates: b.certList, RevokedCertificatesSignature: b.certListSig,
 	})
+	// A weak tag of the JSON, and 304 to an If-None-Match that names it
+	// (PROTOCOL.md §11.8).
+	sum := sha256.Sum256(body)
+	tag := `W/"` + hex.EncodeToString(sum[:16]) + `"`
+	w.Header().Set("ETag", tag)
+	if protocol.IfNoneMatch(r.Header.Values("If-None-Match"), tag) {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(append(body, '\n'))
 }
 
 // revoke takes a revocation of an address, whether or not it has a mailbox here:

@@ -415,6 +415,10 @@ func (b *Mailbox) trySend(ctx context.Context, to protocol.Address, stem string,
 	}
 	r, err := b.postSealed(ctx, to, req)
 	if code(err) == protocol.CodePrekeySuperseded {
+		// The next read of the peer asks no condition (PROTOCOL.md §12.2).
+		if err := b.forgetLookup(to); err != nil {
+			return nil, nil, err
+		}
 		if req, err = b.seal(ctx, to, stem, l); err != nil {
 			return nil, nil, err
 		}

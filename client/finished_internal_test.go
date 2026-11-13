@@ -156,7 +156,7 @@ func TestACommandThatKeptItsOwnRevocationAsksNothingMore(t *testing.T) {
 		if err := b.keepRevocation(id, rec.Revocation); err != nil {
 			return struct{}{}, err
 		}
-		_, gone, err := b.readMailbox(ctx, peer.Address(), nil)
+		_, _, gone, err := b.readMailbox(ctx, peer.Address(), nil, nil)
 		if gone {
 			t.Error("a read of a peer after the mailbox kept its own revocation says the peer is revoked")
 		}

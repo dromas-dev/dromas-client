@@ -54,6 +54,10 @@ func Serve(t testing.TB, s *fakeserver.Server, w http.ResponseWriter, r *http.Re
 	t.Helper()
 	a, _ := ReadOf(r)
 	rec := httptest.NewRecorder()
+	// The operator answers the edited read in full, whatever the read's
+	// condition, with no tag.
+	r = r.Clone(r.Context())
+	r.Header.Del("If-None-Match")
 	next.ServeHTTP(rec, r)
 	var br protocol.MailboxResponse
 	var p protocol.Problem
