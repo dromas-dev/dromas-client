@@ -69,7 +69,17 @@ func (b *Mailbox) resolve(ctx context.Context, peer protocol.Address, l *lookups
 	} else if held {
 		return nil, &RevokedError{Address: peer, Own: peer == b.id.Address()}
 	}
-	ir, gone, err := b.readMailbox(ctx, peer, l)
+	var kept *keptLookup
+	if err := b.view(func(s store) error {
+		p, err := b.peerOf(s, peer)
+		if p != nil && len(p.Lookup) > 0 && entityTag.MatchString(p.LookupETag) {
+			kept = &keptLookup{answer: p.Lookup, tag: p.LookupETag}
+		}
+		return err
+	}); err != nil {
+		return nil, err
+	}
+	ir, tag, gone, err := b.readMailbox(ctx, peer, l, kept)
 	if gone {
 		return nil, &RevokedError{Address: peer, Own: peer == b.id.Address()}
 	}
@@ -161,6 +171,25 @@ func (b *Mailbox) resolve(ctx context.Context, peer protocol.Address, l *lookups
 			return err
 		}
 		kept.Serial, kept.Rank, kept.Prekey, kept.PrekeySignature = p.Serial, by.Rank(), ir.Prekey, ir.PrekeySignature
+		// The answer whose checks passed, kept with its tag for the next
+		// read's If-None-Match (PROTOCOL.md §12.2).
+		kept.Lookup, kept.LookupETag = nil, ""
+		if answer, err := json.Marshal(ir); err == nil && tag != "" {
+			kept.Lookup, kept.LookupETag = answer, tag
+		}
+		return b.keepPeer(s, peer, kept)
+	})
+}
+
+// forgetLookup drops the answer kept of peer's last read, so the next read
+// is unconditional: after a 409 prekey_superseded (PROTOCOL.md §12.2).
+func (b *Mailbox) forgetLookup(peer protocol.Address) error {
+	return b.update(func(s store) error {
+		kept, err := b.peerOf(s, peer)
+		if kept == nil || err != nil || kept.LookupETag == "" {
+			return err
+		}
+		kept.Lookup, kept.LookupETag = nil, ""
 		return b.keepPeer(s, peer, kept)
 	})
 }
@@ -211,6 +240,11 @@ type peerRecord struct {
 	Revocation                   protocol.Bytes `json:"revocation_signature,omitempty"`
 	RevokedCertificates          protocol.Bytes `json:"revoked_certificates,omitempty"`
 	RevokedCertificatesSignature protocol.Bytes `json:"revoked_certificates_signature,omitempty"`
+	// Lookup is the last answer to a read of the peer's mailbox whose checks
+	// passed, as its JSON, and LookupETag its tag: what a conditional read
+	// sends and a 304 answers with (resolve).
+	Lookup     protocol.Bytes `json:"lookup,omitempty"`
+	LookupETag string         `json:"lookup_etag,omitempty"`
 }
 
 // peerOf is what this mailbox keeps of peer a, or nil for a peer it has pinned

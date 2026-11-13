@@ -329,21 +329,46 @@ func (b *Mailbox) heldRecord(a protocol.Address) (doc, revocation, certs, certsS
 // error, which a caller reads as nothing to seal to (resolve) or, proving a
 // 410, as none held (proved). This mailbox's own revocation, which ends its
 // command, is the error, and anything else is no answer.
-func (b *Mailbox) readMailbox(ctx context.Context, a protocol.Address, l *lookups) (*protocol.MailboxResponse, bool, error) {
+//
+// With kept, the answer this mailbox kept of a's last read whose checks passed
+// (resolve), the read is conditional (PROTOCOL.md §12.2): it sends the kept
+// answer's tag in If-None-Match, and a 304 that names that tag answers with
+// the kept answer, which the caller checks again as it checks any. A 304
+// about another tag is no answer. It returns the answer's tag, "" for none.
+func (b *Mailbox) readMailbox(ctx context.Context, a protocol.Address, l *lookups, kept *keptLookup) (*protocol.MailboxResponse, string, bool, error) {
 	var br protocol.MailboxResponse
-	_, err := b.lookup(ctx, a, &br)
+	var hdr http.Header
+	if kept != nil {
+		hdr = http.Header{"If-None-Match": {kept.tag}}
+	}
+	// With no pass: the read is public, and a server reads no pass on it
+	// (PROTOCOL.md §11.8).
+	resp, err := b.call(ctx, http.MethodGet, "/v1/"+a.String(), nil, hdr, &br)
+	tag := ""
+	if err == nil {
+		tag = resp.Header.Get("ETag")
+		if !entityTag.MatchString(tag) {
+			tag = ""
+		}
+		if resp.StatusCode == http.StatusNotModified {
+			if kept == nil || !sameTag(tag, kept.tag) || protocol.Unmarshal(kept.answer, &br) != nil {
+				return nil, "", false, fmt.Errorf("GET /v1/%s: a 304 about another tag than the one the read sent", a)
+			}
+			tag = kept.tag
+		}
+	}
 	var gone *RevokedError
 	switch {
 	case errors.As(err, &gone) && gone.Address == a:
-		return nil, true, nil
+		return nil, "", true, nil
 	case err == nil:
 		if rec := br.Record(); rec != nil {
 			if gone, err := b.take(a, rec); gone || err != nil {
-				return nil, gone, err
+				return nil, "", gone, err
 			}
 		}
 	case code(err) != protocol.CodeMailboxRevoked && code(err) != protocol.CodeMailboxNotFound:
-		return nil, false, err
+		return nil, "", false, err
 	}
 	// The mailbox's own server has answered, whatever it served: with l, a
 	// send's lookups, a is marked answered in the command (resolve, at each
@@ -352,9 +377,17 @@ func (b *Mailbox) readMailbox(ctx context.Context, a protocol.Address, l *lookup
 		l.answered[a] = true
 	}
 	if err != nil {
-		return nil, false, err
+		return nil, "", false, err
 	}
-	return &br, false, nil
+	return &br, tag, false, nil
+}
+
+// keptLookup is the last answer to a read of a peer's mailbox whose checks
+// passed, as a conditional read sends its tag (readMailbox): the answer's
+// JSON and its tag.
+type keptLookup struct {
+	answer []byte
+	tag    string
 }
 
 // recordOf is the revocation record a server's 410 mailbox_revoked carries, or nil.
@@ -928,7 +961,7 @@ func (b *Mailbox) proved(ctx context.Context, method, path string, err error) er
 	default:
 		// The mailbox the 410 is about is read (PROTOCOL.md §12.5), and a
 		// 410 with its record is the proof.
-		_, held, lerr = b.readMailbox(ctx, who, nil)
+		_, _, held, lerr = b.readMailbox(ctx, who, nil, nil)
 		if c := code(lerr); c == protocol.CodeMailboxRevoked || c == protocol.CodeMailboxNotFound {
 			lerr = nil
 		}

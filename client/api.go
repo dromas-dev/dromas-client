@@ -507,9 +507,3 @@ func (b *Mailbox) ownerWith(ctx context.Context, method, path string, hdr http.H
 		}
 	}
 }
-
-// lookup GETs mailbox a from this mailbox's server (GET /v1/<a>), with no pass: the
-// read is public, and a server reads no pass on it (PROTOCOL.md §11.8).
-func (b *Mailbox) lookup(ctx context.Context, a protocol.Address, out any) (*http.Response, error) {
-	return b.call(ctx, http.MethodGet, "/v1/"+a.String(), nil, nil, out)
-}
