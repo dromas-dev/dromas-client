@@ -1585,7 +1585,7 @@ components:
         type: string
     LookupETag:
       description: A weak entity tag of the read of a mailbox (RFC 9110 §8.8.1, §8.8.3), opaque, the same whether the answer is gzipped or not; a `304` carries the tag it matched (`PROTOCOL.md` §11.8).
-      required: false
+      required: true
       schema:
         type: string
         pattern: '^W/"[\x21\x23-\x7e]*"$'

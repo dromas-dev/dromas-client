@@ -83,6 +83,7 @@ func read(t *testing.T, name, value string) []string {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Date", time.Now().UTC().Format(http.TimeFormat))
 		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("ETag", `W/"0123"`)
 		if name != "" {
 			w.Header().Add(name, value)
 		}
@@ -270,6 +271,7 @@ func TestAHeadIsCheckedWithoutItsContent(t *testing.T) {
 			if cacheControl {
 				w.Header().Set("Cache-Control", "no-store")
 			}
+			w.Header().Set("ETag", `W/"0123"`)
 			w.WriteHeader(status)
 			if status == http.StatusOK {
 				_, _ = w.Write([]byte(body))
