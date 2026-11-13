@@ -141,6 +141,8 @@ paths:
               $ref: '#/components/headers/Sunset'
             Cache-Control:
               $ref: '#/components/headers/Cache-Control'
+            ETag:
+              $ref: '#/components/headers/LookupETag'
             Content-Security-Policy:
               $ref: '#/components/headers/Content-Security-Policy'
             X-Content-Type-Options:
@@ -170,6 +172,8 @@ paths:
               $ref: '#/components/headers/Sunset'
             Cache-Control:
               $ref: '#/components/headers/Cache-Control'
+            ETag:
+              $ref: '#/components/headers/LookupETag'
             Vary:
               $ref: '#/components/headers/Vary'
         '400':
@@ -243,6 +247,8 @@ paths:
               $ref: '#/components/headers/Sunset'
             Cache-Control:
               $ref: '#/components/headers/Cache-Control'
+            ETag:
+              $ref: '#/components/headers/LookupETag'
             Content-Security-Policy:
               $ref: '#/components/headers/Content-Security-Policy'
             X-Content-Type-Options:
@@ -268,6 +274,8 @@ paths:
               $ref: '#/components/headers/Sunset'
             Cache-Control:
               $ref: '#/components/headers/Cache-Control'
+            ETag:
+              $ref: '#/components/headers/LookupETag'
             Vary:
               $ref: '#/components/headers/Vary'
         '400':
@@ -831,6 +839,8 @@ paths:
               $ref: '#/components/headers/Sunset'
             Cache-Control:
               $ref: '#/components/headers/Cache-Control'
+            Dromas-RateLimit:
+              $ref: '#/components/headers/Dromas-RateLimit'
             Content-Security-Policy:
               $ref: '#/components/headers/Content-Security-Policy'
             X-Content-Type-Options:
@@ -856,6 +866,8 @@ paths:
               $ref: '#/components/headers/Sunset'
             Cache-Control:
               $ref: '#/components/headers/Cache-Control'
+            Dromas-RateLimit:
+              $ref: '#/components/headers/Dromas-RateLimit'
             Content-Security-Policy:
               $ref: '#/components/headers/Content-Security-Policy'
             X-Content-Type-Options:
@@ -1568,6 +1580,17 @@ components:
         pattern: '^[0-9]+$'
     ETag:
       description: A first page's entity tag (RFC 9110 §8.8.3), opaque; a page after the first has none (`PROTOCOL.md` §11.11).
+      required: false
+      schema:
+        type: string
+    LookupETag:
+      description: A weak entity tag of the read of a mailbox (RFC 9110 §8.8.1, §8.8.3), opaque, the same whether the answer is gzipped or not; a `304` carries the tag it matched (`PROTOCOL.md` §11.8).
+      required: false
+      schema:
+        type: string
+        pattern: '^W/"[\x21\x23-\x7e]*"$'
+    Dromas-RateLimit:
+      description: 'The sending mailbox''s budgets after the call, a Structured Fields Dictionary (RFC 9651 §3.2) keyed by `quota_id`, on a send''s `201` and `200` alone (`PROTOCOL.md` §11.10). Each member is an Integer, what the budget has left, with the Integer parameters `c`, `q`, `f` and optionally `w`; a reader ignores a key or a parameter it does not know (`PROTOCOL.md` §11.5).'
       required: false
       schema:
         type: string

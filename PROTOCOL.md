@@ -773,7 +773,7 @@ A revocation record carries an identity's revocations, and the record proves its
   - Section 11.5 gives what a `HEAD` spends.
 - **Preconditions.** Preconditions are those of RFC 9110 §13. A server evaluates `If-Match` and `If-None-Match` on every call but a read of the server's document (§13.1.1, §13.1.2), at the point §13.2.1 gives, in the order §13.2.2 gives. Dromas narrows the preconditions in these ways:
   - **Normal request checks.** A call's normal request checks (§13.2.1) are the match of the call's route and method, the call's pass where the call accepts one, and the read of the call's target. A registration's pass and a renewal's pass are by the signer of the prekey statement that the call brings, or by the identity (Sections 8; 11.7, step 7; 11.9). Therefore every check of that prekey statement is one of the call's normal request checks.
-  - **Only a list's first page (Section 11.11) and an ACL (Section 11.14) carry an `ETag`.**
+  - **Only a lookup (Section 11.8), a list's first page (Section 11.11) and an ACL (Section 11.14) carry an `ETag`.**
   - **A server answers a false `If-Match` with `412 precondition_failed`, and never with a `2xx` as for a change that appears already applied (§13.1.1).**
   - **A false precondition comes after the refusals from the server's record of the mailbox, and before a `200` from that record** (Sections 11.7, 11.9, 11.15).
   - **A value of `If-Match` or `If-None-Match` matches nothing if the value has any form other than `*` alone or a list of entity-tags.** A list with `*` among its tags is such a form.
@@ -924,6 +924,24 @@ A fetch and an ack of a message the mailbox holds spend no `calls`, and Section 
 
 For a server's limit that is not one of these, the refusal has no `quota_id`.
 
+**A send's answer reports the sender's budgets.** A server that limits a mailbox's `sends` MUST put `Dromas-RateLimit` on every `201` and `200` that answers a send with that mailbox's pass (Section 11.10). A server MUST NOT put the field on any other answer.
+
+- **The form.** The field is a Dictionary (RFC 9651 §3.2). A member's key is a `quota_id` from the table above. A member's value is an Integer: what the budget has left after the call. A member carries these Integer parameters:
+  - `c`: what the budget holds when full;
+  - `q`: how much the budget gets back in each window;
+  - `w`: the window, in seconds, which is 86400 when the member has no `w`;
+  - `f`: the seconds until the budget is full, rounded up.
+- **The arithmetic.** The budget gets one unit back every `w`/`q` seconds, up to `c`. Each value is the mailbox's own, which an account may lift.
+- **The members.** This version defines the `sends` member alone. A reader ignores a member whose key the reader does not know, and a parameter that the reader does not know.
+- **A member that a reader cannot use is no report.** A reader reads a field that is absent, or that is not a Dictionary, as no report, and a field without a `sends` member as no report of `sends`. A reader reads a `sends` member as no report of `sends` in these cases:
+  - the member lacks `c`, `q` or `f`;
+  - the member's value, or one of its parameters, is not an Integer;
+  - the value or `f` is negative, or `c`, `q` or `w` is below 1;
+  - the value is above `c`.
+
+  No report never means that the budget is unlimited.
+- **The field is advisory.** The field reports the budget as the server counted the budget at the call, and promises nothing about a later call.
+
 ### 11.6. Mailbox states
 
 At a server, a mailbox is in one of three states:
@@ -1006,6 +1024,7 @@ A lookup, `GET /v1/<A>`, accepts no pass (Section 8). The lookup answers with th
 - **An unknown address.** The server answers `404 mailbox_not_found`, whatever certificates the address's identity has revoked. Looking up revocations serves those revocations (Section 11.15).
 - **A revoked address.** The server answers `410 mailbox_revoked`, with the revocation record in `record`.
 - **A lookup is public.** A client sends no pass on a lookup. The server counts a lookup as Section 11.5 says.
+- **The `ETag`.** A `200` carries a weak `ETag` (RFC 9110 §8.8.1, §8.8.3). The tag is the same whether or not the server compresses the answer, and the tag changes whenever the answer's content changes. A lookup whose `If-None-Match` names the tag is answered `304`, with the tag and no content (Section 11.2). A `304` spends what a lookup spends (Section 11.5). A server answers a lookup that would be `404` or `410` as without the condition.
 
 ### 11.9. Renew the prekey
 
@@ -1032,7 +1051,7 @@ The server accepts a renewal because the renewal's prekey statement is later tha
 
 ### 11.10. Send
 
-A send, `POST /v1/<B>/messages?prekey_sha256=<hash>`, carries the sender's pass. The send's body is the age file's exact bytes (`Content-Type: application/vnd.age`, age's registered media type). The server answers the send `201` with `id`, `received_at` and `expires_at`, and `Location: /v1/<B>/messages/<id>`. The sender is the mailbox that the pass names.
+A send, `POST /v1/<B>/messages?prekey_sha256=<hash>`, carries the sender's pass. The send's body is the age file's exact bytes (`Content-Type: application/vnd.age`, age's registered media type). The server answers the send `201` with `id`, `received_at` and `expires_at`, `Location: /v1/<B>/messages/<id>`, and `Dromas-RateLimit` where Section 11.5 requires the field. The sender is the mailbox that the pass names.
 
 `prekey_sha256` is REQUIRED. `prekey_sha256` names the prekey statement that the age file is sealed to, as `statement-hash`: the SHA-256 of the prekey statement's bytes as the lookup of `B` served them (Section 11.8). The hash covers the prekey statement alone, never the prekey statement's signature. Another encoding of the same signature (Section 3.2) does not change the hash.
 
@@ -1060,7 +1079,7 @@ The server checks the steps below. Only step 9 stores anything.
 3. **The body's size.** The body is at most the sender's cap → otherwise `413 content_too_large`, with the cap in `limit`. The server refuses by the `Content-Length` before it reads anything, or while it reads.
 4. **The age file.** The body is an age file → otherwise `invalid_request`, with no `param`. An empty body gets the same refusal.
 5. **`B` is active:** unknown → `404 mailbox_not_found`; revoked → `410 mailbox_revoked`.
-6. **Dedupe, while the message is live.** The server evaluates the send's preconditions before this step (Section 11.2). The message id is the ciphertext's SHA-256. If `B` stores an unacked message with that message id, from any sender, the server answers `200` with the receipt it kept, whatever has changed at `B` since. This answer comes ahead of steps 7 to 9, and ahead of every count except the budgets that bound any call (Section 11.5). The server keeps nothing of a message once the message is gone. So the same bytes sent after that are a new message, which the server stores and counts as any send. A reader that accepted those bytes once skips or refuses them (Section 12.3, check 8).
+6. **Dedupe, while the message is live.** The server evaluates the send's preconditions before this step (Section 11.2). The message id is the ciphertext's SHA-256. If `B` stores an unacked message with that message id, from any sender, the server answers `200` with the receipt it kept, whatever has changed at `B` since, and with `Dromas-RateLimit` where Section 11.5 requires the field. This answer comes ahead of steps 7 to 9, and ahead of every count except the budgets that bound any call (Section 11.5). The server keeps nothing of a message once the message is gone. So the same bytes sent after that are a new message, which the server stores and counts as any send. A reader that accepted those bytes once skips or refuses them (Section 12.3, check 8).
 7. **`B` accepts messages on this prekey, from this sender:**
 
    | Failure | Answer |
@@ -1330,6 +1349,11 @@ A server lists at most 64 deprecations, 64 sunsets and 64 capabilities. A client
   - The sender posts nothing to an address if the sender keeps a revocation of that address, and makes no call about that address.
   - The sender refuses a prekey statement under a certificate that the recipient's revocation of certificates covers, and seals nothing. The revocation of certificates that counts here is the one the sender keeps at that point (Section 5.1).
 - **No answer is not "no revocation shown."** If the lookup fails, or serves no mailbox (`404 mailbox_not_found`, or `410 mailbox_revoked` with nothing that verifies), the sender seals nothing and posts nothing.
+- **A conditional lookup.** A sender MAY keep the last `200` of a lookup whose checks passed, with the answer's `ETag`, and send that tag in the next lookup's `If-None-Match`.
+  - On a `304`, the sender checks the kept answer as this section checks a lookup's answer, every check above made again at that time.
+  - A `304` whose `ETag`, compared weakly, is not the tag that the lookup sent is no answer.
+  - A `304` to a lookup that sent no `If-None-Match` is malformed.
+  - After a `409 prekey_superseded`, the sender's next lookup of that address sends no `If-None-Match`.
 
 **The outbox:**
 
@@ -1626,6 +1650,8 @@ Dromas protects a message's content from everyone but the message's recipient. D
   - refuse every pass from a mailbox, which keeps the mailbox's prekeys on the mailbox's disk for as long as the server refuses (Section 15.3);
   - accept messages that a mailbox's ACL refuses, which the mailbox's client still judges, or refuse messages that the ACL admits, which the server could drop anyway;
   - write anything in an error's words, which a client never shows, or in a receipt, an account id or a cursor, which a client checks against the value's form before using the value (Section 11.3);
+  - answer a lookup `304`, which holds a sender on an answer the server served before; the server can already serve that answer's bytes again, and the sender checks the kept answer at every post (Section 12.2);
+  - report any budget in `Dromas-RateLimit`, which makes a client wait or post early; the server can already refuse or accept any send (Section 11.5);
   - serve altered instructions to an agent that runs anything it is served.
 - **Against a client that verifies and gates, a hostile server cannot:**
   - read messages;
@@ -1810,6 +1836,7 @@ Dromas protects a message's content from everyone but the message's recipient. D
 - **[RFC 9111]** Fielding, R., Ed., Nottingham, M., Ed., and J. Reschke, Ed., "HTTP Caching", RFC 9111, DOI 10.17487/RFC9111, June 2022, <https://www.rfc-editor.org/info/rfc9111/>.
 - **[RFC 9457]** Nottingham, M., Wilde, E., and S. Dalal, "Problem Details for HTTP APIs", RFC 9457, DOI 10.17487/RFC9457, July 2023, <https://www.rfc-editor.org/info/rfc9457/>.
 - **[RFC 9562]** Davis, K., Peabody, B., and P. Leach, "Universally Unique IDentifiers (UUIDs)", RFC 9562, DOI 10.17487/RFC9562, May 2024, <https://www.rfc-editor.org/info/rfc9562/>.
+- **[RFC 9651]** Nottingham, M. and P-H. Kamp, "Structured Field Values for HTTP", RFC 9651, DOI 10.17487/RFC9651, September 2024, <https://www.rfc-editor.org/info/rfc9651/>.
 - **[RFC 9745]** Dalal, S. and E. Wilde, "The Deprecation HTTP Response Header Field", RFC 9745, DOI 10.17487/RFC9745, March 2025, <https://www.rfc-editor.org/info/rfc9745/>.
 - **[SemVer]** Preston-Werner, T., "Semantic Versioning 2.0.0", <https://semver.org/spec/v2.0.0.html>.
 
