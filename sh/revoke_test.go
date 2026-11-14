@@ -323,8 +323,8 @@ func (b *shMailbox) keptCerts(a protocol.Address) string {
 }
 
 // A revocation of certificates is the identity's own signature over exact
-// text; a kept one revokes every rank through its own, the identity's 0
-// among them, and one that no longer verifies is a fault.
+// text; a kept one revokes every rank from 1 through its own, never the
+// identity's 0, and one that no longer verifies is a fault.
 func TestScriptReadsARevocationOfCertificates(t *testing.T) {
 	w := newWorld(t)
 	p := w.mailbox()

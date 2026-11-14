@@ -58,7 +58,7 @@ func TestAPostIsDatedAtThePost(t *testing.T) {
 		t.Errorf("the outbox kept %s, want the envelope as written", kept)
 	}
 	if exp, _ := protocol.ParseTime(sent[0].ExpiresAt); !exp.Equal(posted.Add(protocol.Retention)) {
-		t.Errorf("the receipt's expires_at %s, want the TTL less the hour after the post", sent[0].ExpiresAt)
+		t.Errorf("the receipt's expires_at %s, want protocol.Retention after the post", sent[0].ExpiresAt)
 	}
 
 	e.clock.Add(5 * 24 * time.Hour)
