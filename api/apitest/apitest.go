@@ -13,6 +13,8 @@
 //   - a route the description lacks gets the router's plain 404 or 405, a
 //     503 while the server is not ready, or a limit's 429 as PROTOCOL.md §11.2
 //     gives it to any call: rate_limited, with a Retry-After in seconds;
+//   - a path that is not in its clean form gets those checks, or a redirect
+//     to a path in its clean form, ahead of every check (PROTOCOL.md §11.2);
 //   - every error's code counts (protocol.Problem.CodeAt): one the
 //     description knows, under its own status, beside its own type;
 //   - an answer in gzip is one to a request that takes gzip, and is checked
@@ -31,6 +33,7 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -140,6 +143,16 @@ func check(t testing.TB, v validator.Validator, r *http.Request, body *tee, rec 
 	}
 	read := body.done || r.ContentLength == 0
 	where := r.Method + " " + r.URL.Path + " → " + fmt.Sprint(rec.status)
+	if notClean(r.URL.Path) && isRedirect(rec.status) {
+		// A server may answer a path that is not in its clean form with a
+		// redirect to the clean form, ahead of every check, and a client
+		// reads that answer as no answer (PROTOCOL.md §11.2). The body may be
+		// of any type.
+		if loc := rec.header.Get("Location"); !cleanTarget(loc) {
+			t.Errorf("apitest: %s: a path that is not in its clean form is redirected to %q, which is no path in its clean form", where, loc)
+		}
+		return
+	}
 	req := r.Clone(r.Context())
 	req.Body = io.NopCloser(bytes.NewReader(body.buf.Bytes()))
 	// The protocol asks no Content-Type of a request: a server reads a send's
@@ -264,6 +277,34 @@ func missing(errs []*errors.ValidationError) bool {
 		}
 	}
 	return false
+}
+
+// notClean reports whether a path is not in its clean form, as PROTOCOL.md
+// §11.2 defines the clean form: the path has a "." or ".." segment or two
+// "/" in a row, or is "/v1" or "/to" without its last "/".
+func notClean(p string) bool {
+	if p == strings.TrimSuffix(protocol.DocumentPath, "/") || p == strings.TrimSuffix(protocol.LinkPath, "/") || strings.Contains(p, "//") {
+		return true
+	}
+	for s := range strings.SplitSeq(p, "/") {
+		if s == "." || s == ".." {
+			return true
+		}
+	}
+	return false
+}
+
+// cleanTarget reports whether a Location names a path on the same server in
+// its clean form: a reference with no scheme and no host, whose path starts
+// with "/".
+func cleanTarget(loc string) bool {
+	u, err := url.Parse(loc)
+	return err == nil && u.Scheme == "" && u.Host == "" && strings.HasPrefix(u.Path, "/") && !notClean(u.Path)
+}
+
+// isRedirect reports whether a status is a redirect: a 3xx other than 304.
+func isRedirect(status int) bool {
+	return status >= 300 && status < 400 && status != http.StatusNotModified
 }
 
 func isProblem(h http.Header) bool {
