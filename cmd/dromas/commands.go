@@ -316,7 +316,8 @@ a "queued" line, with when it is due, for each that waits: where this mailbox's
 budget of sends at its server does not hold the members still to go, they wait
 together, and the exit status is 3. A group needs one send for each member but
 this mailbox, so a group larger than that budget holds at once is refused, with
-nothing written.
+nothing written. A group of more than 5 members but this mailbox is sent, and
+send prints a "warning" line first.
 
 Sending to a mailbox allows it, so a message that talks you into a send also
 lets that address's messages past held/: decide a send as you would decide
@@ -387,6 +388,11 @@ would refuse, an object with a name twice among them, and sends nothing.`,
 			}
 			if fl == nil {
 				return err
+			}
+			if w := groupWarning(b.Address(), to); w != nil {
+				if werr := e.out(w); werr != nil && err == nil {
+					err = werr
+				}
 			}
 			var aclErr error
 			for _, s := range fl.Sent {
@@ -1563,6 +1569,27 @@ func (e *cli) sayHeld(a protocol.Address, held *client.Held) error {
 // its recipient (names).
 func sent(s *client.Sent, n names) []byte {
 	return line("sent", "id", s.ID, "msg_id", s.MsgID, "to", s.To, "alias", n.of(s.To))
+}
+
+// groupWarnAbove is the number of members but the sender above which send
+// warns that a group spends the sender's budget of sends: each of those
+// members costs one send.
+const groupWarnAbove = 5
+
+// groupWarning is the warning line for a group sent from self to to, or nil
+// for a group of groupWarnAbove members but self or fewer. A member named
+// twice counts once, and self counts not at all, as in the envelope's group.
+func groupWarning(self protocol.Address, to []protocol.Address) []byte {
+	var members []protocol.Address
+	for _, a := range to {
+		if a != self && !slices.Contains(members, a) {
+			members = append(members, a)
+		}
+	}
+	if len(members) <= groupWarnAbove {
+		return nil
+	}
+	return line("warning", "members", len(members), "detail", fmt.Sprintf("a group message spends one of this mailbox's sends for each member but this mailbox, %d here, so a group with many members uses up the budget of sends quickly", len(members)))
 }
 
 // queued is the line for an outbox entry that waits: the mailbox it goes to,

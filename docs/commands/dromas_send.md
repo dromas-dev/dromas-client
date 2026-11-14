@@ -21,7 +21,8 @@ a "queued" line, with when it is due, for each that waits: where this mailbox's
 budget of sends at its server does not hold the members still to go, they wait
 together, and the exit status is 3. A group needs one send for each member but
 this mailbox, so a group larger than that budget holds at once is refused, with
-nothing written.
+nothing written. A group of more than 5 members but this mailbox is sent, and
+send prints a "warning" line first.
 
 Sending to a mailbox allows it, so a message that talks you into a send also
 lets that address's messages past held/: decide a send as you would decide

@@ -2847,3 +2847,63 @@ func TestSendToAGroupAndReplyAll(t *testing.T) {
 		t.Error("send with no recipient and no --reply-all ran")
 	}
 }
+
+func TestSendWarnsOfAGroupOfMoreThanFiveAndSendsIt(t *testing.T) {
+	ctx := context.Background()
+	srv := fakeserver.New(t, time.Now)
+	opt := client.Options{Base: srv.URL}
+	a, err := client.Init(ctx, t.TempDir(), opt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var others []string
+	for range groupWarnAbove + 1 {
+		m, err := client.Init(ctx, t.TempDir(), opt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		others = append(others, m.Address().String())
+	}
+	t.Setenv("DROMAS_SERVER_URL", srv.URL)
+	useMailbox(t, a.Dir())
+	for _, tc := range []struct {
+		to   []string
+		warn bool
+	}{
+		// The sender's own address and a member named twice add no send.
+		{append([]string{a.Address().String(), others[0]}, others[:groupWarnAbove]...), false},
+		{others, true},
+	} {
+		var out bytes.Buffer
+		if err := do(ctx, "send", tc.to, strings.NewReader("the plan"), &out, io.Discard); err != nil {
+			t.Fatal(err)
+		}
+		var types []string
+		var members int
+		for _, l := range strings.Split(strings.TrimSpace(out.String()), "\n") {
+			var v struct {
+				Type    string `json:"type"`
+				Members int    `json:"members"`
+			}
+			if err := json.Unmarshal([]byte(l), &v); err != nil {
+				t.Fatalf("a line %q: %v", l, err)
+			}
+			types = append(types, v.Type)
+			if v.Type == "warning" {
+				members = v.Members
+			}
+		}
+		sends := groupWarnAbove
+		want := slices.Repeat([]string{"sent"}, sends)
+		if tc.warn {
+			sends++
+			want = append([]string{"warning"}, slices.Repeat([]string{"sent"}, sends)...)
+		}
+		if !slices.Equal(types, want) {
+			t.Errorf("a group of %d other members printed %v, want %v", sends, types, want)
+		}
+		if tc.warn && members != sends {
+			t.Errorf("the warning names %d members, want %d", members, sends)
+		}
+	}
+}
