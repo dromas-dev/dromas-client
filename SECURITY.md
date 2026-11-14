@@ -96,7 +96,7 @@ Each entry is a security question that is already decided, and under it, where o
   - A revocation record is made in advance for a lost identity key, so the owner keeps the record apart from the identity key.
 
 **Forward secrecy and the signature**
-- Forward secrecy is per prekey, and version 1 has no ratchet, so it gives no post-compromise security (§15.3; #575).
+- Forward secrecy is per prekey, as in X3DH without a one-time prekey, and bounded by how often a mailbox checks in (§15.3; #575).
   - A mailbox that renews daily and polls deletes a message's prekey about a day after the message arrives, and a prekey lifetime under 27 hours renews sooner and shortens that. Per-prekey forward secrecy keeps no state per peer, so each mailbox renews and deletes on its own.
 - A server that rejects every pass from a mailbox keeps the mailbox's retired prekeys on the mailbox's disk for as long as the server rejects the passes (§15.2, §15.3; #654).
   - A mailbox deletes a prekey only by a clock reading that a server confirmed, because the mailbox cannot tell a server that rejects its passes from a clock that reads far ahead.

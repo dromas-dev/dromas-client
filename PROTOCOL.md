@@ -1620,7 +1620,6 @@ This table gives each security property, the party that the property holds again
 | Recipient binding (no surreptitious forwarding) | a recipient that forwards a signed message to a third mailbox as a message from the sender | sender authentication holds | the namespace and `to`, both inside the signature (Sections 9.2, 15.4; Section 12.3, checks 5 and 6) [Davis] [ADR] |
 | Key-compromise impersonation resistance | a party that holds the mailbox's stolen prekey | sender authentication holds | the signature, by a key apart from the prekey (Section 15.4) [ADR] |
 | Replay and duplicates | the server | the mailbox runs in one place, and keeps its replay set (Section 15.9). A mailbox that loses its replay set has failed, and a server can deliver again a message that the mailbox accepted before the loss (Section 15.9) | checks 6, 8 and 9 (Section 12.3), with `sent_at` and `msg_id` inside the signature |
-| Post-compromise security | a party that stole a prekey | not provided (Section 15.3) | none |
 | Delivery, and proof of delivery | the server | not provided (Sections 15.2, 15.9). A sender that keeps its ciphertext learns, on the server's word, whether the recipient's mailbox still holds the message (Section 15.8) | none |
 | Deniability | a recipient | not provided (Section 15.4) | none |
 | Metadata | the server, and the party that terminates TLS for the server | not provided (Sections 15.1, 15.2, 15.8) | none |
@@ -1690,7 +1689,7 @@ Dromas protects a message's content from everyone but the message's recipient. D
 - **A message waiting on the server is exposed until the mailbox fetches it.** A mailbox that stops renewing keeps its ended prekey as the current prekey. The mailbox's last messages stay exposed until the mailbox renews.
 - **A mailbox that no server accepts a pass from keeps its retired prekeys past their deletion time.** The mailbox keeps those prekeys until a server accepts a pass from the mailbox. This is because the mailbox cannot tell whether its clock is far ahead or a server is refusing the mailbox, and by that clock the mailbox deletes no key that a message may wait for.
 - **Forward secrecy depends on real deletion.** A key kept in a backup, a synced folder or a store with version history survives its deletion.
-- **Version 1 has no ratchet, so there is no per-message forward secrecy and no post-compromise security.** A leaked prekey decrypts every message encrypted to it until the mailbox renews and deletes the prekey.
+- **Forward secrecy is per prekey, as in X3DH without a one-time prekey.** A leaked prekey decrypts every message encrypted to it until the mailbox renews and deletes the prekey, because version 1 has no ratchet.
 - **Forward secrecy per reply can be added as an optional envelope member.** Version 1 does not yet define such a member, but leaves room for one. Such a member is possible because the envelope is inside the encryption, where the server cannot see the envelope, and because a reader ignores an unknown member (Sections 3.3, 14).
 
 ### 15.4. Sender authentication
