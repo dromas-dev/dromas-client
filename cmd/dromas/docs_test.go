@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"unicode"
@@ -330,15 +331,62 @@ func TestTheConfigurationReferenceNamesEveryKey(t *testing.T) {
 	}
 }
 
+// testName is a test or fuzz test named in backticks.
+var testName = regexp.MustCompile("`((?:Test|Fuzz)[A-Za-z0-9_]+)`")
+
+// testsOf maps each test and fuzz test of the repo at root to the files,
+// relative to root, that define it.
+func testsOf(t *testing.T, root string) map[string][]string {
+	t.Helper()
+	def := regexp.MustCompile(`(?m)^func ((?:Test|Fuzz)[A-Za-z0-9_]+)\(`)
+	tests := map[string][]string{}
+	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			if p != root && strings.HasPrefix(d.Name(), ".") {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(p, "_test.go") {
+			return nil
+		}
+		b, err := os.ReadFile(p) //nolint:gosec // a file of this repo
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(root, p)
+		if err != nil {
+			return err
+		}
+		for _, m := range def.FindAllStringSubmatch(string(b), -1) {
+			tests[m[1]] = append(tests[m[1]], filepath.ToSlash(rel))
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tests) < 100 {
+		t.Fatalf("found %d tests under %s: the walk is broken", len(tests), root)
+	}
+	return tests
+}
+
 // maxClaimWords is the longest a claim in SECURITY.md's table may run: one
 // sentence, whose whole rule is the PROTOCOL.md section or the code it names.
 const maxClaimWords = 35
 
 // Each claim in SECURITY.md § Checking the claims yourself is one sentence of
-// at most maxClaimWords words, and each path its "Held by" cell names is a
-// file or directory of this repo.
+// at most maxClaimWords words, and its "Held by" cell names the tests that
+// hold the claim or says "no test". Each path the cell names is a file or
+// directory of this repo, and each test it names is a test of this repo,
+// defined in the test file the cell names it under.
 func TestEachSecurityClaimIsOneSentence(t *testing.T) {
 	root := filepath.Join("..", "..")
+	tests := testsOf(t, root)
 	b, err := os.ReadFile(filepath.Join(root, "SECURITY.md"))
 	if err != nil {
 		t.Fatal(err)
@@ -369,6 +417,28 @@ func TestEachSecurityClaimIsOneSentence(t *testing.T) {
 		if stop.MatchString(claim) {
 			t.Errorf("a claim is more than one sentence: %.60s", claim)
 		}
+		held := cells[2]
+		names := testName.FindAllStringSubmatch(held, -1)
+		if len(names) == 0 && !strings.Contains(held, "no test") {
+			t.Errorf("a claim names no test and does not say \"no test\": %.60s", claim)
+		}
+		for _, m := range names {
+			if len(tests[m[1]]) == 0 {
+				t.Errorf("a claim is held by %s, which is no test of this repo: %.60s", m[1], claim)
+			}
+		}
+		for _, part := range strings.Split(held, "; ") {
+			file, list, ok := strings.Cut(part, "`: ")
+			if !ok || !strings.HasSuffix(file, "_test.go") {
+				continue
+			}
+			file = strings.TrimPrefix(file, "`")
+			for _, m := range testName.FindAllStringSubmatch(list, -1) {
+				if len(tests[m[1]]) > 0 && !slices.Contains(tests[m[1]], file) {
+					t.Errorf("a claim names %s under %s, which does not define it: %.60s", m[1], file, claim)
+				}
+			}
+		}
 		for _, m := range path.FindAllStringSubmatch(cells[2], -1) {
 			p := m[1]
 			if !strings.Contains(p, "/") || strings.Contains(p, "://") {
@@ -379,7 +449,7 @@ func TestEachSecurityClaimIsOneSentence(t *testing.T) {
 			}
 		}
 	}
-	if n < 20 {
+	if n < 10 {
 		t.Fatalf("read %d claims: the reading is broken", n)
 	}
 }

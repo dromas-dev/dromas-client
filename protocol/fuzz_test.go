@@ -162,7 +162,7 @@ func FuzzEnvelopeSender(f *testing.F) {
 }
 
 // ParseIdentity takes a document only in the one form every type shares: it
-// gives back the document's own bytes, the address is their SHA-256, the
+// gives back the document's own bytes, the address is their SHA-384, the
 // key is of a type the protocol defines, and the document is that key
 // written again; and an Ed25519 key only as a canonical point not of small
 // order (edwardsKeyFault, which reads it apart from the function's own
@@ -186,7 +186,7 @@ func FuzzParseIdentity(f *testing.F) {
 		case !bytes.Equal(id.Document(), doc):
 			t.Fatalf("the document is %q, given %q", id.Document(), doc)
 		case id.Address() != Address(sha512.Sum384(doc)):
-			t.Fatal("the address is not the document's SHA-256")
+			t.Fatal("the address is not the document's SHA-384")
 		case !slices.Contains(IdentityTypes(), key.Type()):
 			t.Fatalf("took a key of the type %q", key.Type())
 		case written != string(doc):

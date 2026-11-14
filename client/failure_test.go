@@ -115,8 +115,9 @@ func TestDuplicateRetryIsAckedNotDelivered(t *testing.T) {
 	}
 }
 
-// On 409 prekey_superseded the client re-encrypts the SAME envelope to the newer
-// prekey: same msg_id, so the recipient can never act on it twice.
+// A post that failed is kept, and once the recipient renews, the flush
+// re-encrypts the SAME envelope to the newer prekey: same msg_id, so the
+// recipient can never act on it twice.
 func TestStalePrekeyReencryptsSameEnvelope(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
