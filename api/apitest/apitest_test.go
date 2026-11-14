@@ -216,6 +216,47 @@ func TestARouteTheDescriptionLacksTakesOnlyALimitsOwn429(t *testing.T) {
 	}
 }
 
+// A path that is not in its clean form may be redirected to a path in its
+// clean form on the same server, as net/http's ServeMux redirects one
+// (PROTOCOL.md §11.2). A redirect anywhere else, or of a clean path, is no
+// answer of the description's.
+func TestAPathNotInItsCleanFormMayBeRedirectedToItsCleanForm(t *testing.T) {
+	for _, c := range []struct {
+		path     string
+		status   int
+		location string
+		ok       bool
+	}{
+		{"/.", http.StatusTemporaryRedirect, "/", true},
+		{"/v1", http.StatusTemporaryRedirect, "/v1/", true},
+		{"/to", http.StatusTemporaryRedirect, "/to/", true},
+		{"//v1/", http.StatusTemporaryRedirect, "/v1/", true},
+		{"/v1/./", http.StatusPermanentRedirect, "/v1/", true},
+		{"/v1//x", http.StatusMovedPermanently, "/v1/x", true},
+		{"/x/../v1/", http.StatusTemporaryRedirect, "/v1/?a=1", true},
+		{"/v1/.", http.StatusTemporaryRedirect, "/v1/./", false},
+		{"/v1/.", http.StatusTemporaryRedirect, "/v1", false},
+		{"/.", http.StatusTemporaryRedirect, "", false},
+		{"/.", http.StatusTemporaryRedirect, "//elsewhere.example/", false},
+		{"/.", http.StatusTemporaryRedirect, "https://elsewhere.example/", false},
+		{"/v1/", http.StatusTemporaryRedirect, "/v1/", false},
+		{"/nothing", http.StatusTemporaryRedirect, "/", false},
+	} {
+		r := &reported{TB: t}
+		h := apitest.Handler(r, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			if c.location != "" {
+				w.Header().Set("Location", c.location)
+			}
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.WriteHeader(c.status)
+		}))
+		h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, c.path, nil))
+		if got := len(r.errs) == 0; got != c.ok {
+			t.Errorf("GET %s answered %d to %q: taken %v, want %v (%q)", c.path, c.status, c.location, got, c.ok, r.errs)
+		}
+	}
+}
+
 // A fetch that asks for a range is answered 206 with the bytes from there on
 // and a Content-Range in its one form, or 200 with the whole body
 // (PROTOCOL.md §11.12): a 206 without one, or with one of another form, is no
