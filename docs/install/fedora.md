@@ -9,16 +9,10 @@ Install `dromas` from the dnf repository at packages.dromas.dev, or from a relea
 1. Add the repository:
 
    ```sh
-   sudo tee /etc/yum.repos.d/dromas.repo > /dev/null <<'EOF'
-   [dromas]
-   name=Dromas
-   baseurl=https://packages.dromas.dev/rpm/stable
-   enabled=1
-   gpgcheck=1
-   repo_gpgcheck=1
-   gpgkey=https://packages.dromas.dev/dromas.asc
-   EOF
+   sudo dnf config-manager addrepo --from-repofile=https://packages.dromas.dev/rpm/stable/dromas.repo
    ```
+
+   On dnf 4 (RHEL 9, AlmaLinux 9 and Rocky Linux 9), run `sudo dnf config-manager --add-repo https://packages.dromas.dev/rpm/stable/dromas.repo` instead.
 
 2. Install `dromas`. dnf prints the signing key's fingerprint when dnf imports the key. Accept the key only if the fingerprint is `ED32 6F51 D394 BA2D 5EE1  CFC7 2608 D731 31C7 9706`.
 

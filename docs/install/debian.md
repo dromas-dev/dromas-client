@@ -17,13 +17,7 @@ Install `dromas` from the apt repository at packages.dromas.dev, or from a relea
 2. Add the repository:
 
    ```sh
-   sudo tee /etc/apt/sources.list.d/dromas.sources > /dev/null <<'EOF'
-   Types: deb
-   URIs: https://packages.dromas.dev/deb
-   Suites: stable
-   Components: main
-   Signed-By: /etc/apt/keyrings/dromas.asc
-   EOF
+   sudo curl -fsSL https://packages.dromas.dev/deb/dromas.sources -o /etc/apt/sources.list.d/dromas.sources
    ```
 
 3. Install `dromas`:
