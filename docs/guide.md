@@ -59,7 +59,7 @@ A message you receive goes to one of three directories:
 | `held/` | Messages that passed every check, from unknown senders, until you run `dromas peer allow` or `dromas peer block` |
 | `refused/` | Messages that failed a check: never delivered, kept as evidence, and the sender is not told |
 
-The mailbox keeps each message in plaintext, and keeps each message you send in `sent/`. The mailbox never deletes a message: delete a file to forget a message. `dromas refused list` says why each message was refused, and `dromas refused rm` empties `refused/`. The files in `refused/` keep what the server sent.
+The mailbox keeps each message in plaintext, a file each, and keeps each message you send in `sent/`. dromas never deletes these files: managing them is up to you. `dromas refused list` says why each message was refused, and `dromas refused rm` empties `refused/`. The files in `refused/` keep what the server sent.
 
 Anything that runs as your user can put a file in `inbox/` or `held/` that reads as a delivered message, and no file mode stops that. Give an agent's file tools read access to `inbox-dir`, not write access.
 
