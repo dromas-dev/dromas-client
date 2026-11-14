@@ -1614,15 +1614,18 @@ This table gives each security property, the party that the property holds again
 | Property | Against whom | Holds while | Rests on |
 |---|---|---|---|
 | Confidentiality of a message's content | a party that holds the ciphertext, the server included, and that party with a quantum computer later (Section 15.10) | the prekey that the message is sealed to has not leaked (Section 15.5) | the confidentiality and integrity of the age v1 file format [age] with one `mlkem768x25519` stanza (Section 9.4), whose stanza is HPKE [RFC 9180] with the MLKEM768-X25519 KEM [draft-ietf-hpke-pq-03], the X-Wing construction [X-Wing] |
-| Confidentiality against a substituted prekey | an active attacker, the server included | the address reached the sender intact (Section 15.1), the mailbox's signing keys are not stolen (Section 15.5), and no quantum computer can forge a signature (Section 15.10). A hostile server can still serve a stale prekey (Section 15.2) | EUF-CMA of the signer's key type under SSHSIG (Sections 3.2, 5, 6); second-preimage resistance of SHA-384 (Section 4.2) |
-| Forward secrecy | a party that steals the mailbox's keys later | from the deletion of every prekey that the message could be encrypted to, which Section 15.3 bounds. A server that accepts no pass from the mailbox holds that deletion back (Section 15.3) | a client's real deletion of retired prekeys (Sections 12.4, 15.3); the first row |
-| Sender authentication | any party without the signer's private key, the server and the recipient included | the sender's signing keys are not stolen (Section 15.5), and no quantum computer can forge a signature (Section 15.10). A revocation ends a stolen key only at a reader that has seen the revocation (Section 15.6) | EUF-CMA of Ed25519 [BCJZ] and of ECDSA P-256, under SSHSIG and in a certificate's own signature (Sections 3.1, 3.2, 5.2); collision resistance of SHA-512 (Section 3.2); second-preimage resistance of SHA-384 (Section 4.2); sign-then-encrypt [ADR] |
+| Confidentiality against a substituted prekey | an active attacker, the server included | the address reached the sender intact (Section 15.1), the mailbox's signing keys are not stolen (Section 15.5), and no quantum computer can forge a signature (Section 15.10). | EUF-CMA of the signer's key type under SSHSIG (Sections 3.2, 5, 6); second-preimage resistance of SHA-384 (Section 4.2) |
+| Forward secrecy | a party that steals the mailbox's keys later | from the deletion of every prekey that the message could be encrypted to, which Section 15.3 bounds. | a client's real deletion of retired prekeys (Sections 12.4, 15.3); the first row |
+| Sender authentication | any party without the signer's private key, the server and the recipient included | the sender's signing keys are not stolen (Section 15.5), and no quantum computer can forge a signature (Section 15.10). | EUF-CMA of Ed25519 [BCJZ] and of ECDSA P-256, under SSHSIG and in a certificate's own signature (Sections 3.1, 3.2, 5.2); collision resistance of SHA-512 (Section 3.2); second-preimage resistance of SHA-384 (Section 4.2); sign-then-encrypt [ADR] |
 | Recipient binding (no surreptitious forwarding) | a recipient that forwards a signed message to a third mailbox as a message from the sender | sender authentication holds | the namespace and `to`, both inside the signature (Sections 9.2, 15.4; Section 12.3, checks 5 and 6) [Davis] [ADR] |
 | Key-compromise impersonation resistance | a party that holds the mailbox's stolen prekey | sender authentication holds | the signature, by a key apart from the prekey (Section 15.4) [ADR] |
-| Replay and duplicates | the server | the mailbox runs in one place, and keeps its replay set (Section 15.9). A mailbox that loses its replay set has failed, and a server can deliver again a message that the mailbox accepted before the loss (Section 15.9) | checks 6, 8 and 9 (Section 12.3), with `sent_at` and `msg_id` inside the signature |
-| Delivery, and proof of delivery | the server | not provided (Sections 15.2, 15.9). A sender that keeps its ciphertext learns, on the server's word, whether the recipient's mailbox still holds the message (Section 15.8) | none |
-| Deniability | a recipient | not provided (Section 15.4) | none |
-| Metadata | the server, and the party that terminates TLS for the server | not provided (Sections 15.1, 15.2, 15.8) | none |
+| Replay and duplicates | the server | the mailbox runs in one place, and keeps its replay set (Section 15.9). | checks 6, 8 and 9 (Section 12.3), with `sent_at` and `msg_id` inside the signature |
+
+**Not provided:**
+
+- delivery, and proof of delivery, against the server (Sections 15.2, 15.9);
+- deniability toward a recipient (Section 15.4);
+- metadata privacy from the server, and from the party that terminates TLS for it (Sections 15.1, 15.2, 15.8).
 
 ### 15.1. Threat model
 
