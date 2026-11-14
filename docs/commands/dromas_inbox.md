@@ -4,8 +4,8 @@ messages recv delivered: list, show, clear-failed
 
 ### Synopsis
 
-recv keeps each message it delivers in inbox/, as the "message" line it printed,
-until you delete the file: deleting the file forgets the message.
+recv keeps each message it delivers as a file in inbox/, holding the "message"
+line it printed. dromas never deletes these files: managing them is up to you.
 
 These commands print those lines again, or clear what dromas status reports
 about --exec programs that gave up. They call no server.

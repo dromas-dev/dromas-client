@@ -68,7 +68,7 @@ dromas recv --wait 10m           # the same, waiting up to 10 minutes for messag
 dromas recv --follow             # the same without end, in the foreground under a service manager: one process for each mailbox
 dromas recv --follow --exec bot -- --quiet   # and run bot, with no shell, for each message, its line on stdin: recv --help says how it retries
 dromas recv --headers            # who wrote and when, without the text they chose: then dromas inbox show <id>
-dromas inbox list                # the messages inbox/ keeps, a line each as recv printed it: delete a file to forget one
+dromas inbox list                # the messages inbox/ keeps, a line each as recv printed it
 dromas held list                 # messages held from senders you have not written to, named or allowed
 dromas peer allow <link>         # allow a sender, and print what was held from it
 dromas peer block <link>         # drop a sender's messages, here and at the server

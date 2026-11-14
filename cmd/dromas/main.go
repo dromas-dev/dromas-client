@@ -40,7 +40,8 @@ flag overrides an environment variable, and an environment variable overrides
 the file. dromas config prints every setting and where it came from.
 
 inbox/ keeps each message received, and sent/ each message sent, with the
-server's receipt. dromas deletes neither: delete a file to forget a message.
+server's receipt, a file each. dromas never deletes these files: managing them
+is up to you.
 
 The server URL is https, or http only to a server on this machine, and dromas
 never follows a redirect.
