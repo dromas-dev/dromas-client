@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -316,31 +317,44 @@ func TestInitOfAnIdentityInAnAgentWritesNoKey(t *testing.T) {
 	}
 }
 
-// A renewal that failed as identity_locked is not held to renewRetry, as one
-// a server refused is: the next Receive tries it again, and says it failed as
-// identity_locked again while the key is locked, and renews once it has the
-// key, a minute later.
-func TestARenewalTheKeyWasLockedForIsTriedAtTheNextReceive(t *testing.T) {
+// A mailbox under a certificate whose identity's key is locked renews under
+// the certificate it holds, at each Receive that is due, with no new working
+// key (PROTOCOL.md §12.7), and goes on polling under it once the prekey made
+// with that certificate is deleted; once it has the key again, its next
+// renewal is under a new certificate.
+func TestALockedIdentityRenewsUnderTheCertificateItHolds(t *testing.T) {
 	t.Parallel()
 	e := newWorkEnv(t)
 	b := e.mailbox()
 	encrypt(t, b, "correct horse")
-	before := numberOf(t, b)
-	e.clock.Add(25 * time.Hour)
+	first := numberOf(t, b)
 	opt := e.opts()
 	opt.Passphrase = func(string) ([]byte, error) { return nil, client.ErrNoPassphrase }
-	for i := range 2 {
-		res, err := reopen(t, b, opt).Receive(t.Context())
-		var locked *client.IdentityLockedError
-		if err != nil || !errors.As(res.RenewErr, &locked) {
-			t.Fatalf("receive %d with the key locked: %v; its renewal: %v", i+1, err, res.RenewErr)
+	last := first
+	for i := range 3 {
+		e.clock.Add(8 * 24 * time.Hour)
+		m := reopen(t, b, opt)
+		res, err := m.Receive(t.Context())
+		if err != nil || res.RenewErr != nil || numberOf(t, b) == last {
+			t.Fatalf("receive %d with the key locked: %v; its renewal: %v; serial %d, %d before", i+1, err, res.RenewErr, numberOf(t, b), last)
 		}
-		e.clock.Add(time.Minute)
+		last = numberOf(t, b)
+		st, err := m.Status(t.Context())
+		if err != nil || st.CertificateSerial != first || st.PrekeySerial != last {
+			t.Fatalf("status after renewal %d: %v; certificate %d, prekey %d; want certificate %d, prekey %d", i+1, err, st.CertificateSerial, st.PrekeySerial, first, last)
+		}
+	}
+	if _, err := os.Stat(b.Path("prekeys", strconv.FormatUint(first, 10)+".agekey")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("prekey %d is kept 24 days on: the test reaches no deletion", first)
 	}
 	opt.Passphrase = func(string) ([]byte, error) { return []byte("correct horse"), nil }
-	res, err := reopen(t, b, opt).Receive(t.Context())
-	if err != nil || res.RenewErr != nil || numberOf(t, b) == before {
-		t.Errorf("receive with the key, a minute after a renewal it was locked for: %v; its renewal: %v; serial %d, %d before", err, res.RenewErr, numberOf(t, b), before)
+	e.clock.Add(8 * 24 * time.Hour)
+	m := reopen(t, b, opt)
+	if res, err := m.Receive(t.Context()); err != nil || res.RenewErr != nil {
+		t.Fatalf("receive with the key: %v; its renewal: %v", err, res.RenewErr)
+	}
+	if st, err := m.Status(t.Context()); err != nil || st.CertificateSerial == first || st.CertificateSerial != st.PrekeySerial {
+		t.Errorf("status after a renewal with the key: %v; certificate %d, prekey %d", err, st.CertificateSerial, st.PrekeySerial)
 	}
 }
 

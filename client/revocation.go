@@ -706,7 +706,7 @@ func (b *Mailbox) renewAndRevoke(ctx context.Context) (*Remedy, error) {
 	if err := certificatesOwn(st.certify || made || st.unread != nil && published == 0); err != nil {
 		return nil, err
 	}
-	st.certify = true
+	st.certify, st.fresh = true, true
 	below, _, err := b.nextNumber(st, true)
 	if err != nil {
 		return nil, err
