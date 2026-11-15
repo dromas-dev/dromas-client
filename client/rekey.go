@@ -424,6 +424,16 @@ func (b *Mailbox) nextNumber(st *ownRead, unused bool) (uint64, *protocol.Prekey
 	for _, k := range adopted {
 		known = max(known, k)
 	}
+	// Above every certificate the mailbox holds: one its identity holder gave
+	// may be above all it has published (InstallCertificate), and a working
+	// key made at its serial would replace it.
+	held, err := b.heldCertificates()
+	if err != nil {
+		return 0, nil, err
+	}
+	if len(held) > 0 {
+		known = max(known, held[len(held)-1])
+	}
 	// A number an earlier attempt took, and that nothing has passed since,
 	// is kept: its statement is the one sent again, and a key made for it
 	// and never signed is used. Any other renewal takes a new number, from

@@ -116,19 +116,14 @@ func (b *Mailbox) heldWorker() (*sign.Work, *protocol.Certificate, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	names, err := matching(b.path("work", "*-cert.pub"))
+	ks, err := b.heldCertificates()
 	if err != nil {
 		return nil, nil, err
 	}
-	var ks []uint64
-	for _, name := range names {
-		k, err := strconv.ParseUint(strings.TrimSuffix(filepath.Base(name), "-cert.pub"), 10, 64)
-		if err == nil && k > 0 && k >= floor {
-			ks = append(ks, k)
-		}
-	}
-	slices.Sort(ks)
 	for _, k := range slices.Backward(ks) {
+		if k == 0 || k < floor {
+			break
+		}
 		w, c, err := b.worker(k)
 		if err != nil || c.NotBefore().After(b.now().Add(-protocol.MaxSkew)) || b.ownRevokes(k) {
 			continue
@@ -136,6 +131,23 @@ func (b *Mailbox) heldWorker() (*sign.Work, *protocol.Certificate, error) {
 		return w, c, nil
 	}
 	return nil, nil, errors.New("this mailbox holds no certificate that can sign a renewal")
+}
+
+// heldCertificates is the serial of every certificate the mailbox holds a
+// working key's certificate file of, lowest first.
+func (b *Mailbox) heldCertificates() ([]uint64, error) {
+	names, err := matching(b.path("work", "*-cert.pub"))
+	if err != nil {
+		return nil, err
+	}
+	var ks []uint64
+	for _, name := range names {
+		if k, err := strconv.ParseUint(strings.TrimSuffix(filepath.Base(name), "-cert.pub"), 10, 64); err == nil {
+			ks = append(ks, k)
+		}
+	}
+	slices.Sort(ks)
+	return ks, nil
 }
 
 // worker returns working key n's signer under its certificate, checked

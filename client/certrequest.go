@@ -8,8 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -161,8 +159,10 @@ func (b *Mailbox) underCertificates() error {
 // highestCertificate is the highest certificate serial this mailbox knows of
 // for itself (PROTOCOL.md §5.2), from st, its read of itself: the
 // certificate of the statement it published last, the one its server serves,
-// each certificate it holds, and the highest serial its identity has revoked,
-// which it returns too.
+// each certificate it holds, the highest number a renewal has taken, which a
+// working key made for it would be numbered by, and the highest serial its
+// identity has revoked, which it returns too. So no certificate its holder
+// gives shares a serial with a working key the mailbox made.
 func (b *Mailbox) highestCertificate(st *ownRead) (highest, revoked uint64, err error) {
 	if highest, err = b.publishedRank(); err != nil {
 		return 0, 0, err
@@ -170,15 +170,18 @@ func (b *Mailbox) highestCertificate(st *ownRead) (highest, revoked uint64, err 
 	if st.served != nil {
 		highest = max(highest, st.served.Rank())
 	}
-	names, err := matching(b.path("work", "*-cert.pub"))
+	held, err := b.heldCertificates()
 	if err != nil {
 		return 0, 0, err
 	}
-	for _, name := range names {
-		if k, err := strconv.ParseUint(strings.TrimSuffix(filepath.Base(name), "-cert.pub"), 10, 64); err == nil {
-			highest = max(highest, k)
-		}
+	if len(held) > 0 {
+		highest = max(highest, held[len(held)-1])
 	}
+	begun, err := b.highestBegun()
+	if err != nil {
+		return 0, 0, err
+	}
+	highest = max(highest, begun)
 	own, err := b.revokedCerts(b.id.Address())
 	if err != nil {
 		return 0, 0, err
@@ -304,4 +307,16 @@ func (b *Mailbox) checkInstalled(line []byte) (*protocol.Certificate, error) {
 		return nil, refuse("the certificate began less than an hour before this machine's clock, so this mailbox uses it only from %s (PROTOCOL.md §12.4): install it again then", from.UTC().Format(protocol.TimeLayout))
 	}
 	return cert, nil
+}
+
+// installedAt reports whether working key n is the key of the certificate
+// request the mailbox holds: one InstallCertificate kept, its request not yet
+// cleared.
+func (b *Mailbox) installedAt(n uint64) bool {
+	asked, err := os.ReadFile(b.path("work", "request.pub")) //nolint:gosec // a path inside the mailbox's own directory
+	if err != nil {
+		return false
+	}
+	at, err := os.ReadFile(b.workStem(n) + ".pub") //nolint:gosec // a path inside the mailbox's own directory
+	return err == nil && bytes.Equal(bytes.TrimSpace(asked), bytes.TrimSpace(at))
 }

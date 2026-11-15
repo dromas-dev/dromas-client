@@ -1201,7 +1201,13 @@ func (b *Mailbox) begin(serial uint64) error {
 			return err
 		}
 		if rec == nil {
-			for _, name := range []string{b.path("prekeys", strconv.FormatUint(old, 10)+".agekey"), b.workStem(old), b.workStem(old) + ".pub", b.workStem(old) + "-cert.pub"} {
+			names := []string{b.path("prekeys", strconv.FormatUint(old, 10)+".agekey")}
+			// A certificate its identity holder gave at that serial stays
+			// (InstallCertificate): only its request's working key is in it.
+			if !b.installedAt(old) {
+				names = append(names, b.workStem(old), b.workStem(old)+".pub", b.workStem(old)+"-cert.pub")
+			}
+			for _, name := range names {
 				if err := removeIfExists(name); err != nil {
 					return err
 				}
