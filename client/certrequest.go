@@ -161,8 +161,7 @@ func (b *Mailbox) underCertificates() error {
 // certificate of the statement it published last, the one its server serves,
 // each certificate it holds, the highest number a renewal has taken, which a
 // working key made for it would be numbered by, and the highest serial its
-// identity has revoked, which it returns too. So no certificate its holder
-// gives shares a serial with a working key the mailbox made.
+// identity has revoked, which it returns too.
 func (b *Mailbox) highestCertificate(st *ownRead) (highest, revoked uint64, err error) {
 	if highest, err = b.publishedRank(); err != nil {
 		return 0, 0, err
@@ -198,11 +197,12 @@ func (b *Mailbox) highestCertificate(st *ownRead) (highest, revoked uint64, err 
 // certificate is checked by every rule of §12.7 step 3 before anything is
 // kept: every rule of §5.2 at this machine's clock, a serial no lower than
 // the request's lowest, and the request's working key. It is refused, too,
-// where it began less than an hour before the clock (§12.4), where the
-// mailbox's identity has revoked it, and where the identity has revoked
-// certificates since the request was made: the request's working key was in
-// the mailbox then, so it may be stolen with the rest (§12.7, the remedy's
-// step 2), and a new request is made.
+// where it began less than an hour before the clock (§12.4), and where the
+// identity has revoked certificates since the request was made: the
+// request's working key was in the mailbox then, so it may be stolen with the
+// rest (§12.7, the remedy's step 2), and a new request is made. A revocation
+// of this certificate is among those, since the request's lowest serial is
+// above every revocation the mailbox kept when it made it.
 //
 // The certificate and its working key are kept as work/<serial> first, and
 // the request goes once the renewal is taken: run again, it does the same,
@@ -297,9 +297,8 @@ func (b *Mailbox) checkInstalled(line []byte) (*protocol.Certificate, error) {
 	if err != nil {
 		return nil, err
 	}
-	if own != nil && own.Through >= cert.Serial() {
-		return nil, refuse("this mailbox's identity has revoked every certificate through serial %d, this one among them: dromas cert request makes a new request", own.Through)
-	}
+	// The request's lowest serial is above every revocation the mailbox kept
+	// when it made it, so a revocation of this certificate is one kept since.
 	if own != nil && own.Through > req.RevokedThrough {
 		return nil, refuse("this mailbox's identity revoked its certificates after the request was made, so the request's working key may be stolen with the rest: dromas cert request makes a new request")
 	}

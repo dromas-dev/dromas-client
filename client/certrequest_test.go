@@ -3,11 +3,13 @@ package client_test
 import (
 	"bytes"
 	"errors"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -378,5 +380,84 @@ func TestACertificateInstallKilledAtEachStepFinishesWhenRunAgain(t *testing.T) {
 			}
 			whole(t, e, x, a)
 		})
+	}
+}
+
+// A held certificate signs a renewal only from an hour after it began
+// (PROTOCOL.md §12.4): with the clock set back past that, a renewal without
+// the identity fails as identity_locked.
+func TestAHeldCertificateBegunLessThanAnHourAgoSignsNoRenewal(t *testing.T) {
+	t.Parallel()
+	e := newWorkEnv(t)
+	b, _, _ := keptElsewhere(t, e)
+	e.clock.Add(-30 * time.Minute)
+	_, err := b.Rekey(t.Context())
+	var locked *client.IdentityLockedError
+	if !errors.As(err, &locked) {
+		t.Fatalf("a renewal under a certificate begun 30 minutes before the clock: %v", err)
+	}
+}
+
+// A renewal abandoned at the number its holder then gives the certificate
+// leaves the certificate it installs: the next renewal's cleanup of that
+// number keeps it (installedAt).
+func TestARenewalAbandonedAtTheCertificatesSerialLeavesTheCertificate(t *testing.T) {
+	t.Parallel()
+	if testing.Short() {
+		t.Skip("long: -short skips it; scripts/check.sh full and CI run it")
+	}
+	e := newWorkEnv(t)
+	b, holder, _ := keptElsewhere(t, e)
+	r, err := b.RequestCertificate(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	crash(t, e, b, "rekey", "renewal begun", protocol.Address{})
+	x, err := client.Open(b.Dir(), e.opts())
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, ok := x.Record(t, "renewal")
+	if !ok {
+		t.Fatal("the crashed renewal recorded no number")
+	}
+	n, err := strconv.ParseUint(string(raw), 10, 64)
+	if err != nil || n < r.LowestSerial {
+		t.Fatalf("the crashed renewal's number %q, below the request's lowest %d: %v", raw, r.LowestSerial, err)
+	}
+	if _, err := x.InstallCertificate(t.Context(), certify(t, x, holder, r, n, e.clock.Now())); err != nil || signsUnder(t, x) != n {
+		t.Fatalf("install at the abandoned renewal's number %d: %v; under %d", n, err, signsUnder(t, x))
+	}
+}
+
+// A renewal under a held certificate that its server refused is sent again as
+// it was signed, at its own serial, once the server takes it (AGENTS.md, a
+// prekey serial is signed once): its working key is found by its
+// certificate's serial.
+func TestARenewalUnderAHeldCertificateIsSentAgainAsSigned(t *testing.T) {
+	t.Parallel()
+	e := newWorkEnv(t)
+	b, _, _ := keptElsewhere(t, e)
+	first := numberOf(t, b)
+	var refused atomic.Bool
+	e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
+		if r.Method == http.MethodPut && r.URL.Path == mailboxPath(b)+"/prekey" && refused.CompareAndSwap(false, true) {
+			http.Error(w, "", http.StatusServiceUnavailable)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+	e.clock.Add(2 * time.Second)
+	if _, err := b.Rekey(t.Context()); err == nil {
+		t.Fatal("a renewal its server refused went through")
+	}
+	raw, ok := b.Record(t, "renewal")
+	if !ok {
+		t.Fatal("the refused renewal left no number")
+	}
+	e.clock.Add(time.Hour)
+	p, err := b.Rekey(t.Context())
+	if err != nil || strconv.FormatUint(p.Serial, 10) != string(raw) || p.Rank != first {
+		t.Fatalf("the renewal again: %+v, %v; want serial %s under certificate %d", p, err, raw, first)
 	}
 }

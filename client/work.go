@@ -107,23 +107,16 @@ func (b *Mailbox) certifiedSigner(serial uint64, life time.Duration, st *ownRead
 }
 
 // heldWorker is the newest working key this mailbox holds whose certificate
-// can sign a renewal: at or above the certificate of the statement it
-// published last, valid at the clock, begun protocol.MaxSkew or more before
-// it (PROTOCOL.md §12.4), and covered by none of the mailbox's own revocation
-// of its certificates.
+// can sign a renewal: valid at the clock, begun protocol.MaxSkew or more
+// before it (PROTOCOL.md §12.4), and covered by none of the mailbox's own
+// revocation of its certificates. The mailbox holds none below the
+// certificate in use once a renewal under it is taken (dropWork).
 func (b *Mailbox) heldWorker() (*sign.Work, *protocol.Certificate, error) {
-	floor, err := b.publishedRank()
-	if err != nil {
-		return nil, nil, err
-	}
 	ks, err := b.heldCertificates()
 	if err != nil {
 		return nil, nil, err
 	}
 	for _, k := range slices.Backward(ks) {
-		if k == 0 || k < floor {
-			break
-		}
 		w, c, err := b.worker(k)
 		if err != nil || c.NotBefore().After(b.now().Add(-protocol.MaxSkew)) || b.ownRevokes(k) {
 			continue

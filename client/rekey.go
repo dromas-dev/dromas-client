@@ -450,18 +450,6 @@ func (b *Mailbox) nextNumber(st *ownRead, unused bool) (uint64, *protocol.Prekey
 		}
 		known = begun // the new number is above the spent one too
 	}
-	// A new number is above every certificate the mailbox holds too: one its
-	// identity holder gave may be above all it has published
-	// (InstallCertificate), and a working key made at its serial would
-	// replace it. A waiting statement's own working key is among them, so
-	// this bounds only a new number.
-	held, err := b.heldCertificates()
-	if err != nil {
-		return 0, nil, err
-	}
-	if len(held) > 0 {
-		known = max(known, held[len(held)-1])
-	}
 	if err := noneAbove(known); err != nil {
 		return 0, nil, err
 	}
