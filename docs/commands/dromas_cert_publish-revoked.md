@@ -46,5 +46,5 @@ dromas cert publish-revoked [<file>]
 
 ### SEE ALSO
 
-* [dromas cert](dromas_cert.md)	 - this mailbox's certificates: switch, revoke-earlier, publish-revoked
+* [dromas cert](dromas_cert.md)	 - this mailbox's certificates: switch, request, install, revoke-earlier, publish-revoked
 

@@ -1,12 +1,16 @@
 ## dromas cert
 
-this mailbox's certificates: switch, revoke-earlier, publish-revoked
+this mailbox's certificates: switch, request, install, revoke-earlier, publish-revoked
 
 ### Synopsis
 
 A mailbox's identity signs what the mailbox says, unless the mailbox was created
 with dromas init --offline or switched with dromas cert switch. Then the
 identity certifies a working key with each prekey, and the working key signs.
+
+The identity can be kept on another machine. The mailbox then renews under the
+certificate it holds, and dromas cert request and dromas cert install get each
+new certificate from the identity's holder.
 
 If a mailbox's working key may have been stolen, revoke every certificate before
 a new one with dromas cert revoke-earlier: the address continues. A copy of the
@@ -48,7 +52,9 @@ dromas cert
 ### SEE ALSO
 
 * [dromas](dromas.md)	 - 
+* [dromas cert install](dromas_cert_install.md)	 - check the certificate of the last request, and renew under it
 * [dromas cert publish-revoked](dromas_cert_publish-revoked.md)	 - send a revocation of certificates to the server again
+* [dromas cert request](dromas_cert_request.md)	 - make a new working key for the identity's holder to certify
 * [dromas cert revoke-earlier](dromas_cert_revoke-earlier.md)	 - revoke every certificate before a new one, then publish a new prekey under it
 * [dromas cert switch](dromas_cert_switch.md)	 - renew under a certificate, permanently; the address in full confirms it
 

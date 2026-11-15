@@ -52,8 +52,8 @@ func TestEveryCommandWaitsForTheLock(t *testing.T) {
 	for i, c := range append(refused, run...) {
 		t.Run(c.name, func(t *testing.T) {
 			e := newEnv(t)
-			// The remedy is a certified mailbox's.
-			e.working = c.name == "RevokeEarlier" || c.name == "RenewAndRevoke"
+			// The remedy and a certificate's request are a certified mailbox's.
+			e.working = c.name == "RevokeEarlier" || c.name == "RenewAndRevoke" || c.name == "RequestCertificate" || c.name == "InstallCertificate"
 			a, peer := e.mailbox(), e.mailbox()
 			rec, err := peer.Revocation(t.Context())
 			if err != nil {
@@ -78,6 +78,12 @@ func TestEveryCommandWaitsForTheLock(t *testing.T) {
 			}
 			refused, run := lockingCommands(t.Context(), x, peer, rec, e.srv.AdoptKey("acct"))
 			f := append(refused, run...)[i].f
+			if c.name == "InstallCertificate" {
+				// A certificate for a request made first, which its identity, here,
+				// makes.
+				line := requestedCertificate(t, e, x)
+				f = func() error { _, err := x.InstallCertificate(t.Context(), line); return err }
+			}
 			release := holdState(t, a) // another command's
 			done := make(chan error, 1)
 			go func() { done <- f() }()
@@ -349,7 +355,9 @@ func waits(b, c *client.Mailbox, rec *protocol.Revocations, opt client.Options) 
 			_, err := b.RenewUnderCertificate(ctx)
 			return err
 		},
-		"Send": func(ctx context.Context) error { _, err := b.Send(ctx, c.Address(), "waits"); return err },
+		"RequestCertificate": func(ctx context.Context) error { _, err := b.RequestCertificate(ctx); return err },
+		"InstallCertificate": func(ctx context.Context) error { _, err := b.InstallCertificate(ctx, nil); return err },
+		"Send":               func(ctx context.Context) error { _, err := b.Send(ctx, c.Address(), "waits"); return err },
 		"SendWith": func(ctx context.Context) error {
 			_, err := b.SendWith(ctx, c.Address(), "waits", client.Fields{})
 			return err
@@ -726,4 +734,15 @@ func TestStatusWaitsForACommandThatWrites(t *testing.T) {
 	if _, err := x.Status(t.Context()); err != nil {
 		t.Fatalf("status beside another reading: %v", err)
 	}
+}
+
+// requestedCertificate is a request mailbox b makes, under a certificate,
+// and the certificate its identity, here, makes for it, as its holder would.
+func requestedCertificate(t *testing.T, e *env, b *client.Mailbox) []byte {
+	t.Helper()
+	r, err := b.RequestCertificate(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return certify(t, b, identityKey(t, b), r, r.LowestSerial, e.clock.Now())
 }

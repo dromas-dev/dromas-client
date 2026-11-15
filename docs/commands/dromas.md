@@ -36,7 +36,7 @@ dromas
 * [dromas addr](dromas_addr.md)	 - print this mailbox's link, to give to whoever will write to it
 * [dromas agent](dromas_agent.md)	 - the mailbox's own ssh-agent for the identity's key: start, add
 * [dromas alias](dromas_alias.md)	 - names for peers, usable in place of a link: add, rm, list
-* [dromas cert](dromas_cert.md)	 - this mailbox's certificates: switch, revoke-earlier, publish-revoked
+* [dromas cert](dromas_cert.md)	 - this mailbox's certificates: switch, request, install, revoke-earlier, publish-revoked
 * [dromas config](dromas_config.md)	 - print every setting and where it came from
 * [dromas held](dromas_held.md)	 - messages from unknown senders, held to allow or block: list
 * [dromas inbox](dromas_inbox.md)	 - messages recv delivered: list, show, clear-failed
