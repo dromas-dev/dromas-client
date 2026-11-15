@@ -786,7 +786,7 @@ func (b *Mailbox) publish(ctx context.Context, path string, req any, n uint64) (
 // certificate the server now holds this mailbox to, as the pass the mailbox keeps,
 // or with none given, no pass; and n on the record of a statement the mailbox
 // did not make, which its server took n above (NotMade.RenewedAbove). Then the
-// working keys older than n go.
+// working keys below n's certificate go.
 func (b *Mailbox) recordTaken(n uint64, pass string, at time.Time) error {
 	var rec []byte
 	if pass != "" {
@@ -837,7 +837,14 @@ func (b *Mailbox) recordTaken(n uint64, pass string, at time.Time) error {
 		return err
 	}
 	step("renewal recorded")
-	return b.dropWork(n)
+	rank, err := b.rankOf(n)
+	if err != nil {
+		return err
+	}
+	if rank == 0 {
+		rank = n
+	}
+	return b.dropWork(rank)
 }
 
 // boundFolders are the directories the state file's record of them binds
@@ -1092,16 +1099,16 @@ func (b *Mailbox) prekeys() (ns []uint64, err error) {
 
 // makePrekey makes prekey serial, a NEW key valid for the mailbox's
 // prekey lifetime ([Mailbox.PrekeyLifetime]), and its statement, unless its
-// statement is already signed: signed by the identity, or with certify by a
-// NEW working key under a new certificate, which runs for the longest the
-// server takes (certificateLifetime). The number is
+// statement is already signed: signed by the identity, or, where the renewal
+// is under a certificate (st.certify), by the signer certifiedSigner gives.
+// The number is
 // recorded as the renewal under way before anything is made, and the
 // statement, with when it was signed, once it is: so a key or a working key
 // that no statement names was never sent, and a key an earlier attempt made
 // and never signed is used, but never a working key, whose certificate began
 // when that attempt ran (#197). A statement never outlives the certificate
 // it is signed under.
-func (b *Mailbox) makePrekey(ctx context.Context, serial uint64, certify bool) (*protocol.Prekey, error) {
+func (b *Mailbox) makePrekey(ctx context.Context, serial uint64, st *ownRead) (*protocol.Prekey, error) {
 	if rec, err := b.prekeyOf(serial); err != nil || rec != nil {
 		if err != nil {
 			return nil, err
@@ -1112,8 +1119,9 @@ func (b *Mailbox) makePrekey(ctx context.Context, serial uint64, certify bool) (
 	if err != nil {
 		return nil, err
 	}
+	certify := st.certify
 	var certLife time.Duration
-	if certify {
+	if certify && st.under == 0 {
 		if certLife, err = b.certificateLifetime(ctx); err != nil {
 			return nil, err
 		}
@@ -1126,7 +1134,7 @@ func (b *Mailbox) makePrekey(ctx context.Context, serial uint64, certify bool) (
 	var by signer = b.identity
 	var cert *protocol.Certificate
 	if certify {
-		if by, cert, err = b.makeWork(serial, certLife); err != nil {
+		if by, cert, err = b.certifiedSigner(serial, certLife, st); err != nil {
 			return nil, err
 		}
 		step("working key made")
@@ -1193,7 +1201,13 @@ func (b *Mailbox) begin(serial uint64) error {
 			return err
 		}
 		if rec == nil {
-			for _, name := range []string{b.path("prekeys", strconv.FormatUint(old, 10)+".agekey"), b.workStem(old), b.workStem(old) + ".pub", b.workStem(old) + "-cert.pub"} {
+			names := []string{b.path("prekeys", strconv.FormatUint(old, 10)+".agekey")}
+			// A certificate its identity holder gave at that serial stays
+			// (InstallCertificate): only its request's working key is in it.
+			if !b.installedAt(old) {
+				names = append(names, b.workStem(old), b.workStem(old)+".pub", b.workStem(old)+"-cert.pub")
+			}
+			for _, name := range names {
 				if err := removeIfExists(name); err != nil {
 					return err
 				}

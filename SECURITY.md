@@ -75,9 +75,9 @@ Each entry is a security question that is already decided, and under it, where o
 - A server can withhold a revocation from a reader that has never seen the revocation, and the protocol has no key transparency (§15.6; #572, #311).
   - A reader keeps every revocation it was shown, and a record that the owner hands over out of band settles the question. Key transparency fits inside version 1.
 - A stolen working key signs messages that every reader accepts, through any server, until the key's certificate ends, at most 45 days and an hour after the certificate began (§15.5; #716).
-  - Only a revocation of certificates ends the key at a reader, once the reader sees the revocation, and `dromas cert revoke-earlier` publishes one. A renewal ends the stolen key's passes and prekey statements, at the server and at each sender that sees the new certificate, and ends nothing at a reader.
+  - Only a revocation of certificates ends the key at a reader, once the reader sees the revocation. `dromas cert revoke-earlier` publishes one, and so does `dromas cert publish-revoked` with a record that the identity's holder made. A renewal ends the stolen key's passes and prekey statements, at the server and at each sender that sees the new certificate, and ends nothing at a reader.
 - A party that copies a mailbox's identity key signs as the mailbox until the owner revokes the address (§15.5; #571, #594).
-  - Revoking the address is the one remedy, and is permanent. The owner can keep the identity key in the mailbox's agent or behind a passphrase, and a mailbox whose identity is held on another machine is #459, open.
+  - Revoking the address is the one remedy, and is permanent. The owner can keep the identity key in the mailbox's agent, behind a passphrase, or on another machine that certifies each working key (`docs/guide.md`; #459).
 
 **Forward secrecy and the signature**
 - Forward secrecy is per prekey, as in X3DH without a one-time prekey, and bounded by how often a mailbox checks in (§15.3; #575).

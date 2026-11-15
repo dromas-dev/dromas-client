@@ -119,7 +119,9 @@ func TestAPrekeyOnAFinishedMailboxWritesNoKey(t *testing.T) {
 		}
 		before := files()
 		n := protocol.SerialAt(b.now(), 0) + 10
-		_, err := lockedFinished(context.Background(), b, func() (*protocol.Prekey, error) { return b.makePrekey(context.Background(), n, certify) })
+		_, err := lockedFinished(context.Background(), b, func() (*protocol.Prekey, error) {
+			return b.makePrekey(context.Background(), n, &ownRead{certify: certify})
+		})
 		var gone *RevokedError
 		if !errors.As(err, &gone) || !gone.Own || files() != before {
 			t.Fatalf("under a certificate %v: a prekey on a finished mailbox: %v; %d files, were %d", certify, err, files(), before)

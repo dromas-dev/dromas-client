@@ -78,16 +78,20 @@ dromas recv renews the prekey once it is a day old, so run recv at least every
 %s and the mailbox never lapses. dromas prekey lifetime --help says how often
 to run recv for a shorter lifetime.`, protocol.PrekeyLifetime/(24*time.Hour), formatTime(client.RecvWithin(protocol.PrekeyLifetime))),
 			e.renewCmd(), e.lifetimeCmd()),
-		e.group("cert", "this mailbox's certificates: switch, revoke-earlier, publish-revoked",
+		e.group("cert", "this mailbox's certificates: switch, request, install, revoke-earlier, publish-revoked",
 			`A mailbox's identity signs what the mailbox says, unless the mailbox was created
 with dromas init --offline or switched with dromas cert switch. Then the
 identity certifies a working key with each prekey, and the working key signs.
+
+The identity can be kept on another machine. The mailbox then renews under the
+certificate it holds, and dromas cert request and dromas cert install get each
+new certificate from the identity's holder.
 
 If a mailbox's working key may have been stolen, revoke every certificate before
 a new one with dromas cert revoke-earlier: the address continues. A copy of the
 whole mailbox directory holds the identity too, and then the remedy is to revoke
 the address.`,
-			e.switchCmd(), e.revokeEarlierCmd(), e.publishRevokedCmd()),
+			e.switchCmd(), e.requestCmd(), e.installCmd(), e.revokeEarlierCmd(), e.publishRevokedCmd()),
 		e.group("account", "the account that can lift this mailbox's limits: join, leave",
 			`An account can lift the limits of the mailboxes in it. The account's holder
 gives you an adopt key, which puts a mailbox in the account.`,
@@ -1277,6 +1281,89 @@ func (e *cli) remedied(own protocol.Address, r *client.Remedy, err error) error 
 		return said
 	}
 	return fmt.Errorf("%w. %w", said, err)
+}
+
+func (e *cli) requestCmd() *cobra.Command {
+	return command("request", "make a new working key for the identity's holder to certify",
+		fmt.Sprintf(`Make a new working key, and print the request for its certificate: one
+"certificate_request" line. Save the line's working key as request.pub in the
+directory of the identity key file, run the line's command there, with the key
+file's own name in place of identity, and bring the certificate it writes,
+request-cert.pub, back to dromas cert install.
+
+The certificate's serial is at least the request's lowest_serial, and the
+certificate runs for at most max_certificate_lifetime_seconds. A request made
+later replaces this one.
+
+The mailbox renews under the certificate it holds until then. Give it the next
+certificate before its current one has %d days left, because no message is
+signed under a certificate with less: dromas status gives that time as
+certificate_signs_messages_until.`, protocol.TTL/(24*time.Hour)),
+		nargs(0, 0), func(c *cobra.Command, _ []string) error {
+			b, err := e.mailbox()
+			if err != nil {
+				return err
+			}
+			r, err := b.RequestCertificate(c.Context())
+			if err != nil {
+				return err
+			}
+			l, err := json.Marshal(r)
+			if err != nil {
+				return err
+			}
+			return e.out(typed("certificate_request", l))
+		})
+}
+
+func (e *cli) installCmd() *cobra.Command {
+	return command("install <file>", "check the certificate of the last request, and renew under it",
+		`Check the certificate in the file, as ssh-keygen -s writes one for the request
+dromas cert request printed last, and publish a new prekey under it. The
+certificate is checked by every rule a verifier holds it to, for this mailbox's
+working key, at a serial no lower than the request's.
+
+A certificate that began less than an hour ago is refused until that hour has
+passed. A certificate is refused, too, where the identity has revoked
+certificates since the request was made: make a new request then.`,
+		nargs(1, 1), func(c *cobra.Command, args []string) error {
+			b, err := e.mailbox()
+			if err != nil {
+				return err
+			}
+			line, err := readSmall(args[0])
+			if err != nil {
+				return err
+			}
+			p, err := b.InstallCertificate(c.Context(), line)
+			if p != nil {
+				if werr := e.out(prekey(p)); werr != nil {
+					return werr
+				}
+			}
+			return err
+		})
+}
+
+// maxCertificateFile is the most bytes dromas cert install reads of a
+// certificate file: one -cert.pub line of any key type is far below it.
+const maxCertificateFile = 64 << 10
+
+// readSmall reads a certificate file the caller named, up to maxCertificateFile.
+func readSmall(name string) ([]byte, error) {
+	f, err := os.Open(name) //nolint:gosec // a file the caller named
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close() //nolint:errcheck // read only
+	data, err := io.ReadAll(io.LimitReader(f, maxCertificateFile+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > maxCertificateFile {
+		return nil, fmt.Errorf("the file is longer than %d bytes, and a certificate as ssh-keygen -s writes one is far shorter", maxCertificateFile)
+	}
+	return data, nil
 }
 
 func (e *cli) publishRevokedCmd() *cobra.Command {

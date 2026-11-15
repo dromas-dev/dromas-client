@@ -302,7 +302,7 @@ Without an `askpass` program, a reboot leaves the mailbox locked until you load 
 
 `dromas agent add` has `ssh-add` ask for the passphrase the same way, when the key file has one. `ssh-add` runs the `askpass` program at most 3 times in all, and `agent add` fails with `identity_locked` when no passphrase from the program unlocks the key file.
 
-While the key is locked, a mailbox whose identity signs neither sends nor receives. A mailbox under a certificate keeps sending and receiving, and renews nothing until you unlock the key.
+While the key is locked, a mailbox whose identity signs neither sends nor receives. A mailbox under a certificate keeps receiving and renewing under the certificate it holds until that certificate ends, and keeps sending until `certificate_signs_messages_until`, which `dromas status` gives. Unlock the key before then, or [keep the identity on another machine](#keep-the-identity-on-another-machine).
 
 ## Mailbox files
 
@@ -357,6 +357,46 @@ Anyone who copies a mailbox's identity signs as the mailbox, and the only remedy
 - `dromas status` names what signs for the mailbox: `signer` is `identity` or `certificate`.
 
 If the working key (`work/`) is stolen and the identity is not, run `dromas cert revoke-earlier`. The address continues: the command makes a new working key and prekey, and revokes every earlier certificate. The old certificates are revoked before the new prekey is sent, so a thief who holds the old key cannot hold back the fix (`PROTOCOL.md` §12.6). A message this mailbox sent under a revoked certificate, and not yet read, is refused too: send it again.
+
+## Keep the identity on another machine
+
+A mailbox under a certificate needs its identity's key only to certify each new working key. You can keep the key on another machine, the identity's holder, so that a copy of the mailbox holds no identity. The mailbox then renews under the certificate it holds, and the holder certifies each next working key with stock `ssh-keygen` (`PROTOCOL.md` §12.7).
+
+The files that go between the two machines are public: `identity.doc`, `request.pub`, `request-cert.pub` and a revocation of certificates. Copy them by any means you trust. Only the identity key file is secret.
+
+### Move the identity
+
+1. If `dromas status` gives `"signer": "identity"`, run `dromas cert switch <address>` first. The switch is permanent.
+2. On the mailbox, make a revocation record of the address: `umask 077; dromas revocation make > <file>`. Move the file to a place that is neither the mailbox nor the holder. If the identity is lost later, the record still ends the address.
+3. Move the identity key file, `identity` in the mailbox's directory, to the holder, and copy `identity.doc` beside it. Keep `identity.pub` in the mailbox.
+
+### Get the next certificate
+
+The mailbox signs messages under its certificate until `certificate_signs_messages_until`, which `dromas status` gives, and renews under it until the certificate ends. Install the next certificate before `certificate_signs_messages_until`.
+
+1. On the mailbox, run `dromas cert request`. Its `certificate_request` line has the new working key, as `working_key`, and the command that certifies it, as `command` ([Output format](output.md)).
+2. On the holder, save `working_key` as `request.pub` in the directory of the identity key file, and run `command` there. `command` names the key file `identity`: give the file's own name if it differs. For an identity in the holder's ssh-agent, put `-U` before `-s`, and give the identity's public key file in place of `identity`. `ssh-keygen` writes `request-cert.pub`.
+3. On the mailbox, run `dromas cert install request-cert.pub`. The mailbox checks the certificate and renews under it.
+
+`command` makes a certificate that runs for the longest the server takes, and dates its start an hour back, so `cert install` accepts it at once. A request made later replaces the one before. `cert install` rejects a certificate for another request, one whose serial is below the request's `lowest_serial`, one whose start is less than an hour before the mailbox's clock, and one the identity has revoked.
+
+### If the working key is stolen
+
+1. On the holder, revoke every certificate up to and including the `certificate_serial` that `dromas status` gives, or a higher serial you certified for the mailbox since (`PROTOCOL.md` §10.2, §10.3). In the directory of the identity key file and `identity.doc`:
+
+   ```sh
+   A=<address>; SERIAL=<serial>
+   printf 'dromas-revoke-certs-v1\n%s\n%s\n' "$A" "$SERIAL" > statement
+   ssh-keygen -q -Y sign -n "dromas-revoke-certs-v1:$A" -f identity < statement > statement.sig
+   printf '{"type":"revocation_record","identity":"%s","revoked_certificates":"%s","revoked_certificates_signature":"%s"}\n' "$(openssl base64 -A < identity.doc)" "$(openssl base64 -A < statement)" "$(openssl base64 -A < statement.sig)" > record
+   ```
+
+2. On the mailbox, run `dromas cert publish-revoked record`.
+3. On the mailbox, get the next certificate as above. A request made before `cert publish-revoked` ran is rejected, because its working key may be stolen too.
+
+### If the identity is lost or stolen
+
+Publish the record that `dromas revocation make` wrote, from any machine with `dromas`: `dromas revocation publish --record <file> <address>`. Then create a new mailbox with `dromas init`.
 
 ## Rate limits
 

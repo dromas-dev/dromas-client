@@ -116,16 +116,19 @@ func (b *Mailbox) renewAs(ctx context.Context, asked, certify bool) (*protocol.P
 		return nil, time.Time{}, refuse("this mailbox's server serves a prekey statement in its name that this mailbox did not make, and recv renews nothing above one: dromas status says what to do, and dromas prekey renew renews above it, for its owner to run")
 	}
 	st.certify = st.certify || certify
+	st.fresh = certify
 	return b.renewFrom(ctx, st)
 }
 
 // renewFrom is renew from what the mailbox knows of itself at its server, st.
 // A statement whose certificate the server answers is longer than it takes
 // (certificate_lifetime_too_long) is spent, and one under a certificate of the
-// maximum that answer names is made and sent, once (shorter).
+// maximum that answer names is made and sent, once (shorter). A renewal under
+// a certificate the identity holder gave (st.under) takes nothing an earlier
+// attempt left, so it is signed under that certificate.
 func (b *Mailbox) renewFrom(ctx context.Context, st *ownRead) (*protocol.Prekey, time.Time, error) {
 	for attempt := 0; ; attempt++ {
-		next, signed, err := b.nextNumber(st, false)
+		next, signed, err := b.nextNumber(st, st.under != 0)
 		if err != nil {
 			return nil, time.Time{}, err
 		}
@@ -250,6 +253,17 @@ type ownRead struct {
 	// mailbox published its last statement under one, its server serves one,
 	// or its owner asked for one.
 	certify bool
+	// fresh is set when the renewal is under a NEW working key and
+	// certificate whatever the mailbox holds: its owner asked for one (dromas
+	// cert switch), or it is the remedy. Without it, a renewal under a
+	// certificate whose identity's key is not here renews under the newest
+	// certificate the mailbox holds that can sign one (heldWorker; PROTOCOL.md
+	// §12.7).
+	fresh bool
+	// under is the serial of the certificate the renewal is signed under, one
+	// the mailbox's identity holder certified ([Mailbox.InstallCertificate]),
+	// or zero.
+	under uint64
 	// known is the highest number this mailbox knows it has used: what it
 	// published, and the served statement's signer's rank, or its serial
 	// where the identity signed it, when the read could be used.
@@ -311,7 +325,7 @@ func (b *Mailbox) readOwn(ctx context.Context, unused, past bool) (*ownRead, err
 	}
 	out.certify = pubRank > 0
 	if o.at == atServed {
-		remedy := "dromas cert revoke-earlier renews past it, revoking every certificate before the new one"
+		remedy := "dromas cert revoke-earlier renews past it, revoking every certificate before the new one; with the identity kept elsewhere, its holder revokes them, and dromas cert install renews past it"
 		if pubRank == 0 {
 			remedy = "dromas prekey renew renews past it"
 		}
@@ -410,6 +424,7 @@ func (b *Mailbox) nextNumber(st *ownRead, unused bool) (uint64, *protocol.Prekey
 	for _, k := range adopted {
 		known = max(known, k)
 	}
+
 	// A number an earlier attempt took, and that nothing has passed since,
 	// is kept: its statement is the one sent again, and a key made for it
 	// and never signed is used. Any other renewal takes a new number, from
@@ -468,7 +483,7 @@ func (b *Mailbox) makeRenewal(ctx context.Context, st *ownRead, next uint64, p *
 	req := &out.req
 	if p == nil {
 		var err error
-		if p, err = b.makePrekey(ctx, next, st.certify); err != nil {
+		if p, err = b.makePrekey(ctx, next, st); err != nil {
 			return nil, out, err
 		}
 	}
@@ -521,7 +536,7 @@ func (b *Mailbox) signedPrekey(serial uint64, certify bool) (p *protocol.Prekey,
 		if c.NotBefore().After(b.now().Add(-protocol.MaxSkew)) {
 			return nil, true, nil // under a certificate made while the clock read ahead
 		}
-		if _, _, err := b.worker(serial); err != nil {
+		if _, _, err := b.worker(c.Serial()); err != nil {
 			return nil, true, nil //nolint:nilerr // a statement whose working key this mailbox cannot sign a pass with
 		}
 	}
@@ -923,7 +938,7 @@ func (b *Mailbox) dropRetired(at time.Time) error {
 
 // removePrekey deletes a prekey's key and what the state file keeps of it, its
 // statement or its adoption, and the working key made with it, if a renewal the
-// server never took left one: a transaction marks a statement's record as going,
+// server never took left one below the certificate in use: a transaction marks a statement's record as going,
 // the files go, and a transaction deletes the record. So a crash in between
 // leaves a marked record, which the next prune finishes (finishGoing), and which
 // recv does not read as a key lost (prekeyKept); or an adoption of a key gone,
@@ -952,9 +967,14 @@ func (b *Mailbox) removePrekey(n uint64) error {
 	if err := removeIfExists(b.path("prekeys", strconv.FormatUint(n, 10)+".agekey")); err != nil {
 		return err
 	}
-	for _, ext := range []string{"", ".pub", "-cert.pub"} {
-		if err := removeIfExists(b.workStem(n) + ext); err != nil {
-			return err
+	// Working key n goes only below the certificate in use: statements after
+	// prekey n may be signed under n's certificate (heldWorker), and one
+	// above it may be a certificate the identity holder gave.
+	if rank, err := b.publishedRank(); err == nil && n < rank {
+		for _, ext := range []string{"", ".pub", "-cert.pub"} {
+			if err := removeIfExists(b.workStem(n) + ext); err != nil {
+				return err
+			}
 		}
 	}
 	step("prekey files removed")

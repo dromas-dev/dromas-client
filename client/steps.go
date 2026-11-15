@@ -7,19 +7,20 @@ package client
 // what they are a step of. The crash tests kill a process at each
 // (crash_test.go), and a test holds this list to the calls in the code.
 var steps = map[string][]string{
-	"identity":   {"identity key written"},
-	"renewal":    {"renewal begun", "working key made", "prekey made", "statement kept", "renewal taken", "renewal recorded"},
-	"revocation": {"revocation published", "revocation kept"},
-	"delivery":   {"delivery written", "delivery seen"},
-	"owed":       {"handler begun", "handler returned", "owed cleared"},
-	"refusal":    {"refusal written", "refusal kept"},
-	"post":       {"outbox written", "posted", "sent kept"},
-	"group":      {"group written"},
-	"partial":    {"partial kept", "partial dropped"},
-	"folders":    {"folders to make", "folders made"},
-	"keys":       {"keys adopted"},
-	"removal":    {"prekey marked going", "prekey files removed"},
-	"allow":      {"sender allowed", "held message written", "held message removed"},
+	"identity":    {"identity key written"},
+	"renewal":     {"renewal begun", "working key made", "prekey made", "statement kept", "renewal taken", "renewal recorded"},
+	"revocation":  {"revocation published", "revocation kept"},
+	"delivery":    {"delivery written", "delivery seen"},
+	"owed":        {"handler begun", "handler returned", "owed cleared"},
+	"refusal":     {"refusal written", "refusal kept"},
+	"post":        {"outbox written", "posted", "sent kept"},
+	"group":       {"group written"},
+	"partial":     {"partial kept", "partial dropped"},
+	"folders":     {"folders to make", "folders made"},
+	"keys":        {"keys adopted"},
+	"removal":     {"prekey marked going", "prekey files removed"},
+	"certificate": {"request key made", "request recorded", "certificate installed"},
+	"allow":       {"sender allowed", "held message written", "held message removed"},
 }
 
 // atStep is called at each step with its name: nil but in a test.

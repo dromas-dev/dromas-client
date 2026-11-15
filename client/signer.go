@@ -35,8 +35,9 @@ type signer interface {
 }
 
 // signerOf is the signer of statement n, as this mailbox signed it: its
-// identity, or working key n under its certificate, which it returns too. A
-// mailbox that may sign nothing more hands out no signer.
+// identity, or the working key under the certificate the statement names as
+// its signer, which it returns too. A mailbox that may sign nothing more hands
+// out no signer.
 func (b *Mailbox) signerOf(n uint64) (signer, *protocol.Certificate, error) {
 	if err := b.finished(); err != nil {
 		return nil, nil, err
@@ -48,7 +49,7 @@ func (b *Mailbox) signerOf(n uint64) (signer, *protocol.Certificate, error) {
 	if rank == 0 {
 		return b.identity, nil, nil
 	}
-	w, c, err := b.worker(n)
+	w, c, err := b.worker(rank)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -56,7 +57,10 @@ func (b *Mailbox) signerOf(n uint64) (signer, *protocol.Certificate, error) {
 }
 
 // rankOf is the rank of the signer of statement n, as this mailbox keeps it:
-// 0 for its identity, n for working key n (PROTOCOL.md §5).
+// 0 for its identity, and its certificate's serial for a working key
+// (PROTOCOL.md §5). A statement under a new certificate shares its number
+// with that certificate; one signed under a certificate the mailbox already
+// held (heldWorker) does not.
 func (b *Mailbox) rankOf(n uint64) (uint64, error) {
 	rec, err := b.prekeyOf(n)
 	if err != nil {
@@ -82,6 +86,16 @@ func (b *Mailbox) currentSigner() (signer, *protocol.Certificate, error) {
 		return nil, nil, errors.New("this mailbox has published no prekey: dromas init registers it, and dromas prekey renew recovers one restored from its identity")
 	}
 	return b.signerOf(n)
+}
+
+// publishedRank is the rank of the signer of the statement this mailbox
+// published last: zero where it has published none, or its identity signed it.
+func (b *Mailbox) publishedRank() (uint64, error) {
+	n, err := b.publishedSerial()
+	if err != nil || n == 0 {
+		return 0, err
+	}
+	return b.rankOf(n)
 }
 
 // certified reports whether the statement this mailbox published last is

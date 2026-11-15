@@ -307,6 +307,8 @@ func lockingCommands(ctx context.Context, a, b *client.Mailbox, rec *protocol.Re
 		{"RevokeEarlier", func() error { _, err := a.RevokeEarlier(ctx); return err }},
 		{"RenewAndRevoke", func() error { _, err := a.RenewAndRevoke(ctx); return err }},
 		{"RenewUnderCertificate", func() error { _, err := a.RenewUnderCertificate(ctx); return err }},
+		{"RequestCertificate", func() error { _, err := a.RequestCertificate(ctx); return err }},
+		{"InstallCertificate", func() error { _, err := a.InstallCertificate(ctx, nil); return err }},
 		{"SendWith", func() error {
 			_, err := a.SendWith(ctx, b.Address(), "from a finished mailbox", client.Fields{})
 			return err

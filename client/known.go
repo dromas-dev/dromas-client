@@ -260,7 +260,7 @@ func (nm *NotMade) Words() string {
 	}
 	head := fmt.Sprintf("at its read of itself at %s, this mailbox's server served a prekey statement in its name, serial %d under certificate %d, that this mailbox did not make", nm.At, nm.Serial, nm.CertificateSerial)
 	if nm.OwnCertificate {
-		return head + ", under this mailbox's own certificate: whoever made it holds this mailbox's working key, so they copied this mailbox's files, which may hold its identity too. Revoke the address, unless you know the identity was not copied, when dromas cert revoke-earlier ends every certificate before a new one instead. " + tail
+		return head + ", under this mailbox's own certificate: whoever made it holds this mailbox's working key, so they copied this mailbox's files, which may hold its identity too. Revoke the address, unless you know the identity was not copied, when dromas cert revoke-earlier ends every certificate before a new one instead, or, with the identity kept elsewhere, its holder revokes them and certifies a new working key from dromas cert request. " + tail
 	}
 	return head + ", under a certificate this mailbox did not make either: this mailbox's identity certified someone else's working key. Unless it is the owner's own, from the machine this mailbox was restored from, the identity is in other hands, and only revoking the address ends that: whoever holds the identity makes a later certificate as easily as this mailbox. " + tail
 }

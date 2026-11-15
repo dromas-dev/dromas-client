@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -20,18 +21,24 @@ import (
 // certify a working key, and the working key signs what the mailbox says:
 // its prekey statements, its messages and its passes (PROTOCOL.md §5). This
 // client makes a new working key, with a new certificate, each time it makes
-// a new prekey under a certificate: work/<n> is the working key made with
-// prekey n, in the files ssh-keygen keeps for one,
+// a new prekey under a certificate, where the identity's key is here: work/<n>
+// is the working key of certificate n, made with prekey n, in the files
+// ssh-keygen keeps for one,
 //
 //	work/<n>            the working key, OpenSSH format
 //	work/<n>.pub        its public key
 //	work/<n>-cert.pub   its certificate, serial n
 //
-// so "ssh-keygen -Y sign -f work/<n>-cert.pub" signs with it. The one in use
-// is the one made with the prekey this mailbox published last. Older ones are
-// deleted once a newer prekey is published: the server then takes no pass
-// under them, and what they signed is already signed. A mailbox whose
-// identity signs keeps none.
+// so "ssh-keygen -Y sign -f work/<n>-cert.pub" signs with it. Where the
+// identity's key is not here, a renewal is signed under the newest
+// certificate the mailbox holds that can sign one (heldWorker), and its
+// identity holder certifies the next working key (certrequest.go): between
+// certificates, the mailbox renews under its current one (PROTOCOL.md
+// §12.7). The one in use is the one under the certificate of the prekey this
+// mailbox published last. Older ones are deleted once a prekey under a later
+// certificate is published: the server then takes no pass under them, and
+// what they signed is already signed. A mailbox whose identity signs keeps
+// none.
 
 func (b *Mailbox) workStem(n uint64) string { return b.path("work", strconv.FormatUint(n, 10)) }
 
@@ -74,6 +81,68 @@ func (b *Mailbox) makeWork(n uint64, lifetime time.Duration) (*sign.Work, *proto
 	return b.worker(n)
 }
 
+// certifiedSigner is the signer of statement serial, a renewal under a
+// certificate: the working key of the certificate the identity holder gave
+// (st.under); otherwise a NEW working key of serial that the identity
+// certifies, running for life (makeWork). Where the identity's key is not
+// here and the renewal asks for no new certificate (st.fresh unset), it is
+// the newest certificate the mailbox holds that can sign one (heldWorker):
+// between certificates, the mailbox renews under its current one (PROTOCOL.md
+// §12.7). A mailbox that holds none fails as identity_locked, as its renewal
+// did before it looked, and its identity holder certifies a new working key
+// ([Mailbox.RequestCertificate]).
+func (b *Mailbox) certifiedSigner(serial uint64, life time.Duration, st *ownRead) (*sign.Work, *protocol.Certificate, error) {
+	if st.under != 0 {
+		return b.worker(st.under)
+	}
+	w, c, err := b.makeWork(serial, life)
+	var locked *IdentityLockedError
+	if err == nil || st.fresh || !errors.As(err, &locked) {
+		return w, c, err
+	}
+	if w, c, herr := b.heldWorker(); herr == nil {
+		return w, c, nil
+	}
+	return nil, nil, &IdentityLockedError{File: locked.File, Agent: locked.Agent, Reason: locked.Reason + ", and no certificate this mailbox holds can sign a renewal (each has ended, begun less than an hour ago or been revoked): where the identity is kept elsewhere, dromas cert request asks its holder for a certificate"}
+}
+
+// heldWorker is the newest working key this mailbox holds whose certificate
+// can sign a renewal: valid at the clock, begun protocol.MaxSkew or more
+// before it (PROTOCOL.md §12.4), and covered by none of the mailbox's own
+// revocation of its certificates. The mailbox holds none below the
+// certificate in use once a renewal under it is taken (dropWork).
+func (b *Mailbox) heldWorker() (*sign.Work, *protocol.Certificate, error) {
+	ks, err := b.heldCertificates()
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, k := range slices.Backward(ks) {
+		w, c, err := b.worker(k)
+		if err != nil || c.NotBefore().After(b.now().Add(-protocol.MaxSkew)) || b.ownRevokes(k) {
+			continue
+		}
+		return w, c, nil
+	}
+	return nil, nil, errors.New("this mailbox holds no certificate that can sign a renewal")
+}
+
+// heldCertificates is the serial of every certificate the mailbox holds a
+// working key's certificate file of, lowest first.
+func (b *Mailbox) heldCertificates() ([]uint64, error) {
+	names, err := matching(b.path("work", "*-cert.pub"))
+	if err != nil {
+		return nil, err
+	}
+	var ks []uint64
+	for _, name := range names {
+		if k, err := strconv.ParseUint(strings.TrimSuffix(filepath.Base(name), "-cert.pub"), 10, 64); err == nil {
+			ks = append(ks, k)
+		}
+	}
+	slices.Sort(ks)
+	return ks, nil
+}
+
 // worker returns working key n's signer under its certificate, checked
 // against the mailbox's identity at the mailbox's clock: a certificate that has
 // ended signs nothing.
@@ -107,7 +176,7 @@ func (b *Mailbox) worker(n uint64) (*sign.Work, *protocol.Certificate, error) {
 		return nil, nil, refuse("this mailbox's certificate has not begun, by this machine's clock: the clock reads earlier than when the certificate was made. Check this machine's clock against a time source you trust. If the clock is right now and was ahead then, dromas prekey renew makes a new working key, certificate and prekey")
 	}
 	if errors.Is(err, protocol.ErrCertificateTime) {
-		return nil, nil, refuse("this mailbox's certificate has ended: dromas prekey renew makes a new working key, certificate and prekey")
+		return nil, nil, refuse("this mailbox's certificate has ended: dromas prekey renew makes a new working key, certificate and prekey, with the identity's key here; where the identity is kept elsewhere, dromas cert request asks its holder for a certificate")
 	}
 	if err != nil {
 		return nil, nil, fmt.Errorf("working key %d's certificate: %w", n, err)

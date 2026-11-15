@@ -706,7 +706,7 @@ func (b *Mailbox) renewAndRevoke(ctx context.Context) (*Remedy, error) {
 	if err := certificatesOwn(st.certify || made || st.unread != nil && published == 0); err != nil {
 		return nil, err
 	}
-	st.certify = true
+	st.certify, st.fresh = true, true
 	below, _, err := b.nextNumber(st, true)
 	if err != nil {
 		return nil, err
@@ -951,7 +951,7 @@ func (b *Mailbox) proved(ctx context.Context, method, path string, err error) er
 		if !b.usesRevoked() {
 			return fmt.Errorf("%w; it showed no revocation of this mailbox's certificates that verifies and covers the one it uses", err)
 		}
-		return refuseRenews("this mailbox's identity has revoked the certificate it signs under, as its server shows, so it is taken nowhere it is held: dromas recv or dromas prekey renew publishes a new one")
+		return refuseRenews("this mailbox's identity has revoked the certificate it signs under, as its server shows, so it is taken nowhere it is held: dromas recv or dromas prekey renew publishes a new one, with the identity's key here; with the identity kept elsewhere, dromas cert request asks its holder for a certificate")
 	}
 	held, lerr := b.revoked(who)
 	switch {

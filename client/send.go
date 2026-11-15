@@ -678,7 +678,7 @@ func (b *Mailbox) seal(ctx context.Context, to protocol.Address, stem string, l 
 	if held, err := b.revokedCerts(b.id.Address()); err != nil {
 		return nil, err
 	} else if cert != nil && held != nil && held.Revokes(cert.Serial()) {
-		return nil, refuse("this mailbox's identity has revoked the certificate it signs under, so a message signed now would be refused: dromas recv or dromas prekey renew publishes the new one first")
+		return nil, refuse("this mailbox's identity has revoked the certificate it signs under, so a message signed now would be refused: dromas recv or dromas prekey renew publishes the new one first, with the identity's key here; with the identity kept elsewhere, dromas cert request asks its holder for a certificate")
 	}
 	// Nor does a certificate whose working key another holds, as a statement this mailbox did not make under it shows
 	// (PROTOCOL.md §12.4): its owner's remedy revokes it, and its reader then

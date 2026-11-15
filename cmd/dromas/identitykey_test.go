@@ -339,10 +339,10 @@ func TestTheTerminalPromptReadsAsReadpassphrase(t *testing.T) {
 	}
 }
 
-// recv's renewal_failed line carries identity_locked where the identity's key
-// was locked for the renewal, at each recv: a renewal the key was locked for is
-// not held to the hour a server's refusal is.
-func TestRecvSaysARenewalTheKeyWasLockedForAtEachRecv(t *testing.T) {
+// recv renews a mailbox under a certificate while its identity's key is
+// locked, under the certificate it holds (PROTOCOL.md §12.7): no
+// renewal_failed line, and exit status 0, at each recv.
+func TestRecvRenewsUnderTheCertificateItHoldsWhileTheKeyIsLocked(t *testing.T) {
 	ctx := context.Background()
 	// Made 25 hours ago, by a clock the server shares (TestRecvSaysARenewalFailed).
 	var ago atomic.Int64
@@ -357,15 +357,12 @@ func TestRecvSaysARenewalTheKeyWasLockedForAtEachRecv(t *testing.T) {
 	encryptIdentity(t, b.Path("identity"), "correct horse")
 	useMailbox(t, b.Dir())
 	t.Setenv("DROMAS_SERVER_URL", srv.URL)
-	for i := range 2 {
-		var out bytes.Buffer
-		var look *needsALook
-		if err := do(ctx, "recv", []string{"--no-prompt"}, nil, &out, io.Discard); !errors.As(err, &look) {
-			t.Fatalf("recv %d: %v", i+1, err)
-		}
-		if ls := printed(t, out.String()); typesOf(ls) != "renewal_failed" || ls[0]["code"] != client.IdentityLocked {
-			t.Errorf("recv %d: %s", i+1, out.String())
-		}
+	var out bytes.Buffer
+	if err := do(ctx, "recv", []string{"--no-prompt"}, nil, &out, io.Discard); err != nil {
+		t.Fatalf("recv: %v: %s", err, out.String())
+	}
+	if strings.Contains(typesOf(printed(t, out.String())), "renewal_failed") {
+		t.Errorf("recv: %s", out.String())
 	}
 }
 

@@ -18,11 +18,11 @@ import (
 // mailCommands are the commands of lockingCommands that receive, send, renew or
 // hand over a message, which a state that does not match prekeys/ stops; every
 // other command there runs on it.
-var mailCommands = []string{"Receive", "Hold", "Await", "Follow", "Rekey", "RenewAndRevoke", "RenewUnderCertificate", "SendWith", "SendJSON", "SendGroup", "SendGroupJSON", "Flush", "FlushReport", "Allow"}
+var mailCommands = []string{"Receive", "Hold", "Await", "Follow", "Rekey", "RenewAndRevoke", "RenewUnderCertificate", "InstallCertificate", "SendWith", "SendJSON", "SendGroup", "SendGroupJSON", "Flush", "FlushReport", "Allow"}
 
 // notMail are the commands of lockingCommands that touch no message, which run
 // on a state that does not match prekeys/.
-var notMail = []string{"Adopt", "Leave", "Resolve", "RevokeEarlier", "Block", "SyncACL", "Ask", "KeepRevocation", "Publish", "SetAlias", "RemoveAlias", "RemoveRefused", "ClearFailed", "SetPolicy", "RebuildAllowed"}
+var notMail = []string{"Adopt", "Leave", "Resolve", "RevokeEarlier", "RequestCertificate", "Block", "SyncACL", "Ask", "KeepRevocation", "Publish", "SetAlias", "RemoveAlias", "RemoveRefused", "ClearFailed", "SetPolicy", "RebuildAllowed"}
 
 // signals are the states that do not match prekeys/, each made from a mailbox b
 // that has delivered a message from a, with a message of a's that the server
