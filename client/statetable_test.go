@@ -132,6 +132,11 @@ func stateRows() []stateRow {
 	for _, working := range []bool{false, true} {
 		signer := map[bool]string{false: "identity-signed, ", true: "certified, "}[working]
 		for _, r := range signerRows() {
+			// An identity kept elsewhere is a mailbox under a certificate's
+			// (PROTOCOL.md §12.7).
+			if !working && strings.HasPrefix(r.name, "identity elsewhere") {
+				continue
+			}
 			r.name, r.working = signer+r.name, working
 			rows = append(rows, r)
 		}
@@ -142,7 +147,7 @@ func stateRows() []stateRow {
 // signerRows are the rows of one signer, whose env makes its mailboxes so.
 func signerRows() []stateRow {
 	var rows []stateRow
-	for _, view := range []string{"full", "identity alone"} {
+	for _, view := range []string{"full", "identity alone", "identity elsewhere"} {
 		for _, server := range []string{"never registered", "active", "forgotten"} {
 			for _, rev := range []string{"no revocation", "revoked through the one in use", "revoked a day ahead"} {
 				if view == "identity alone" && server == "forgotten" {
@@ -160,8 +165,11 @@ func signerRows() []stateRow {
 					case "revoked a day ahead":
 						publish(t, e, certsRecord(t, dir, protocol.SerialAt(e.clock.Now(), 0)+86400))
 					}
-					if view == "identity alone" {
+					switch view {
+					case "identity alone":
 						identityAlone(t, dir)
+					case "identity elsewhere":
+						identityElsewhere(t, dir)
 					}
 				}})
 			}
@@ -318,6 +326,29 @@ func identityAlone(t *testing.T, dir string) {
 	}
 }
 
+// identityElsewhere moves the identity key file of the mailbox in dir to its
+// holder, beside dir (holderKey), as an owner who keeps the identity on
+// another machine does.
+func identityElsewhere(t *testing.T, dir string) {
+	t.Helper()
+	if err := os.Rename(filepath.Join(dir, "identity"), dir+".identity"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// holderKey is the identity key of the mailbox in dir: its own file, or the one
+// its holder keeps (identityElsewhere).
+func holderKey(dir string) (ssh.Signer, error) {
+	raw, err := os.ReadFile(filepath.Join(dir, "identity"))
+	if errors.Is(err, fs.ErrNotExist) {
+		raw, err = os.ReadFile(dir + ".identity")
+	}
+	if err != nil {
+		return nil, err
+	}
+	return ssh.ParsePrivateKey(raw)
+}
+
 // A stateCommand is a command as the CLI runs it, on the mailbox in dir, as a
 // process of its own: it returns what to write for it.
 type stateCommand struct {
@@ -360,6 +391,46 @@ func stateCommands() []stateCommand {
 				return "", err
 			}
 			return fmt.Sprintf("prekey %d", p.Serial), err
+		}},
+		{"cert request", func(ctx context.Context, e *env, dir string, _ *client.Mailbox) (string, error) {
+			b, err := open(e, dir)
+			if err != nil {
+				return "", err
+			}
+			r, err := b.RequestCertificate(ctx)
+			if r == nil {
+				return "", err
+			}
+			return fmt.Sprintf("lowest serial %d", r.LowestSerial), err
+		}},
+		// A request, then the certificate its identity's holder makes for it at
+		// its lowest serial, installed.
+		{"cert request, cert install", func(ctx context.Context, e *env, dir string, _ *client.Mailbox) (string, error) {
+			b, err := open(e, dir)
+			if err != nil {
+				return "", err
+			}
+			r, err := b.RequestCertificate(ctx)
+			if err != nil {
+				return "", err
+			}
+			holder, err := holderKey(dir)
+			if err != nil {
+				return "", err
+			}
+			work, _, _, _, err := ssh.ParseAuthorizedKey([]byte(r.WorkingKey))
+			if err != nil {
+				return "", err
+			}
+			c, err := protocol.NewCertificate(b.Identity(), holder, work, r.LowestSerial, e.clock.Now(), time.Duration(r.Lifetime)*time.Second)
+			if err != nil {
+				return "", err
+			}
+			p, err := b.InstallCertificate(ctx, ssh.MarshalAuthorizedKey(c.PublicKey()))
+			if p == nil {
+				return "", err
+			}
+			return fmt.Sprintf("prekey %d under certificate %d", p.Serial, p.Rank), err
 		}},
 		{"recv", func(ctx context.Context, e *env, dir string, _ *client.Mailbox) (string, error) {
 			b, err := open(e, dir)

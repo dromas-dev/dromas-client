@@ -314,3 +314,69 @@ func TestACertificateThatEndsWithItsIdentityElsewhereIsSaidAndMended(t *testing.
 		t.Fatalf("the reader after the install: %+v", res)
 	}
 }
+
+// A certificate request killed at each of its steps: run again, it makes a
+// request whose certificate installs, and the mailbox is whole.
+func TestACertificateRequestKilledAtEachStepIsMadeAgain(t *testing.T) {
+	t.Parallel()
+	if testing.Short() {
+		t.Skip("long: -short skips it; scripts/check.sh full and CI run it")
+	}
+	for _, step := range []string{"request key made", "request recorded"} {
+		t.Run(step, func(t *testing.T) {
+			e := newWorkEnv(t)
+			a := e.mailbox()
+			b, holder, _ := keptElsewhere(t, e)
+			crash(t, e, b, "cert request", step, protocol.Address{})
+			x, err := client.Open(b.Dir(), e.opts())
+			if err != nil {
+				t.Fatal(err)
+			}
+			r, err := x.RequestCertificate(t.Context())
+			if err != nil {
+				t.Fatalf("the request again after a crash at %s: %v", step, err)
+			}
+			serial := protocol.SerialAt(e.clock.Now(), r.LowestSerial-1)
+			if _, err := x.InstallCertificate(t.Context(), certify(t, x, holder, r, serial, e.clock.Now())); err != nil || signsUnder(t, x) != serial {
+				t.Fatalf("install after a crash at %s: %v; under %d", step, err, signsUnder(t, x))
+			}
+			whole(t, e, x, a)
+		})
+	}
+}
+
+// An install killed at each of its steps, its renewal's among them: run
+// again, it renews under the certificate, and the mailbox is whole.
+func TestACertificateInstallKilledAtEachStepFinishesWhenRunAgain(t *testing.T) {
+	t.Parallel()
+	if testing.Short() {
+		t.Skip("long: -short skips it; scripts/check.sh full and CI run it")
+	}
+	for _, step := range append([]string{"certificate installed"}, renewalSteps(true)...) {
+		t.Run(step, func(t *testing.T) {
+			e := newWorkEnv(t)
+			a := e.mailbox()
+			b, holder, _ := keptElsewhere(t, e)
+			r, err := b.RequestCertificate(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			serial := protocol.SerialAt(e.clock.Now(), r.LowestSerial-1)
+			line := certify(t, b, holder, r, serial, e.clock.Now())
+			file := filepath.Join(t.TempDir(), "request-cert.pub")
+			if err := os.WriteFile(file, line, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			crashTo(t, e, b.Dir(), "cert install", step, file)
+			x, err := client.Open(b.Dir(), e.opts())
+			if err != nil {
+				t.Fatal(err)
+			}
+			e.clock.Add(2 * time.Second)
+			if _, err := x.InstallCertificate(t.Context(), line); err != nil || signsUnder(t, x) != serial {
+				t.Fatalf("install again after a crash at %s: %v; under %d", step, err, signsUnder(t, x))
+			}
+			whole(t, e, x, a)
+		})
+	}
+}

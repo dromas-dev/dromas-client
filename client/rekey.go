@@ -325,7 +325,7 @@ func (b *Mailbox) readOwn(ctx context.Context, unused, past bool) (*ownRead, err
 	}
 	out.certify = pubRank > 0
 	if o.at == atServed {
-		remedy := "dromas cert revoke-earlier renews past it, revoking every certificate before the new one"
+		remedy := "dromas cert revoke-earlier renews past it, revoking every certificate before the new one; with the identity kept elsewhere, its holder revokes them, and dromas cert install renews past it"
 		if pubRank == 0 {
 			remedy = "dromas prekey renew renews past it"
 		}

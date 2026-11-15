@@ -151,7 +151,7 @@ func (b *Mailbox) underCertificates() error {
 		return err
 	}
 	if !certified {
-		return refuse("this mailbox's identity signs its prekey statements, so it asks for no certificate: dromas cert switch moves it to certificates, run where the identity's key is")
+		return refuse("this mailbox has published no prekey statement under a certificate, so it asks for no certificate: dromas init registers or restores it, and dromas cert switch moves one its identity signs to certificates, each run where the identity's key is")
 	}
 	return nil
 }

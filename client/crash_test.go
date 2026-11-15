@@ -93,6 +93,19 @@ var crashCommands = map[string]func(ctx context.Context, b *client.Mailbox, o cr
 		_, err := b.SendGroup(ctx, to, "sent to a group by a process killed on its way", client.Fields{})
 		return err
 	},
+	"cert request": func(ctx context.Context, b *client.Mailbox, _ crashOrder) error {
+		_, err := b.RequestCertificate(ctx)
+		return err
+	},
+	// The order's To names the file of the certificate to install.
+	"cert install": func(ctx context.Context, b *client.Mailbox, o crashOrder) error {
+		line, err := os.ReadFile(o.To)
+		if err != nil {
+			return err
+		}
+		_, err = b.InstallCertificate(ctx, line)
+		return err
+	},
 	"allow": func(ctx context.Context, b *client.Mailbox, o crashOrder) error {
 		to, err := protocol.ParseAddress(o.To)
 		if err != nil {
