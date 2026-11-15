@@ -63,6 +63,11 @@ type Status struct {
 	// identity signs.
 	CertificateSerial   uint64 `json:"certificate_serial,omitempty"`
 	CertificateNotAfter string `json:"certificate_not_after,omitempty"`
+	// CertificateSignsMessagesUntil is when that certificate stops signing
+	// messages: its end less protocol.TTL, the most a message may wait to be
+	// read. A mailbox whose identity is kept elsewhere is given its next
+	// certificate before then (PROTOCOL.md §12.7).
+	CertificateSignsMessagesUntil string `json:"certificate_signs_messages_until,omitempty"`
 	// RenewalPendingSince is when this mailbox signed the oldest new prekey it
 	// still holds and has not seen published: empty if every renewal went
 	// through.
@@ -201,7 +206,9 @@ func (b *Mailbox) status() (*Status, error) {
 	// then, unless the key is unlocked, senders are refused once the prekey
 	// expires. A drain or a send the lock stops fails as identity_locked
 	// itself.
-	if !s.Revoked && (s.IdentityKey == KeyPassphrase || s.IdentityKey == KeyNone) && b.renewDue() {
+	// A mailbox under a certificate renews under the one it holds while the
+	// key is locked (heldWorker), so only its certificate's end needs a look.
+	if !s.Revoked && !certified && (s.IdentityKey == KeyPassphrase || s.IdentityKey == KeyNone) && b.renewDue() {
 		when := "once the prekey expires"
 		if s.PrekeyNotAfter != "" {
 			when = "from " + s.PrekeyNotAfter
@@ -211,13 +218,14 @@ func (b *Mailbox) status() (*Status, error) {
 	switch _, cert, werr := b.currentSigner(); {
 	case werr != nil && (err != nil || perr != nil || s.Revoked):
 	case werr != nil && certified:
-		s.Attention = append(s.Attention, "this mailbox holds no working key it can sign with, or its certificate has ended: it cannot poll or send until dromas prekey renew makes new ones")
+		s.Attention = append(s.Attention, "this mailbox holds no working key it can sign with, or its certificate has ended: it cannot poll or send until dromas prekey renew makes new ones, with the identity's key here; where the identity is kept elsewhere, dromas cert request asks its holder for a certificate")
 	case werr != nil:
 		s.Attention = append(s.Attention, fmt.Sprintf("this mailbox cannot sign: %v", werr))
 	case cert != nil:
 		s.CertificateSerial, s.CertificateNotAfter = cert.Serial(), cert.NotAfter().Format(protocol.TimeLayout)
+		s.CertificateSignsMessagesUntil = cert.NotAfter().Add(-protocol.TTL).Format(protocol.TimeLayout)
 		if !cert.SignsMessages(b.now()) {
-			s.Attention = append(s.Attention, fmt.Sprintf("the certificate ends at %s, too soon to sign messages: sends are refused until dromas recv or dromas prekey renew renews it", s.CertificateNotAfter))
+			s.Attention = append(s.Attention, fmt.Sprintf("the certificate ends at %s, too soon to sign messages: sends are refused until dromas recv or dromas prekey renew renews under a new certificate, with the identity's key here; where the identity is kept elsewhere, dromas cert request asks its holder for one", s.CertificateNotAfter))
 		}
 	}
 	// A statement signed for a serial above the published one is a renewal
