@@ -5,8 +5,9 @@ make a new working key for the identity's holder to certify
 ### Synopsis
 
 Make a new working key, and print the request for its certificate: one
-"certificate_request" line. Run the line's command where the identity is, with
-the working key saved as request.pub, and bring the certificate it writes,
+"certificate_request" line. Save the line's working key as request.pub in the
+directory of the identity key file, run the line's command there, with the key
+file's own name in place of identity, and bring the certificate it writes,
 request-cert.pub, back to dromas cert install.
 
 The certificate's serial is at least the request's lowest_serial, and the
