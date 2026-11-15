@@ -118,6 +118,12 @@ nfpms:
 # A classic token, WINGET_GITHUB_TOKEN, opens it: a fine-grained one cannot
 # contribute to a repository its owner is not a member of (GitHub's
 # personal-access-token docs). A snapshot writes the manifests to dist/ alone.
+#
+# skip_upload is true while winget-pkgs reviews the package's first manifest,
+# whose pull request is already open: winget-pkgs reviews a new package by
+# hand, and each new pull request starts that review again. A release then
+# writes the manifests to dist/ alone. auto, which opens a pull request at each
+# release tag, follows that first manifest's merge.
 winget:
   - name: dromas
     publisher: Dromas
@@ -134,7 +140,7 @@ winget:
       - encryption
       - messaging
       - bots
-    skip_upload: auto
+    skip_upload: true
     commit_author:
       name: Drew Streib
       email: dtype@dtype.org
