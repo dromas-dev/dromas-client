@@ -63,9 +63,10 @@ func Admits(held *RevokedCertificates, s *Signer) error {
 
 // VerifySigned verifies an armored signature over message, in namespace, by
 // the identity id or a working key it certified, under a certificate valid at
-// now (CheckCertificate). Its signing key decides which: the identity's key,
-// byte for byte, or a certificate. It returns the signer; holding it to the
-// revocation of certificates is the caller's (Admits).
+// now (CheckCertificate), by the steps of PROTOCOL.md §5.4. Its signing key
+// decides which: the identity's key, byte for byte, or a certificate. It
+// returns the signer; holding it to the revocation of certificates is the
+// caller's (Admits).
 func VerifySigned(id *Identity, message, signature []byte, namespace string, now time.Time) (*Signer, error) {
 	return verifySigned(id, message, signature, namespace, func(key ssh.PublicKey) (*Certificate, error) { return CheckCertificate(id, key, now) })
 }
