@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -79,6 +80,39 @@ func TestASilentDropHalvesTheKeepAlive(t *testing.T) {
 			t.Fatalf("silent drops came to %v, want %v", got, want)
 		}
 	}
+}
+
+// TestWhatTheDropsTaughtIsForgottenADayAfterTheLast: a mailbox keeps the
+// keep-alive and the wait its drops taught it until relearnAfter passes with
+// no drop, and a drop within the day starts the day again; then it asks for
+// DefaultHold, dials with no keep-alive, and its next drop teaches it from
+// there.
+func TestWhatTheDropsTaughtIsForgottenADayAfterTheLast(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var h holding
+		for range 7 {
+			h.dropped(DefaultHold+holdMargin, true)
+		}
+		if w, ka := h.current(); w != MinHold || ka != minKeepAlive {
+			t.Fatalf("after seven silent drops the mailbox asks for %v with keep-alive %v, want %v with %v", w, ka, MinHold, minKeepAlive)
+		}
+		time.Sleep(relearnAfter - time.Second)
+		h.dropped(MinHold+holdMargin, true)
+		time.Sleep(relearnAfter - time.Second)
+		if w, ka := h.current(); w != MinHold || ka != minKeepAlive {
+			t.Fatalf("a second short of a day after its last drop the mailbox asks for %v with keep-alive %v, want %v with %v", w, ka, MinHold, minKeepAlive)
+		}
+		time.Sleep(time.Second)
+		if w, ka := h.current(); w != DefaultHold || ka != 0 {
+			t.Fatalf("a day after its last drop the mailbox asks for %v with keep-alive %v, want %v with none", w, ka, DefaultHold)
+		}
+		if d := h.dialer(); d.KeepAliveConfig.Enable || d.KeepAlive >= 0 {
+			t.Fatalf("a day after its last drop the mailbox dials with keep-alive: %+v", d)
+		}
+		if w, ka := h.dropped(3*time.Minute, false); w != DefaultHold || ka != 3*time.Minute-holdMargin {
+			t.Fatalf("the first drop after the day taught a wait of %v with keep-alive %v, want %v with %v", w, ka, DefaultHold, 3*time.Minute-holdMargin)
+		}
+	})
 }
 
 type closeCounter struct {
