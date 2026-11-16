@@ -374,8 +374,7 @@ Every prekey statement, pass and message that a mailbox signs has an SSHSIG (Sec
 | A certificate the identity made of a working key (Section 5.2) | the certificate's certificate serial, 1 to 2^53 − 1 |
 
 - **The identity also signs certificates and revocations (Section 10).** A verifier verifies a certificate's own signature, and a revocation's signature, against the identity key directly. In these two roles the identity key is not a signer, and has no rank.
-- **A verifier reads the signer from the signature.** A verifier MUST refuse a signing key of neither form, including a bare working key.
-- **A verifier checks a certificate against the identity it has for the address (Section 5.2), before it verifies the signature under the certificate.**
+- **A verifier verifies a signer's signature by Section 5.4.**
 
 ### 5.1. What a verifier accepts
 
@@ -404,7 +403,7 @@ A certificate is an OpenSSH user certificate. A verifier MUST check every row of
 | Nonce | exactly 32 bytes |
 | Signed by | the identity key, byte for byte as the key appears in the identity document, with the signature in the one form of the key's type (Section 3.2) |
 
-- **A verifier checks a certificate at the verifier's clock, exactly, and only after the identity's signature on the certificate has verified.** A certificate is valid from its `valid after`, and has ended at its `valid before` (Section 2.2). A verifier refuses a certificate with a date past `9999-12-31T23:59:59Z`, including `ssh-keygen`'s `forever`.
+- **A verifier checks a certificate's dates at the verifier's clock, exactly, as the last of the certificate's checks (Section 5.4, step 4).** A certificate is valid from its `valid after`, and has ended at its `valid before` (Section 2.2). A verifier refuses a certificate with a date past `9999-12-31T23:59:59Z`, including `ssh-keygen`'s `forever`.
 - **A verifier refuses a certificate that runs longer than the protocol's maximum.** The protocol's maximum holds at every verifier, whatever any server serves as its own maximum (Section 15.5). A server also refuses a certificate that runs longer than the server's maximum (Section 11.7, step 6).
 - **The certified key is never the identity key (Section 15.5).**
 - **Every certificate MUST certify a new working key, one that no certificate made before it certified.** No verifier can check this rule. The certificate's maker keeps to the rule (Section 15.5).
@@ -439,6 +438,18 @@ A certificate is an OpenSSH user certificate. A verifier MUST check every row of
   - at the server, every prekey statement by a signer of a lower rank (Section 11.9), and the pass by every certificate other than the current certificate (Section 8). The server still accepts the identity's pass.
   - at a sender, every prekey statement by a signer of a lower rank.
   - at a reader, nothing. A reader accepts a message signed by the sender's identity, or under any certificate of that identity that the reader accepts (Section 5.1) and that is valid when the reader reads the message.
+
+### 5.4. Verifying a signature
+
+To verify the signature on a prekey statement, a pass or a message, a verifier MUST apply the following steps. The inputs are the armoured signature, the signed bytes, the namespace, the identity document of the mailbox that signed, and the verifier's clock. If any step fails, the verifier refuses the signature. A verifier MAY check in another order only where each signature gets the same result, and a refused signature the same reason.
+
+1. Check that the signature is no longer than the bound for the identity's key type (Section 3.2).
+2. Parse the armour and the blob, and check that the signature is in the one form (Section 3.2).
+3. Read the signing key from the blob. If the signing key is the identity key, byte for byte as on line 2 of the identity document, the signer is the identity. Skip to step 5.
+4. Otherwise the signing key MUST be a certificate, so a bare working key fails. The signer is the certificate. Check the certificate by every rule of Section 5.2, including the identity's signature on the certificate. Of those rules, check `valid after` ≤ now < `valid before` last.
+5. Verify the SSHSIG over the signed bytes, in the namespace, under the identity key or the certified working key (`PROTOCOL.sshsig`, Section 3.2).
+
+The result is the signer, whose rank Section 5 gives. Each party applies revocations to the signer afterwards (Section 5.1).
 
 ## 6. The prekey statement
 
@@ -1342,7 +1353,7 @@ A server lists at most 64 deprecations, 64 sunsets and 64 capabilities. A client
   - The client refuses a served identity document of a key type that the client does not verify, and seals nothing.
   - The client pins the served identity only after something that identity signed has verified, which is the served prekey statement or a revocation. A later lookup never replaces the pin.
 - **The prekey statement:**
-  - the signature is by that identity, or by a certificate of that identity that meets every rule of Section 5.2;
+  - the signature verifies by Section 5.4, with that identity's document as the input;
   - the prekey statement meets every rule of Section 6:
     - the form and namespace;
     - line 2 the recipient's address;
@@ -1399,7 +1410,7 @@ A client drains every page of its list (Section 11.11) and fetches the message o
 5. **Check 5, signature.** The signature meets all of these (`invalid_signature`):
    - the signature is over line 1 exactly as decrypted;
    - the signature is in the namespace `dromas-msg-v1:<this mailbox>`;
-   - the signature is by that identity, or by a working key under a certificate of that identity that is valid now (Section 5.2).
+   - the signature verifies by Section 5.4, with that identity's document as the input.
 6. **Check 6, envelope.** The reader checks the rest of the envelope, in this order:
 
    | Order | Rule | Otherwise |
