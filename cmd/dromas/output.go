@@ -18,9 +18,10 @@ import (
 )
 
 // Every command prints JSON lines: one object a line, whose first member,
-// "type", says what the line is. Its members follow, and last, where this
-// client has something to say, "detail", in its own words: never a
-// sender's, never a server's. Help is the one thing printed as text.
+// "type", says what the line is, and whose second, "time", says when the
+// client made it. Its members follow, and last, where this client has
+// something to say, "detail", in its own words: never a sender's, never a
+// server's. Help is the one thing printed as text.
 //
 // What a command did and what it met on the way go to stdout, messages and
 // refusals alike, so a reader of stdout alone misses nothing. Stderr carries
@@ -28,8 +29,15 @@ import (
 // wrong, and the line that says it is waiting.
 
 // line is one line of output: a JSON object whose first member is "type",
-// then the members of kv, as object writes them.
-func line(typ string, kv ...any) []byte { return object(append([]any{"type", typ}, kv...)...) }
+// then "time", this machine's clock as the line is made, in UTC, in
+// protocol.TimeLayout, then the members of kv, as object writes them. A
+// service's log keeps the lines as the command printed them, so each line
+// carries its own time, as log/slog's handlers write a record's "time".
+// The revocation record that revocation make prints is a protocol document,
+// printed as it is (PROTOCOL.md §10.3), and carries no time.
+func line(typ string, kv ...any) []byte {
+	return object(append([]any{"type", typ, "time", time.Now().UTC().Format(protocol.TimeLayout)}, kv...)...)
+}
 
 // object is a JSON object of each name in kv followed by its value, in turn.
 // A value is written with encoding/json, or as its bytes are when it is raw;
