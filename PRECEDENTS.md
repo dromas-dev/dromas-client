@@ -392,7 +392,7 @@ None was a flaw in the layout: each was a verifier that read an object different
 
 ## 3e. Output: JSON lines, each with its type first
 
-**Ours:** every command prints JSON lines, `type` first, the same from the script: what it did and met to stdout, refusals included; to stderr only its failure, a wrong command line, or waiting. No `--json`, no switch on a terminal; help is the one text. A line nests the envelope whole as `envelope`, so what the envelope gains in v1 (§14) never meets the line's own names. A line that does not carry the envelope may carry one of its checked values as a member of its own, as `held`'s `from` and `sent`'s `to` do: nothing is spread, so nothing meets (client#441 item 3).
+**Ours:** every command prints JSON lines, `type` first, the same from the script, and from the Go client `time` second: what it did and met to stdout, refusals included; to stderr only its failure, a wrong command line, or waiting. No `--json`, no switch on a terminal; help is the one text. A line nests the envelope whole as `envelope`, so what the envelope gains in v1 (§14) never meets the line's own names. A line that does not carry the envelope may carry one of its checked values as a member of its own, as `held`'s `from` and `sent`'s `to` do: nothing is spread, so nothing meets (client#441 item 3).
 
 | Who | What they do | How it is known |
 |---|---|---|
@@ -404,6 +404,8 @@ None was a flaw in the layout: each was a verifier that read an object different
 | **Arcjet's CLI** | Text to a terminal, JSON otherwise, errors as JSON on stderr when JSON output is on | blog.arcjet.com/designing-a-cli-for-ai-agents, read 2026-10-16 |
 | **Google Workspace CLI, its author** | NDJSON by default off a TTY | justin.poehnelt.com/posts/rewrite-your-cli-for-ai-agents, read 2026-10-16 |
 | **Kubernetes, API conventions** | Every object carries `kind` and `apiVersion`, defaultable from the path | `kubernetes/community`, `contributors/devel/sig-architecture/api-conventions.md`, read 2026-10-16 |
+| **Go, `log/slog`** | The default handler formats each record's "message, time, level, and attributes"; `JSONHandler` writes line-delimited JSON objects, and for a record whose time is not zero, "the key is "time"" | pkg.go.dev/log/slog, read 2026-11-16 |
+| **Homebrew, `service do`** | `log_path` is the "path to write `stdout` to" and `error_log_path` the one for `stderr`: the lines as the program printed them, with nothing added | docs.brew.sh/Formula-Cookbook, read 2026-11-16 |
 | **Kubernetes, watch events** | `{"type": …, "object": {…}}`: the event's `type` beside the object nested whole with its own `kind` | kubernetes.io/docs/reference/using-api/api-concepts/, § Efficient detection of changes, from `kubernetes/website`, read 2026-10-22 |
 | **Notation Matters** (arXiv 2605.29676, May 2026) | Token-saving formats cost accuracy in agent loops: TOON saves up to 18% at about 9 points, and cascades on multi-turn parsing failures | arxiv.org/abs/2605.29676, read 2026-10-16 |
 
@@ -411,6 +413,7 @@ None was a flaw in the layout: each was a verifier that read an object different
 - **One form, no switch on a terminal,** where Arcjet and clig.dev switch: the reader is an agent first, a harness may run it in a pseudo-terminal, and one form is one to test.
 - **JSON where text or Markdown would do:** the guidance finds no format best; our lines are one record each, where Markdown saved nothing; and a stranger's text inside a JSON string can pass for no line of ours and write no control character to a terminal (§ 3d's rule).
 - **What a command met is on stdout,** as agent CLIs stream their errors among their events: a reader of stdout alone misses no forgery.
+- **Every line carries its own `time`,** as slog writes a record's: `recv --follow` runs under a service manager, whose log on macOS and Windows is the lines as printed, with no time of its own (Homebrew's `log_path`). The script's lines carry none, since that difference guards none of the five (`AGENTS.md` § The shell client).
 - **A revocation record names its own `type`** (§10.3), as a Kubernetes object its `kind`: the line `revocation make` prints is the record that publishes with curl; readers take one without it and refuse another type.
 
 ## 4. The rest: one row a decision

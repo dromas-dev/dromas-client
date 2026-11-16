@@ -168,14 +168,15 @@ func (c *callbackEnv) exec(mode string, args ...string) []string {
 	return append([]string{"--exec", os.Args[0], "--", callbackWord, c.record, mode}, args...)
 }
 
-// recorded is what the callback recorded.
+// recorded is what the callback recorded, each line it was handed without its
+// "time" (untimedText), as the command's own output reaches a test.
 func (c *callbackEnv) recorded() string {
 	c.t.Helper()
 	raw, err := os.ReadFile(c.record)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		c.t.Fatal(err)
 	}
-	return string(raw)
+	return untimedText(string(raw))
 }
 
 // The callback gets recv's line for the message on stdin, the line recv printed,

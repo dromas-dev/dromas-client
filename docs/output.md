@@ -2,6 +2,8 @@
 
 Every `dromas` command prints [JSON Lines](https://jsonlines.org/): one JSON object per line, with `type` as the first member, naming what the line reports. Help, and the notice that `-h` is deprecated in favour of `--help`, are the only output in plain text.
 
+The second member of every line is `time`: the time the client made the line, by this machine's clock, in UTC, to the second, for example `"2026-11-16T16:11:26Z"`. A service's log holds the lines as the command printed them, so `time` dates each one. The one line without `time` is the `revocation_record` that `dromas revocation make` prints, because that line is the record a server accepts, member for member.
+
 A command prints what it did, and what it met on the way, to stdout, messages and refusals alike. The only JSON lines a command prints to stderr are these:
 
 - `error`, when the command failed
