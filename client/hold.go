@@ -57,6 +57,13 @@ import (
 //     keep-alive does not reach). Holds start at most about once a minute
 //     (holdEvery), so a connection that fails at once is a minute's poll,
 //     within the poll budget (PROTOCOL.md §11.5).
+//   - What the drops taught. Nothing tells a mailbox that a network which
+//     forgot its connections is gone, as nothing tells a host that a path
+//     MTU a loss lowered is stale, so the mailbox ages what it learned, as
+//     path MTU discovery ages that estimate (RFC 1191 §6.3): once
+//     relearnAfter passes with no drop, the next connection and hold start
+//     again from DefaultHold with no keep-alive, and the drops of a network
+//     that still forgets connections teach the mailbox again.
 
 // DefaultHold is how long a mailbox asks the server to hold its list at first:
 // under the 5 minutes at which common networks drop a silent connection.
@@ -98,12 +105,23 @@ const (
 // TLS handshake has its own (net/http's TLSHandshakeTimeout).
 const dialTimeout = 10 * time.Second
 
+// relearnAfter is how long a mailbox keeps what its drops taught it, from
+// its last drop (holding.age). It is a day, where path MTU discovery ages
+// its estimate after about 10 minutes (RFC 1191 §6.3; PMTU_RAISE_TIMER,
+// RFC 8899 §5.1.1), because a failed probe here is a dead hold, up to the
+// wait and holdMargin with no answer, where theirs is one packet. A
+// mailbox whose connections keep dropping starts the day again at each
+// drop, so it stays where its drops put it. The day is counted on the
+// wall clock, so time the machine spends asleep counts toward it.
+const relearnAfter = 24 * time.Hour
+
 // holding is what a mailbox has learned of its network while it holds its
 // list: the wait it asks for, and the keep-alive its connections need.
 type holding struct {
 	mu        sync.Mutex
 	wait      time.Duration // the wait it asks for; DefaultHold when zero
 	keepAlive time.Duration // the keep-alive a new connection gets; none when zero
+	lastDrop  time.Time     // on the wall clock; zero when nothing is learned
 	starts    *rate.Limiter
 	http2     atomic.Bool // the connection in use speaks HTTP/2
 }
@@ -111,10 +129,17 @@ type holding struct {
 func (h *holding) current() (wait, keepAlive time.Duration) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if h.wait == 0 {
-		h.wait = DefaultHold
-	}
+	h.age(time.Now())
 	return h.wait, h.keepAlive
+}
+
+// age gives h the wait DefaultHold where it has none, and forgets what its
+// drops taught it, the keep-alive and a shorter wait, once relearnAfter has
+// passed on the wall clock since its last drop. h.mu is held.
+func (h *holding) age(now time.Time) {
+	if h.wait == 0 || !h.lastDrop.IsZero() && now.Round(0).Sub(h.lastDrop) >= relearnAfter {
+		h.wait, h.keepAlive, h.lastDrop = DefaultHold, 0, time.Time{}
+	}
 }
 
 // minKeepAlive is the shortest keep-alive a mailbox's connections get, however
@@ -126,13 +151,14 @@ const minKeepAlive = MinHold / 2
 // the hold's own deadline (silent) dropped at some time within the wait, so
 // keep-alive halves, from the wait at first. Once keep-alive is at its
 // floor, a drop shortens the wait instead: below held, or for a silent one
-// to half of it. It returns what the mailbox asks for and sets from now on.
+// to half of it. It returns what the mailbox asks for and sets from now on,
+// until relearnAfter passes with no drop.
 func (h *holding) dropped(held time.Duration, silent bool) (wait, keepAlive time.Duration) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if h.wait == 0 {
-		h.wait = DefaultHold
-	}
+	now := time.Now()
+	h.age(now)
+	h.lastDrop = now.Round(0)
 	below := held - holdMargin
 	if silent {
 		below = h.keepAlive
@@ -207,8 +233,9 @@ type HoldResult struct {
 	// hold's answer, seen as it dropped or only at the hold's deadline, or,
 	// over HTTP/1.1, on a reused connection that net/http sent the request
 	// again past, which the hold's answer then follows. Wait and KeepAlive are
-	// then what the mailbox's default client asks for from now on: a given
-	// client's dialer is its own, so nothing applies KeepAlive there.
+	// then what the mailbox's default client asks for from now on, until
+	// relearnAfter passes with no drop: a given client's dialer is its own,
+	// so nothing applies KeepAlive there.
 	Dropped bool
 	// After is how long the request was held on the connection it got
 	// last.
