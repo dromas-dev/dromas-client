@@ -49,7 +49,7 @@ func doWith(ctx context.Context, opt client.Options, command string, args []stri
 }
 
 // lineTime is the "time" member that line puts second in every line it makes.
-var lineTime = regexp.MustCompile(`(\{"type":"[a-z_]+"),"time":"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z"`)
+var lineTime = regexp.MustCompile(`(\{"type":"[a-z_]+"),"time":"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}Z"`)
 
 // untimedText is s with each line's "time" member taken out, so that a test
 // holds a line's other members byte for byte;
@@ -121,32 +121,33 @@ func typesOf(ls []map[string]any) string {
 }
 
 // TestEveryLineCarriesTheTimeItWasMade: line and typed put "time" second,
-// after "type": this machine's clock as the line is made, in UTC, in
-// protocol.TimeLayout. A command's lines carry it on stdout and on stderr.
+// after "type": this machine's clock as the line is made, in UTC, to the
+// millisecond with three digits always (lineTimeLayout). A command's lines
+// carry it on stdout and on stderr.
 func TestEveryLineCarriesTheTimeItWasMade(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		// The bubble's clock starts at 2000-01-01T00:00:00Z.
 		for _, c := range []struct{ got, want string }{
-			{string(line("a", "n", 1)), `{"type":"a","time":"2000-01-01T00:00:00Z","n":1}`},
-			{string(typed("b", []byte(`{"m":2}`))), `{"type":"b","time":"2000-01-01T00:00:00Z","m":2}`},
-			{string(typed("c", []byte(`{}`))), `{"type":"c","time":"2000-01-01T00:00:00Z"}`},
+			{string(line("a", "n", 1)), `{"type":"a","time":"2000-01-01T00:00:00.000Z","n":1}`},
+			{string(typed("b", []byte(`{"m":2}`))), `{"type":"b","time":"2000-01-01T00:00:00.000Z","m":2}`},
+			{string(typed("c", []byte(`{}`))), `{"type":"c","time":"2000-01-01T00:00:00.000Z"}`},
 		} {
 			if c.got != c.want {
 				t.Fatalf("a line made at the bubble's start is %s, want %s", c.got, c.want)
 			}
 		}
-		time.Sleep(90 * time.Second)
-		if got, want := string(line("a")), `{"type":"a","time":"2000-01-01T00:01:30Z"}`; got != want {
-			t.Fatalf("a line made 90 s later is %s, want %s", got, want)
+		time.Sleep(90*time.Second + 250*time.Millisecond + 999*time.Microsecond)
+		if got, want := string(line("a")), `{"type":"a","time":"2000-01-01T00:01:30.250Z"}`; got != want {
+			t.Fatalf("a line made 90.250999 s later is %s, want %s", got, want)
 		}
 	})
-	before := time.Now().UTC().Truncate(time.Second)
+	before := time.Now().UTC().Truncate(time.Millisecond)
 	var out, errs bytes.Buffer
 	_ = run(t.Context(), []string{"version"}, strings.NewReader(""), &out, &errs)
 	_ = report(run(t.Context(), []string{"send"}, strings.NewReader(""), io.Discard, &errs), &errs)
 	after := time.Now().UTC()
 	for _, l := range printed(t, out.String()+errs.String()) {
-		at, err := time.Parse(protocol.TimeLayout, fmt.Sprint(l["time"]))
+		at, err := time.Parse(lineTimeLayout, fmt.Sprint(l["time"]))
 		if err != nil || at.Before(before) || at.After(after) {
 			t.Fatalf("a %s line carries the time %v, want one from %s to %s", l["type"], l["time"], before, after)
 		}

@@ -30,14 +30,22 @@ import (
 
 // line is one line of output: a JSON object whose first member is "type",
 // then "time", this machine's clock as the line is made, in UTC, in
-// protocol.TimeLayout, then the members of kv, as object writes them. A
+// lineTimeLayout, then the members of kv, as object writes them. A
 // service's log keeps the lines as the command printed them, so each line
 // carries its own time, as log/slog's handlers write a record's "time".
 // The revocation record that revocation make prints is a protocol document,
 // printed as it is (PROTOCOL.md §10.3), and carries no time.
 func line(typ string, kv ...any) []byte {
-	return object(append([]any{"type", typ, "time", time.Now().UTC().Format(protocol.TimeLayout)}, kv...)...)
+	return object(append([]any{"type", typ, "time", time.Now().UTC().Format(lineTimeLayout)}, kv...)...)
 }
+
+// lineTimeLayout is a line's "time": RFC 3339 in UTC, cut to the
+// millisecond (time.Format cuts a fraction, never rounds it), always with
+// three digits after the second. log/slog writes a record's
+// time as json.Marshal does, to the nanosecond with its trailing zeros cut.
+// A fixed width keeps a log's lines in time order when they are sorted as
+// text, which a cut fraction does not, because "." sorts before "Z".
+const lineTimeLayout = "2006-01-02T15:04:05.000Z"
 
 // object is a JSON object of each name in kv followed by its value, in turn.
 // A value is written with encoding/json, or as its bytes are when it is raw;
