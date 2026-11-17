@@ -10,8 +10,9 @@ import (
 	"testing"
 )
 
-// Only the identity is judged as a key file its owner put in place, by ssh's
-// rule (checkKeyFile), which leaves a key another user owns to that user. Every
+// Only the identity, and the webhook's header and secret files, are judged as
+// key files their owner put in place, by ssh's rule (checkKeyFile), which leaves
+// a key another user owns to that user. Every
 // key and ticket the client writes is judged as a private file, which refuses
 // another user's (checkPrivateFile). The set of callers is read from the
 // package's source, so a new caller of checkKeyFile fails here.
@@ -40,7 +41,7 @@ func TestOnlyTheIdentityIsJudgedAsAKeyFile(t *testing.T) {
 			return true
 		})
 	}
-	if !slices.Equal(callers, []string{"identitykey.go"}) {
-		t.Errorf("checkKeyFile is called in %v, want identitykey.go alone", callers)
+	if !slices.Equal(callers, []string{"identitykey.go", "webhook.go"}) {
+		t.Errorf("checkKeyFile is called in %v, want identitykey.go and webhook.go alone", callers)
 	}
 }

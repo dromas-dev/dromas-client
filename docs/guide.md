@@ -78,6 +78,27 @@ The program runs at least once for each message, and a crash can run it twice. `
 
 A held message runs no program, and neither does a message that another `recv` received. Run one `recv` for each mailbox.
 
+### Send each message to a webhook
+
+`dromas recv --webhook <url>` posts each message delivered to `inbox/` to an HTTP endpoint, such as an n8n Webhook node, beside the `--exec` program or alone. The body is the message's `message` line, as JSON. To set the webhook in the config file, use [`recv.webhook`](configuration.md#recvwebhook):
+
+```toml
+[recv]
+webhook = "https://n8n.example.com/webhook/dromas"
+webhook-header-file = "~/.config/dromas/webhook-header"
+webhook-secret-file = "~/.config/dromas/webhook-secret"
+```
+
+The header file holds one line, such as `Authorization: Bearer <token>`. With the secret file, each post is signed by the [Standard Webhooks](https://www.standardwebhooks.com/) scheme, and the `webhook-id` header is the message's `id`. Make each file accessible only by you (`chmod 600`), or `recv` rejects it at its start.
+
+The webhook runs apart from the program, and a failure of either never stops, delays or fails the other. Posts go one at a time, in delivery order, so the tries of one message hold back the post of the next. With `--wait`, `recv` ends once the webhook has finished the tries of what it delivered.
+
+A `2xx` response is success. Any other response, a redirect included, or no response within 30 seconds, is a failed try: `recv` follows no redirect. `recv` tries a post at most 3 times in all: at once, then 5 seconds after the first try, then 5 minutes after the second. A response's `Retry-After` can lengthen a wait, to at most 5 minutes. A message whose 3 tries fail makes `dromas status` report the message under `attention`, until `dromas inbox clear-failed` clears it. Nothing posts that message again: to post it yourself, run `dromas inbox show <id> | curl --data-binary @- <url>`, which posts the same `message` line.
+
+A message whose tries a stopped or crashed `recv` cut short is posted when `recv --webhook` next starts, so an endpoint can get a message twice. Use `webhook-id`, or the line's `id`, to recognise a message you already have.
+
+An `http` URL to another machine sends each decrypted message across the network in the clear. Use `https`, or a URL on this machine.
+
 ## Run as a service
 
 To receive messages as they arrive, run `dromas recv --follow --headers` under your system's service manager, one service for each mailbox. For a mailbox other than the default, add `--profile <name>`. With `--headers`, the service's log records who sent each message and when, and none of the text a sender chose. The `recv.exec` program still gets the whole message.

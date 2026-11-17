@@ -45,7 +45,7 @@ dromas inbox
 ### SEE ALSO
 
 * [dromas](dromas.md)	 - 
-* [dromas inbox clear-failed](dromas_inbox_clear-failed.md)	 - clear what status reports of every --exec program that gave up
+* [dromas inbox clear-failed](dromas_inbox_clear-failed.md)	 - clear what status reports of every --exec program and webhook that gave up
 * [dromas inbox list](dromas_inbox_list.md)	 - list the messages in inbox/, one JSON line each
 * [dromas inbox show](dromas_inbox_show.md)	 - print a message in inbox/, as recv printed it
 

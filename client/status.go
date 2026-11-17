@@ -95,7 +95,11 @@ type Status struct {
 	// GaveUp names the messages inbox/ keeps whose handling gave up
 	// ([ErrGaveUp]), which nothing tries again, until [Mailbox.ClearFailed]
 	// clears every one.
-	GaveUp []string `json:"failed,omitempty"`
+	GaveUp []string `json:"exec_failed,omitempty"`
+	// WebhookOwed and WebhookGaveUp are Owed and GaveUp of the webhook's
+	// handling, where recv --webhook runs one ([FollowOptions.Webhook]).
+	WebhookOwed   int      `json:"webhook_pending,omitempty"`
+	WebhookGaveUp []string `json:"webhook_failed,omitempty"`
 	// Attention says, in words, each thing that needs a look. It is empty
 	// when nothing does.
 	Attention []string `json:"attention"`
@@ -264,11 +268,17 @@ func (b *Mailbox) status() (*Status, error) {
 	if s.Held > 0 {
 		s.Attention = append(s.Attention, fmt.Sprintf("%d held in held/ from senders this mailbox has not allowed: dromas held list lists them by sender; dromas peer allow <address> delivers a sender's to inbox/, and dromas peer block <address> deletes them", s.Held))
 	}
-	if s.Owed, s.GaveUp, err = b.owedCounts(); err != nil {
+	if s.Owed, s.GaveUp, err = b.owedCounts(handlerRecords); err != nil {
 		return nil, err
 	}
 	if len(s.GaveUp) > 0 {
 		s.Attention = append(s.Attention, fmt.Sprintf("%d in inbox/ whose callback gave up, which nothing tries again (%s): dromas inbox show <id> | <program> hands one to a program by hand, and dromas inbox clear-failed clears this for every one", len(s.GaveUp), strings.Join(s.GaveUp, ", ")))
+	}
+	if s.WebhookOwed, s.WebhookGaveUp, err = b.owedCounts(webhookRecords); err != nil {
+		return nil, err
+	}
+	if len(s.WebhookGaveUp) > 0 {
+		s.Attention = append(s.Attention, fmt.Sprintf("%d in inbox/ whose webhook gave up, which nothing posts again (%s): dromas inbox show <id> | curl --data-binary @- <url> posts one by hand, and dromas inbox clear-failed clears this for every one", len(s.WebhookGaveUp), strings.Join(s.WebhookGaveUp, ", ")))
 	}
 	s.Attention = append(s.Attention, b.versionsAttention()...)
 	if s.Outbox > 0 {

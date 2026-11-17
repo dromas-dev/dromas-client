@@ -55,6 +55,9 @@ var crashCommands = map[string]func(ctx context.Context, b *client.Mailbox, o cr
 	"follow": func(ctx context.Context, b *client.Mailbox, o crashOrder) error {
 		return followOwed(ctx, b, o.Dir+".handled")
 	},
+	"follow --webhook": func(ctx context.Context, b *client.Mailbox, o crashOrder) error {
+		return followBoth(ctx, b, o.Dir)
+	},
 	"remedy": func(ctx context.Context, b *client.Mailbox, _ crashOrder) error {
 		_, err := b.RenewAndRevoke(ctx)
 		return err
@@ -778,6 +781,78 @@ func followOwed(ctx context.Context, b *client.Mailbox, handled string) error {
 		_, err = f.WriteString(body + "\n")
 		return err
 	})
+}
+
+// appendBody is a handler that appends the body of each message it is handed
+// to the file to.
+func appendBody(to string) client.Handler {
+	return func(_ context.Context, ev client.Event) error {
+		if ev.Kind != client.EventDelivery {
+			return nil
+		}
+		var body string
+		if err := json.Unmarshal(ev.Delivery.Envelope.Body, &body); err != nil {
+			return err
+		}
+		f, err := os.OpenFile(to, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600) //nolint:gosec // the test's own file
+		if err != nil {
+			return err
+		}
+		defer f.Close() //nolint:errcheck // written below, and a test's
+		_, err = f.WriteString(body + "\n")
+		return err
+	}
+}
+
+// followBoth runs one drain of the loop with what it delivers owed to the
+// handler and to the webhook, which append each body to dir's .handled and
+// .posted.
+func followBoth(ctx context.Context, b *client.Mailbox, dir string) error {
+	return b.Follow(ctx, client.FollowOptions{Until: time.Now(), Owed: true, Webhook: appendBody(dir + ".posted")}, appendBody(dir+".handled"))
+}
+
+// A loop killed at each step of keeping a message or of handling it, with a
+// webhook beside the handler: the next loop hands each pipeline what it is
+// owed, so every message reaches the handler and the webhook at least once,
+// and twice at most, where a kill came after one of them returned and before
+// its record was cleared. Nothing is owed to either after.
+func TestALoopWithAWebhookKilledAtEachStepHandsEveryMessageToBothAtLeastOnce(t *testing.T) {
+	t.Parallel()
+	for _, step := range append(slices.Clone(client.Steps("delivery")), client.Steps("owed")...) {
+		t.Run(step, func(t *testing.T) {
+			e := newEnv(t)
+			a, b := e.mailbox(), e.mailbox()
+			send(t, a, b, "first")
+			send(t, a, b, "second")
+			crash(t, e, b, "follow --webhook", step, protocol.Address{})
+			x, err := client.Open(b.Dir(), e.opts())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := followBoth(context.Background(), x, b.Dir()); err != nil {
+				t.Fatalf("the loop after the crash: %v", err)
+			}
+			for _, to := range []string{".handled", ".posted"} {
+				raw, err := os.ReadFile(b.Dir() + to)
+				if err != nil {
+					t.Fatal(err)
+				}
+				count := map[string]int{}
+				for l := range strings.Lines(string(raw)) {
+					count[strings.TrimSpace(l)]++
+				}
+				for _, body := range []string{"first", "second"} {
+					if n := count[body]; n < 1 || n > 2 {
+						t.Errorf("%s: %q %d times after a kill at %s, want once or twice", to, body, n, step)
+					}
+				}
+			}
+			if st, err := x.Status(context.Background()); err != nil || st.Owed != 0 || st.WebhookOwed != 0 {
+				t.Fatalf("still owed: %+v, %v", st, err)
+			}
+			whole(t, e, x, a, "first", "second")
+		})
+	}
 }
 
 // A loop killed at each step of keeping a message or of handling it: the next

@@ -329,7 +329,7 @@ func TestInboxClearFailedClearsEveryCallbackThatGaveUpUntilTheNext(t *testing.T)
 			t.Fatalf("status: exit %d, want %d: %s", code, want, stdout)
 		}
 		var got []string
-		if ids, ok := ls[0]["failed"].([]any); ok {
+		if ids, ok := ls[0]["exec_failed"].([]any); ok {
 			for _, id := range ids {
 				got = append(got, fmt.Sprint(id))
 			}

@@ -96,6 +96,9 @@ type fileConfig struct {
 		Exec        []string `toml:"exec"`
 		ExecTimeout string   `toml:"exec-timeout"`
 		LogFile     string   `toml:"log-file"`
+		Webhook     string   `toml:"webhook"`
+		WebhookHead string   `toml:"webhook-header-file"`
+		WebhookKey  string   `toml:"webhook-secret-file"`
 	} `toml:"recv"`
 	Inbox struct {
 		List struct {
@@ -136,6 +139,10 @@ type config struct {
 	// exec is [recv] exec: the program a recv that waits runs for each message,
 	// then its arguments, where the command line gives no --exec.
 	exec []string
+	// webhook is [recv] webhook, the URL a recv that waits posts each message
+	// to, and webhookHeader and webhookSecret its header and secret files,
+	// absolute, each where the command line gives none.
+	webhook, webhookHeader, webhookSecret string
 	// flagged is each table's settings, by the command that takes them.
 	flagged map[string]map[string]string
 	values  map[string]setting
@@ -586,6 +593,36 @@ func (cfg *config) resolve(g *globals, fc *fileConfig, rel string, noMailbox boo
 			return bad("recv.exec-timeout", "recv.exec-timeout goes with recv.exec")
 		}
 		table("recv", "exec-timeout", v)
+	}
+	if v := fc.Recv.Webhook; v != "" {
+		if err := client.CheckWebhookURL(v); err != nil {
+			return bad("recv.webhook", "recv.webhook: %v", err)
+		}
+		cfg.webhook = v
+		cfg.values["recv.webhook"] = setting{v, "file"}
+	}
+	for _, f := range []struct {
+		key, value string
+		to         *string
+	}{
+		{"recv.webhook-header-file", fc.Recv.WebhookHead, &cfg.webhookHeader},
+		{"recv.webhook-secret-file", fc.Recv.WebhookKey, &cfg.webhookSecret},
+	} {
+		if f.value == "" {
+			continue
+		}
+		if cfg.webhook == "" {
+			return bad(f.key, "%s goes with recv.webhook", f.key)
+		}
+		p, err := expand(f.value, rel)
+		if err == nil {
+			p, err = filepath.Abs(p)
+		}
+		if err != nil {
+			return bad(f.key, "%s: %v", f.key, err)
+		}
+		*f.to = p
+		cfg.values[f.key] = setting{p, "file"}
 	}
 	if v := fc.Recv.LogFile; v != "" {
 		p, err := expand(v, rel)
