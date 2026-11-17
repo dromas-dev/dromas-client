@@ -10,7 +10,7 @@ tar -xzf dromas_*_linux_amd64.tar.gz dromas packaging/systemd/dromas@.service
 sudo install dromas /usr/local/bin/
 ```
 
-The archive also carries the man pages, `dromas(1)` and `dromas.toml(5)`, in `share/man/`: copy them to a directory on your system's manual path (`manpath`).
+The archive also carries the man pages, `dromas(1)`, `dromas.toml(5)` and `dromas-output(7)`, in `share/man/`: copy them to a directory on your system's manual path (`manpath`).
 
 ## Quickstart
 
