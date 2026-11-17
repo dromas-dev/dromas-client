@@ -89,7 +89,7 @@ webhook-header-file = "~/.config/dromas/webhook-header"
 webhook-secret-file = "~/.config/dromas/webhook-secret"
 ```
 
-The header file holds one line, such as `Authorization: Bearer <token>`. With the secret file, each post is signed by the [Standard Webhooks](https://www.standardwebhooks.com/) scheme, and the `webhook-id` header is the message's `id`. Make each file accessible only by you (`chmod 600`), or `recv` rejects it at its start.
+The header file holds one line, such as `Authorization: Bearer <token>`. With the secret file, each post is signed by the [Standard Webhooks](https://www.standardwebhooks.com/) scheme, and the `webhook-id` header is the message's `id`. Make each file accessible only by you (`chmod 600`), or `recv` rejects it at its start. `dromas config` shows the URL, and a URL given as `--webhook` appears in the system's list of processes, so put a URL that carries a token in the config file.
 
 The webhook runs apart from the program, and a failure of either never stops, delays or fails the other. Posts go one at a time, in delivery order, so the tries of one message hold back the post of the next. With `--wait`, `recv` ends once the webhook has finished the tries of what it delivered.
 

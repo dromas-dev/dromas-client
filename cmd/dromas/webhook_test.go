@@ -297,10 +297,10 @@ func TestTheWebhooksTriesAreAtOnceThen5sThen5m(t *testing.T) {
 	}
 }
 
-// No line recv prints carries the header, the secret or the URL: the line
-// types are every one webhook.go makes, read from its source, each made once at
-// least, by an endpoint that answers 500, one that is not there, and a message
-// owed that inbox/ no longer keeps.
+// No line recv prints, and nothing dromas status prints, carries the header,
+// the secret or the URL: the line types are every one webhook.go makes, read
+// from its source, each made once at least, by an endpoint that answers 500,
+// one that is not there, and a message owed that inbox/ no longer keeps.
 func TestNoWebhookLineCarriesItsSecrets(t *testing.T) {
 	quickHook(t)
 	types := lineTypesOf(t, "webhook.go")
@@ -323,6 +323,13 @@ func TestNoWebhookLineCarriesItsSecrets(t *testing.T) {
 	gone.Close()
 	c.send("to nobody")
 	run(gone.URL + hookPath)
+	// dromas status, which lists the webhook's records, while inbox/ keeps the messages that gave up.
+	var st, sterr bytes.Buffer
+	_ = do(context.Background(), "status", nil, strings.NewReader(""), &st, &sterr)
+	if !strings.Contains(st.String(), "webhook_failed") {
+		t.Errorf("dromas status lists no webhook_failed: %s %s", st.String(), sterr.String())
+	}
+	all.WriteString(st.String() + sterr.String())
 	// A message left owed, then gone from inbox/.
 	c.send("deleted")
 	cut := func(context.Context, client.Event) error { return errors.New("cut short") }
