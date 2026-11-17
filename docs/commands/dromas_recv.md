@@ -79,6 +79,34 @@ runs that program again when recv --exec next starts, so the program runs at
 least once for each message and may run twice: it should use the "id" as the
 message's name.
 
+With --webhook, recv posts each message delivered to inbox/ to the URL, beside
+--exec's program or alone: the message's "message" line is the body, as JSON,
+with no line feed. --webhook needs --wait or --follow, and the config file's
+[recv] webhook sets the URL where the command line names none. The URL may be
+http or https, on this machine or another: an http URL to another machine sends
+each message across the network in the clear. A URL with a user or a password is
+refused, because a secret is never an argument. --webhook-header-file names a
+file whose one line, "Name: Value", is a header each post carries, for example
+Authorization: Bearer and a token. --webhook-secret-file names a file holding a
+Standard Webhooks secret, whsec_ and the base64 of 24 to 64 random bytes, and
+each post is signed by Standard Webhooks' v1 scheme: the webhook-id header is the
+message's "id", the same at each try. recv refuses either file where others can
+read it, as ssh refuses a private key, and reads each once, at its start.
+
+The webhook runs apart from --exec's program: a failure of either never stops,
+delays or fails the other. Posts go one at a time, in delivery order, and with
+--wait recv ends once the webhook has finished the tries of what it delivered.
+A 2xx answer is success. recv follows no redirect, and posts again after any
+other answer or none within 30s, up to 3 tries in all: at once, then 5s after
+the first and 5m0s after the second, or longer where the answer's Retry-After
+asks, up to 5m0s. Each failed attempt prints a
+"webhook_attempt_failed" line, and a message with no attempts left a
+"webhook_failed" line, which dromas status lists until dromas inbox clear-failed
+clears it, and recv exits with status 3. Nothing posts that message again: dromas
+inbox show \<id> | curl --data-binary @- \<url> posts it by hand. A process killed
+before a message's tries end posts it again when recv --webhook next starts, so
+the endpoint should use webhook-id or the "id" as the message's name.
+
 ```
 dromas recv [flags] [-- <argument>...]
 ```
@@ -86,14 +114,17 @@ dromas recv [flags] [-- <argument>...]
 ### Options
 
 ```
-      --drain-time duration     how long one drain runs before it stops for the next recv (default 15m0s)
-      --exec program            run this program for each message, with its line on stdin, and the arguments after -- as its own
-      --exec-timeout duration   kill --exec's program when one run takes this long (default 5m0s)
-      --follow[=true|false]     continue after each message, without end or for --wait's duration
-      --headers[=true|false]    print each message's checked fields and its body's size, without its body or subject
-      --help[=true|false]       print this help, and run nothing
-      --log-file file           append every line recv prints, stdout's and stderr's, to this file
-      --wait duration           hold the list open until a message arrives, for at most this long, however many held requests that needs
+      --drain-time duration        how long one drain runs before it stops for the next recv (default 15m0s)
+      --exec program               run this program for each message, with its line on stdin, and the arguments after -- as its own
+      --exec-timeout duration      kill --exec's program when one run takes this long (default 5m0s)
+      --follow[=true|false]        continue after each message, without end or for --wait's duration
+      --headers[=true|false]       print each message's checked fields and its body's size, without its body or subject
+      --help[=true|false]          print this help, and run nothing
+      --log-file file              append every line recv prints, stdout's and stderr's, to this file
+      --wait duration              hold the list open until a message arrives, for at most this long, however many held requests that needs
+      --webhook URL                post each message's line to this URL, beside --exec or alone
+      --webhook-header-file file   send the header this file holds, one line Name: Value, with each --webhook post
+      --webhook-secret-file file   sign each --webhook post by Standard Webhooks, under the secret this file holds
 ```
 
 ### Options inherited from parent commands

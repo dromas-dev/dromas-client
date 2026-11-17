@@ -512,7 +512,37 @@ Nothing runs that message's program again: dromas inbox show <id> | <program>
 hands it to a program by hand. A process killed before a program's tries end
 runs that program again when recv --exec next starts, so the program runs at
 least once for each message and may run twice: it should use the "id" as the
-message's name.`, formatTime(client.RecvWithin(protocol.PrekeyLifetime)), execTries, execDelay),
+message's name.
+
+With --webhook, recv posts each message delivered to inbox/ to the URL, beside
+--exec's program or alone: the message's "message" line is the body, as JSON,
+with no line feed. --webhook needs --wait or --follow, and the config file's
+[recv] webhook sets the URL where the command line names none. The URL may be
+http or https, on this machine or another: an http URL to another machine sends
+each message across the network in the clear. A URL with a user or a password is
+refused, because a secret is never an argument. --webhook-header-file names a
+file whose one line, "Name: Value", is a header each post carries, for example
+Authorization: Bearer and a token. --webhook-secret-file names a file holding a
+Standard Webhooks secret, whsec_ and the base64 of 24 to 64 random bytes, and
+each post is signed by Standard Webhooks' v1 scheme: the webhook-id header is the
+message's "id", the same at each try. recv refuses either file where others can
+read it, as ssh refuses a private key, and reads each once, at its start.
+
+The webhook runs apart from --exec's program: a failure of either never stops,
+delays or fails the other. Posts go one at a time, in delivery order, and with
+--wait recv ends once the webhook has finished the tries of what it delivered.
+A 2xx answer is success. recv follows no redirect, and posts again after any
+other answer or none within %s, up to %d tries in all: at once, then %s after
+the first and %s after the second, or longer where the answer's Retry-After
+asks, up to %s. Each failed attempt prints a
+"webhook_attempt_failed" line, and a message with no attempts left a
+"webhook_failed" line, which dromas status lists until dromas inbox clear-failed
+clears it, and recv exits with status 3. Nothing posts that message again: dromas
+inbox show <id> | curl --data-binary @- <url> posts it by hand. A process killed
+before a message's tries end posts it again when recv --webhook next starts, so
+the endpoint should use webhook-id or the "id" as the message's name.`,
+			formatTime(client.RecvWithin(protocol.PrekeyLifetime)), execTries, execDelay,
+			client.WebhookTimeout, webhookTries, webhookDelays[0], webhookDelays[1], webhookLongest),
 		checked(o.takesArguments, func(c *cobra.Command, args []string) error {
 			if drain <= 0 {
 				return wrong(c, "%s --drain-time takes a duration above zero, such as 15m", c.CommandPath())
@@ -522,6 +552,9 @@ message's name.`, formatTime(client.RecvWithin(protocol.PrekeyLifetime)), execTr
 			e.opt.DrainTime = drain
 			run, args, err := o.fromConfig(c, e.cfg, program, args)
 			if err != nil {
+				return err
+			}
+			if err := o.webhookFrom(c, e.cfg); err != nil {
 				return err
 			}
 			if logFile != "" {
@@ -545,6 +578,9 @@ message's name.`, formatTime(client.RecvWithin(protocol.PrekeyLifetime)), execTr
 	c.Flags().BoolVar(&o.follow, "follow", false, "continue after each message, without end or for --wait's duration")
 	c.Flags().StringVar(&program, "exec", "", "run this `program` for each message, with its line on stdin, and the arguments after -- as its own")
 	c.Flags().DurationVar(&o.execTimeout, "exec-timeout", 5*time.Minute, "kill --exec's program when one run takes this long")
+	c.Flags().StringVar(&o.webhookURL, "webhook", "", "post each message's line to this `URL`, beside --exec or alone")
+	c.Flags().StringVar(&o.webhookHeader, "webhook-header-file", "", "send the header this `file` holds, one line Name: Value, with each --webhook post")
+	c.Flags().StringVar(&o.webhookSecret, "webhook-secret-file", "", "sign each --webhook post by Standard Webhooks, under the secret this `file` holds")
 	c.Flags().DurationVar(&drain, "drain-time", client.DefaultDrainTime, "how long one drain runs before it stops for the next recv")
 	// As rclone's --log-file and Syncthing's --log-file, which append to the file
 	// and rotate nothing unless asked.
@@ -608,15 +644,16 @@ refused before any file is read.`,
 // "degraded", until systemctl reset-failed, which with no unit resets every one
 // (systemctl(1)): a callback that gave up keeps drawing attention the same way.
 func (e *cli) inboxClearFailedCmd() *cobra.Command {
-	return command("clear-failed", "clear what status reports of every --exec program that gave up",
-		`Clear the record of every message in inbox/ whose recv --exec program gave up,
-and print a "failed_cleared" line with their "count". dromas status then lists
-none of them, and needs no attention for them, until a program gives up again.
+	return command("clear-failed", "clear what status reports of every --exec program and webhook that gave up",
+		`Clear the record of every message in inbox/ whose recv --exec program or recv
+--webhook post gave up, and print a "failed_cleared" line with their "count".
+dromas status then lists none of them, and needs no attention for them, until a
+program or a webhook gives up again.
 
-clear-failed takes no id. It clears every message whose program gave up, and
-none whose program still has tries left; with none, the count is 0. Each message
-stays in inbox/, and nothing runs its program again: dromas inbox show <id> |
-<program> hands a message to a program by hand.`,
+clear-failed takes no id. It clears every message whose program or webhook gave
+up, and none that still has tries left; with none, the count is 0. Each message
+stays in inbox/, and nothing runs its program or posts it again: dromas inbox
+show <id> | <program> hands a message to a program by hand.`,
 		nargs(0, 0), func(c *cobra.Command, _ []string) error {
 			b, err := e.mailbox()
 			if err != nil {

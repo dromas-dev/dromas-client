@@ -50,7 +50,8 @@ const (
 	// [Event.Err].
 	EventRetry
 	// EventOwedGone is an owed message that inbox/ no longer keeps as recv wrote
-	// it, so the handler is not handed it: [Event.ID].
+	// it, so the handler, or the webhook's ([FollowOptions.Webhook]), is not
+	// handed it: [Event.ID].
 	EventOwedGone
 	// EventSent is a message of the outbox that a flush posted, under
 	// [FollowOptions.Flush]: [Event.Sent].
@@ -93,10 +94,11 @@ func noHandler(context.Context, Event) error { return nil }
 // ErrStop is what a [Handler] returns to end [Mailbox.Follow] with no error.
 var ErrStop = errors.New("the handler stopped the loop")
 
-// ErrGaveUp is what a [Handler] returns where [FollowOptions.Owed] is set, for a
-// delivery whose handling failed for good. [Mailbox.Follow] records it, for
-// [Mailbox.Status] to list under attention until [Mailbox.ClearFailed] clears
-// every such record, and goes on: nothing tries it again.
+// ErrGaveUp is what a [Handler] returns where [FollowOptions.Owed] is set, or
+// the webhook's ([FollowOptions.Webhook]), for a delivery whose handling failed
+// for good. [Mailbox.Follow] records it, for [Mailbox.Status] to list under
+// attention until [Mailbox.ClearFailed] clears every such record, and goes on:
+// nothing tries it again.
 var ErrGaveUp = errors.New("the handler gave up on the message")
 
 // FollowOptions says how [Mailbox.Follow] runs. The zero value runs until its
@@ -125,7 +127,31 @@ type FollowOptions struct {
 	// comes due, so a message a refusal left waiting goes once its
 	// Retry-After has passed.
 	Flush bool
+	// Webhook, when not nil, is a second handling of each delivery, apart
+	// from the handler's, with owed and gave-up records of its own: a
+	// failure of either never stops, delays or fails the other. The
+	// transaction that records a message landed in inbox/ as seen records it
+	// as owed to Webhook too. Webhook runs on a goroutine of its own, and is
+	// handed an [EventDelivery] for each owed message, in delivery order, one
+	// at a time, beginning with what is owed when Follow starts, or an
+	// [EventOwedGone] where inbox/ no longer keeps the message. The record is
+	// cleared once Webhook returns nil or [ErrGaveUp], which it records; any
+	// other error leaves the message owed, for the next handover. Follow
+	// waits for Webhook to hand over what is owed before it returns, but
+	// where its context ended: what is cut short stays owed for the next
+	// Follow.
+	Webhook Handler
 }
+
+// records are the owed and gave-up records of one handling of each delivery,
+// by their buckets: the handler's, under [FollowOptions.Owed], and the
+// webhook's, under [FollowOptions.Webhook].
+type records struct{ owed, gaveUp string }
+
+var (
+	handlerRecords = records{bucketOwed, bucketGaveUp}
+	webhookRecords = records{bucketWebhookOwed, bucketWebhookGaveUp}
+)
 
 // Follow is the mailbox's receive-and-hold loop: it drains, hands the handler
 // each [Event] of what the drain did, and holds the list until a message
@@ -151,8 +177,24 @@ type FollowOptions struct {
 // refusal no wait mends does ([Fatal]), and what is owed stays owed for the
 // next loop. Where the retry lands past Until the error ends the loop, as any
 // other drain's error does. Follow returns that error, the handler's, ctx's
-// when ctx ended, and nil for [ErrStop] or at Until.
-func (b *Mailbox) Follow(ctx context.Context, o FollowOptions, h Handler) error {
+// when ctx ended, and nil for [ErrStop] or at Until. Under
+// [FollowOptions.Webhook] it returns, where it would return nil, the fault
+// that cut the webhook's last handover short.
+func (b *Mailbox) Follow(ctx context.Context, o FollowOptions, h Handler) (err error) {
+	// delivered is called after each drain that delivered a message to inbox/.
+	delivered := func() {}
+	if o.Webhook != nil {
+		w := &webhooks{b: b, h: o.Webhook, kicked: make(chan struct{}, 1), done: make(chan struct{})}
+		ended := make(chan error, 1)
+		go func() { ended <- w.run(ctx) }()
+		delivered = w.kick
+		defer func() {
+			close(w.done)
+			if werr := <-ended; err == nil && ctx.Err() == nil {
+				err = werr
+			}
+		}()
+	}
 	if h == nil {
 		h = noHandler
 	}
@@ -169,17 +211,27 @@ func (b *Mailbox) Follow(ctx context.Context, o FollowOptions, h Handler) error 
 	// owed is whether what the state file records as owed is handed over
 	// before the next drain: at the start, and after a handover a fault cut short.
 	owed := o.Owed
+	var owing []records
+	if o.Owed {
+		owing = append(owing, handlerRecords)
+	}
+	if o.Webhook != nil {
+		owing = append(owing, webhookRecords)
+	}
 	for {
 		var res *Result
 		var err error
 		if owed {
 			var serr error
-			serr, err = b.handOverOwed(ctx, h)
+			serr, err = b.handOverOwed(ctx, handlerRecords, h)
 			keep(serr)
 			owed = err != nil
 		}
 		if err == nil {
-			res, err = locked(ctx, b, func() (*Result, error) { return b.receive(ctx, o.Owed) })
+			res, err = locked(ctx, b, func() (*Result, error) { return b.receive(ctx, owing) })
+			if res != nil && len(res.Delivered) > 0 {
+				delivered()
+			}
 			serr, fault := b.handOver(ctx, o.Owed, res, h)
 			keep(serr)
 			if fault != nil {
@@ -356,7 +408,7 @@ func (b *Mailbox) handOver(ctx context.Context, owed bool, res *Result, h Handle
 			give(Event{Kind: EventDelivery, Delivery: d})
 		case fault == nil:
 			var herr error
-			herr, fault = b.handOwed(ctx, d, res, h)
+			herr, fault = b.handOwed(ctx, handlerRecords, d, res, h)
 			keep(herr)
 		}
 	}
@@ -398,7 +450,7 @@ func (b *Mailbox) handOver(ctx context.Context, owed bool, res *Result, h Handle
 // once the handling has ended: h returned nil, ErrStop or ErrGaveUp, which it
 // records. It returns h's error, but for ErrGaveUp, which the loop goes on
 // after, beside a fault at clearing the record, which leaves the delivery owed.
-func (b *Mailbox) handOwed(ctx context.Context, d *Delivery, res *Result, h Handler) (stopped, fault error) {
+func (b *Mailbox) handOwed(ctx context.Context, r records, d *Delivery, res *Result, h Handler) (stopped, fault error) {
 	step("handler begun")
 	err := h(ctx, Event{Kind: EventDelivery, Delivery: d, Result: res})
 	step("handler returned")
@@ -409,7 +461,7 @@ func (b *Mailbox) handOwed(ctx context.Context, d *Delivery, res *Result, h Hand
 	if gaveUp {
 		err = nil
 	}
-	if cerr := b.clearOwed(ctx, d.owed, d.ID, gaveUp); cerr != nil {
+	if cerr := b.clearOwed(ctx, r, d.owed, d.ID, gaveUp); cerr != nil {
 		return err, cerr
 	}
 	step("owed cleared")
@@ -423,12 +475,12 @@ type owedMessage struct {
 	delivery *Delivery
 }
 
-// handOverOwed hands h what the state file records as owed, in delivery order,
-// and returns h's first error beside the fault that cut the handover short:
-// one at reading the records, or at clearing one, after which the rest are
-// not handed to h and stay owed (Follow).
-func (b *Mailbox) handOverOwed(ctx context.Context, h Handler) (stopped, fault error) {
-	owed, err := lockedFinished(ctx, b, b.owedMessages)
+// handOverOwed hands h what the state file records as owed in r, in delivery
+// order, and returns h's first error beside the fault that cut the handover
+// short: one at reading the records, or at clearing one, after which the rest
+// are not handed to h and stay owed (Follow).
+func (b *Mailbox) handOverOwed(ctx context.Context, r records, h Handler) (stopped, fault error) {
+	owed, err := lockedFinished(ctx, b, func() ([]owedMessage, error) { return b.owedMessages(r) })
 	if err != nil {
 		return nil, err
 	}
@@ -436,10 +488,10 @@ func (b *Mailbox) handOverOwed(ctx context.Context, h Handler) (stopped, fault e
 		var herr, cerr error
 		if m.delivery == nil {
 			if herr = h(ctx, Event{Kind: EventOwedGone, ID: m.id}); herr == nil {
-				cerr = b.clearOwed(ctx, m.key, m.id, false)
+				cerr = b.clearOwed(ctx, r, m.key, m.id, false)
 			}
 		} else {
-			herr, cerr = b.handOwed(ctx, m.delivery, nil, h)
+			herr, cerr = b.handOwed(ctx, r, m.delivery, nil, h)
 		}
 		if herr != nil && stopped == nil {
 			stopped = herr
@@ -451,32 +503,32 @@ func (b *Mailbox) handOverOwed(ctx context.Context, h Handler) (stopped, fault e
 	return stopped, nil
 }
 
-// owe records in s that the message id is owed its handling, and returns the
-// record's key: a number that rises with each, so the bucket's order is the
-// order of delivery.
-func owe(s store, id string) (string, error) {
-	n, err := s.next(bucketOwed)
+// owe records in s that the message id is owed its handling of r, and returns
+// the record's key: a number that rises with each, so the bucket's order is
+// the order of delivery.
+func owe(s store, r records, id string) (string, error) {
+	n, err := s.next(r.owed)
 	if err != nil {
 		return "", err
 	}
 	key := serialKey(n)
-	return key, s.put(bucketOwed, key, []byte(id))
+	return key, s.put(r.owed, key, []byte(id))
 }
 
 // clearOwed ends the record under key of the message id, and in the same
 // transaction records that its handling gave up, where it did. While another
 // command holds the lock it waits on, for as long as ctx lasts: a message whose
 // record stays is handed over again.
-func (b *Mailbox) clearOwed(ctx context.Context, key, id string, gaveUp bool) error {
+func (b *Mailbox) clearOwed(ctx context.Context, r records, key, id string, gaveUp bool) error {
 	for {
 		err := b.lockedFinishedDo(ctx, func() error {
 			return b.update(func(s store) error {
 				if gaveUp {
-					if err := s.put(bucketGaveUp, id, nil); err != nil {
+					if err := s.put(r.gaveUp, id, nil); err != nil {
 						return err
 					}
 				}
-				return s.del(bucketOwed, key)
+				return s.del(r.owed, key)
 			})
 		})
 		if !errors.Is(err, errLocked) {
@@ -485,25 +537,25 @@ func (b *Mailbox) clearOwed(ctx context.Context, key, id string, gaveUp bool) er
 	}
 }
 
-// owedMessages reads what the state file records as owed, under the command that
+// owedMessages reads what the state file records as owed in r, under the command that
 // holds the lock, and drops the record of a handling that gave up where inbox/
 // no longer keeps its message. An owed message's file that others can reach,
 // or that another user owns, is refused before it is read (judgeKept), and
 // nothing is handed over.
-func (b *Mailbox) owedMessages() ([]owedMessage, error) {
+func (b *Mailbox) owedMessages(r records) ([]owedMessage, error) {
 	if err := b.keysMatch(); err != nil {
 		return nil, err
 	}
 	var owed []owedMessage
 	var left []string
 	if err := b.view(func(s store) error {
-		if err := s.each(bucketOwed, func(k, v []byte) error {
+		if err := s.each(r.owed, func(k, v []byte) error {
 			owed = append(owed, owedMessage{key: string(k), id: string(v)})
 			return nil
 		}); err != nil {
 			return err
 		}
-		return s.each(bucketGaveUp, func(k, _ []byte) error {
+		return s.each(r.gaveUp, func(k, _ []byte) error {
 			if !exists(b.path("inbox", string(k)+".json")) {
 				left = append(left, string(k))
 			}
@@ -536,7 +588,7 @@ func (b *Mailbox) owedMessages() ([]owedMessage, error) {
 	}
 	return owed, b.update(func(s store) error {
 		for _, id := range left {
-			if err := s.del(bucketGaveUp, id); err != nil {
+			if err := s.del(r.gaveUp, id); err != nil {
 				return err
 			}
 		}
@@ -544,15 +596,15 @@ func (b *Mailbox) owedMessages() ([]owedMessage, error) {
 	})
 }
 
-// owedCounts is what Status says of the owed records: how many messages are
-// owed their handling, and the ids of those whose handling gave up that
+// owedCounts is what Status says of the owed records of r: how many messages
+// are owed their handling, and the ids of those whose handling gave up that
 // inbox/ still keeps.
-func (b *Mailbox) owedCounts() (owed int, gaveUp []string, err error) {
+func (b *Mailbox) owedCounts(r records) (owed int, gaveUp []string, err error) {
 	err = b.view(func(s store) error {
-		if err := s.each(bucketOwed, func(_, _ []byte) error { owed++; return nil }); err != nil {
+		if err := s.each(r.owed, func(_, _ []byte) error { owed++; return nil }); err != nil {
 			return err
 		}
-		return s.each(bucketGaveUp, func(k, _ []byte) error {
+		return s.each(r.gaveUp, func(k, _ []byte) error {
 			if b.listedGaveUp(k) {
 				gaveUp = append(gaveUp, string(k))
 			}
@@ -569,8 +621,8 @@ func (b *Mailbox) listedGaveUp(key []byte) bool {
 }
 
 // ClearFailed deletes the record of every message whose handling gave up
-// ([ErrGaveUp]), in one transaction, so that [Mailbox.Status] lists none until a
-// handling gives up again. It returns how many of them Status listed, those
+// ([ErrGaveUp]), the handler's and the webhook's, in one transaction, so that
+// [Mailbox.Status] lists none until a handling gives up again. It returns how many of them Status listed, those
 // inbox/ keeps, and drops the records of those inbox/ no longer keeps too. Each
 // message stays in inbox/, and nothing hands one over again. It writes the
 // mailbox, so it waits while another command holds the lock, and a mailbox that
@@ -579,19 +631,21 @@ func (b *Mailbox) ClearFailed(ctx context.Context) (int, error) {
 	return lockedFinished(ctx, b, func() (int, error) {
 		listed := 0
 		err := b.update(func(s store) error {
-			var keys []string
-			if err := s.each(bucketGaveUp, func(k, _ []byte) error {
-				if b.listedGaveUp(k) {
-					listed++
-				}
-				keys = append(keys, string(k))
-				return nil
-			}); err != nil {
-				return err
-			}
-			for _, k := range keys {
-				if err := s.del(bucketGaveUp, k); err != nil {
+			for _, r := range []records{handlerRecords, webhookRecords} {
+				var keys []string
+				if err := s.each(r.gaveUp, func(k, _ []byte) error {
+					if b.listedGaveUp(k) {
+						listed++
+					}
+					keys = append(keys, string(k))
+					return nil
+				}); err != nil {
 					return err
+				}
+				for _, k := range keys {
+					if err := s.del(r.gaveUp, k); err != nil {
+						return err
+					}
 				}
 			}
 			return nil
@@ -601,4 +655,59 @@ func (b *Mailbox) ClearFailed(ctx context.Context) (int, error) {
 		}
 		return listed, nil
 	})
+}
+
+// webhooks hands each delivery owed the webhook to its handler, on a goroutine
+// of its own ([FollowOptions.Webhook]).
+type webhooks struct {
+	b *Mailbox
+	h Handler
+	// kicked holds one kick, a drain's deliveries since the last handover
+	// began; done is closed when Follow's loop has ended.
+	kicked chan struct{}
+	done   chan struct{}
+}
+
+// webhookRetry is how soon a handover that a fault cut short is tried again,
+// where no delivery kicks one sooner: Follow's own wait for a drain that
+// failed with no Retry-After.
+const webhookRetry = time.Minute
+
+// kick asks for a handover of what is owed, after the one under way.
+func (w *webhooks) kick() {
+	select {
+	case w.kicked <- struct{}{}:
+	default:
+	}
+}
+
+// run hands over what is owed at the start, again at each kick, and once more
+// after a fault (webhookRetry), until Follow's loop ends. It then hands over
+// what the last kick asked for, and returns the last handover's fault.
+func (w *webhooks) run(ctx context.Context) error {
+	for {
+		err := w.handOver(ctx)
+		var retry <-chan time.Time
+		if err != nil {
+			retry = time.After(webhookRetry)
+		}
+		select {
+		case <-w.kicked:
+		case <-retry:
+		case <-w.done:
+			select {
+			case <-w.kicked:
+				return w.handOver(ctx)
+			default:
+				return err
+			}
+		}
+	}
+}
+
+// handOver hands the webhook's handler what is owed it. Its handler's errors
+// leave a message owed, and are not a fault of the handover.
+func (w *webhooks) handOver(ctx context.Context) error {
+	_, fault := w.b.handOverOwed(ctx, webhookRecords, w.h)
+	return fault
 }

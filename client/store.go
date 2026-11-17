@@ -37,6 +37,7 @@ import (
 //	refused      what this client's checks found of each message it refused, by its id: refused/ keeps the message as served
 //	owed         each message [Mailbox.Follow] kept and whose handling has not ended, by a number that rises in delivery order: its id
 //	gave-up      each message whose handling gave up ([ErrGaveUp]), by its id, until [Mailbox.ClearFailed] or a Follow that finds inbox/ no longer keeps it
+//	webhook-owed and webhook-gave-up    the same of the webhook's handling ([FollowOptions.Webhook])
 //	waits        each outbox entry a refusal left waiting, by its name in outbox/ less ".P": when it is due (waits.go)
 //	meta         the mailbox's format, under "format", and the address it belongs to, under "address" (format.go)
 const (
@@ -52,6 +53,9 @@ const (
 	bucketRefused    = "refused"
 	bucketOwed       = "owed"
 	bucketGaveUp     = "gave-up"
+	// The webhook's owed and gave-up records, apart from the handler's.
+	bucketWebhookOwed   = "webhook-owed"
+	bucketWebhookGaveUp = "webhook-gave-up"
 )
 
 // store is one transaction of the mailbox's state. A store with no transaction

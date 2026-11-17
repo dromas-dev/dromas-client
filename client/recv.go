@@ -116,9 +116,9 @@ type Result struct {
 	// list, and zero until it has: keys are deleted and the replay set pruned
 	// only by it.
 	listedAt time.Time
-	// owing has the drain record each message it lands in inbox/ as owed its
-	// handling, in the transaction that records it seen ([Mailbox.Follow]).
-	owing bool
+	// owing is each handling the drain records a message it lands in inbox/ as
+	// owed, in the transaction that records it seen ([Mailbox.Follow]).
+	owing []records
 	// receiveWithin is RecvWithin for the prekey in use, where the mailbox knows
 	// its lifetime: how soon [Mailbox.Follow] drains again.
 	receiveWithin time.Duration
@@ -159,10 +159,10 @@ func (r *Result) Again() time.Duration {
 //
 // A mailbox that holds its own revocation receives nothing.
 func (b *Mailbox) Receive(ctx context.Context) (*Result, error) {
-	return locked(ctx, b, func() (*Result, error) { return b.receive(ctx, false) })
+	return locked(ctx, b, func() (*Result, error) { return b.receive(ctx, nil) })
 }
 
-func (b *Mailbox) receive(ctx context.Context, owing bool) (*Result, error) {
+func (b *Mailbox) receive(ctx context.Context, owing []records) (*Result, error) {
 	if err := b.keysMatch(); err != nil {
 		return nil, err
 	}
@@ -546,9 +546,15 @@ func (b *Mailbox) receiveOne(ctx context.Context, m protocol.MessageInfo, res *R
 				if err := recordSeen(s, ct.bytes, d.Envelope); err != nil {
 					return err
 				}
-				if res.owing && where == landInbox {
-					if d.owed, err = owe(s, local); err != nil {
-						return err
+				if where == landInbox {
+					for _, r := range res.owing {
+						key, err := owe(s, r, local)
+						if err != nil {
+							return err
+						}
+						if r == handlerRecords {
+							d.owed = key
+						}
 					}
 				}
 				return s.del(bucketRefused, local)

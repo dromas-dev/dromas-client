@@ -248,6 +248,30 @@ A program to run for each message, then its arguments, for example `exec = ["/us
 
 How long one run of the `recv.exec` program may take before `recv` kills the run. `recv.exec-timeout` without `recv.exec` is an error.
 
+### `recv.webhook`
+
+- Type: string, an `http` or `https` URL
+- Default: none
+- Flag: `dromas recv --webhook`
+
+A URL that `recv` posts each message's `message` line to, with or without the `recv.exec` program. `recv` uses this key only with `--wait` or `--follow`, and a `--webhook` on the command line replaces it. A URL with a user or a password is an error: put a token in `recv.webhook-header-file`. See [Send each message to a webhook](guide.md#send-each-message-to-a-webhook).
+
+### `recv.webhook-header-file`
+
+- Type: path
+- Default: none
+- Flag: `dromas recv --webhook-header-file`
+
+A file of exactly one line, `Name: Value`, with or without a line ending: a header that each webhook post carries, for example `Authorization: Bearer <token>`. `recv` rejects the file, and runs nothing, when the file's mode gives its group or other users any access, as `ssh` rejects a private key. `recv` also rejects a header that each post sets itself, in any case: `Content-Type`, `Content-Length`, `Host`, `Transfer-Encoding` and any `webhook-*`. In the config file, `recv.webhook-header-file` without `recv.webhook` is an error.
+
+### `recv.webhook-secret-file`
+
+- Type: path
+- Default: none
+- Flag: `dromas recv --webhook-secret-file`
+
+A file holding a [Standard Webhooks](https://www.standardwebhooks.com/) secret: `whsec_` and the standard, padded base64 of 24 to 64 random bytes. With it, each post carries the `webhook-id`, `webhook-timestamp` and `webhook-signature` headers of the Standard Webhooks `v1` scheme, so the endpoint can verify the post with any Standard Webhooks library. `recv` rejects the file as it rejects `recv.webhook-header-file`. In the config file, `recv.webhook-secret-file` without `recv.webhook` is an error.
+
 ### `recv.log-file`
 
 - Type: path

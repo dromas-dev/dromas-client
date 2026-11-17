@@ -1,17 +1,18 @@
 ## dromas inbox clear-failed
 
-clear what status reports of every --exec program that gave up
+clear what status reports of every --exec program and webhook that gave up
 
 ### Synopsis
 
-Clear the record of every message in inbox/ whose recv --exec program gave up,
-and print a "failed_cleared" line with their "count". dromas status then lists
-none of them, and needs no attention for them, until a program gives up again.
+Clear the record of every message in inbox/ whose recv --exec program or recv
+--webhook post gave up, and print a "failed_cleared" line with their "count".
+dromas status then lists none of them, and needs no attention for them, until a
+program or a webhook gives up again.
 
-clear-failed takes no id. It clears every message whose program gave up, and
-none whose program still has tries left; with none, the count is 0. Each message
-stays in inbox/, and nothing runs its program again: dromas inbox show \<id> |
-\<program> hands a message to a program by hand.
+clear-failed takes no id. It clears every message whose program or webhook gave
+up, and none that still has tries left; with none, the count is 0. Each message
+stays in inbox/, and nothing runs its program or posts it again: dromas inbox
+show \<id> | \<program> hands a message to a program by hand.
 
 ```
 dromas inbox clear-failed

@@ -6,6 +6,7 @@ require (
 	filippo.io/age v1.3.2
 	filippo.io/edwards25519 v1.2.0
 	github.com/BurntSushi/toml v1.6.0
+	github.com/cpuguy83/go-md2man/v2 v2.0.6
 	github.com/dunglas/httpsfv v1.1.2
 	github.com/pb33f/libopenapi v0.42.3
 	github.com/pb33f/libopenapi-validator v0.16.2
@@ -13,6 +14,7 @@ require (
 	github.com/spf13/pflag v1.1.0
 	go.etcd.io/bbolt v1.5.0
 	golang.org/x/crypto v0.58.0
+	golang.org/x/net v0.62.0
 	golang.org/x/sys v0.49.0
 	golang.org/x/term v0.47.0
 	golang.org/x/time v0.16.0
@@ -25,7 +27,6 @@ require (
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
 	github.com/basgys/goxml2json v1.1.1-0.20231018121955-e66ee54ceaad // indirect
 	github.com/buger/jsonparser v1.6.1 // indirect
-	github.com/cpuguy83/go-md2man/v2 v2.0.6 // indirect
 	github.com/go-openapi/jsonpointer v1.0.2 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/pb33f/go-yaml v0.1.1 // indirect
@@ -34,7 +35,6 @@ require (
 	github.com/pb33f/ordered-map/v2 v2.3.2 // indirect
 	github.com/russross/blackfriday/v2 v2.1.0 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
-	golang.org/x/net v0.62.0 // indirect
 	golang.org/x/sync v0.24.0 // indirect
 	golang.org/x/text v0.43.0 // indirect
 )

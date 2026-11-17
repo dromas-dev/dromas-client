@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -38,6 +40,11 @@ type recvOptions struct {
 	headers     bool
 	exec        []string // --exec's program and arguments
 	execTimeout time.Duration
+	// webhookURL, webhookHeader and webhookSecret are --webhook and its two
+	// files as the command line gives them; webhook is the webhook recv
+	// posts to, from them or the config file (webhookFrom).
+	webhookURL, webhookHeader, webhookSecret string
+	webhook                                  *client.Webhook
 }
 
 // takesArguments allows recv arguments only after --, where they are --exec's.
@@ -53,6 +60,17 @@ func (o *recvOptions) takesArguments(c *cobra.Command, args []string) error {
 // rather than at each message.
 func (o *recvOptions) check(c *cobra.Command, program string, args []string) error {
 	path := c.CommandPath()
+	switch {
+	case c.Flags().Changed("webhook") && o.webhookURL == "":
+		return wrong(c, "%s --webhook takes a URL", path)
+	case o.webhookURL != "" && !o.follow && !c.Flags().Changed("wait"):
+		return wrong(c, "%s --webhook goes with --wait or --follow", path)
+	}
+	if o.webhookURL != "" {
+		if err := client.CheckWebhookURL(o.webhookURL); err != nil {
+			return wrong(c, "%s --webhook: %v", path, err)
+		}
+	}
 	switch {
 	case program == "" && c.Flags().Changed("exec"):
 		return wrong(c, "%s --exec takes a program", path)
@@ -88,6 +106,60 @@ func (o *recvOptions) fromConfig(c *cobra.Command, cfg *config, program string, 
 	return program, args, nil
 }
 
+// webhookFrom makes the webhook recv posts to, where recv waits: --webhook, or
+// the config file's [recv] webhook where the command line names none, with
+// each of its two files from its flag, or otherwise from the file's key. Each
+// file is read once, here, so a resident process with a wrong one refuses at its
+// start rather than at each message.
+func (o *recvOptions) webhookFrom(c *cobra.Command, cfg *config) error {
+	waits := o.follow || c.Flags().Changed("wait")
+	url, header, secret := o.webhookURL, o.webhookHeader, o.webhookSecret
+	if url == "" && waits {
+		url = cfg.webhook
+	}
+	if url == "" {
+		if header != "" || secret != "" {
+			return wrong(c, "%s --webhook-header-file and --webhook-secret-file go with --webhook, or with recv.webhook in the config file", c.CommandPath())
+		}
+		return nil
+	}
+	// A file named by a flag is the command line's fault, and one the config
+	// file names is the file's: each runs nothing (exit status 2).
+	refused := func(flag, key string, err error) error {
+		if c.Flags().Changed(flag) {
+			return wrong(c, "%s --%s: %v", c.CommandPath(), flag, err)
+		}
+		return &configError{file: cfg.file, key: key, msg: fmt.Sprintf("%s: %s: %v", cfg.file, key, err)}
+	}
+	var h *client.WebhookHeader
+	if header == "" {
+		header = cfg.webhookHeader
+	}
+	if header != "" {
+		read, err := client.ReadWebhookHeader(header)
+		if err != nil {
+			return refused("webhook-header-file", "recv.webhook-header-file", err)
+		}
+		h = &read
+	}
+	var key []byte
+	if secret == "" {
+		secret = cfg.webhookSecret
+	}
+	if secret != "" {
+		var err error
+		if key, err = client.ReadWebhookSecret(secret); err != nil {
+			return refused("webhook-secret-file", "recv.webhook-secret-file", err)
+		}
+	}
+	w, err := client.NewWebhook(url, h, key, webhookClient)
+	if err != nil {
+		return err
+	}
+	o.webhook = w
+	return nil
+}
+
 // fatalEnd is a recv that ended on a refusal no wait mends (client.Fatal): exit
 // status 4, and "fatal" in its "error" line.
 type fatalEnd struct{ err error }
@@ -106,6 +178,9 @@ func (e *cli) recv(c *cobra.Command, b *client.Mailbox, o recvOptions) error {
 		f.Until = time.Now().Add(o.wait)
 	}
 	r := &recvRun{cli: e, b: b, o: o, stale: true}
+	if o.webhook != nil {
+		f.Webhook = r.webhook
+	}
 	err := b.Follow(ctx, f, r.handle)
 	if o.follow && ctx.Err() != nil && errors.Is(err, ctx.Err()) {
 		err = nil
@@ -116,7 +191,7 @@ func (e *cli) recv(c *cobra.Command, b *client.Mailbox, o recvOptions) error {
 	case err != nil:
 		return err
 	}
-	if r.renewErr != nil || r.aclErr != nil || r.notMade != nil || r.replaced || r.gaveUp {
+	if r.renewErr != nil || r.aclErr != nil || r.notMade != nil || r.replaced || r.gaveUp.Load() {
 		return &needsALook{}
 	}
 	return nil
@@ -133,22 +208,35 @@ type recvRun struct {
 	got   bool // a drain delivered a message
 	// werr is the first failed write to stdout: every delivery is also kept in
 	// inbox/, and every refusal in refused/, so it loses nothing, and it ends
-	// the run once the drain's events are handed over.
+	// the run once the drain's events are handed over. mu holds it and
+	// stdout, which the webhook's goroutine prints to as well.
+	mu   sync.Mutex
 	werr error
 	// renewErr is a renewal that was due and failed, and that no later drain
 	// of this run made good; aclErr the same for the mailbox's ACL; notMade what
 	// the mailbox's last read of itself served that it did not make; replaced that
 	// a renewal of this run found an ACL at the server that the mailbox had not
-	// sent, and replaced it; and gaveUp that a callback ran out of tries.
+	// sent, and replaced it; and gaveUp that a callback or the webhook ran
+	// out of tries.
 	renewErr, aclErr error
 	notMade          *client.NotMade
-	replaced, gaveUp bool
+	replaced         bool
+	gaveUp           atomic.Bool
 }
 
 func (r *recvRun) print(l []byte) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if err := r.out(l); err != nil && r.werr == nil {
 		r.werr = err
 	}
+}
+
+// writeErr is the first failed write to stdout, or nil.
+func (r *recvRun) writeErr() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.werr
 }
 
 // handle prints one event, and runs --exec's program for a delivery.
@@ -204,8 +292,8 @@ func (r *recvRun) handle(ctx context.Context, ev client.Event) error {
 	case client.EventDrained:
 		r.notMade, r.aclErr, r.stale = ev.Result.NotMade, ev.Result.ACLErr, true
 		switch {
-		case r.werr != nil:
-			return r.werr
+		case r.writeErr() != nil:
+			return r.writeErr()
 		case r.got && !r.o.follow:
 			return client.ErrStop
 		}
@@ -241,7 +329,7 @@ func (r *recvRun) callback(ctx context.Context, id string, l []byte) error {
 		r.print(line("exec_attempt_failed", append(append([]any{"id", id, "attempt", try}, how...),
 			"detail", fmt.Sprintf("the callback failed at try %d of at most %d", try, execTries))...))
 		if permanent || try == execTries {
-			r.gaveUp = true
+			r.gaveUp.Store(true)
 			r.print(line("exec_failed", "id", id, "attempts", try, "detail",
 				"the callback has no try left: inbox/ keeps the message, nothing tries it again, and dromas status lists it until dromas inbox clear-failed"))
 			return client.ErrGaveUp
