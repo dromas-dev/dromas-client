@@ -181,6 +181,8 @@ var (
 // [FollowOptions.Webhook] it returns, where it would return nil, the fault
 // that cut the webhook's last handover short.
 func (b *Mailbox) Follow(ctx context.Context, o FollowOptions, h Handler) (err error) {
+	// The loop's goroutine and the webhook's are one command (claim).
+	ctx = context.WithValue(ctx, followingKey{}, &following{})
 	// delivered is called after each drain that delivered a message to inbox/.
 	delivered := func() {}
 	if o.Webhook != nil {

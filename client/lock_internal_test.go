@@ -155,3 +155,61 @@ func TestWhereThereIsNoGateNeitherAReadingNorACommandWaitsForOne(t *testing.T) {
 		t.Errorf("they took %v, as if waiting for a gate", d)
 	}
 }
+
+// The goroutines of one Follow, its loop's and its webhook's, are one command:
+// one that waits for the slot while another of them holds it tells
+// Options.Waiting nothing, and one of another command, or of another Follow,
+// tells it once (#927 item 2). Each wait is seen in the slot itself, on no
+// clock.
+func TestAFollowsOwnGoroutinesWaitForEachOtherUntold(t *testing.T) {
+	t.Parallel()
+	b, _, _ := twoOpens(t)
+	var told atomic.Int32
+	b.waiting = func() { told.Add(1) }
+	ctx := context.Background()
+	one := context.WithValue(ctx, followingKey{}, &following{})
+	other := context.WithValue(ctx, followingKey{}, &following{})
+	waiting := func() {
+		t.Helper()
+		for {
+			b.slot.mu.Lock()
+			w := b.slot.free != nil
+			b.slot.mu.Unlock()
+			if w {
+				return
+			}
+			time.Sleep(time.Millisecond)
+		}
+	}
+	for _, tc := range []struct {
+		name string
+		ctx  context.Context
+		want int32
+	}{
+		{"the same Follow", one, 0},
+		{"another Follow", other, 1},
+		{"no Follow", ctx, 1},
+	} {
+		told.Store(0)
+		release, err := b.claim(one)
+		if err != nil {
+			t.Fatal(err)
+		}
+		done := make(chan error, 1)
+		go func() {
+			r, err := b.claim(tc.ctx)
+			if err == nil {
+				r()
+			}
+			done <- err
+		}()
+		waiting()
+		release()
+		if err := <-done; err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		if n := told.Load(); n != tc.want {
+			t.Errorf("%s: Waiting was told %d times, want %d", tc.name, n, tc.want)
+		}
+	}
+}

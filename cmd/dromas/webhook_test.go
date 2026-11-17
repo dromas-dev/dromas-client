@@ -446,3 +446,31 @@ func TestTheConfigFilesWebhookServesARecvThatWaits(t *testing.T) {
 		t.Fatalf("a header file without a webhook: %v %s", err, stderr)
 	}
 }
+
+// recv's two pipelines are one command: with no other command of the mailbox
+// running, recv --webhook, alone or beside --exec, says no wait for the
+// mailbox's lock, though the webhook's goroutine and the loop's take turns in
+// the Mailbox's slot (#927 item 2). A wait for another command is told by the
+// slot's test, TestAFollowsOwnGoroutinesWaitForEachOtherUntold.
+func TestOneRecvSaysNoWaitForItsOwnLock(t *testing.T) {
+	for _, exec := range []bool{false, true} {
+		t.Run(map[bool]string{false: "webhook alone", true: "beside --exec"}[exec], func(t *testing.T) {
+			c := newCallback(t)
+			hook := answering(http.StatusOK)
+			srv := httptest.NewServer(hook)
+			defer srv.Close()
+			c.send("one", "two", "three", "four", "five", "six")
+			args := []string{"--wait", "0s", "--webhook", srv.URL}
+			if exec {
+				args = append(args, c.exec("exit", "0")...)
+			}
+			_, stderr, err := c.recv(context.Background(), args...)
+			if err != nil || len(hook.got()) != 6 {
+				t.Fatalf("recv: %v, %d posts; %s", err, len(hook.got()), stderr)
+			}
+			if n := strings.Count(stderr, `"reason":"lock"`); n > 0 {
+				t.Errorf("recv said %d times that it waits for the mailbox's lock, with no other command running: %s", n, stderr)
+			}
+		})
+	}
+}
