@@ -1,6 +1,6 @@
 # The dromas command's releases, which .github/workflows/release.yml makes
 # from a signed tag: a static binary for each system and architecture below,
-# archived with the licence and README, a .deb, .rpm and .apk of each Linux
+# archived with the licence, README and man pages, a .deb, .rpm and .apk of each Linux
 # build, an SBOM of each archive, and
 # checksums.txt, signed with cosign, whose files the workflow attests; and
 # the winget and Nix packages made from those archives. Built
@@ -15,6 +15,15 @@ project_name: dromas
 
 gomod:
   proxy: true
+
+# The man pages, from the command tree and docs/configuration.md, by the
+# client's hidden gen-docs command, as GoReleaser's own release writes its man
+# page with its hidden man command. Dated by the commit (SOURCE_DATE_EPOCH),
+# so a rebuild writes the same bytes; share/ is gitignored.
+before:
+  hooks:
+    - rm -rf share/man
+    - env SOURCE_DATE_EPOCH={{ .CommitTimestamp }} go run ./cmd/dromas gen-docs --man-dir share/man
 
 builds:
   - id: dromas
@@ -53,6 +62,11 @@ archives:
         info: *info
       - src: README.md
         info: *info
+      # The man pages, in every archive but Windows', where nothing reads them.
+      - src: '{{ if ne .Os "windows" }}share/man/man1/*.1{{ end }}'
+        info: *info
+      - src: '{{ if ne .Os "windows" }}share/man/man5/*.5{{ end }}'
+        info: *info
       # Each service template, in the archives of its systems alone
       # (docs/guide.md § Run as a service): the path is empty for any other
       # system, which adds nothing. The rc.d scripts keep their mode, 0755.
@@ -70,8 +84,8 @@ archives:
 # A .deb, .rpm and .apk of each Linux build, by nFPM through GoReleaser: the
 # binary in /usr/bin, a user service that nothing enables (the systemd user
 # template in the .deb and .rpm, the OpenRC user service in the .apk, as
-# Alpine's own packages ship one in /etc/user/init.d), and the licence and
-# README. Dated by the commit, as the archives are, so a rebuild makes the
+# Alpine's own packages ship one in /etc/user/init.d), the licence and
+# README, and the man pages. Dated by the commit, as the archives are, so a rebuild makes the
 # same bytes.
 nfpms:
   - formats: [deb, rpm, apk]
@@ -109,6 +123,12 @@ nfpms:
         file_info: *pkg
       - src: README.md
         dst: /usr/share/doc/dromas/README.md
+        file_info: *pkg
+      - src: share/man/man1/*.1
+        dst: /usr/share/man/man1/
+        file_info: *pkg
+      - src: share/man/man5/*.5
+        dst: /usr/share/man/man5/
         file_info: *pkg
 
 # The Windows zips as a winget package, Dromas.dromas, by GoReleaser's winget
@@ -183,6 +203,7 @@ nix:
     extra_install: |
       install -Dm644 ./LICENSE $out/share/doc/dromas/LICENSE
       install -Dm644 ./README.md $out/share/doc/dromas/README.md
+      installManPage ./share/man/man1/*.1 ./share/man/man5/*.5
 
 checksum:
   name_template: checksums.txt

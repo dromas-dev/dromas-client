@@ -1,10 +1,8 @@
 package main
 
 import (
-	"context"
 	"flag"
 	"fmt"
-	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -13,11 +11,10 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 	"unicode"
 
 	"github.com/dromas-dev/dromas-client/client"
-	"github.com/spf13/cobra"
-	"github.com/spf13/cobra/doc"
 )
 
 var updateDocs = flag.Bool("update", false, "write docs/commands from the command tree, and the Windows resource files from the manifest")
@@ -32,24 +29,8 @@ var commandsDir = filepath.Join("..", "..", "docs", "commands")
 //
 //	go test ./cmd/dromas -run TestTheCommandPagesAreTheHelp -update
 func TestTheCommandPagesAreTheHelp(t *testing.T) {
-	e := &cli{ctx: context.Background(), stdin: strings.NewReader(""), stdout: io.Discard, stderr: io.Discard}
-	root := e.tree()
-	e.flags.add(root)
-	var all func(*cobra.Command)
-	all = func(c *cobra.Command) {
-		c.DisableAutoGenTag = true // the pages carry no date
-		// cobra writes a command's help as Markdown prose, where <link> reads
-		// as an HTML tag that GitHub and the site drop: escaped, it reads as
-		// the help prints it.
-		c.Short = strings.ReplaceAll(c.Short, "<", `\<`)
-		c.Long = strings.ReplaceAll(c.Long, "<", `\<`)
-		for _, s := range c.Commands() {
-			all(s)
-		}
-	}
-	all(root)
 	dir := t.TempDir()
-	if err := doc.GenMarkdownTree(root, dir); err != nil {
+	if err := writeDocs(dir, "", "", time.Time{}); err != nil {
 		t.Fatal(err)
 	}
 	want := map[string][]byte{}
@@ -100,6 +81,81 @@ func TestTheCommandPagesAreTheHelp(t *testing.T) {
 	for name := range want {
 		if !seen[name] {
 			t.Errorf("docs/commands/%s is missing: run this test with -update", name)
+		}
+	}
+}
+
+// The man pages are the same tree's: a page in man1/ for each page of
+// docs/commands, each with the help it gives, and man5/dromas.toml.5, the
+// config file's reference, with every key of docs/configuration.md. Each is
+// dated by the date it is given, so a release that dates them by its commit
+// rebuilds the same bytes.
+func TestTheManPagesAreTheCommandsAndTheConfigFile(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	date := time.Date(2000, time.January, 2, 3, 4, 5, 0, time.UTC)
+	config := filepath.Join("..", "..", "docs", "configuration.md")
+	if err := writeDocs("", dir, config, date); err != nil {
+		t.Fatal(err)
+	}
+	pages, err := os.ReadDir(commandsDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	man1, err := os.ReadDir(filepath.Join(dir, "man1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(man1) != len(pages) || len(pages) < 20 {
+		t.Fatalf("%d man pages for %d command pages", len(man1), len(pages))
+	}
+	read := func(name string) string {
+		t.Helper()
+		b, err := os.ReadFile(filepath.Join(dir, name)) //nolint:gosec // a file this test wrote
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+	for _, p := range pages {
+		name := strings.ReplaceAll(strings.TrimSuffix(p.Name(), ".md"), "_", "-") + ".1"
+		page := read(filepath.Join("man1", name))
+		if !strings.Contains(page, "\n.TH \"") || !strings.Contains(page, `"Jan 2000" "Dromas" "Dromas Manual"`) {
+			t.Errorf("man1/%s has no title of its date: %.120q", name, page)
+		}
+	}
+	// A help's or a flag's <placeholder> is kept, never dropped as an HTML tag.
+	for name, want := range map[string]string{"dromas-account-join.1": "dromas account join <", "dromas-send.1": "<base-dir>/identity"} {
+		if page := read(filepath.Join("man1", name)); !strings.Contains(page, want) {
+			t.Errorf("%s lacks %q", name, want)
+		}
+	}
+	toml := read(filepath.Join("man5", "dromas.toml.5"))
+	if !strings.Contains(toml, "\n.TH DROMAS.TOML 5 \"Jan 2000\" \"Dromas\" \"Dromas Manual\"\n") || !strings.Contains(toml, ".SH NAME") || strings.Contains(toml, "guide.md") {
+		t.Errorf("dromas.toml.5 has not a man page's title, NAME and links: %.300q", toml)
+	}
+	src, err := os.ReadFile(config) //nolint:gosec // a page of this repo
+	if err != nil {
+		t.Fatal(err)
+	}
+	keys := regexp.MustCompile("(?m)^### `([a-z.-]+)`$").FindAllStringSubmatch(string(src), -1)
+	if len(keys) < 20 {
+		t.Fatalf("read %d keys from docs/configuration.md: the reading is broken", len(keys))
+	}
+	for _, k := range keys {
+		if !strings.Contains(toml, ".SS \\fB"+k[1]+"\\fR") {
+			t.Errorf("dromas.toml.5 lacks the key %s", k[1])
+		}
+	}
+	// The same date writes the same bytes.
+	again := t.TempDir()
+	if err := writeDocs("", again, config, date); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{filepath.Join("man1", "dromas.1"), filepath.Join("man1", "dromas-send.1"), filepath.Join("man5", "dromas.toml.5")} {
+		b, err := os.ReadFile(filepath.Join(again, name)) //nolint:gosec // a file this test wrote
+		if err != nil || string(b) != read(name) {
+			t.Errorf("%s differs from one run to the next: %v", name, err)
 		}
 	}
 }

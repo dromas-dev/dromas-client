@@ -134,6 +134,7 @@ help, and dromas <group> help a group's.`,
 			_, err = io.WriteString(e.stdout, helpText(t))
 			return err
 		}))
+	root.AddCommand(e.genDocsCmd())
 	root.SetFlagErrorFunc(func(c *cobra.Command, err error) error { return wrong(c, "%v", err) })
 	return root
 }

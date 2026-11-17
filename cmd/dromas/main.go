@@ -238,8 +238,9 @@ func runWith(ctx context.Context, opt client.Options, args []string, stdin io.Re
 	root := e.tree()
 	e.flags.add(root)
 	root.PersistentPreRunE = func(c *cobra.Command, _ []string) error {
-		// A group runs nothing of its own, and help and version read nothing.
-		if c.HasSubCommands() || c.Name() == "help" || (c.Name() == "version" && c.Parent() == root) {
+		// A group runs nothing of its own, and help, version and gen-docs read
+		// nothing.
+		if c.HasSubCommands() || c.Name() == "help" || (c.Parent() == root && (c.Name() == "version" || c.Name() == "gen-docs")) {
 			return nil
 		}
 		return e.environment(c)

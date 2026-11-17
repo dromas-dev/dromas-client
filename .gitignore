@@ -7,3 +7,5 @@ CLAUDE.md
 # What `go build ./cmd/...` writes at the root.
 /dromas
 /dromas-echo
+# The man pages that .goreleaser.yaml's before hook writes.
+/share/
