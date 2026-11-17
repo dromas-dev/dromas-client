@@ -15,6 +15,7 @@ import (
 	"unicode"
 
 	"github.com/dromas-dev/dromas-client/client"
+	"github.com/spf13/cobra"
 )
 
 var updateDocs = flag.Bool("update", false, "write docs/commands from the command tree, and the Windows resource files from the manifest")
@@ -86,16 +87,18 @@ func TestTheCommandPagesAreTheHelp(t *testing.T) {
 }
 
 // The man pages are the same tree's: a page in man1/ for each page of
-// docs/commands, each with the help it gives, and man5/dromas.toml.5, the
-// config file's reference, with every key of docs/configuration.md. Each is
-// dated by the date it is given, so a release that dates them by its commit
-// rebuilds the same bytes.
-func TestTheManPagesAreTheCommandsAndTheConfigFile(t *testing.T) {
+// docs/commands, each with its usage line's and its help's placeholders, and
+// a page for each of docsManPages, each with a man page's title, NAME and
+// SEE ALSO, every heading of its page in docs/, and no link that only
+// resolves in this repo; dromas.toml.5 has every key of docs/configuration.md.
+// Each is dated by the date it is given, so a release that dates them by its
+// commit rebuilds the same bytes.
+func TestTheManPagesAreTheCommandsAndTheDocs(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	date := time.Date(2000, time.January, 2, 3, 4, 5, 0, time.UTC)
-	config := filepath.Join("..", "..", "docs", "configuration.md")
-	if err := writeDocs("", dir, config, date); err != nil {
+	docs := filepath.Join("..", "..", "docs")
+	if err := writeDocs("", dir, docs, date); err != nil {
 		t.Fatal(err)
 	}
 	pages, err := os.ReadDir(commandsDir)
@@ -109,13 +112,15 @@ func TestTheManPagesAreTheCommandsAndTheConfigFile(t *testing.T) {
 	if len(man1) != len(pages) || len(pages) < 20 {
 		t.Fatalf("%d man pages for %d command pages", len(man1), len(pages))
 	}
+	// A page as text, with roff's escapes of a hyphen and of a dot undone.
+	plain := strings.NewReplacer(`\-`, "-", `\&`, "")
 	read := func(name string) string {
 		t.Helper()
 		b, err := os.ReadFile(filepath.Join(dir, name)) //nolint:gosec // a file this test wrote
 		if err != nil {
 			t.Fatal(err)
 		}
-		return string(b)
+		return plain.Replace(string(b))
 	}
 	for _, p := range pages {
 		name := strings.ReplaceAll(strings.TrimSuffix(p.Name(), ".md"), "_", "-") + ".1"
@@ -124,17 +129,70 @@ func TestTheManPagesAreTheCommandsAndTheConfigFile(t *testing.T) {
 			t.Errorf("man1/%s has no title of its date: %.120q", name, page)
 		}
 	}
-	// A help's or a flag's <placeholder> is kept, never dropped as an HTML tag.
+	// A usage line's, a help's or a flag's <placeholder> is kept, never
+	// dropped as an HTML tag.
+	placeholder := regexp.MustCompile(`<[^>]+>`)
+	var uses int
+	var walk func(*cobra.Command)
+	walk = func(c *cobra.Command) {
+		if !c.Hidden {
+			page := read(filepath.Join("man1", strings.ReplaceAll(c.CommandPath(), " ", "-")+".1"))
+			for _, p := range placeholder.FindAllString(c.Use, -1) {
+				uses++
+				if !strings.Contains(page, p) {
+					t.Errorf("%s.1 lacks its usage line's %s", strings.ReplaceAll(c.CommandPath(), " ", "-"), p)
+				}
+			}
+		}
+		for _, s := range c.Commands() {
+			walk(s)
+		}
+	}
+	walk((&cli{}).tree())
+	if uses < 5 {
+		t.Fatalf("read %d placeholders from the usage lines: the reading is broken", uses)
+	}
 	for name, want := range map[string]string{"dromas-account-join.1": "dromas account join <", "dromas-send.1": "<base-dir>/identity"} {
 		if page := read(filepath.Join("man1", name)); !strings.Contains(page, want) {
 			t.Errorf("%s lacks %q", name, want)
 		}
 	}
-	toml := read(filepath.Join("man5", "dromas.toml.5"))
-	if !strings.Contains(toml, "\n.TH DROMAS.TOML 5 \"Jan 2000\" \"Dromas\" \"Dromas Manual\"\n") || !strings.Contains(toml, ".SH NAME") || strings.Contains(toml, "guide.md") {
-		t.Errorf("dromas.toml.5 has not a man page's title, NAME and links: %.300q", toml)
+	heading := regexp.MustCompile("(?m)^## (.+)$")
+	// go-md2man writes a link's target between \[la] and \[ra].
+	link := regexp.MustCompile(`\\\[la\]([^\\]+)\\\[ra\]`)
+	for _, p := range docsManPages {
+		name := filepath.Join("man"+p.section, p.name+"."+p.section)
+		page := read(name)
+		src, err := os.ReadFile(filepath.Join(docs, p.page)) //nolint:gosec // a page of this repo
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(page, "\n.TH "+strings.ToUpper(p.name)+" "+p.section+` "Jan 2000" "Dromas" "Dromas Manual"`+"\n") || !strings.Contains(page, ".SH NAME\n"+p.name+" - ") || !strings.Contains(page, ".SH SEE ALSO") {
+			t.Errorf("%s has not a man page's title, NAME and SEE ALSO: %.300q", name, page)
+		}
+		for _, l := range link.FindAllStringSubmatch(page, -1) {
+			if !strings.Contains(l[1], "://") {
+				t.Errorf("%s links %s, which resolves only in this repo", name, l[1])
+			}
+		}
+		see := page[max(strings.Index(page, ".SH SEE ALSO"), 0):]
+		for _, o := range append(docsManPages, struct{ page, name, section, what string }{name: "dromas", section: "1"}) {
+			if o.name != p.name && !strings.Contains(see, o.name+`\fP(`+o.section+")") {
+				t.Errorf("%s's SEE ALSO lacks %s(%s)", name, o.name, o.section)
+			}
+		}
+		hs := heading.FindAllStringSubmatch(string(src), -1)
+		if len(hs) < 3 {
+			t.Fatalf("read %d headings from docs/%s: the reading is broken", len(hs), p.page)
+		}
+		for _, h := range hs {
+			if !strings.Contains(page, ".SH "+strings.ReplaceAll(h[1], "`", "")) && !strings.Contains(page, ".SH "+h[1]) {
+				t.Errorf("%s lacks the section %q", name, h[1])
+			}
+		}
 	}
-	src, err := os.ReadFile(config) //nolint:gosec // a page of this repo
+	toml := read(filepath.Join("man5", "dromas.toml.5"))
+	src, err := os.ReadFile(filepath.Join(docs, "configuration.md")) //nolint:gosec // a page of this repo
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,12 +207,12 @@ func TestTheManPagesAreTheCommandsAndTheConfigFile(t *testing.T) {
 	}
 	// The same date writes the same bytes.
 	again := t.TempDir()
-	if err := writeDocs("", again, config, date); err != nil {
+	if err := writeDocs("", again, docs, date); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{filepath.Join("man1", "dromas.1"), filepath.Join("man1", "dromas-send.1"), filepath.Join("man5", "dromas.toml.5")} {
+	for _, name := range []string{filepath.Join("man1", "dromas.1"), filepath.Join("man1", "dromas-send.1"), filepath.Join("man5", "dromas.toml.5"), filepath.Join("man7", "dromas-output.7")} {
 		b, err := os.ReadFile(filepath.Join(again, name)) //nolint:gosec // a file this test wrote
-		if err != nil || string(b) != read(name) {
+		if err != nil || plain.Replace(string(b)) != read(name) {
 			t.Errorf("%s differs from one run to the next: %v", name, err)
 		}
 	}

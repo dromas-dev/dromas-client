@@ -16,7 +16,7 @@ project_name: dromas
 gomod:
   proxy: true
 
-# The man pages, from the command tree and docs/configuration.md, by the
+# The man pages, from the command tree and two pages of docs/, by the
 # client's hidden gen-docs command, as GoReleaser's own release writes its man
 # page with its hidden man command. Dated by the commit (SOURCE_DATE_EPOCH),
 # so a rebuild writes the same bytes; share/ is gitignored.
@@ -66,6 +66,8 @@ archives:
       - src: '{{ if ne .Os "windows" }}share/man/man1/*.1{{ end }}'
         info: *info
       - src: '{{ if ne .Os "windows" }}share/man/man5/*.5{{ end }}'
+        info: *info
+      - src: '{{ if ne .Os "windows" }}share/man/man7/*.7{{ end }}'
         info: *info
       # Each service template, in the archives of its systems alone
       # (docs/guide.md § Run as a service): the path is empty for any other
@@ -129,6 +131,9 @@ nfpms:
         file_info: *pkg
       - src: share/man/man5/*.5
         dst: /usr/share/man/man5/
+        file_info: *pkg
+      - src: share/man/man7/*.7
+        dst: /usr/share/man/man7/
         file_info: *pkg
 
 # The Windows zips as a winget package, Dromas.dromas, by GoReleaser's winget
@@ -203,7 +208,7 @@ nix:
     extra_install: |
       install -Dm644 ./LICENSE $out/share/doc/dromas/LICENSE
       install -Dm644 ./README.md $out/share/doc/dromas/README.md
-      installManPage ./share/man/man1/*.1 ./share/man/man5/*.5
+      installManPage ./share/man/man1/*.1 ./share/man/man5/*.5 ./share/man/man7/*.7
 
 checksum:
   name_template: checksums.txt
