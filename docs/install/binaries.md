@@ -25,6 +25,8 @@ sudo install -d /usr/local/bin
 sudo install dromas /usr/local/bin/
 ```
 
+The archive also carries the man pages, `dromas(1)` and `dromas.toml(5)`, in `share/man/`: copy them to a directory on your system's manual path (`manpath`).
+
 ## Quickstart
 
 1. Check that `dromas` runs:
