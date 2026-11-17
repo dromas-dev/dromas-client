@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"errors"
@@ -28,12 +29,21 @@ import (
 	"github.com/dromas-dev/dromas-client/internal/fakeserver"
 )
 
-// The header's value and the secret's bytes, which no line may carry.
+// The header's value and the URL's path, which no line may carry.
 const (
-	hookToken  = "Bearer hook-token-sekrit"
-	hookSecret = "whsec_c2VrcmV0LXNla3JpdC1zZWtyaXQtc2VrcmV0LTEyMzQ1Ng=="
-	hookPath   = "/hook-path-sekrit"
+	hookToken = "Bearer hook-token-sekrit"
+	hookPath  = "/hook-path-sekrit"
 )
+
+// hookSecret is a Standard Webhooks secret made for this run, of 32 random
+// bytes, which no line may carry either.
+var hookSecret = func() string {
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		panic(err)
+	}
+	return "whsec_" + base64.StdEncoding.EncodeToString(key)
+}()
 
 // endpoint is a webhook's endpoint that answers each post as answer says, and
 // keeps each post it was sent, with when it came.
