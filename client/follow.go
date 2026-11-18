@@ -647,8 +647,10 @@ func (b *Mailbox) listedGaveUp(key []byte) bool {
 
 // ClearFailed deletes the record of every message whose handling gave up
 // ([ErrGaveUp]), the handler's and the webhook's, in one transaction, so that
-// [Mailbox.Status] lists none until a handling gives up again. It returns how many of them Status listed, those
-// inbox/ keeps, and drops the records of those inbox/ no longer keeps too. Each
+// [Mailbox.Status] lists none until a handling gives up again. It returns how
+// many of the records Status listed, those of messages inbox/ keeps, so a
+// message whose handler and webhook both gave up counts twice, and drops the
+// records of those inbox/ no longer keeps too. Each
 // message stays in inbox/, and nothing hands one over again. It writes the
 // mailbox, so it waits while another command holds the lock, and a mailbox that
 // holds its own revocation runs it too: it signs and asks nothing.
