@@ -459,7 +459,7 @@ func (b *Mailbox) handOwed(ctx context.Context, r records, d *Delivery, res *Res
 	step("handler begun")
 	err := h(ctx, Event{Kind: EventDelivery, Delivery: d, Result: res})
 	step("handler returned")
-	stopped, fault, cleared := b.settleOwed(ctx, r, d.owed, d.ID, err)
+	cleared, stopped, fault := b.settleOwed(ctx, r, d.owed, d.ID, err)
 	if cleared {
 		step("owed cleared")
 	}
@@ -470,19 +470,19 @@ func (b *Mailbox) handOwed(ctx context.Context, r records, d *Delivery, res *Res
 // its handling has ended with err: nil, ErrStop or ErrGaveUp, which it
 // records. Any other error leaves it owed. It returns err, but nil for
 // ErrGaveUp, beside a fault at clearing the record, which leaves it owed
-// too, and whether it cleared it.
-func (b *Mailbox) settleOwed(ctx context.Context, r records, key, id string, err error) (stopped, fault error, cleared bool) {
+// too, after whether it cleared it.
+func (b *Mailbox) settleOwed(ctx context.Context, r records, key, id string, err error) (cleared bool, stopped, fault error) {
 	gaveUp := errors.Is(err, ErrGaveUp)
 	if err != nil && !gaveUp && !errors.Is(err, ErrStop) {
-		return err, nil, false
+		return false, err, nil
 	}
 	if gaveUp {
 		err = nil
 	}
 	if fault := b.clearOwed(ctx, r, key, id, gaveUp); fault != nil {
-		return err, fault, false
+		return false, err, fault
 	}
-	return err, nil, true
+	return true, err, nil
 }
 
 // owedMessage is a message the state file records as owed its handling: the
@@ -504,7 +504,7 @@ func (b *Mailbox) handOverOwed(ctx context.Context, r records, h Handler) (stopp
 	for _, m := range owed {
 		var herr, cerr error
 		if m.delivery == nil {
-			herr, cerr, _ = b.settleOwed(ctx, r, m.key, m.id, h(ctx, Event{Kind: EventOwedGone, ID: m.id}))
+			_, herr, cerr = b.settleOwed(ctx, r, m.key, m.id, h(ctx, Event{Kind: EventOwedGone, ID: m.id}))
 		} else {
 			herr, cerr = b.handOwed(ctx, r, m.delivery, nil, h)
 		}
