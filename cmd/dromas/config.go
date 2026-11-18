@@ -320,8 +320,16 @@ func eachKey(v reflect.Value, path []string, f func(path []string, value reflect
 	return nil
 }
 
-// unknownKey is the refusal of a key this client does not read.
+// renamedKeys are the keys a release renamed, by their old names: a file that
+// still gives one is told the new name.
+var renamedKeys = map[string]string{"policy.server": "policy.admit"}
+
+// unknownKey is the refusal of a key this client does not read, which names
+// the new name of one a release renamed.
 func unknownKey(file, name string) *configError {
+	if now, ok := renamedKeys[name]; ok {
+		return &configError{file: file, key: name, msg: fmt.Sprintf("%s: %s is now %s: rename it", file, name, now)}
+	}
 	return &configError{file: file, key: name, msg: fmt.Sprintf("%s: this client reads no key %s", file, name)}
 }
 
