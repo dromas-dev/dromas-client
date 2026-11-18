@@ -167,10 +167,12 @@ type NotMade struct {
 // noteServed keeps what a read served of the mailbox's own statement. One the mailbox
 // did not make, by the statements it keeps and the hash of every one it ever
 // signed (madeKey), is kept as [NotMade], and dropped once a read serves one it
-// made. One it made, under the certificate it made with it, and above the one
-// it published last, the server took, whether or not the mailbox saw the answer:
-// its process may have ended in between (steps.go). It is recorded as publish
-// records one, with no pass, before the mailbox does anything more.
+// made. One it made, above the one it published last, the server took,
+// whether or not the mailbox saw the answer: its process may have ended in
+// between (steps.go). That holds whoever signed it, the identity, the working
+// key made with it, or a certificate the mailbox held (heldWorker). It is
+// recorded as publish records one, with no pass, before the mailbox does
+// anything more.
 func (b *Mailbox) noteServed(o *own, served []byte) error {
 	rec, err := b.prekeyOf(o.statement.Serial)
 	if err != nil {
@@ -180,10 +182,8 @@ func (b *Mailbox) noteServed(o *own, served []byte) error {
 		if err := b.update(func(s store) error { return s.del(bucketMailbox, "not-made") }); err != nil {
 			return err
 		}
-		// Signed by this mailbox's identity, or under the certificate it made
-		// with that number (work.go).
 		published, err := b.publishedSerial()
-		if r := o.signer.Rank(); err != nil || o.statement.Serial <= published || r != 0 && r != o.statement.Serial {
+		if err != nil || o.statement.Serial <= published {
 			return err
 		}
 		return b.recordTaken(o.statement.Serial, "", time.Time{})

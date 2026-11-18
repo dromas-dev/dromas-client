@@ -358,6 +358,34 @@ func TestALockedIdentityRenewsUnderTheCertificateItHolds(t *testing.T) {
 	}
 }
 
+// A renewal that failed as identity_locked failed at no server, so it is not
+// held for an hour as other failures are (renewNow): the next Receive, with
+// the key, renews at once. The mailbox signs its passes under its
+// certificate, and the one it holds began less than an hour ago, so it signs
+// no renewal without the identity (heldWorker); a prekey lifetime set below
+// the current prekey's makes the renewal due.
+func TestARenewalTheKeyWasLockedForIsTriedAtTheNextReceive(t *testing.T) {
+	t.Parallel()
+	e := newWorkEnv(t)
+	b, _, raw := keptElsewhere(t, e)
+	first := numberOf(t, b)
+	opt := e.opts()
+	opt.PrekeyLifetime = client.MinPrekeyLifetime
+	e.clock.Add(-30 * time.Minute)
+	res, err := reopen(t, b, opt).Receive(t.Context())
+	var locked *client.IdentityLockedError
+	if err != nil || !errors.As(res.RenewErr, &locked) {
+		t.Fatalf("receive with the identity elsewhere: %v; its renewal: %v; want identity_locked", err, res.RenewErr)
+	}
+	if err := os.WriteFile(b.Path("identity"), raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	res, err = reopen(t, b, opt).Receive(t.Context())
+	if err != nil || res.RenewErr != nil || res.Renewed == nil || numberOf(t, b) == first {
+		t.Fatalf("receive with the identity back, at once: %v; its renewal: %+v, %v", err, res.Renewed, res.RenewErr)
+	}
+}
+
 // serveAgent serves a on a socket of its own, as ssh-agent does, and returns
 // the socket.
 func serveAgent(t *testing.T, a agent.Agent) string {

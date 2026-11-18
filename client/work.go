@@ -100,23 +100,40 @@ func (b *Mailbox) certifiedSigner(serial uint64, life time.Duration, st *ownRead
 	if err == nil || st.fresh || !errors.As(err, &locked) {
 		return w, c, err
 	}
-	if w, c, herr := b.heldWorker(); herr == nil {
+	w, c, herr := b.heldWorker()
+	if herr == nil {
 		return w, c, nil
 	}
-	return nil, nil, &IdentityLockedError{File: locked.File, Agent: locked.Agent, Reason: locked.Reason + ", and no certificate this mailbox holds can sign a renewal (each has ended, begun less than an hour ago or been revoked): where the identity is kept elsewhere, dromas cert request asks its holder for a certificate"}
+	return nil, nil, &IdentityLockedError{File: locked.File, Agent: locked.Agent, Reason: locked.Reason + ", and no certificate this mailbox holds can sign a renewal (each is below the one in use, has ended, began less than an hour ago, is revoked, or has a working key someone else holds): where the identity is kept elsewhere, dromas cert request asks its holder for a certificate"}
 }
 
 // heldWorker is the newest working key this mailbox holds whose certificate
-// can sign a renewal: valid at the clock, begun protocol.MaxSkew or more
-// before it (PROTOCOL.md §12.4), and covered by none of the mailbox's own
-// revocation of its certificates. The mailbox holds none below the
-// certificate in use once a renewal under it is taken (dropWork).
+// can sign a renewal: the certificate in use or a later one (between
+// certificates, the mailbox renews under its current one, PROTOCOL.md §12.7),
+// valid at the clock, begun protocol.MaxSkew or more before it (§12.4),
+// covered by none of the mailbox's own revocation of its certificates, and not
+// one whose working key a statement the mailbox did not make shows someone
+// else holds (§12.7; seal's rule).
 func (b *Mailbox) heldWorker() (*sign.Work, *protocol.Certificate, error) {
 	ks, err := b.heldCertificates()
 	if err != nil {
 		return nil, nil, err
 	}
+	inUse, err := b.publishedRank()
+	if err != nil {
+		return nil, nil, err
+	}
+	nm, err := b.notMade()
+	if err != nil {
+		return nil, nil, err
+	}
 	for _, k := range slices.Backward(ks) {
+		if k < inUse {
+			break
+		}
+		if nm != nil && nm.OwnCertificate && nm.CertificateSerial == k {
+			continue
+		}
 		w, c, err := b.worker(k)
 		if err != nil || c.NotBefore().After(b.now().Add(-protocol.MaxSkew)) || b.ownRevokes(k) {
 			continue

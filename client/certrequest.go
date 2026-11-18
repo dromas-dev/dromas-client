@@ -193,12 +193,15 @@ func (b *Mailbox) highestCertificate(st *ownRead) (highest, revoked uint64, err 
 
 // InstallCertificate takes the certificate the mailbox's identity holder made
 // for its request, line as ssh-keygen writes a -cert.pub file, and renews
-// under it, as the mailbox's owner asking (PROTOCOL.md §12.4). The
-// certificate is checked by every rule of §12.7 step 3 before anything is
-// kept: every rule of §5.2 at this machine's clock, a serial no lower than
-// the request's lowest, and the request's working key. It is refused, too,
-// where it began less than an hour before the clock (§12.4), and where the
-// identity has revoked certificates since the request was made: the
+// under it, as the mailbox's owner asking (PROTOCOL.md §12.4). It reads the
+// mailbox at its server first, keeping what verifies of its own revocations,
+// and then checks the certificate by every rule of §12.7 step 3 before
+// anything is kept: every rule of §5.2 at this machine's clock, a lifetime no
+// longer than its certificates may run now (certificateLifetime), a serial no
+// lower than the request's lowest, and the request's working key. It is
+// refused, too, where it began less than an hour before the clock (§12.4),
+// and where the identity has revoked certificates since the request was made,
+// at this mailbox or anywhere its server has taken a revocation from: the
 // request's working key was in the mailbox then, so it may be stolen with the
 // rest (§12.7, the remedy's step 2), and a new request is made. A revocation
 // of this certificate is among those, since the request's lowest serial is
@@ -215,7 +218,18 @@ func (b *Mailbox) InstallCertificate(ctx context.Context, line []byte) (*protoco
 		if err := b.underCertificates(); err != nil {
 			return nil, err
 		}
-		cert, err := b.checkInstalled(line)
+		// The read first: it keeps every revocation of the mailbox's own that
+		// its server holds, so the check below meets one its identity holder
+		// published from anywhere (PROTOCOL.md §12.7, the remedy's step 2).
+		st, err := b.readOwn(ctx, false, false)
+		if err != nil {
+			return nil, err
+		}
+		life, err := b.certificateLifetime(ctx)
+		if err != nil {
+			return nil, err
+		}
+		cert, err := b.checkInstalled(line, life)
 		if err != nil {
 			return nil, err
 		}
@@ -236,10 +250,6 @@ func (b *Mailbox) InstallCertificate(ctx context.Context, line []byte) (*protoco
 			return nil, err
 		}
 		step("certificate installed")
-		st, err := b.readOwn(ctx, false, false)
-		if err != nil {
-			return nil, err
-		}
 		st.certify, st.under = true, n
 		p, at, err := b.renewFrom(ctx, st)
 		if err != nil {
@@ -258,8 +268,10 @@ func (b *Mailbox) InstallCertificate(ctx context.Context, line []byte) (*protoco
 }
 
 // checkInstalled holds line, a certificate the identity holder made, to the
-// request this mailbox made last, and returns it (InstallCertificate).
-func (b *Mailbox) checkInstalled(line []byte) (*protocol.Certificate, error) {
+// request this mailbox made last and to life, the longest a certificate of
+// this mailbox may run now (certificateLifetime), and returns it
+// (InstallCertificate).
+func (b *Mailbox) checkInstalled(line []byte, life time.Duration) (*protocol.Certificate, error) {
 	var req certificateRequest
 	if err := b.view(func(s store) error {
 		raw := s.get(bucketMailbox, keyCertificateRequest)
@@ -289,6 +301,11 @@ func (b *Mailbox) checkInstalled(line []byte) (*protocol.Certificate, error) {
 	}
 	if !bytes.Equal(cert.WorkingKey().Marshal(), asked.Marshal()) {
 		return nil, refuse("the certificate certifies another key than the working key of this mailbox's last request: dromas cert request prints that key, and a request made since replaces the one before")
+	}
+	// Longer than its server takes, its renewal would be refused, and a
+	// certificate kept would be one no renewal can sign under.
+	if cert.Lifetime() > life {
+		return nil, refuse("the certificate runs %d seconds, longer than the %d this mailbox's certificates may run now, the least of the protocol's maximum, its server's and its owner's: dromas cert request makes a new request, whose command its identity holder runs", int64(cert.Lifetime()/time.Second), int64(life/time.Second))
 	}
 	if cert.Serial() < req.Lowest {
 		return nil, refuse("the certificate's serial is %d, below %d, the lowest serial this mailbox's request gave: its identity holder certifies the request again at that serial or above", cert.Serial(), req.Lowest)
