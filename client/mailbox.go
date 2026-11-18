@@ -127,7 +127,7 @@ type Options struct {
 	// names; empty if none did.
 	ConfigFile string
 	// Policy is what its owner set of the mailbox's policy: a field left empty
-	// takes what SetPolicy or a restore recorded, or the default ([Mailbox.Policy]).
+	// takes what SetPolicy recorded, or the default ([Mailbox.Policy]).
 	Policy Policy
 	// PrekeyLifetime is how long each new prekey is valid for, from
 	// MinPrekeyLifetime to protocol.PrekeyLifetime, in whole seconds; zero is
@@ -419,8 +419,9 @@ func (t *transport) renew(was *http.RoundTripper) {
 // newTransport is rt, or net/http's default, held to checkServerURL
 // (transport). A transport of net/http's own type calls a server on this
 // machine, or one named localhost in any case, through no proxy, whatever
-// the environment names (PROTOCOL.md §11.1): Go's ProxyFromEnvironment
-// exempts only the exact name localhost.
+// the transport's Proxy or the environment names (PROTOCOL.md §11.1): Go's
+// ProxyFromEnvironment exempts every loopback IP and the name localhost in
+// lowercase alone.
 func newTransport(rt http.RoundTripper) http.RoundTripper {
 	if rt == nil {
 		rt = http.DefaultTransport

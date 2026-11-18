@@ -98,7 +98,7 @@ refusal never quotes a message.
 
 To try the whole loop, send anything to dromas.dev's echo mailbox:
 ` + client.DefaultBase + protocol.LinkPath + client.EchoAddress + `
-It answers within two minutes with a signed reply saying what it checked.
+It answers within seconds with a signed reply saying what it checked.
 dromas.dev's operator can read what you send it.
 
 The README has the rest, including what this client checks and how to test it:

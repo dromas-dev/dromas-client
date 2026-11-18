@@ -494,11 +494,11 @@ and the file can set it only beside exec. On Windows, cmd.exe runs a .bat or
 .cmd program, and cmd.exe splits and expands its arguments.
 
 Nothing of a message is ever on the command line. recv discards the program's
-stdout and stderr. The programs run one at a time, in delivery order, with the
-mailbox's lock free, so a program can run dromas. Each message is kept in inbox/
-first, so the program is a notification and never the only copy. A message held
-in held/ runs no program, and neither does a message that another recv receives,
-so run one recv for each mailbox.
+stdout and stderr. The programs run one at a time, with the mailbox's lock free,
+so a program can run dromas. Each message is kept in inbox/ first, so the
+program is a notification and never the only copy. A message held in held/ runs
+no program, and neither does a message that another recv receives, so run one
+recv for each mailbox.
 
 A program's exit status 0 means done, and 100 means failed for good. recv tries
 again after any other exit status, a signal, a run longer than --exec-timeout
@@ -529,9 +529,9 @@ message's "id", the same at each try. recv refuses either file where others can
 read it, as ssh refuses a private key, and reads each once, at its start.
 
 The webhook runs apart from --exec's program: a failure of either never stops,
-delays or fails the other. Posts go one at a time, in delivery order, and with
---wait recv ends once the webhook has finished the tries of what it delivered.
-A 2xx answer is success. recv follows no redirect, and posts again after any
+delays or fails the other. Posts go one at a time, and with --wait recv ends
+once the webhook has finished the tries of what it delivered. A 2xx answer is
+success. recv follows no redirect, and posts again after any
 other answer or none within %s, up to %d tries in all: at once, then %s after
 the first and %s after the second, or longer where the answer's Retry-After
 asks, up to %s. Each failed attempt prints a
