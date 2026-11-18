@@ -8,6 +8,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/dromas-dev/dromas-client/internal/fakeserver"
@@ -156,60 +157,49 @@ func TestWhereThereIsNoGateNeitherAReadingNorACommandWaitsForOne(t *testing.T) {
 	}
 }
 
-// The goroutines of one Follow, its loop's and its webhook's, are one command:
-// one that waits for the slot while another of them holds it tells
-// Options.Waiting nothing, and one of another command, or of another Follow,
-// tells it once (#927 item 2). Each wait is seen in the slot itself, on no
-// clock.
-func TestAFollowsOwnGoroutinesWaitForEachOtherUntold(t *testing.T) {
+// The goroutines of a Follow, its loop's and its webhook's, wait for each
+// other in the Mailbox's slot and tell Options.Waiting nothing, and a goroutine
+// of no Follow tells it once (#927 item 2). The second claim's wait is seen in a
+// bubble, on no clock: the Mailbox is opened in it, so its slot is the bubble's.
+func TestAFollowsGoroutinesTellNoWaitForTheSlot(t *testing.T) {
 	t.Parallel()
-	b, _, _ := twoOpens(t)
-	var told atomic.Int32
-	b.waiting = func() { told.Add(1) }
-	ctx := context.Background()
-	one := context.WithValue(ctx, followingKey{}, &following{})
-	other := context.WithValue(ctx, followingKey{}, &following{})
-	waiting := func() {
-		t.Helper()
-		for {
-			b.slot.mu.Lock()
-			w := b.slot.free != nil
-			b.slot.mu.Unlock()
-			if w {
-				return
-			}
-			time.Sleep(time.Millisecond)
-		}
-	}
+	a, _, _ := twoOpens(t)
+	follow := context.WithValue(context.Background(), followingKey{}, true)
 	for _, tc := range []struct {
 		name string
 		ctx  context.Context
 		want int32
 	}{
-		{"the same Follow", one, 0},
-		{"another Follow", other, 1},
-		{"no Follow", ctx, 1},
+		{"a goroutine of the Follow", follow, 0},
+		{"a goroutine of no Follow", context.Background(), 1},
 	} {
-		told.Store(0)
-		release, err := b.claim(one)
-		if err != nil {
-			t.Fatal(err)
-		}
-		done := make(chan error, 1)
-		go func() {
-			r, err := b.claim(tc.ctx)
-			if err == nil {
-				r()
+		synctest.Test(t, func(t *testing.T) {
+			b, err := Open(a.Dir(), Options{Base: a.base})
+			if err != nil {
+				t.Fatal(err)
 			}
-			done <- err
-		}()
-		waiting()
-		release()
-		if err := <-done; err != nil {
-			t.Fatalf("%s: %v", tc.name, err)
-		}
-		if n := told.Load(); n != tc.want {
-			t.Errorf("%s: Waiting was told %d times, want %d", tc.name, n, tc.want)
-		}
+			var told atomic.Int32
+			b.waiting = func() { told.Add(1) }
+			release, err := b.claim(follow)
+			if err != nil {
+				t.Fatal(err)
+			}
+			done := make(chan error, 1)
+			go func() {
+				r, err := b.claim(tc.ctx)
+				if err == nil {
+					r()
+				}
+				done <- err
+			}()
+			synctest.Wait() // the second claim waits for the slot
+			release()
+			if err := <-done; err != nil {
+				t.Fatalf("%s: %v", tc.name, err)
+			}
+			if n := told.Load(); n != tc.want {
+				t.Errorf("%s: Waiting was told %d times, want %d", tc.name, n, tc.want)
+			}
+		})
 	}
 }

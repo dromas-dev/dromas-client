@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"sync"
 	"time"
 
 	bolt "go.etcd.io/bbolt"
@@ -131,89 +130,35 @@ func (b *Mailbox) makeState() error {
 	return syncDir(b.dir)
 }
 
-// slot is a Mailbox's slot, held by one command or reading at a time: by,
-// the Follow that the holder is part of, or nil; and free, closed when the
-// holder lets go, for every goroutine that waits.
-type slot struct {
-	mu   sync.Mutex
-	held bool
-	by   *following
-	free chan struct{}
-}
-
-// following marks the goroutines of one Follow, its loop's and its webhook's
-// ([FollowOptions.Webhook]), in their context: they are one command, so one
-// that waits for the slot while another of them holds it waits for no other
-// command (claim). Its byte gives each a pointer of its own: two pointers to
-// values of size zero may be equal.
-type following struct{ _ byte }
-
+// followingKey marks the goroutines of one Follow, its loop's and its
+// webhook's ([FollowOptions.Webhook]), in their context (claim).
 type followingKey struct{}
-
-// ofFollow is the Follow that ctx's goroutine is part of, or nil.
-func ofFollow(ctx context.Context) *following {
-	f, _ := ctx.Value(followingKey{}).(*following)
-	return f
-}
-
-// take takes the slot for f's goroutine where it is free. Where it is held, it
-// says whether f's Follow holds it, and returns what is closed when it is let
-// go of.
-func (s *slot) take(f *following) (taken, own bool, free <-chan struct{}) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if !s.held {
-		s.held, s.by = true, f
-		return true, false, nil
-	}
-	if s.free == nil {
-		s.free = make(chan struct{})
-	}
-	return false, f != nil && s.by == f, s.free
-}
-
-// release lets go of the slot, for each goroutine waiting to take it.
-func (s *slot) release() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.held, s.by = false, nil
-	if s.free != nil {
-		close(s.free)
-		s.free = nil
-	}
-}
 
 // claim takes the Mailbox's slot for one command or reading, waiting while
 // another goroutine's holds it as hold waits for the state file: up to
-// lockPatience, while ctx lasts (#329). It tells Options.Waiting once, when
-// the holder is another command: never when it is another goroutine of the
-// same Follow (ofFollow).
+// lockPatience, while ctx lasts, telling Options.Waiting once (#329). A
+// goroutine of a Follow tells it nothing: in recv, a Follow's loop and its
+// webhook are the only goroutines of their Mailbox, and they wait for each
+// other as one command. A wait for another process's command is told at its
+// lock (openState).
 func (b *Mailbox) claim(ctx context.Context) (func(), error) {
-	f := ofFollow(ctx)
-	taken, own, free := b.slot.take(f)
-	if taken {
-		return b.slot.release, nil
+	select {
+	case b.slot <- struct{}{}:
+		return func() { <-b.slot }, nil
+	default:
+	}
+	if b.waiting != nil && ctx.Value(followingKey{}) == nil {
+		b.waiting()
 	}
 	wait := time.NewTimer(lockPatience)
 	defer wait.Stop()
-	told := false
-	for {
-		if !told && !own {
-			told = true
-			if b.waiting != nil {
-				b.waiting()
-			}
-		}
-		select {
-		case <-free:
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-wait.C:
-			return nil, errLocked
-		}
-		if taken, own, free = b.slot.take(f); taken {
-			return b.slot.release, nil
-		}
+	select {
+	case b.slot <- struct{}{}:
+		return func() { <-b.slot }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-wait.C:
+		return nil, errLocked
 	}
 }
 

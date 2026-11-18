@@ -182,7 +182,7 @@ var (
 // that cut the webhook's last handover short.
 func (b *Mailbox) Follow(ctx context.Context, o FollowOptions, h Handler) (err error) {
 	// The loop's goroutine and the webhook's are one command (claim).
-	ctx = context.WithValue(ctx, followingKey{}, &following{})
+	ctx = context.WithValue(ctx, followingKey{}, true)
 	// delivered is called after each drain that delivered a message to inbox/.
 	delivered := func() {}
 	if o.Webhook != nil {
