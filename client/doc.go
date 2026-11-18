@@ -27,7 +27,7 @@
 //	sent/                      sent messages the server took: each envelope with the server's receipt
 //	aliases                    this mailbox's own names for peers: "<name> <address>" lines
 //	gate                       on Windows alone, an empty file whose lock is the mailbox's gate, which a waiting writer holds so that readings that overlap do not hold it back: elsewhere the gate is a flock on the directory itself, where the system has flock (gate_unix.go)
-//	state                      a bbolt database of what the client writes about the mailbox itself, each change one transaction (client/store.go): the prekey serial it published last, each prekey statement it signed, when, and when its server took it, each key it adopted, the renewal under way and one that failed, a statement its server served in its name that it did not make, the lowest serial of the last certificate request and the revocation serial held when it was made, the pass it last signed, with the server name it was signed for, the ETag of the last empty poll, the ACL its server last took, its own revocations once one verifies, what its server's answers last said of its version (a deprecation and a sunset, each with its date) and when it last read its server's document, with the latest version that named, what it pinned of each peer, the replay set and its floor, why each message in refused/ was refused, each message Follow kept whose handling has not ended and each whose handling gave up, the address it belongs to, and that it made its directories. It is the mailbox's lock too: each command that writes the mailbox holds it open from its start to its end, a second process waits for it, and one killed leaves nothing. A base directory on a network filesystem is refused on Linux and macOS
+//	state                      a bbolt database of what the client writes about the mailbox itself, each change one transaction (client/store.go): the prekey serial it published last, each prekey statement it signed, when, and when its server took it, each key it adopted, the renewal under way and one that failed, a statement its server served in its name that it did not make, the lowest serial of the last certificate request and the revocation serial held when it was made, the pass it last signed, with the server name it was signed for, the ETag of the last empty poll, the ACL its server last took, its own revocations once one verifies, what its server's answers last said of its version (a deprecation and a sunset, each with its date) and when it last read its server's document, with the latest version that named, what it pinned of each peer, the replay set and its floor, why each message in refused/ was refused, each message Follow kept whose handling has not ended and each whose handling gave up, the address it belongs to, and that it made its directories. It is the mailbox's lock too: each command that writes the mailbox holds it open from its start to its end, a second process waits for it, and one killed leaves nothing.
 //
 // A process that waits for messages runs [Mailbox.Follow], one loop that drains,
 // hands each [Event] to a handler, and holds the mailbox's list, with the lock
@@ -36,8 +36,10 @@
 // own cycle.
 //
 // Every command judges state, gate, partial, allowed, blocked and aliases, each
-// where it exists, before it opens the state file or the gate (judgeFiles), as a
-// private key is judged: others can reach none, and no other user owns one.
+// where it exists, before it opens the state file or the gate (judgeFiles): no
+// other user owns one, others can reach none of the first three, as a private
+// key is judged, and others can write none of the lists, as a config file is
+// judged.
 //
 // The mailbox's format is one number for what each of these files holds, the
 // state file's records among them, kept in the state file (format.go): every

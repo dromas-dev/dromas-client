@@ -63,8 +63,8 @@ func (g *globals) add(c *cobra.Command) {
 	f.StringVar(&g.agent, "agent", "", "the `socket` of the ssh-agent that holds the identity's key, read as ssh_config's IdentityAgent (a path, $VAR, SSH_AUTH_SOCK or none): $DROMAS_AGENT, or "+agentDefaultWords)
 	f.StringVar(&g.askpass, "askpass", "", "a `program` that prints the identity key's passphrase, as ssh's SSH_ASKPASS: $DROMAS_ASKPASS")
 	f.BoolVar(&g.noPrompt, "no-prompt", false, "never ask for the identity key's passphrase at a terminal: $DROMAS_NO_PROMPT")
-	f.BoolVar(&g.unsafeInbox, "unsafe-inbox-permissions", false, "read inbox-dir and held/ even when others can write to them or another user owns them, and their messages even when others can access them, although anyone who can write there can add a message that reads as delivered: $DROMAS_UNSAFE_INBOX_PERMISSIONS")
-	f.BoolVar(&g.unsafeState, "unsafe-state-permissions", false, "open state, gate, partial and the lists even when others can access them or another user owns them; never a private key: $DROMAS_UNSAFE_STATE_PERMISSIONS")
+	f.BoolVar(&g.unsafeInbox, "unsafe-inbox-permissions", false, "read inbox-dir and held/, and their messages, even when others can write to them or another user owns them, although anyone who can write there can add a message that reads as delivered: $DROMAS_UNSAFE_INBOX_PERMISSIONS")
+	f.BoolVar(&g.unsafeState, "unsafe-state-permissions", false, "open state, gate and partial even when others can access them, and the lists even when others can write to them, or another user owns one; never a private key: $DROMAS_UNSAFE_STATE_PERMISSIONS")
 	f.StringVar(&g.addKeysToAgent, "add-keys-to-agent", "", "after a passphrase unlocks the identity's key, add the key to the agent: no, yes, or the `time` the agent keeps it, as ssh_config's AddKeysToAgent: $DROMAS_ADD_KEYS_TO_AGENT")
 }
 

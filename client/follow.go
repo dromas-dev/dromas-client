@@ -98,7 +98,8 @@ var ErrStop = errors.New("the handler stopped the loop")
 // the webhook's ([FollowOptions.Webhook]), for a delivery whose handling failed
 // for good. [Mailbox.Follow] records it, for [Mailbox.Status] to list under
 // attention until [Mailbox.ClearFailed] clears every such record, and goes on:
-// nothing tries it again.
+// nothing tries it again, unless the record could not be written, when it stays
+// owed and is handed over again.
 var ErrGaveUp = errors.New("the handler gave up on the message")
 
 // FollowOptions says how [Mailbox.Follow] runs. The zero value runs until its
@@ -526,49 +527,32 @@ func owe(s store, r records, id string) (string, error) {
 }
 
 // clearOwed ends the record under key of the message id, and in the same
-// transaction records that its handling gave up, where it did. While another
-// command holds the lock it waits on, for as long as ctx lasts: a message whose
-// record stays is handed over again.
+// transaction records that its handling gave up, where it did.
 func (b *Mailbox) clearOwed(ctx context.Context, r records, key, id string, gaveUp bool) error {
-	for {
-		err := b.lockedFinishedDo(ctx, func() error {
-			return b.update(func(s store) error {
-				if gaveUp {
-					if err := s.put(r.gaveUp, id, nil); err != nil {
-						return err
-					}
+	return b.lockedFinishedDo(ctx, func() error {
+		return b.update(func(s store) error {
+			if gaveUp {
+				if err := s.put(r.gaveUp, id, nil); err != nil {
+					return err
 				}
-				return s.del(r.owed, key)
-			})
+			}
+			return s.del(r.owed, key)
 		})
-		if !errors.Is(err, errLocked) {
-			return err
-		}
-	}
+	})
 }
 
 // owedMessages reads what the state file records as owed in r, under the command that
-// holds the lock, and drops the record of a handling that gave up where inbox/
-// no longer keeps its message. An owed message's file that others can reach,
-// or that another user owns, is refused before it is read (judgeKept), and
-// nothing is handed over.
+// holds the lock. An owed message's file that others can write, or that
+// another user owns, is refused before it is read (judgeKept), and nothing is
+// handed over.
 func (b *Mailbox) owedMessages(r records) ([]owedMessage, error) {
 	if err := b.keysMatch(); err != nil {
 		return nil, err
 	}
 	var owed []owedMessage
-	var left []string
 	if err := b.view(func(s store) error {
-		if err := s.each(r.owed, func(k, v []byte) error {
+		return s.each(r.owed, func(k, v []byte) error {
 			owed = append(owed, owedMessage{key: string(k), id: string(v)})
-			return nil
-		}); err != nil {
-			return err
-		}
-		return s.each(r.gaveUp, func(k, _ []byte) error {
-			if !exists(b.path("inbox", string(k)+".json")) {
-				left = append(left, string(k))
-			}
 			return nil
 		})
 	}); err != nil {
@@ -593,62 +577,39 @@ func (b *Mailbox) owedMessages(r records) ([]owedMessage, error) {
 			owed[i].delivery = &Delivery{ID: id, Envelope: env, Line: line, owed: owed[i].key}
 		}
 	}
-	if len(left) == 0 {
-		return owed, nil
-	}
-	return owed, b.update(func(s store) error {
-		for _, id := range left {
-			if err := s.del(r.gaveUp, id); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
+	return owed, nil
 }
 
 // owedCounts is what Status says of the owed records of r: how many messages
-// are owed their handling, and the ids of those whose handling gave up that
-// inbox/ still keeps.
+// are owed their handling, and the ids of those whose handling gave up.
 func (b *Mailbox) owedCounts(r records) (owed int, gaveUp []string, err error) {
 	err = b.view(func(s store) error {
 		if err := s.each(r.owed, func(_, _ []byte) error { owed++; return nil }); err != nil {
 			return err
 		}
 		return s.each(r.gaveUp, func(k, _ []byte) error {
-			if b.listedGaveUp(k) {
-				gaveUp = append(gaveUp, string(k))
-			}
+			gaveUp = append(gaveUp, string(k))
 			return nil
 		})
 	})
 	return owed, gaveUp, err
 }
 
-// listedGaveUp reports whether Status lists the record of a handling that gave
-// up under key: one named by a message's id whose file inbox/ keeps.
-func (b *Mailbox) listedGaveUp(key []byte) bool {
-	return hexID.Match(key) && exists(b.path("inbox", string(key)+".json"))
-}
-
 // ClearFailed deletes the record of every message whose handling gave up
 // ([ErrGaveUp]), the handler's and the webhook's, in one transaction, so that
 // [Mailbox.Status] lists none until a handling gives up again. It returns how
-// many of the records Status listed, those of messages inbox/ keeps, so a
-// message whose handler and webhook both gave up counts twice, and drops the
-// records of those inbox/ no longer keeps too. Each
-// message stays in inbox/, and nothing hands one over again. It writes the
-// mailbox, so it waits while another command holds the lock, and a mailbox that
-// holds its own revocation runs it too: it signs and asks nothing.
+// many records it deleted, so a message whose handler and webhook both gave
+// up counts twice. Each message inbox/ keeps stays there, and nothing hands
+// one over again. It writes the mailbox, so it waits while another command
+// holds the lock, and a mailbox that holds its own revocation runs it too: it
+// signs and asks nothing.
 func (b *Mailbox) ClearFailed(ctx context.Context) (int, error) {
 	return lockedFinished(ctx, b, func() (int, error) {
-		listed := 0
+		cleared := 0
 		err := b.update(func(s store) error {
 			for _, r := range []records{handlerRecords, webhookRecords} {
 				var keys []string
 				if err := s.each(r.gaveUp, func(k, _ []byte) error {
-					if b.listedGaveUp(k) {
-						listed++
-					}
 					keys = append(keys, string(k))
 					return nil
 				}); err != nil {
@@ -659,13 +620,14 @@ func (b *Mailbox) ClearFailed(ctx context.Context) (int, error) {
 						return err
 					}
 				}
+				cleared += len(keys)
 			}
 			return nil
 		})
 		if err != nil {
 			return 0, err
 		}
-		return listed, nil
+		return cleared, nil
 	})
 }
 

@@ -48,7 +48,9 @@ const EchoAddress = "d_QGnwhx4dTMGWuVDvVof0-J6p-8tA4oxE4q9mw0fzMSS9G0g9m4QVEnPk2
 // for a test (SetRequestTimeout).
 var requestTimeout = time.Minute
 
-// Options configures a [Mailbox]. The zero value is ready to use.
+// Options configures a [Mailbox]. The zero value is ready to use. A callback
+// here runs while the Mailbox holds its command's slot, so it never calls the
+// Mailbox: such a call waits until its context ends.
 type Options struct {
 	// Base is the server's base URL; DefaultBase if empty. It is https, or
 	// http only to a server on this machine ([checkServerURL]).
@@ -162,20 +164,21 @@ type Options struct {
 	AddToAgent    bool
 	AgentLifetime time.Duration
 	NotAdded      func(error)
-	// UnsafeInboxPermissions reads inbox-dir and held/ where others can write
-	// them, and each file they keep where others can reach it or another user
-	// owns it, which the mailbox otherwise refuses ([Mailbox.judgeKept]):
-	// whoever can write there can put in a message that reads as delivered.
+	// UnsafeInboxPermissions reads inbox-dir and held/, and each file they
+	// keep, where others can write them or another user owns them, which the
+	// mailbox otherwise refuses ([Mailbox.judgeKept]): whoever can write there
+	// can put in a message that reads as delivered.
 	UnsafeInboxPermissions bool
-	// UnsafeStatePermissions opens state, gate, partial and the lists where
-	// others can reach them or another user owns them, which the mailbox
-	// otherwise refuses (judgeFiles). It covers no private key.
+	// UnsafeStatePermissions opens state, gate and partial where others can
+	// reach them, the lists where others can write them, and any of them
+	// another user owns, which the mailbox otherwise refuses (judgeFiles). It
+	// covers no private key.
 	UnsafeStatePermissions bool
 }
 
 // Mailbox is one mailbox: its files and the server it talks to. It is
 // safe for concurrent use: a command or reading of one goroutine waits for
-// another's, as one of another process does.
+// another's while its context lasts.
 type Mailbox struct {
 	// dir is the base directory, and layout where the rest is.
 	dir        string
@@ -285,14 +288,8 @@ func Open(dir string, opt Options) (*Mailbox, error) {
 func newMailbox(dir string, opt Options) (*Mailbox, error) {
 	// No directory is a mailbox that keeps nothing ([Publish], [Revoke]). The
 	// default layout's parts are apart but for a link made inside it, which Open
-	// and Init check for, so only its base directory is read here.
-	switch {
-	case dir == "":
-	case opt.Layout == (Layout{}):
-		if err := checkBaseLocal(dir); err != nil {
-			return nil, err
-		}
-	default:
+	// and Init check for, so only a layout given is checked here.
+	if dir != "" && opt.Layout != (Layout{}) {
 		if err := CheckLayout(dir, opt.Layout); err != nil {
 			return nil, err
 		}
