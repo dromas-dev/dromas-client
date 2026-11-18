@@ -239,3 +239,43 @@ func TestAHeldMessageIsOwedTheWebhookNothing(t *testing.T) {
 		t.Fatalf("status: %+v, %v", st, err)
 	}
 }
+
+// A webhook's error other than ErrGaveUp leaves its message owed and ends the
+// handover there: the messages after it stay owed behind it, and the next
+// handover begins with it, so the webhook is handed them in delivery order
+// (#927 item 4).
+func TestAWebhooksErrorKeepsTheDeliveryOrder(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	e := newEnv(t)
+	a, b := e.mailbox(), e.mailbox()
+	for _, body := range []string{"one", "two", "three"} {
+		send(t, a, b, body)
+	}
+	failed := false
+	hook := &bodies{result: func(body string) error {
+		if body == "one" && !failed {
+			failed = true
+			return errors.New("not now")
+		}
+		return nil
+	}}
+	if err := b.Follow(ctx, client.FollowOptions{Until: time.Now(), Webhook: hook.handle}, nil); err != nil {
+		t.Fatal(err)
+	}
+	// The first Follow hands "one" alone, or, where a kick came during that
+	// handover, hands the three again after it: either is the order.
+	want := []string{"one", "one", "two", "three"}
+	if got := hook.list(); !slices.Equal(got, want[:1]) && !slices.Equal(got, want) {
+		t.Fatalf("after the first Follow: handed %q", got)
+	}
+	if err := b.Follow(ctx, client.FollowOptions{Until: time.Now(), Webhook: hook.handle}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(hook.list(), want) {
+		t.Errorf("the webhook was handed %q, want %q", hook.list(), want)
+	}
+	if st, err := b.Status(ctx); err != nil || st.WebhookOwed != 0 {
+		t.Errorf("after: %+v, %v", st, err)
+	}
+}

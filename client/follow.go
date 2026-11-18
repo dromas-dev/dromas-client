@@ -120,7 +120,9 @@ type FollowOptions struct {
 	// returns nil, [ErrStop] or [ErrGaveUp]. Follow begins by handing over what
 	// is owed, in delivery order, and the handler's work is at least once: a
 	// crash before the record is cleared hands the message over again. Any
-	// other error from the handler leaves the message owed.
+	// other error from the handler leaves the message owed, and the
+	// deliveries after it stay owed behind it, in delivery order: the handler
+	// is not handed them until it has handled that one.
 	Owed bool
 	// Flush posts the outbox's messages that are due after each drain that
 	// succeeds, as [Mailbox.FlushReport] does but for the entries whose wait is not over, and ends a hold when the next waiting one
@@ -136,7 +138,9 @@ type FollowOptions struct {
 	// at a time, beginning with what is owed when Follow starts, or an
 	// [EventOwedGone] where inbox/ no longer keeps the message. The record is
 	// cleared once Webhook returns nil or [ErrGaveUp], which it records; any
-	// other error leaves the message owed, for the next handover. Follow
+	// other error leaves the message owed, and ends the handover there, so
+	// the messages after it stay owed behind it, in delivery order, for the
+	// next handover. Follow
 	// waits for Webhook to hand over what is owed before it returns, but
 	// where its context ended: what is cut short stays owed for the next
 	// Follow.
@@ -164,7 +168,9 @@ var (
 // never while the handler runs. A message is kept in its folder before the
 // handler sees it, and a handler that ends the loop on a delivery still sees
 // the rest of that drain's events, because the drain has acked those messages.
-// A handler's error ends the loop after the last of them.
+// Under [FollowOptions.Owed] the deliveries after one that the handler's error
+// left owed are the exception: they stay owed behind it. A handler's error ends
+// the loop after the last of them.
 //
 // A drain that fails in a way a wait may mend ([Transient]) is an [EventRetry],
 // a drain refused for what a renewal mends among them where that renewal failed
@@ -389,7 +395,8 @@ func drainWithin(res *Result) time.Duration {
 
 // handOver hands h each event of one drain, res, and returns h's first error
 // beside the first fault at clearing what was owed. The deliveries after that
-// fault are not handed to h: they stay owed, for the loop to hand over again.
+// fault, or after one that h's error left owed, are not handed to h: they stay
+// owed, for the loop to hand over again.
 func (b *Mailbox) handOver(ctx context.Context, owed bool, res *Result, h Handler) (stopped, fault error) {
 	if res == nil {
 		return nil, nil
@@ -403,15 +410,19 @@ func (b *Mailbox) handOver(ctx context.Context, owed bool, res *Result, h Handle
 		e.Result = res
 		keep(h(ctx, e))
 	}
+	// left is a delivery that h's error left owed: the deliveries after it
+	// stay owed behind it, in delivery order, as after a fault.
+	left := false
 	for i := range res.Delivered {
 		d := &res.Delivered[i]
 		switch {
 		case !owed:
 			give(Event{Kind: EventDelivery, Delivery: d})
-		case fault == nil:
+		case fault == nil && !left:
 			var herr error
 			herr, fault = b.handOwed(ctx, handlerRecords, d, res, h)
 			keep(herr)
+			left = leftOwed(herr)
 		}
 	}
 	for _, id := range res.Duplicates {
@@ -480,7 +491,9 @@ type owedMessage struct {
 // handOverOwed hands h what the state file records as owed in r, in delivery
 // order, and returns h's first error beside the fault that cut the handover
 // short: one at reading the records, or at clearing one, after which the rest
-// are not handed to h and stay owed (Follow).
+// are not handed to h and stay owed (Follow). A message that h's error leaves
+// owed ends the handover too, so the messages after it stay owed behind it,
+// in delivery order.
 func (b *Mailbox) handOverOwed(ctx context.Context, r records, h Handler) (stopped, fault error) {
 	owed, err := lockedFinished(ctx, b, func() ([]owedMessage, error) { return b.owedMessages(r) })
 	if err != nil {
@@ -488,22 +501,29 @@ func (b *Mailbox) handOverOwed(ctx context.Context, r records, h Handler) (stopp
 	}
 	for _, m := range owed {
 		var herr, cerr error
+		left := false
 		if m.delivery == nil {
 			if herr = h(ctx, Event{Kind: EventOwedGone, ID: m.id}); herr == nil {
 				cerr = b.clearOwed(ctx, r, m.key, m.id, false)
 			}
+			left = herr != nil
 		} else {
 			herr, cerr = b.handOwed(ctx, r, m.delivery, nil, h)
+			left = leftOwed(herr)
 		}
 		if herr != nil && stopped == nil {
 			stopped = herr
 		}
-		if cerr != nil {
+		if cerr != nil || left {
 			return stopped, cerr
 		}
 	}
 	return stopped, nil
 }
+
+// leftOwed reports whether handOwed's error, err, left its message owed: any
+// error but ErrStop, after which the record is cleared.
+func leftOwed(err error) bool { return err != nil && !errors.Is(err, ErrStop) }
 
 // owe records in s that the message id is owed its handling of r, and returns
 // the record's key: a number that rises with each, so the bucket's order is

@@ -485,8 +485,10 @@ func TestAnOwedMessageIsKeptBeforeItsHandlerAndClearedAfter(t *testing.T) {
 	}
 }
 
-// Any other error from a handler leaves the message owed. The next loop hands
-// over what is owed first, in delivery order, then what it drains.
+// Any other error from a handler leaves the message owed, and the drain's
+// deliveries after it stay owed behind it, not handed over (#927 item 4). The
+// next loop hands over what is owed first, in delivery order, then what it
+// drains.
 func TestAnOwedMessageIsHandedOverFirstInDeliveryOrder(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
@@ -503,7 +505,7 @@ func TestAnOwedMessageIsHandedOverFirstInDeliveryOrder(t *testing.T) {
 		}
 		return nil
 	})
-	if !errors.Is(err, boom) || len(first) != 3 {
+	if !errors.Is(err, boom) || !slices.Equal(first, []string{"one"}) {
 		t.Fatalf("Follow: %v, having handed over %q", err, first)
 	}
 	if st, err := b.Status(context.Background()); err != nil || st.Owed != 3 {
@@ -517,7 +519,7 @@ func TestAnOwedMessageIsHandedOverFirstInDeliveryOrder(t *testing.T) {
 		}
 		return nil
 	})
-	if err != nil || !slices.Equal(again, append(slices.Clone(first), "new")) {
+	if err != nil || !slices.Equal(again, []string{"one", "two", "three", "new"}) {
 		t.Fatalf("Follow: %v, handed over %q after %q", err, again, first)
 	}
 	if st, err := b.Status(context.Background()); err != nil || st.Owed != 0 {
