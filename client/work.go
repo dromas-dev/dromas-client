@@ -134,7 +134,7 @@ func (b *Mailbox) heldWorker() (*sign.Work, *protocol.Certificate, error) {
 		if k < inUse {
 			break
 		}
-		if nm != nil && nm.OwnCertificate && nm.CertificateSerial == k {
+		if nm.showsTaken(k) {
 			continue
 		}
 		w, c, err := b.worker(k)

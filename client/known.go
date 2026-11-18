@@ -229,6 +229,15 @@ func (b *Mailbox) certifiedHere(c *protocol.Certificate) bool {
 	return err == nil && ok && bytes.Equal(own.Key.Marshal(), c.WorkingKey().Marshal())
 }
 
+// showsTaken reports whether nm, a statement the mailbox did not make or nil,
+// is under the mailbox's own certificate serial: that certificate's working
+// key is in someone else's hands, and the mailbox signs nothing more under it
+// (PROTOCOL.md §12.4, §12.7): no message (seal), no new statement
+// (heldWorker), and no statement that waited (signedPrekey).
+func (nm *NotMade) showsTaken(serial uint64) bool {
+	return nm != nil && nm.OwnCertificate && nm.CertificateSerial == serial
+}
+
 // NotMade is the statement the mailbox's server served in its name, at the mailbox's
 // last read of itself, that the mailbox did not make, or nil.
 func (b *Mailbox) NotMade(ctx context.Context) (*NotMade, error) {
