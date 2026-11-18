@@ -245,6 +245,9 @@ type Mailbox struct {
 	// slot is held by the one command or reading of this Mailbox under way, of
 	// whichever goroutine ([Mailbox.claim]).
 	slot chan struct{}
+	// followDone, a test's, is called once Follow's loop has ended and told
+	// its webhook's goroutine so (SetFollowDone).
+	followDone func()
 	// ended is this mailbox's own revocation once the command under way has kept
 	// it, having begun with none (keepRevocation): that command asks nothing
 	// more (call), and returns it (locked). Each command begins with none.

@@ -4,11 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -277,5 +281,100 @@ func TestAWebhooksErrorKeepsTheDeliveryOrder(t *testing.T) {
 	}
 	if st, err := b.Status(ctx); err != nil || st.WebhookOwed != 0 {
 		t.Errorf("after: %+v, %v", st, err)
+	}
+}
+
+// Follow returns, where it would return nil, the fault that cut the
+// webhook's last handover short: here the refusal of an owed message's file
+// that others can write (judgeKept) (#927 item 7).
+func TestFollowReturnsTheFaultOfTheWebhooksLastHandover(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("a mode is not an access list: a file's refusal there is judgeKept's own test")
+	}
+	ctx := context.Background()
+	e := newEnv(t)
+	a, b := e.mailbox(), e.mailbox()
+	send(t, a, b, "one")
+	cut := &bodies{result: func(string) error { return errors.New("cut short") }}
+	if err := b.Follow(ctx, client.FollowOptions{Until: time.Now(), Webhook: cut.handle}, nil); err != nil {
+		t.Fatal(err)
+	}
+	ids, err := filepath.Glob(filepath.Join(b.Dir(), "mail", "inbox", "*.json"))
+	if err != nil || len(ids) != 1 {
+		t.Fatalf("inbox/: %v %v", ids, err)
+	}
+	if err := os.Chmod(ids[0], 0o666); err != nil {
+		t.Fatal(err)
+	}
+	hook := &bodies{}
+	err = b.Follow(ctx, client.FollowOptions{Until: time.Now(), Webhook: hook.handle}, nil)
+	if err == nil || len(hook.list()) != 0 {
+		t.Errorf("Follow: %v, having handed the webhook %q", err, hook.list())
+	}
+}
+
+// A delivery whose kick came while the webhook's handover was under way, and
+// Follow's loop ended before that handover did, is handed to the webhook
+// before Follow returns (webhooks.run's end) (#927 item 9). The order is
+// made, never timed: the handler's owed message, handed over before the
+// drain, waits until the webhook has begun the message owed it, which waits
+// until Follow's loop has ended (SetFollowDone).
+func TestAKickDuringTheLastHandoverIsHandedOverBeforeFollowReturns(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	e := newEnv(t)
+	a, b := e.mailbox(), e.mailbox()
+	send(t, a, b, "old")
+	failing := func(context.Context, client.Event) error { return errors.New("not yet") }
+	if err := b.Follow(ctx, client.FollowOptions{Until: time.Now(), Owed: true, Webhook: failing}, failing); err != nil && err.Error() != "not yet" {
+		t.Fatal(err)
+	}
+	send(t, a, b, "new")
+	begun, ended := make(chan struct{}), make(chan struct{})
+	client.SetFollowDone(b, func() { close(ended) })
+	hook := &bodies{result: func(body string) error {
+		if body == "old" {
+			close(begun)
+			<-ended
+		}
+		return nil
+	}}
+	handler := func(_ context.Context, ev client.Event) error {
+		if ev.Kind == client.EventDelivery && ev.Result == nil { // the owed "old", before the drain
+			<-begun
+		}
+		return nil
+	}
+	if err := b.Follow(ctx, client.FollowOptions{Until: time.Now(), Owed: true, Webhook: hook.handle}, handler); err != nil {
+		t.Fatal(err)
+	}
+	if st, err := b.Status(ctx); err != nil || st.WebhookOwed != 0 || !slices.Equal(hook.list(), []string{"old", "new"}) {
+		t.Errorf("the webhook was handed %q; %+v, %v", hook.list(), st, err)
+	}
+}
+
+// A webhook made with the caller's http.Client follows no redirect either: the
+// redirect's status is the try's answer (#927 item 10).
+func TestAWebhookOfTheCallersClientFollowsNoRedirect(t *testing.T) {
+	t.Parallel()
+	var landed atomic.Bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/moved" {
+			landed.Store(true)
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		http.Redirect(w, r, "/moved", http.StatusFound)
+	}))
+	defer srv.Close()
+	w, err := client.NewWebhook(srv.URL+"/hook", nil, nil, &http.Client{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = w.Post(context.Background(), "id", []byte(`{}`))
+	var we *client.WebhookError
+	if !errors.As(err, &we) || we.Status != http.StatusFound || landed.Load() {
+		t.Errorf("Post: %v, the redirect followed %v", err, landed.Load())
 	}
 }
