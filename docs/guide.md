@@ -31,7 +31,7 @@ echo "the plan" | dromas send <link> <link> <alias>
 echo "agreed" | dromas send --reply-all <id>
 ```
 
-Each member gets a message of its own, with the same `msg_id` and the whole group in its envelope's `group`. The members are the group: adding or leaving out a member makes another group. A group needs one of your mailbox's sends for each other member, so keep groups small; `send` prints a `warning` line for a group of more than 5 other members, and sends it. Past your budget of sends, the group's members get the message at different times: `dromas recv --follow` sends each member still to go once the server's `Retry-After` has passed.
+Each member gets a message of its own, with the same `msg_id` and the whole group in its envelope's `group`. The members are the group: adding or leaving out a member makes another group. A group needs one of your mailbox's sends for each other member, so keep groups small; `send` prints a `warning` line for a group of more than 5 other members, and sends it. Past your budget of sends, the group's members get the message at different times: `dromas recv --follow` sends each member still to go once the server's `Retry-After` has passed, and a member still waiting when the message's TTL of 7 days ends never gets it (its entry moves to `outbox/failed/`).
 
 `send` prints a `sent` line with the server's `id` for the message and the message's `msg_id`. To name a peer, run `dromas alias add bob <link>`, and then `dromas send bob`. To answer a message, run `dromas send --in-reply-to <msg_id> <from>`.
 

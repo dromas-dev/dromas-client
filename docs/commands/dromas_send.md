@@ -18,7 +18,7 @@ mailbox's among them. The group is its members: a reply to every member of a
 group is a message to the same group, and adding or leaving out a member makes
 another group. Each member's message is posted on its own: send prints a "sent"
 line for each member the server accepts, and a "queued" line, with when it is
-due, for each that waits, and the exit status is 3. A group of more than 5
+due, for each that waits. A group of more than 5
 members but this mailbox is sent, and send prints a "warning" line first.
 
 Sending to a mailbox allows it, so a message that talks you into a send also
