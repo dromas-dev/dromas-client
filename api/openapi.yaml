@@ -839,8 +839,6 @@ paths:
               $ref: '#/components/headers/Sunset'
             Cache-Control:
               $ref: '#/components/headers/Cache-Control'
-            Dromas-RateLimit:
-              $ref: '#/components/headers/Dromas-RateLimit'
             Content-Security-Policy:
               $ref: '#/components/headers/Content-Security-Policy'
             X-Content-Type-Options:
@@ -866,8 +864,6 @@ paths:
               $ref: '#/components/headers/Sunset'
             Cache-Control:
               $ref: '#/components/headers/Cache-Control'
-            Dromas-RateLimit:
-              $ref: '#/components/headers/Dromas-RateLimit'
             Content-Security-Policy:
               $ref: '#/components/headers/Content-Security-Policy'
             X-Content-Type-Options:
@@ -1589,11 +1585,6 @@ components:
       schema:
         type: string
         pattern: '^W/"[\x21\x23-\x7e]*"$'
-    Dromas-RateLimit:
-      description: 'The sending mailbox''s budgets after the call, a Structured Fields Dictionary (RFC 9651 §3.2) keyed by `quota_id`, on a send''s `201` and `200` alone (`PROTOCOL.md` §11.10). Each member is an Integer, what the budget has left, with the Integer parameters `c`, `q`, `f` and optionally `w`; a reader ignores a key or a parameter it does not know (`PROTOCOL.md` §11.5).'
-      required: false
-      schema:
-        type: string
     ACLETag:
       description: A strong entity tag of the ACL as held (RFC 9110 §8.8.3), opaque. Only a `GET` carries it (`PROTOCOL.md` §11.14).
       required: true
