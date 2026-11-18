@@ -146,13 +146,9 @@ func (b *Mailbox) status() (*Status, error) {
 		s.Revoked = true
 		s.Attention = append(s.Attention, "this mailbox's address is revoked, for good, and the revocation verifies: it sends and receives nothing more. Make a new mailbox and give its address to those who wrote to this one")
 	}
-	p, err := b.policy()
+	p := b.Policy()
 	s.Policy = StatusPolicy{Unknown: p.Unknown, Admit: p.Server}
-	if err != nil {
-		s.Attention = append(s.Attention, fmt.Sprintf("the mailbox's policy cannot be read, so it neither sends nor receives until that is put right: %v", err))
-	}
 	switch pending, perr := b.aclPending(); {
-	case err != nil: // said above
 	case perr != nil:
 		s.Attention = append(s.Attention, fmt.Sprintf("whom this mailbox allows or blocks cannot be read, so it neither sends nor receives until that is put right: %v", perr))
 	case pending:
@@ -325,8 +321,7 @@ func (b *Mailbox) refusedCodes() string {
 
 // StatusPolicy is the policy in force as status prints it, by the names a
 // config file gives it: where a message from a sender not allowed lands, and
-// whom the server takes messages from. The state file keeps the names it was
-// written with (Policy).
+// whom the server takes messages from.
 type StatusPolicy struct {
 	Unknown string `json:"unknown"`
 	Admit   string `json:"admit"`

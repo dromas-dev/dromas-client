@@ -24,7 +24,6 @@ func TestEveryFileOfAMailboxIsItsOwnersAlone(t *testing.T) {
 	}
 	b := e.mailbox()
 	for _, x := range [][2]*client.Mailbox{{a, b}, {b, a}} {
-		landAll(t, x[1])
 		if _, err := x[0].Send(t.Context(), x[1].Address(), "kept where only its owner reads it"); err != nil {
 			t.Fatal(err)
 		}
@@ -84,7 +83,6 @@ func TestADirectoryTheClientDidNotMakeIsLeftAsItIs(t *testing.T) {
 	// The directory's list reaches none of the files it writes there: the state
 	// file holds a pass, and the inbox a message in the clear.
 	b := e.mailbox()
-	landAll(t, a)
 	if _, err := b.Send(t.Context(), a.Address(), "kept where only its owner reads it"); err != nil {
 		t.Fatal(err)
 	}

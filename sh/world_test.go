@@ -108,11 +108,10 @@ func (w *world) mailbox() *shMailbox {
 // (certs) and no script command ever runs in.
 func (w *world) goMailbox(workingKey bool) (*client.Mailbox, *shMailbox) {
 	w.t.Helper()
-	g, err := client.Init(w.t.Context(), w.t.TempDir(), client.Options{Base: w.srv.URL, WorkingKey: workingKey})
+	g, err := client.Init(w.t.Context(), w.t.TempDir(), client.Options{Base: w.srv.URL, WorkingKey: workingKey, Policy: landAll})
 	if err != nil {
 		w.t.Fatal(err)
 	}
-	landAll(w.t, g)
 	return g, &shMailbox{w: w, dir: g.Dir(), addr: g.Address(), goLayout: true}
 }
 

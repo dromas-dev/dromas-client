@@ -120,7 +120,6 @@ func TestADrainMendedPartWayDeletesByTheListOfTheDrainAfterIt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	landAll(t, b)
 	a := e.mailbox()
 	oldest := numberOf(t, b)
 	e.clock.Add(2 * time.Second)
@@ -187,7 +186,6 @@ func TestARenewalAtRecvWithinWhoseReadTakesSeconds(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			landAll(t, b)
 			a, err := client.Init(ctx, t.TempDir(), e.skewed(&fromOff))
 			if err != nil {
 				t.Fatal(err)

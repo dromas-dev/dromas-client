@@ -43,7 +43,6 @@ func lostUnacknowledged(t *testing.T, e *env, b *client.Mailbox) *client.Mailbox
 	if err != nil {
 		t.Fatal(err)
 	}
-	landAll(t, x)
 	return x
 }
 
@@ -333,7 +332,6 @@ func TestAKeyOnAVolumeMountedLateStopsUntilAdopted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	landAll(t, x)
 	e.clock.Add(2 * time.Second)
 	if res, err := x.Receive(ctx); err != nil || res.Renewed == nil {
 		t.Fatalf("the restore with its keys' volume not mounted: %+v, %v", res, err)
@@ -483,7 +481,6 @@ func TestAKeyMountedDuringADrainDecryptsNothingUntilAdopted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	landAll(t, x)
 	e.clock.Add(2 * time.Second)
 	if res, err := x.Receive(ctx); err != nil || res.Renewed == nil {
 		t.Fatalf("the restore with its keys' volume not mounted: %+v, %v", res, err)

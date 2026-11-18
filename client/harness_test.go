@@ -84,34 +84,37 @@ func newMemEnv(t *testing.T) *env {
 	return e
 }
 
+// opts are the options of a mailbox of e, whose policy lands every sender's
+// messages in inbox/: the tests that use them are of what comes before a message
+// lands. Where it lands, held/ by default, is senders_test.go's, which makes its
+// mailboxes with heldMailbox.
 func (e *env) opts() client.Options {
-	return client.Options{Base: e.srv.URL, Now: e.clock.Now, HTTPClient: e.http, WorkingKey: e.working}
+	return client.Options{Base: e.srv.URL, Now: e.clock.Now, HTTPClient: e.http, WorkingKey: e.working, Policy: client.Policy{Unknown: client.LandInbox, Server: client.AdmitAll}}
 }
 
-// mailbox makes and registers a mailbox, whose policy lands every sender's messages in
-// inbox/: the tests that use it are of what comes before a message lands.
-// Where it lands, held/ by default, is senders_test.go's, which makes its
-// mailboxes with heldMailbox.
+// heldOpts are opts with the default policy: a message from a sender the
+// mailbox has not allowed is held.
+func (e *env) heldOpts() client.Options {
+	opt := e.opts()
+	opt.Policy = client.Policy{}
+	return opt
+}
+
+// mailbox makes and registers a mailbox opened with opts.
 func (e *env) mailbox() *client.Mailbox {
 	e.t.Helper()
-	b := e.heldMailbox()
-	landAll(e.t, b)
-	return b
+	return e.made(e.opts())
 }
 
-// landAll gives a mailbox made outside env.mailbox the policy env.mailbox gives.
-func landAll(t *testing.T, b *client.Mailbox) {
-	t.Helper()
-	if err := b.SetPolicy(t.Context(), client.Policy{Unknown: client.LandInbox, Server: client.AdmitAll}); err != nil {
-		t.Fatal(err)
-	}
-}
-
-// heldMailbox makes and registers a mailbox with the default policy: a message from a
-// sender it has not allowed is held.
+// heldMailbox makes and registers a mailbox opened with heldOpts.
 func (e *env) heldMailbox() *client.Mailbox {
 	e.t.Helper()
-	b, err := client.Init(context.Background(), e.t.TempDir(), e.opts())
+	return e.made(e.heldOpts())
+}
+
+func (e *env) made(opt client.Options) *client.Mailbox {
+	e.t.Helper()
+	b, err := client.Init(context.Background(), e.t.TempDir(), opt)
 	if err != nil {
 		e.t.Fatalf("init: %v", err)
 	}

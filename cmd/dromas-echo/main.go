@@ -187,6 +187,9 @@ func start(ctx context.Context, dir, identity string, opt client.Options, l *log
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
 	}
+	// An echo mailbox answers whoever writes: every sender's messages land in
+	// inbox/, where a mailbox would hold messages from one it has not allowed.
+	opt.Policy = client.Policy{Unknown: client.LandInbox, Server: client.AdmitAll}
 	mine := filepath.Join(dir, "identity")
 	switch held, err := os.ReadFile(mine); { //nolint:gosec // a path inside the state directory
 	case err == nil && !bytes.Equal(held, key):
@@ -224,11 +227,6 @@ func start(ctx context.Context, dir, identity string, opt client.Options, l *log
 		if _, err := b.Rekey(ctx); err != nil {
 			return nil, err
 		}
-	}
-	// An echo mailbox answers whoever writes: every sender's messages land in
-	// inbox/, where a mailbox would hold messages from one it has not allowed.
-	if err := b.SetPolicy(ctx, client.Policy{Unknown: client.LandInbox, Server: client.AdmitAll}); err != nil {
-		return nil, err
 	}
 	now := opt.Now
 	if now == nil {

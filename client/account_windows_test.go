@@ -238,7 +238,6 @@ func setAndJudge(t *testing.T, reach, manifest string) {
 		t.Fatal(err)
 	}
 	b := e.mailbox()
-	landAll(t, a)
 	for _, x := range [][2]*client.Mailbox{{a, b}, {b, a}} {
 		send(t, x[0], x[1], "kept where only its owner reads it")
 		if _, err := x[1].Receive(t.Context()); err != nil {

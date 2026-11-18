@@ -1103,16 +1103,14 @@ func TestAP256MailboxInBothClients(t *testing.T) {
 	if id, err := protocol.ParseIdentity(doc); err != nil || id.Type() != protocol.IdentityP256 || id.Address() != sp {
 		t.Fatalf("the script's P-256 mailbox: %v", err)
 	}
-	gp, err := client.Init(ctx, t.TempDir(), client.Options{Base: srv.URL, IdentityType: protocol.IdentityP256})
+	gp, err := client.Init(ctx, t.TempDir(), client.Options{Base: srv.URL, IdentityType: protocol.IdentityP256, Policy: landAll})
 	if err != nil {
 		t.Fatal(err)
 	}
-	landAll(t, gp)
-	ge, err := client.Init(ctx, t.TempDir(), client.Options{Base: srv.URL})
+	ge, err := client.Init(ctx, t.TempDir(), client.Options{Base: srv.URL, Policy: landAll})
 	if err != nil {
 		t.Fatal(err)
 	}
-	landAll(t, ge)
 
 	// The script's P-256 mailbox and the Go client's Ed25519 one.
 	sh(shP256, "printf 'from the script on P-256' | dr_send "+ge.Link())
@@ -1258,11 +1256,10 @@ func TestWithGoClient(t *testing.T) {
 	if err != nil || shLink != srv.URL+protocol.LinkPath+shAddr.String() {
 		t.Fatalf("dr_init printed %q, not the mailbox's link", out)
 	}
-	g, err := client.Init(ctx, goDir, client.Options{Base: srv.URL})
+	g, err := client.Init(ctx, goDir, client.Options{Base: srv.URL, Policy: landAll})
 	if err != nil {
 		t.Fatal(err)
 	}
-	landAll(t, g)
 
 	// An API error prints its status and code, and nothing the server wrote
 	// (PROTOCOL.md §11.3).
@@ -1544,7 +1541,7 @@ func TestRevocationInBothClients(t *testing.T) {
 	need(t, append(scriptTools, "curl")...)
 	ctx := context.Background()
 	srv := fakeserver.New(t, time.Now)
-	opt := client.Options{Base: srv.URL}
+	opt := client.Options{Base: srv.URL, Policy: landAll}
 	sh := func(dir, commands string) (string, error) {
 		return bash(t, []string{"DR_HOME=" + dir, "DR_SERVER_URL=" + srv.URL}, commands)
 	}
@@ -1567,7 +1564,6 @@ func TestRevocationInBothClients(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		landAll(t, b)
 		return b
 	}
 	var gone *client.RevokedError
@@ -1809,11 +1805,10 @@ func TestRevokedCertificatesInBothClients(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	g, err := client.Init(ctx, t.TempDir(), client.Options{Base: srv.URL, WorkingKey: true})
+	g, err := client.Init(ctx, t.TempDir(), client.Options{Base: srv.URL, WorkingKey: true, Policy: landAll})
 	if err != nil {
 		t.Fatal(err)
 	}
-	landAll(t, g)
 	gAddr := g.Address().String()
 	first := numberOf(t, g)
 
@@ -1911,11 +1906,10 @@ func TestAJSONBodyFromTheGoClient(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	g, err := client.Init(ctx, t.TempDir(), client.Options{Base: srv.URL})
+	g, err := client.Init(ctx, t.TempDir(), client.Options{Base: srv.URL, Policy: landAll})
 	if err != nil {
 		t.Fatal(err)
 	}
-	landAll(t, g)
 	value := func(b []byte) any {
 		t.Helper()
 		var v any
@@ -1953,15 +1947,10 @@ func TestAJSONBodyFromTheGoClient(t *testing.T) {
 	}
 }
 
-// landAll gives a Go mailbox the policy that lands every sender's messages in
+// landAll is the policy of a Go mailbox that lands every sender's messages in
 // inbox/: these tests are of what the two clients send each other, and where
 // a message from a sender not allowed lands is the Go client's own (client/).
-func landAll(t *testing.T, b *client.Mailbox) {
-	t.Helper()
-	if err := b.SetPolicy(t.Context(), client.Policy{Unknown: client.LandInbox, Server: client.AdmitAll}); err != nil {
-		t.Fatal(err)
-	}
-}
+var landAll = client.Policy{Unknown: client.LandInbox, Server: client.AdmitAll}
 
 // dromas.sh run as a command takes the Go client's command line for the
 // commands it has, and gives help as the Go client does: asked for, on stdout
@@ -1992,11 +1981,10 @@ func TestTheCommandLine(t *testing.T) {
 	if _, errs, code := run("", "init"); code != 0 {
 		t.Fatalf("init: %d %s", code, errs)
 	}
-	g, err := client.Init(ctx, t.TempDir(), client.Options{Base: srv.URL})
+	g, err := client.Init(ctx, t.TempDir(), client.Options{Base: srv.URL, Policy: landAll})
 	if err != nil {
 		t.Fatal(err)
 	}
-	landAll(t, g)
 	for want, lines := range map[string][][]string{
 		"bash dromas.sh init ":         {{"help"}, {"-h"}, {"--help"}},
 		"bash dromas.sh send ":         {{"help", "send"}, {"send", g.Link(), "-h"}, {"send", g.Link(), "--help"}},
@@ -2222,11 +2210,10 @@ func TestNoCallOfTheScriptFollowsARedirect(t *testing.T) {
 	if _, err := bash(t, env, "dr_init"); err != nil {
 		t.Fatalf("dr_init: %v", err)
 	}
-	r, err := client.Init(ctx, t.TempDir(), client.Options{Base: srv.URL})
+	r, err := client.Init(ctx, t.TempDir(), client.Options{Base: srv.URL, Policy: landAll})
 	if err != nil {
 		t.Fatal(err)
 	}
-	landAll(t, r)
 	for _, status := range []int{http.StatusMovedPermanently, http.StatusFound, http.StatusSeeOther, http.StatusTemporaryRedirect, http.StatusPermanentRedirect} {
 		for _, call := range []struct {
 			name string

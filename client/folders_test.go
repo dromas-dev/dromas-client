@@ -71,7 +71,6 @@ func TestASeparateInboxDirAndAWholeMailDirAreBound(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	landAll(t, b)
 	a := e.mailbox()
 	send(t, a, b, "waiting on the server")
 	back := moveAside(t, opt.Layout.Inbox)
@@ -174,7 +173,6 @@ func TestARestoreMakesItsFoldersAndThenBindsThem(t *testing.T) {
 	if _, err := r.Rekey(ctx); err != nil {
 		t.Fatalf("the restore: %v", err)
 	}
-	landAll(t, r)
 	send(t, a, r, "after the restore")
 	if res := receive(t, r); len(res.Delivered) != 1 {
 		t.Fatalf("recv after the restore: %+v", res)

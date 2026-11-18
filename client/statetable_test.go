@@ -260,7 +260,6 @@ func makeMailbox(t *testing.T, e *env, dir string, peer *client.Mailbox, unregis
 	if err != nil {
 		t.Fatal(err)
 	}
-	landAll(t, a)
 	send(t, peer, a, "waiting")
 }
 

@@ -34,7 +34,7 @@ func TestAMailboxRunsWithEachPartWhereItsLayoutSays(t *testing.T) {
 	e := newEnv(t)
 	root := t.TempDir()
 	dir := filepath.Join(root, "base")
-	opt := e.opts()
+	opt := e.heldOpts()
 	opt.Layout = layoutIn(root)
 	b, err := client.Init(t.Context(), dir, opt)
 	if err != nil {
@@ -244,23 +244,27 @@ func TestAPublishedPrekeyMissingFromItsDirectoryStopsRecv(t *testing.T) {
 	}
 }
 
-// What its owner set stands over what the state file recorded, field by field.
-func TestAPolicyItsOwnerSetStandsOverOneRecorded(t *testing.T) {
+// Each field of the policy its owner left empty is the default's, and a policy
+// that is none is refused.
+func TestAPolicyFieldItsOwnerLeftEmptyIsTheDefaults(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
 	b := e.mailbox()
-	if err := b.SetPolicy(t.Context(), client.Policy{Unknown: client.LandInbox, Server: client.AdmitAllowed}); err != nil {
-		t.Fatal(err)
+	for _, c := range []struct{ set, want client.Policy }{
+		{client.Policy{Server: client.AdmitAllowed}, client.Policy{Unknown: client.LandHeld, Server: client.AdmitAllowed}},
+		{client.Policy{Unknown: client.LandInbox}, client.Policy{Unknown: client.LandInbox, Server: client.AdmitAll}},
+	} {
+		opt := e.opts()
+		opt.Policy = c.set
+		set, err := client.Open(b.Dir(), opt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if p := set.Policy(); p != c.want {
+			t.Errorf("%+v: %+v", c.set, p)
+		}
 	}
 	opt := e.opts()
-	opt.Policy.Server = client.AdmitAll
-	set, err := client.Open(b.Dir(), opt)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if p, err := set.Policy(t.Context()); err != nil || p.Server != client.AdmitAll || p.Unknown != client.LandInbox {
-		t.Errorf("%+v, %v", p, err)
-	}
 	opt.Policy.Server = "everyone"
 	if _, err := client.Open(b.Dir(), opt); err == nil {
 		t.Error("a policy that is none was taken")
@@ -472,25 +476,6 @@ func TestAnIdentityFileOnAnotherMailboxChangesNothing(t *testing.T) {
 	}
 	if _, err := os.Stat(typo); err == nil {
 		t.Error("a refused init left a key at the typo")
-	}
-}
-
-// What its owner set of the policy stands over a recorded one, each field alone.
-func TestAPolicyItsOwnerSetStandsOverOneRecordedByUnknownToo(t *testing.T) {
-	t.Parallel()
-	e := newEnv(t)
-	b := e.mailbox()
-	if err := b.SetPolicy(t.Context(), client.Policy{Unknown: client.LandInbox, Server: client.AdmitAllowed}); err != nil {
-		t.Fatal(err)
-	}
-	opt := e.opts()
-	opt.Policy.Unknown = client.LandHeld
-	set, err := client.Open(b.Dir(), opt)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if p, err := set.Policy(t.Context()); err != nil || p.Unknown != client.LandHeld || p.Server != client.AdmitAllowed {
-		t.Errorf("%+v, %v", p, err)
 	}
 }
 

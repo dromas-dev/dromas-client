@@ -591,11 +591,10 @@ func partwayCases() []partwayCase {
 		e.clock.Add(2 * time.Second)
 		return partwaySet{dir: dir, a: a, run: func(ctx context.Context) (any, error) { return client.Init(ctx, dir, e.opts()) }}
 	}
-	serverAllowed := func(t *testing.T, a *client.Mailbox) {
-		t.Helper()
-		if err := a.SetPolicy(t.Context(), client.Policy{Unknown: client.LandInbox, Server: client.AdmitAllowed}); err != nil {
-			t.Fatal(err)
-		}
+	serverAllowed := func(e *env) *client.Mailbox {
+		opt := e.opts()
+		opt.Policy.Server = client.AdmitAllowed
+		return e.made(opt)
 	}
 	return []partwayCase{
 		{"recv", func(t *testing.T, e *env) partwaySet {
@@ -688,8 +687,7 @@ func partwayCases() []partwayCase {
 			return partwaySet{dir: a.Dir(), a: a, check: outboxSaysItAlone, run: func(ctx context.Context) (any, error) { return a.Send(ctx, b.Address(), "sent") }}
 		}},
 		{"send, its ACL changed, the one its server took admitting no reply", func(t *testing.T, e *env) partwaySet {
-			a, b := e.mailbox(), e.mailbox()
-			serverAllowed(t, a)
+			a, b := serverAllowed(e), e.mailbox()
 			if err := a.SyncACL(t.Context()); err != nil {
 				t.Fatal(err)
 			}
@@ -719,8 +717,7 @@ func partwayCases() []partwayCase {
 			return partwaySet{dir: a.Dir(), a: a, check: outboxSaysItAlone, joined: true, run: func(ctx context.Context) (any, error) { return a.Flush(ctx) }}
 		}},
 		{"outbox flush, its ACL changed, the one its server took admitting no reply", func(t *testing.T, e *env) partwaySet {
-			a, b := e.mailbox(), e.mailbox()
-			serverAllowed(t, a)
+			a, b := serverAllowed(e), e.mailbox()
 			if err := a.SyncACL(t.Context()); err != nil {
 				t.Fatal(err)
 			}
@@ -746,8 +743,7 @@ func partwayCases() []partwayCase {
 			return restored(t, e, a)
 		}},
 		{"peer allow", func(t *testing.T, e *env) partwaySet {
-			a, b := e.mailbox(), e.mailbox()
-			serverAllowed(t, a)
+			a, b := serverAllowed(e), e.mailbox()
 			return partwaySet{dir: a.Dir(), a: a, run: func(ctx context.Context) (any, error) { return a.Allow(ctx, b.Address()) }}
 		}},
 		{"peer block", func(t *testing.T, e *env) partwaySet {
@@ -755,8 +751,7 @@ func partwayCases() []partwayCase {
 			return partwaySet{dir: a.Dir(), a: a, run: func(ctx context.Context) (any, error) { return a.Block(ctx, b.Address()) }}
 		}},
 		{"SyncACL", func(t *testing.T, e *env) partwaySet {
-			a := e.mailbox()
-			serverAllowed(t, a)
+			a := serverAllowed(e)
 			return partwaySet{dir: a.Dir(), a: a, run: func(ctx context.Context) (any, error) { return nil, a.SyncACL(ctx) }}
 		}},
 		{"account join", func(t *testing.T, e *env) partwaySet {
