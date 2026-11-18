@@ -485,11 +485,49 @@ func TestAnOwedMessageIsKeptBeforeItsHandlerAndClearedAfter(t *testing.T) {
 	}
 }
 
-// Any other error from a handler leaves the message owed, and the drain's
-// deliveries after it stay owed behind it, not handed over (#927 item 4). A
-// loop whose handover of what is owed stops there drains nothing, so nothing
-// new is handed ahead of them. The next loop hands over what is owed first, in
-// delivery order, then what it drains.
+// A handler that ends the loop while what is owed is handed over, by ErrStop
+// or an error, is handed nothing more: Follow makes no drain, and returns nil
+// for ErrStop, or the handler's error.
+func TestAHandlerThatStopsDuringTheOwedHandoverIsHandedNoDrain(t *testing.T) {
+	t.Parallel()
+	boom := errors.New("boom")
+	for name, answer := range map[string]error{"ErrStop": client.ErrStop, "an error": boom} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			e := newEnv(t)
+			a, b := e.mailbox(), e.mailbox()
+			send(t, a, b, "one")
+			failing := func(_ context.Context, ev client.Event) error {
+				if ev.Kind == client.EventDelivery {
+					return boom
+				}
+				return nil
+			}
+			if err := b.Follow(context.Background(), oneDrain(true), failing); !errors.Is(err, boom) {
+				t.Fatalf("Follow: %v", err)
+			}
+			send(t, a, b, "two") // waiting on the server, never drained
+			var handed []string
+			err := b.Follow(context.Background(), oneDrain(true), func(_ context.Context, ev client.Event) error {
+				if ev.Kind == client.EventDelivery {
+					handed = append(handed, bodyOf(t, *ev.Delivery))
+					return answer
+				}
+				return nil
+			})
+			want := answer // ErrStop ends Follow with no error
+			if want == client.ErrStop {
+				want = nil
+			}
+			if !errors.Is(err, want) || !slices.Equal(handed, []string{"one"}) {
+				t.Fatalf("Follow: %v, having handed over %q; want %v, and \"one\" alone", err, handed, want)
+			}
+		})
+	}
+}
+
+// Any other error from a handler leaves the message owed. The next loop hands
+// over what is owed first, in delivery order, then what it drains.
 func TestAnOwedMessageIsHandedOverFirstInDeliveryOrder(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
@@ -506,24 +544,13 @@ func TestAnOwedMessageIsHandedOverFirstInDeliveryOrder(t *testing.T) {
 		}
 		return nil
 	})
-	if !errors.Is(err, boom) || !slices.Equal(first, []string{"one"}) {
+	if !errors.Is(err, boom) || len(first) != 3 {
 		t.Fatalf("Follow: %v, having handed over %q", err, first)
 	}
 	if st, err := b.Status(context.Background()); err != nil || st.Owed != 3 {
 		t.Fatalf("after: %+v, %v", st, err)
 	}
 	send(t, a, b, "new")
-	var stopped []string
-	err = b.Follow(context.Background(), oneDrain(true), func(_ context.Context, ev client.Event) error {
-		if ev.Kind == client.EventDelivery {
-			stopped = append(stopped, bodyOf(t, *ev.Delivery))
-			return boom
-		}
-		return nil
-	})
-	if !errors.Is(err, boom) || !slices.Equal(stopped, []string{"one"}) {
-		t.Fatalf("Follow, its handler failing again: %v, having handed over %q", err, stopped)
-	}
 	var again []string
 	err = b.Follow(context.Background(), oneDrain(true), func(_ context.Context, ev client.Event) error {
 		if ev.Kind == client.EventDelivery {
@@ -531,7 +558,7 @@ func TestAnOwedMessageIsHandedOverFirstInDeliveryOrder(t *testing.T) {
 		}
 		return nil
 	})
-	if err != nil || !slices.Equal(again, []string{"one", "two", "three", "new"}) {
+	if err != nil || !slices.Equal(again, append(slices.Clone(first), "new")) {
 		t.Fatalf("Follow: %v, handed over %q after %q", err, again, first)
 	}
 	if st, err := b.Status(context.Background()); err != nil || st.Owed != 0 {
