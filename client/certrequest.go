@@ -197,19 +197,24 @@ func (b *Mailbox) highestCertificate(st *ownRead) (highest, revoked uint64, err 
 // mailbox at its server first, keeping what verifies of its own revocations,
 // and then checks the certificate by every rule of §12.7 step 3 before
 // anything is kept: every rule of §5.2 at this machine's clock, a lifetime no
-// longer than its certificates may run now (certificateLifetime), a serial no
-// lower than the request's lowest, and the request's working key. It is
-// refused, too, where it began less than an hour before the clock (§12.4),
-// and where the identity has revoked certificates since the request was made,
-// at this mailbox or anywhere its server has taken a revocation from: the
-// request's working key was in the mailbox then, so it may be stolen with the
-// rest (§12.7, the remedy's step 2), and a new request is made. A revocation
-// of this certificate is among those, since the request's lowest serial is
-// above every revocation the mailbox kept when it made it.
+// longer than its server takes (serverCertificateLifetime), a serial no lower
+// than the request's lowest, and the request's working key. It is refused,
+// too, where it began less than an hour before the clock (§12.4), and where
+// the identity has revoked certificates above what the request knew of, kept
+// at this mailbox or taken by its server from anywhere: the request's working
+// key may have been in the mailbox then, so it may be stolen with the rest
+// (§12.7, the remedy's step 2), and a new request is made. A revocation of
+// this certificate is among those, since the request's lowest serial is above
+// every revocation the mailbox kept when it made it. A request made while the
+// mailbox's read of itself went unanswered knew only what the mailbox kept,
+// so a revocation its server held then refuses the certificate too: the cost
+// is a new request.
 //
-// The certificate and its working key are kept as work/<serial> first, and
-// the request goes once the renewal is taken: run again, it does the same,
-// and recv's next renewal is under that certificate too (heldWorker).
+// Where the read or the server's document goes unanswered, nothing is kept,
+// and the install is run again. Once checked, the certificate and its working
+// key are kept as work/<serial> first, and the request goes once the renewal
+// is taken: run again, it does the same, and recv's next renewal is under
+// that certificate too (heldWorker).
 func (b *Mailbox) InstallCertificate(ctx context.Context, line []byte) (*protocol.Prekey, error) {
 	return locked(ctx, b, func() (*protocol.Prekey, error) {
 		if err := b.keysMatch(); err != nil {
@@ -221,13 +226,15 @@ func (b *Mailbox) InstallCertificate(ctx context.Context, line []byte) (*protoco
 		// The read first: it keeps every revocation of the mailbox's own that
 		// its server holds, so the check below meets one its identity holder
 		// published from anywhere (PROTOCOL.md §12.7, the remedy's step 2).
+		// Where it cannot be made, nothing is kept, and the install is run
+		// again once the server answers.
 		st, err := b.readOwn(ctx, false, false)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("the certificate is not checked or kept, since this mailbox could not read itself at its server: dromas cert install runs again with the same file once it can: %w", err)
 		}
-		life, err := b.certificateLifetime(ctx)
+		life, err := b.serverCertificateLifetime(ctx)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("the certificate is not checked or kept, since this mailbox's server's document, which names the longest certificate it takes, could not be read: dromas cert install runs again with the same file once it can: %w", err)
 		}
 		cert, err := b.checkInstalled(line, life)
 		if err != nil {
@@ -268,9 +275,8 @@ func (b *Mailbox) InstallCertificate(ctx context.Context, line []byte) (*protoco
 }
 
 // checkInstalled holds line, a certificate the identity holder made, to the
-// request this mailbox made last and to life, the longest a certificate of
-// this mailbox may run now (certificateLifetime), and returns it
-// (InstallCertificate).
+// request this mailbox made last and to life, the longest its server takes
+// (serverCertificateLifetime), and returns it (InstallCertificate).
 func (b *Mailbox) checkInstalled(line []byte, life time.Duration) (*protocol.Certificate, error) {
 	var req certificateRequest
 	if err := b.view(func(s store) error {
@@ -305,7 +311,7 @@ func (b *Mailbox) checkInstalled(line []byte, life time.Duration) (*protocol.Cer
 	// Longer than its server takes, its renewal would be refused, and a
 	// certificate kept would be one no renewal can sign under.
 	if cert.Lifetime() > life {
-		return nil, refuse("the certificate runs %d seconds, longer than the %d this mailbox's certificates may run now, the least of the protocol's maximum, its server's and its owner's: dromas cert request makes a new request, whose command its identity holder runs", int64(cert.Lifetime()/time.Second), int64(life/time.Second))
+		return nil, refuse("the certificate runs %d seconds, longer than the %d its server takes: dromas cert request makes a new request, whose command its identity holder runs", int64(cert.Lifetime()/time.Second), int64(life/time.Second))
 	}
 	if cert.Serial() < req.Lowest {
 		return nil, refuse("the certificate's serial is %d, below %d, the lowest serial this mailbox's request gave: its identity holder certifies the request again at that serial or above", cert.Serial(), req.Lowest)
@@ -317,7 +323,7 @@ func (b *Mailbox) checkInstalled(line []byte, life time.Duration) (*protocol.Cer
 	// The request's lowest serial is above every revocation the mailbox kept
 	// when it made it, so a revocation of this certificate is one kept since.
 	if own != nil && own.Through > req.RevokedThrough {
-		return nil, refuse("this mailbox's identity revoked its certificates after the request was made, so the request's working key may be stolen with the rest: dromas cert request makes a new request")
+		return nil, refuse("this mailbox's identity has revoked certificates above those the request knew of, so the request's working key may be stolen with the rest: dromas cert request makes a new request")
 	}
 	if from := cert.NotBefore().Add(protocol.MaxSkew); from.After(b.now()) {
 		return nil, refuse("the certificate began less than an hour before this machine's clock, so this mailbox uses it only from %s (PROTOCOL.md §12.4): install it again then", from.UTC().Format(protocol.TimeLayout))

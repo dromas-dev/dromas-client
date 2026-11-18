@@ -1360,7 +1360,7 @@ func (e *cli) installCmd() *cobra.Command {
 dromas cert request printed last, and publish a new prekey under it. The
 certificate is checked by every rule a verifier holds it to, for this mailbox's
 working key, at a serial no lower than the request's, running no longer than
-this mailbox's certificates may run now.
+its server takes.
 
 A certificate that began less than an hour ago is refused until that hour has
 passed. A certificate is refused, too, where the identity has revoked

@@ -509,10 +509,12 @@ func (b *Mailbox) makeRenewal(ctx context.Context, st *ownRead, next uint64, p *
 // a certificate signed it, under one that is valid now, no longer than its server takes, began at
 // least protocol.MaxSkew before now (so was not made while the clock read
 // ahead of where it reads now: a reader whose clock a server takes may not
-// have reached its start), whose working key the mailbox holds, and, where
-// the renewal is under a new working key whatever the mailbox holds (fresh),
-// the certificate made with it, never one the mailbox held (heldWorker); and
-// either way, not made after the clock reads now. If it signed one that cannot be, the serial is spent. If it
+// have reached its start), whose working key the mailbox holds and no
+// statement the mailbox did not make shows another holds (PROTOCOL.md §12.7;
+// heldWorker's and seal's rule), and, where the renewal is under a new working
+// key whatever the mailbox holds (fresh), the certificate made with it, never
+// one the mailbox held (heldWorker); and either way, not made after the clock
+// reads now. If it signed one that cannot be, the serial is spent. If it
 // signed nothing, neither: a key it made and never signed is free to use.
 func (b *Mailbox) signedPrekey(serial uint64, certify, fresh bool) (p *protocol.Prekey, spent bool, err error) {
 	rec, err := b.prekeyOf(serial)
@@ -533,6 +535,11 @@ func (b *Mailbox) signedPrekey(serial uint64, certify, fresh bool) (p *protocol.
 	if c := by.Certificate(); c != nil {
 		if fresh && c.Serial() != serial {
 			return nil, true, nil // under a held certificate, not a new one
+		}
+		if nm, err := b.notMade(); err != nil {
+			return nil, false, err
+		} else if nm != nil && nm.OwnCertificate && nm.CertificateSerial == c.Serial() {
+			return nil, true, nil // under a certificate whose working key another holds
 		}
 		// Longer than its server takes, by the maximum this command read.
 		if b.lifetime > 0 && c.Lifetime() > b.lifetime {

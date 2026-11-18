@@ -161,13 +161,9 @@ func (b *Mailbox) certificateLifetime(ctx context.Context) (time.Duration, error
 	if b.lifetime > 0 {
 		return b.lifetime, nil
 	}
-	var d protocol.ServerDocument
-	if _, err := b.call(ctx, http.MethodGet, protocol.DocumentPath, nil, nil, &d); err != nil {
+	life, err := b.serverCertificateLifetime(ctx)
+	if err != nil {
 		return 0, fmt.Errorf("this mailbox's server's document could not be read, so no certificate is made: a certificate runs for the longest the server takes, which the document names: %w", err)
-	}
-	life := protocol.MaxCertificateLifetime
-	if d.MaxCertificateLifetime < uint64(life/time.Second) {
-		life = time.Duration(d.MaxCertificateLifetime) * time.Second //nolint:gosec // bounded above
 	}
 	if b.certLife > 0 {
 		life = min(life, b.certLife)
@@ -179,6 +175,24 @@ func (b *Mailbox) certificateLifetime(ctx context.Context) (time.Duration, error
 		life = last.Truncate(time.Second)
 	}
 	b.lifetime = life
+	return life, nil
+}
+
+// serverCertificateLifetime is the longest a certificate of this mailbox may
+// run at its server: the least of protocol.MaxCertificateLifetime and
+// max_certificate_lifetime_seconds in the server's document (PROTOCOL.md
+// §5.2, §11.18). The owner's Options.CertificateLifetime is for the
+// certificates this mailbox makes, never one its identity holder makes. The
+// error is the read's, for the caller to say what it stops.
+func (b *Mailbox) serverCertificateLifetime(ctx context.Context) (time.Duration, error) {
+	var d protocol.ServerDocument
+	if _, err := b.call(ctx, http.MethodGet, protocol.DocumentPath, nil, nil, &d); err != nil {
+		return 0, err
+	}
+	life := protocol.MaxCertificateLifetime
+	if d.MaxCertificateLifetime < uint64(life/time.Second) {
+		life = time.Duration(d.MaxCertificateLifetime) * time.Second //nolint:gosec // bounded above
+	}
 	return life, nil
 }
 

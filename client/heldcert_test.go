@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -65,6 +66,75 @@ func TestAMailboxWhoseIdentityIsKeptElsewhereSignsNothingUnderACertificateAnothe
 	}
 }
 
+// Nor does a statement that waited under that certificate, signed before the
+// served one: it is spent (signedPrekey), and the owner's renewal is under a
+// new certificate where the identity is back, or fails as identity_locked
+// where it is elsewhere (#928).
+func TestAStatementWaitingUnderACertificateAnotherHoldsIsNotSent(t *testing.T) {
+	t.Parallel()
+	for _, back := range []bool{false, true} {
+		t.Run(map[bool]string{false: "the identity elsewhere", true: "the identity back"}[back], func(t *testing.T) {
+			t.Parallel()
+			e := newWorkEnv(t)
+			b, _, raw := keptElsewhere(t, e)
+			n := numberOf(t, b)
+			var refused atomic.Bool
+			var thief atomic.Value
+			e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
+				if r.Method == http.MethodPut && r.URL.Path == mailboxPath(b)+"/prekey" && refused.CompareAndSwap(false, true) {
+					http.Error(w, "", http.StatusServiceUnavailable)
+					return
+				}
+				if v := thief.Load(); v != nil && r.Method == http.MethodGet && r.URL.Path == mailboxPath(b) {
+					s := v.([2][]byte)
+					e.serve(w, r, next, func(m *protocol.MailboxResponse) { m.Prekey, m.PrekeySignature = s[0], s[1] })
+					return
+				}
+				next.ServeHTTP(w, r)
+			})
+			e.clock.Add(30 * time.Second)
+			if _, err := b.Rekey(t.Context()); err == nil {
+				t.Fatal("a renewal its server refused went through")
+			}
+			st, _ := e.srv.Prekey(b.Address())
+			p, err := protocol.ParsePrekey(st)
+			if err != nil {
+				t.Fatal(err)
+			}
+			k, err := age.GenerateHybridIdentity()
+			if err != nil {
+				t.Fatal(err)
+			}
+			p.Rank, p.Serial, p.Key = n, n+1, k.Recipient().String()
+			sig, err := protocol.Sign(workerAt(t, b, n), p.Statement(), protocol.PrekeyNamespace(b.Address()))
+			if err != nil {
+				t.Fatal(err)
+			}
+			thief.Store([2][]byte{[]byte(p.Statement()), sig})
+			e.clock.Add(25 * time.Hour)
+			if res, _ := b.Receive(t.Context()); res == nil || res.NotMade == nil || !res.NotMade.OwnCertificate {
+				t.Fatalf("recv shown a statement under its own certificate that it did not make: %+v", res)
+			}
+			if back {
+				if err := os.WriteFile(b.Path("identity"), raw, 0o600); err != nil {
+					t.Fatal(err)
+				}
+				if b, err = client.Open(b.Dir(), e.opts()); err != nil {
+					t.Fatal(err)
+				}
+			}
+			q, err := b.Rekey(t.Context())
+			var locked *client.IdentityLockedError
+			switch {
+			case back && (err != nil || q.Rank == n || q.Rank != q.Serial):
+				t.Fatalf("the owner's renewal with the identity back: %+v, %v; want one under a new certificate", q, err)
+			case !back && (!errors.As(err, &locked) || q != nil):
+				t.Fatalf("the owner's renewal with the identity elsewhere: %+v, %v; want identity_locked", q, err)
+			}
+		})
+	}
+}
+
 // A certificate for a request made before a revocation of the mailbox's
 // certificates is refused, and nothing of it is kept, where the revocation
 // was published from elsewhere and only the server holds it: the install
@@ -90,8 +160,10 @@ func TestACertificateForARequestMadeBeforeARevocationOnlyItsServerHoldsIsRefused
 	}
 	publish(t, e, &protocol.Revocations{Identity: b.Identity().Document(), RevokedCertificates: rc.Statement(), RevokedCertificatesSignature: rsig})
 	serial := protocol.SerialAt(e.clock.Now(), r.LowestSerial-1)
-	if p, err := b.InstallCertificate(t.Context(), certify(t, b, holder, r, serial, e.clock.Now())); err == nil {
-		t.Fatalf("installed and renewed under a request's working key made before a revocation: %+v", p)
+	p, err := b.InstallCertificate(t.Context(), certify(t, b, holder, r, serial, e.clock.Now()))
+	var refused *client.RefusedError
+	if !errors.As(err, &refused) || !strings.Contains(err.Error(), "revoked certificates above those the request knew of") {
+		t.Fatalf("an install under a request's working key made before a revocation: %+v, %v; want its refusal", p, err)
 	}
 	if exists(workFile(b, serial, "-cert.pub")) || signsUnder(t, b) != first {
 		t.Errorf("the refused certificate %d is kept, or the mailbox signs under %d, not %d", serial, signsUnder(t, b), first)
@@ -121,8 +193,10 @@ func TestACertificateLongerThanItsServerTakesIsNotInstalled(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p, err := b.InstallCertificate(t.Context(), ssh.MarshalAuthorizedKey(c.PublicKey())); err == nil {
-		t.Fatalf("installed a 40-day certificate at a 30-day server: %+v", p)
+	p, err := b.InstallCertificate(t.Context(), ssh.MarshalAuthorizedKey(c.PublicKey()))
+	var refused *client.RefusedError
+	if !errors.As(err, &refused) || !strings.Contains(err.Error(), "longer than the") {
+		t.Fatalf("an install of a 40-day certificate at a 30-day server: %+v, %v; want its refusal", p, err)
 	}
 	if exists(workFile(b, serial, "-cert.pub")) {
 		t.Fatalf("the refused certificate %d is kept", serial)
@@ -130,6 +204,37 @@ func TestACertificateLongerThanItsServerTakesIsNotInstalled(t *testing.T) {
 	e.clock.Add(25 * time.Hour)
 	if res := receive(t, b); res.RenewErr != nil || res.Renewed == nil || res.Renewed.Rank != first {
 		t.Fatalf("the next day's renewal: %+v, %v; want one under certificate %d", res.Renewed, res.RenewErr, first)
+	}
+}
+
+// The owner's certificate lifetime is for the certificates the mailbox
+// makes: a certificate its identity holder makes for longer, within what the
+// server takes, installs (PROTOCOL.md §5.2).
+func TestACertificateLongerThanTheOwnersLifetimeButNotTheServersInstalls(t *testing.T) {
+	t.Parallel()
+	e := newWorkEnv(t)
+	b, holder, _ := keptElsewhere(t, e)
+	r, err := b.RequestCertificate(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	opt := e.opts()
+	opt.CertificateLifetime = 20 * 24 * time.Hour
+	x, err := client.Open(b.Dir(), opt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	work, _, _, _, err := ssh.ParseAuthorizedKey([]byte(r.WorkingKey))
+	if err != nil {
+		t.Fatal(err)
+	}
+	serial := protocol.SerialAt(e.clock.Now(), r.LowestSerial-1)
+	c, err := protocol.NewCertificate(b.Identity(), holder, work, serial, e.clock.Now(), 30*24*time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p, err := x.InstallCertificate(t.Context(), ssh.MarshalAuthorizedKey(c.PublicKey())); err != nil || p.Rank != serial {
+		t.Fatalf("an install of a 30-day certificate where the owner's lifetime is 20 days: %+v, %v", p, err)
 	}
 }
 

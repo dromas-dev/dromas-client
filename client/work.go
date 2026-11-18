@@ -104,6 +104,9 @@ func (b *Mailbox) certifiedSigner(serial uint64, life time.Duration, st *ownRead
 	if herr == nil {
 		return w, c, nil
 	}
+	if !errors.Is(herr, errNoHeldWorker) {
+		return nil, nil, herr // a fault of the mailbox's own, said as it is
+	}
 	return nil, nil, &IdentityLockedError{File: locked.File, Agent: locked.Agent, Reason: locked.Reason + ", and no certificate this mailbox holds can sign a renewal (each is below the one in use, has ended, began less than an hour ago, is revoked, or has a working key someone else holds): where the identity is kept elsewhere, dromas cert request asks its holder for a certificate"}
 }
 
@@ -140,8 +143,12 @@ func (b *Mailbox) heldWorker() (*sign.Work, *protocol.Certificate, error) {
 		}
 		return w, c, nil
 	}
-	return nil, nil, errors.New("this mailbox holds no certificate that can sign a renewal")
+	return nil, nil, errNoHeldWorker
 }
+
+// errNoHeldWorker is heldWorker's answer where it looked and no certificate
+// the mailbox holds can sign a renewal: every other error of its is a fault.
+var errNoHeldWorker = errors.New("this mailbox holds no certificate that can sign a renewal")
 
 // heldCertificates is the serial of every certificate the mailbox holds a
 // working key's certificate file of, lowest first.
