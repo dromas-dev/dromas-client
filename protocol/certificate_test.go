@@ -185,7 +185,16 @@ func TestCertificateRules(t *testing.T) {
 		{name: "another key id", change: func(c *ssh.Certificate) { c.KeyId = "work" }, want: ErrCertificate},
 		{name: "no key id", change: func(c *ssh.Certificate) { c.KeyId = "" }, want: ErrCertificate},
 		{name: "serial 0", change: func(c *ssh.Certificate) { c.Serial = 0 }, want: ErrCertificate},
-		{name: "no principal", change: func(c *ssh.Certificate) { c.ValidPrincipals = nil }, want: ErrCertificate},
+		// x/crypto signs no certificate without a principal (OpenSSH reads
+		// one as valid for every principal), so this one is signed by hand.
+		{name: "no principal", after: func(c *ssh.Certificate) {
+			c.ValidPrincipals = nil
+			sig, err := b.identity.Sign(rand.Reader, signedBytes(c))
+			if err != nil {
+				panic(err)
+			}
+			c.Signature = sig
+		}, want: ErrCertificate},
 		{name: "another mailbox's address", change: func(c *ssh.Certificate) { c.ValidPrincipals = []string{other.id.Address().String()} }, want: ErrCertificate},
 		{name: "two principals", change: func(c *ssh.Certificate) { c.ValidPrincipals = append(c.ValidPrincipals, other.id.Address().String()) }, want: ErrCertificate},
 		{name: "the address in capitals", change: func(c *ssh.Certificate) { c.ValidPrincipals = []string{strings.ToUpper(b.id.Address().String())} }, want: ErrCertificate},
