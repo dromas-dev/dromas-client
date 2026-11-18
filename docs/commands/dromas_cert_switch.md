@@ -4,10 +4,11 @@ renew under a certificate, permanently; the address in full confirms it
 
 ### Synopsis
 
-Publish a new prekey now under a new working key and certificate, as dromas init
---offline registers one. From then on, the mailbox signs under certificates
-permanently, because its server and its correspondents accept no statement its
-identity signs below one. Messages its identity signed stay valid.
+Publish a new prekey now under a certificate, as dromas init --offline registers
+one. From then on, the mailbox signs under certificates permanently, because its
+server and its correspondents accept no statement its identity signs below one.
+Messages its identity signed stay valid. On a mailbox already under certificates,
+it is a renewal like dromas prekey renew, with the identity's key here.
 
 Type the mailbox's address in full as the confirmation.
 

@@ -170,7 +170,7 @@ type NotMade struct {
 // made. One it made, above the one it published last, the server took,
 // whether or not the mailbox saw the answer: its process may have ended in
 // between (steps.go). That holds whoever signed it, the identity, the working
-// key made with it, or a certificate the mailbox held (heldWorker). It is
+// key made with it, or one made before it (heldWorker, InstallCertificate). It is
 // recorded as publish records one, with no pass, before the mailbox does
 // anything more.
 func (b *Mailbox) noteServed(o *own, served []byte) error {

@@ -22,10 +22,12 @@ that was under certificates, run dromas cert switch \<address> next.
 A profile without a config file gets one, with each path in full.
 
 With --revocation-file, init also writes the mailbox's revocation record, as
-dromas revocation make prints it, to a new file outside every directory of the
-mailbox, for the day the mailbox is lost: keep the file where only you can read
-it. On a mailbox already registered, init with --revocation-file writes the
-record and changes nothing else.
+dromas revocation make prints it, to the new file you name, for the day the
+mailbox is lost: keep the file where only you can read it. A record kept beside
+the mailbox is lost and stolen with it, and with the identity kept elsewhere it
+lets whoever copies the mailbox end the address. On a mailbox already
+registered, init with --revocation-file writes the record and changes nothing
+else.
 
 A mailbox whose state does not match its prekeys/, as after state is lost, or
 restored from an older copy while prekeys/ was kept, has failed: it receives,
@@ -47,7 +49,7 @@ dromas init [flags]
       --identity-type type     make the identity a key of this type, not ssh-ed25519: ecdsa-sha2-nistp256, which every client verifies too
       --offline[=true|false]   register the mailbox under a certificate, whose working key signs in place of its identity: permanent
       --restore[=true|false]   acknowledge a state that does not match prekeys/, as after state is lost or restored from an older copy, so the mailbox runs again; on a state that matches, it changes nothing
-      --revocation-file file   write this mailbox's revocation record, as dromas revocation make prints it, to this new file, outside every directory of the mailbox: $DROMAS_REVOCATION_FILE
+      --revocation-file file   write this mailbox's revocation record, as dromas revocation make prints it, to this new file: $DROMAS_REVOCATION_FILE
 ```
 
 ### Options inherited from parent commands

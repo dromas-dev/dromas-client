@@ -59,8 +59,8 @@ func (b *Mailbox) signerOf(n uint64) (signer, *protocol.Certificate, error) {
 // rankOf is the rank of the signer of statement n, as this mailbox keeps it:
 // 0 for its identity, and its certificate's serial for a working key
 // (PROTOCOL.md §5). A statement under a new certificate shares its number
-// with that certificate; one signed under a certificate the mailbox already
-// held (heldWorker) does not.
+// with that certificate; one signed under the certificate in use
+// (heldWorker), or one its identity holder gave, does not.
 func (b *Mailbox) rankOf(n uint64) (uint64, error) {
 	rec, err := b.prekeyOf(n)
 	if err != nil {
@@ -161,9 +161,13 @@ func (b *Mailbox) certificateLifetime(ctx context.Context) (time.Duration, error
 	if b.lifetime > 0 {
 		return b.lifetime, nil
 	}
-	life, err := b.serverCertificateLifetime(ctx)
-	if err != nil {
+	var d protocol.ServerDocument
+	if _, err := b.call(ctx, http.MethodGet, protocol.DocumentPath, nil, nil, &d); err != nil {
 		return 0, fmt.Errorf("this mailbox's server's document could not be read, so no certificate is made: a certificate runs for the longest the server takes, which the document names: %w", err)
+	}
+	life := protocol.MaxCertificateLifetime
+	if d.MaxCertificateLifetime < uint64(life/time.Second) {
+		life = time.Duration(d.MaxCertificateLifetime) * time.Second //nolint:gosec // bounded above
 	}
 	if b.certLife > 0 {
 		life = min(life, b.certLife)
@@ -178,32 +182,15 @@ func (b *Mailbox) certificateLifetime(ctx context.Context) (time.Duration, error
 	return life, nil
 }
 
-// serverCertificateLifetime is the longest a certificate of this mailbox may
-// run at its server: the least of protocol.MaxCertificateLifetime and
-// max_certificate_lifetime_seconds in the server's document (PROTOCOL.md
-// §5.2, §11.18). The owner's Options.CertificateLifetime is for the
-// certificates this mailbox makes, never one its identity holder makes. The
-// error is the read's, for the caller to say what it stops.
-func (b *Mailbox) serverCertificateLifetime(ctx context.Context) (time.Duration, error) {
-	var d protocol.ServerDocument
-	if _, err := b.call(ctx, http.MethodGet, protocol.DocumentPath, nil, nil, &d); err != nil {
-		return 0, err
-	}
-	life := protocol.MaxCertificateLifetime
-	if d.MaxCertificateLifetime < uint64(life/time.Second) {
-		life = time.Duration(d.MaxCertificateLifetime) * time.Second //nolint:gosec // bounded above
-	}
-	return life, nil
-}
-
-// RenewUnderCertificate publishes a new prekey under a new working key and
-// certificate, as [Mailbox.Rekey] does, whatever signed the mailbox's last
-// statement: what dromas cert switch runs. Once a server takes it, an
-// identity statement stands below it in the order (c, p) and is refused
-// there and at every sender that saw it, so the mailbox signs under
-// certificates from then on, for good. Messages its identity signed stay
-// good. A server whose maximum leaves a certificate no room refuses it
-// before anything is signed (noRoom).
+// RenewUnderCertificate publishes a new prekey under a certificate, as
+// [Mailbox.Rekey] does, whatever signed the mailbox's last statement: what
+// dromas cert switch runs. Once a server takes it, an identity statement
+// stands below it in the order (c, p) and is refused there and at every
+// sender that saw it, so the mailbox signs under certificates from then on,
+// for good. Messages its identity signed stay good. On a mailbox already
+// under certificates, it is a renewal like any other, with the identity's key
+// here. A server whose maximum leaves a certificate no room refuses it before
+// anything is signed (noRoom).
 func (b *Mailbox) RenewUnderCertificate(ctx context.Context) (*protocol.Prekey, error) {
 	return locked(ctx, b, func() (*protocol.Prekey, error) {
 		if err := b.keysMatch(); err != nil {
