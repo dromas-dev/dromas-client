@@ -691,7 +691,7 @@ func (b *Mailbox) seal(ctx context.Context, to protocol.Address, stem string, l 
 	if cert != nil {
 		if nm, err := b.notMade(); err != nil {
 			return nil, err
-		} else if nm != nil && nm.OwnCertificate && nm.CertificateSerial == cert.Serial() {
+		} else if nm.showsTaken(cert.Serial()) {
 			return nil, refuse("someone else holds the working key of the certificate this mailbox signs under, as a statement its server serves in its name shows, so a message signed now would go with that certificate: dromas status says what to do, and the message waits for the mailbox's next certificate")
 		}
 		// A message may wait protocol.TTL to be read, and its certificate must

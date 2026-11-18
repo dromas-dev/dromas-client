@@ -538,7 +538,7 @@ func (b *Mailbox) signedPrekey(serial uint64, certify, fresh bool) (p *protocol.
 		}
 		if nm, err := b.notMade(); err != nil {
 			return nil, false, err
-		} else if nm != nil && nm.OwnCertificate && nm.CertificateSerial == c.Serial() {
+		} else if nm.showsTaken(c.Serial()) {
 			return nil, true, nil // under a certificate whose working key another holds
 		}
 		// Longer than its server takes, by the maximum this command read.
