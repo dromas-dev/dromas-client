@@ -98,7 +98,8 @@ var ErrStop = errors.New("the handler stopped the loop")
 // the webhook's ([FollowOptions.Webhook]), for a delivery whose handling failed
 // for good. [Mailbox.Follow] records it, for [Mailbox.Status] to list under
 // attention until [Mailbox.ClearFailed] clears every such record, and goes on:
-// nothing tries it again.
+// nothing tries it again, unless the record could not be written, when it stays
+// owed and is handed over again.
 var ErrGaveUp = errors.New("the handler gave up on the message")
 
 // FollowOptions says how [Mailbox.Follow] runs. The zero value runs until its

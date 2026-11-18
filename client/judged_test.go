@@ -84,7 +84,7 @@ func TestEveryPrivateFileIsJudgedBeforeEveryOpen(t *testing.T) {
 				t.Fatalf("the server holds %d, and nothing was to be acked", n)
 			}
 			if list {
-				closeFile(t, path)
+				openFile(t, path)
 			} else {
 				runFix(t, fixLine(t, refusal))
 			}

@@ -48,7 +48,9 @@ const EchoAddress = "d_QGnwhx4dTMGWuVDvVof0-J6p-8tA4oxE4q9mw0fzMSS9G0g9m4QVEnPk2
 // for a test (SetRequestTimeout).
 var requestTimeout = time.Minute
 
-// Options configures a [Mailbox]. The zero value is ready to use.
+// Options configures a [Mailbox]. The zero value is ready to use. A callback
+// here runs while the Mailbox holds its command's slot, so it never calls the
+// Mailbox: such a call waits until its context ends.
 type Options struct {
 	// Base is the server's base URL; DefaultBase if empty. It is https, or
 	// http only to a server on this machine ([checkServerURL]).

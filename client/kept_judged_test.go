@@ -105,7 +105,7 @@ func TestAKeptMessageOthersCanWriteIsRefused(t *testing.T) {
 			t.Fatalf("%s names neither file: %v", what, err)
 		}
 	}
-	closeFile(t, inPath)
+	openFile(t, inPath)
 	if got, err := b.Inbox(ctx); err != nil || len(got) != 1 {
 		t.Fatalf("inbox once the file is put right: %v, %v", got, err)
 	}

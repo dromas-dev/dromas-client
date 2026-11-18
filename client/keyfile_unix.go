@@ -70,9 +70,9 @@ func checkKeptDirAs(path string, me int) error {
 	return nil
 }
 
-// CheckConfigFile refuses a config file others can write, as ssh_config(5)
-// does: whoever can write it says where the mailbox's keys are and which
-// server it calls. Its owner can, whatever its mode says, so one who is neither
+// CheckConfigFile refuses a file others can write, as ssh_config(5) refuses a
+// config file: the config file, the lists and the kept messages, which
+// whoever can write them would rewrite. Its owner can, whatever its mode says, so one who is neither
 // this user nor root is refused too, as ssh does.
 func CheckConfigFile(path string) error { return checkConfigFile(path, os.Getuid()) }
 

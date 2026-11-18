@@ -190,8 +190,9 @@ func checkPrivateFile(path string) error {
 	return nil
 }
 
-// CheckConfigFile refuses a config file others can write (readAccess), and one
-// another user owns, who can give themselves the write.
+// CheckConfigFile refuses a file others can write (readAccess), and one another
+// user owns, who can give themselves the write: the config file, the lists and
+// the kept messages.
 func CheckConfigFile(path string) error {
 	a, err := readAccess(path)
 	if err != nil {
