@@ -91,17 +91,13 @@ func (o *recvOptions) check(c *cobra.Command, program string, args []string) err
 
 // fromConfig takes the config file's [recv] exec where the command line names
 // no --exec and recv waits: the program, then its arguments. So a service
-// manager's unit names only the profile. --exec-timeout goes with a program
-// from either.
+// manager's unit names only the profile.
 func (o *recvOptions) fromConfig(c *cobra.Command, cfg *config, program string, args []string) (string, []string, error) {
 	if program == "" && cfg.exec != nil && (o.follow || c.Flags().Changed("wait")) {
 		program, args = cfg.exec[0], cfg.exec[1:]
 		if _, err := exec.LookPath(program); err != nil {
 			return "", nil, &configError{file: cfg.file, key: "recv.exec", msg: fmt.Sprintf("%s: recv.exec: %v", cfg.file, err)}
 		}
-	}
-	if program == "" && c.Flags().Changed("exec-timeout") {
-		return "", nil, wrong(c, "%s --exec-timeout goes with --exec, or with recv.exec in the config file", c.CommandPath())
 	}
 	return program, args, nil
 }
@@ -118,9 +114,6 @@ func (o *recvOptions) webhookFrom(c *cobra.Command, cfg *config) error {
 		url = cfg.webhook
 	}
 	if url == "" {
-		if header != "" || secret != "" {
-			return wrong(c, "%s --webhook-header-file and --webhook-secret-file go with --webhook, or with recv.webhook in the config file", c.CommandPath())
-		}
 		return nil
 	}
 	// A file named by a flag is the command line's fault, and one the config

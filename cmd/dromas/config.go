@@ -320,16 +320,8 @@ func eachKey(v reflect.Value, path []string, f func(path []string, value reflect
 	return nil
 }
 
-// renamedKeys are the keys a release renamed, by their old names: a file that
-// still gives one is told the new name.
-var renamedKeys = map[string]string{"policy.server": "policy.admit"}
-
-// unknownKey is the refusal of a key this client does not read, which names
-// the new name of one a release renamed.
+// unknownKey is the refusal of a key this client does not read.
 func unknownKey(file, name string) *configError {
-	if now, ok := renamedKeys[name]; ok {
-		return &configError{file: file, key: name, msg: fmt.Sprintf("%s: %s is now %s: rename it", file, name, now)}
-	}
 	return &configError{file: file, key: name, msg: fmt.Sprintf("%s: this client reads no key %s", file, name)}
 }
 
@@ -589,9 +581,6 @@ func (cfg *config) resolve(g *globals, fc *fileConfig, rel string, noMailbox boo
 		if d, err := time.ParseDuration(v); err != nil || d <= 0 {
 			return bad("recv.exec-timeout", "recv.exec-timeout takes a duration above zero, such as 5m, and %.40q is not", v)
 		}
-		if cfg.exec == nil {
-			return bad("recv.exec-timeout", "recv.exec-timeout goes with recv.exec")
-		}
 		table("recv", "exec-timeout", v)
 	}
 	if v := fc.Recv.Webhook; v != "" {
@@ -610,9 +599,6 @@ func (cfg *config) resolve(g *globals, fc *fileConfig, rel string, noMailbox boo
 	} {
 		if f.value == "" {
 			continue
-		}
-		if cfg.webhook == "" {
-			return bad(f.key, "%s goes with recv.webhook", f.key)
 		}
 		p, err := expand(f.value, rel)
 		if err == nil {

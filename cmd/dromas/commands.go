@@ -486,9 +486,9 @@ go to it one for one: no shell runs, and nothing is split or expanded. The
 config file's [recv] exec names the program and its arguments as one list, for
 example exec = ["/usr/local/bin/notify", "--quiet"]. recv runs that program only
 with --wait or --follow, and only when the command line has no --exec, which
-replaces it. The file's [recv] exec-timeout sets the default of --exec-timeout,
-and the file can set it only beside exec. On Windows, cmd.exe runs a .bat or
-.cmd program, and cmd.exe splits and expands its arguments.
+replaces it. The file's [recv] exec-timeout sets the default of --exec-timeout.
+On Windows, cmd.exe runs a .bat or .cmd program, and cmd.exe splits and expands
+its arguments.
 
 Nothing of a message is ever on the command line. recv discards the program's
 stdout and stderr. The programs run one at a time, with the mailbox's lock free,
@@ -747,8 +747,9 @@ func (e *cli) statusCmd() *cobra.Command {
 		`Report what this mailbox holds and what needs attention, as one "status" line,
 from the mailbox's own files and with no call to the server: its format and
 where it keeps each of its files, its prekey, a renewal that has not gone
-through, refused messages in refused/, held messages, and messages in outbox/
-that the server has not accepted yet.
+through, refused messages in refused/, held messages, messages in outbox/ that
+the server has not accepted yet, and a sunset of this client's version, or a
+deprecation whose date has passed, that the last command's answers carried.
 
 status refuses a mailbox in a format other than this client's, its "error" line
 naming both formats.`,
@@ -1110,70 +1111,32 @@ longer.`, formatTime(client.MinPrekeyLifetime), formatTime(protocol.PrekeyLifeti
 // FORMATS), in either case.
 var timeUnits = map[byte]time.Duration{'s': time.Second, 'm': time.Minute, 'h': time.Hour, 'd': 24 * time.Hour, 'w': 7 * 24 * time.Hour}
 
-// parseTime reads a time as sshd does (sshd_config(5), TIME FORMATS): a
-// sequence of numbers, each with a unit or none for seconds, added together,
-// as in 600, 10m or 2d1h. It is OpenSSH's convtime, as 10.3p1 to 10.6p1 have
-// it (misc.c, convtime_double; #193): each number in decimal digits alone,
-// any number of them, a fraction only on seconds and only with a digit after
-// its point, seconds named once, and the sum truncated to whole seconds, at
-// most INT_MAX of them.
-//
-// It differs from convtime in one place, kept as it is (#389): a fraction
-// below binary64's smallest normal, 2.2250738585072014e-308, so with some
-// 308 digits after its point, which strconv.ParseFloat reads as a subnormal
-// or zero, and convtime refuses wherever its libc's strtod sets ERANGE for
-// an underflow (POSIX.1-2024, strtod). Which such fractions underflow is the
-// libc's, glibc alone measured, so no code here follows one. Such a fraction
-// is under a second, which the truncation drops: what parseTime takes there
-// is the seconds the rest of the time names, every time convtime takes reads
-// as the same seconds here, and the only time parseTime reads is one the
-// mailbox's owner writes (prekey-lifetime).
+// parseTime reads a time as sshd_config(5) TIME FORMATS writes one, as in 600, 10m or 2d1h.
 func parseTime(s string) (time.Duration, error) {
 	no := fmt.Errorf("%.40q is no time: one is numbers, each with its unit (s, m, h, d or w), as in 2d1h", s)
 	if s == "" {
 		return 0, no
 	}
-	total, seconds := 0.0, false
-	for p := 0; p < len(s); {
+	total := 0.0
+	for p := 0; p < len(s); p++ {
 		i := p
 		for i < len(s) && s[i] >= '0' && s[i] <= '9' {
 			i++
 		}
-		if i < len(s) && s[i] == '.' {
-			i++
-			for i < len(s) && s[i] >= '0' && s[i] <= '9' {
-				i++
-			}
-		}
-		num := s[p:i]
-		if strings.Trim(num, ".") == "" { // no digit: what strtod reads none of
-			return 0, no
-		}
-		v, err := strconv.ParseFloat(num, 64)
-		if err != nil {
-			return 0, no
-		}
-		unit := 1.0
-		switch {
-		case i == len(s) || s[i] == 's' || s[i] == 'S':
-			if seconds {
-				return 0, no
-			}
-			seconds = true
-		default:
+		unit := time.Second
+		if i < len(s) {
 			u, ok := timeUnits[s[i]|0x20]
-			if !ok || u == time.Second {
+			if !ok {
 				return 0, no
 			}
-			unit = u.Seconds()
+			unit = u
 		}
-		if strings.Contains(num, ".") && (unit > 1 || num[len(num)-1] == '.') {
+		if i == p {
 			return 0, no
 		}
-		total += v * unit
-		if p = i; p < len(s) {
-			p++
-		}
+		v, _ := strconv.ParseFloat(s[p:i], 64)
+		total += v * unit.Seconds()
+		p = i
 	}
 	if total > math.MaxInt32 {
 		return 0, fmt.Errorf("%.40q is longer than any prekey lifetime", s)

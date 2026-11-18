@@ -157,18 +157,19 @@ func TestEveryRequestNamesTheClientsVersion(t *testing.T) {
 }
 
 // An answer that carries a Sunset for this client's version prints a sunset
-// line, with the server's date, and the command needs a look (exit status
-// 3); status, which calls no server, says it in its attention from what the
-// last command kept. Once answers carry none, the line and the attention go.
-// The date is the server's word; the two clocks differ.
-func TestASunsetIsSaidAndNeedsALook(t *testing.T) {
+// line, with the server's date, and the command keeps its exit status;
+// status, which calls no server, says it in its attention from what the last
+// command kept, and needs a look (exit status 3). Once answers carry none, the
+// line and the attention go. The date is the server's word; the two clocks
+// differ.
+func TestASunsetIsSaidAndStatusNeedsALook(t *testing.T) {
 	v := newVersioned(t)
 	v.client.Add(20 * time.Minute) // within what a server takes of a pass
 	at := v.server.Now().Add(30 * 24 * time.Hour)
 	v.srv.SetPolicy(protocol.ServerDocument{Sunsets: []protocol.Scheduled{{Version: "1.5", At: at.Format(protocol.TimeLayout)}}})
 	ls, status, errs := v.run("recv")
 	l := lineOf(ls, "sunset")
-	if status != 3 || l == nil || l["version"] != ownVersion || l["sunset_at"] != at.Format(protocol.TimeLayout) || !strings.Contains(l["detail"].(string), at.Format(protocol.TimeLayout)) {
+	if status != 0 || l == nil || l["version"] != ownVersion || l["sunset_at"] != at.Format(protocol.TimeLayout) || !strings.Contains(l["detail"].(string), at.Format(protocol.TimeLayout)) {
 		t.Fatalf("recv: exit %d, %v, %s", status, ls, errs)
 	}
 	ls, status, _ = v.run("status")
@@ -192,10 +193,9 @@ func TestASunsetIsSaidAndNeedsALook(t *testing.T) {
 }
 
 // A Deprecation is said on every command that meets one, with its date, and
-// needs a look only once that date has passed at the mailbox's own clock,
-// whatever the server's reads: a date to come prints the line and changes no
-// exit status, and status says it only once it has passed (RFC 9745 §2.1:
-// a date to come says the version will be deprecated then).
+// changes no exit status; status says it, and needs a look, only once that
+// date has passed at the mailbox's own clock, whatever the server's reads
+// (RFC 9745 §2.1: a date to come says the version will be deprecated then).
 func TestADeprecationNeedsALookOnlyOnceItsDatePasses(t *testing.T) {
 	v := newVersioned(t)
 	at := v.server.Now().Add(10 * time.Minute)
@@ -214,9 +214,12 @@ func TestADeprecationNeedsALookOnlyOnceItsDatePasses(t *testing.T) {
 	if ls, status, _ := v.run("recv"); status != 0 || lineOf(ls, "deprecated") == nil {
 		t.Fatalf("recv with the server's clock past the date: exit %d, %v", status, ls)
 	}
+	if ls, status, _ := v.run("status"); status != 0 || attention(t, ls) != "" {
+		t.Fatalf("status with the server's clock past the date: exit %d, %v", status, ls)
+	}
 	// The mailbox's clock passes it, the server's standing still.
 	v.client.Add(3 * time.Minute)
-	if ls, status, _ := v.run("recv"); status != 3 || lineOf(ls, "deprecated") == nil {
+	if ls, status, _ := v.run("recv"); status != 0 || lineOf(ls, "deprecated") == nil {
 		t.Fatalf("recv past the date: exit %d, %v", status, ls)
 	}
 	if ls, status, _ := v.run("status"); status != 3 || !strings.Contains(attention(t, ls), "deprecated from "+at.Format(protocol.TimeLayout)) {
@@ -235,10 +238,9 @@ func TestADeprecationNeedsALookOnlyOnceItsDatePasses(t *testing.T) {
 // The mailbox reads its server's document at most once a day, on the first
 // command of the day that calls the server, and says an upgrade is available
 // where the latest version it names is higher in a part it writes: so once a
-// day at most, and never as needing a look. status says it from what the
-// read kept. A read that fails, or a document whose latest_version is no
-// string, fails nothing, and the next command that calls the server reads it
-// again.
+// day at most, and never as needing a look, by status either. A read that
+// fails, or a document whose latest_version is no string, fails nothing, and
+// the next command that calls the server reads it again.
 func TestAnUpgradeIsSaidOnceADay(t *testing.T) {
 	v := newVersioned(t)
 	v.srv.SetPolicy(protocol.ServerDocument{LatestVersion: "1.6"})
@@ -252,7 +254,7 @@ func TestAnUpgradeIsSaidOnceADay(t *testing.T) {
 	if status != 0 || l == nil || l["version"] != ownVersion || l["latest"] != "1.6" || v.documentReads() != 2 {
 		t.Fatalf("recv a day on: exit %d, %v, %d reads", status, ls, v.documentReads())
 	}
-	if ls, status, _ := v.run("status"); status != 3 || !strings.Contains(attention(t, ls), "names 1.6 as the latest version") {
+	if ls, status, _ := v.run("status"); status != 0 || attention(t, ls) != "" {
 		t.Fatalf("status: exit %d, %v", status, ls)
 	}
 	// The same day: no read, no line, on either clock's day.
@@ -292,16 +294,12 @@ func TestAnUpgradeIsSaidOnceADay(t *testing.T) {
 		}
 	}
 	v.srv.SetMiddle(nil)
-	// A latest equal in every part it writes is no upgrade, and status stops
-	// saying one once a read finds none; nor does one with no latest.
+	// A latest equal in every part it writes is no upgrade, nor is no latest.
 	for _, latest := range []string{"1.5", ""} {
 		v.srv.SetPolicy(protocol.ServerDocument{LatestVersion: latest})
 		v.both(24 * time.Hour)
 		if ls, status, _ := v.run("recv"); status != 0 || lineOf(ls, "upgrade_available") != nil {
 			t.Fatalf("latest %q: exit %d, %v", latest, status, ls)
-		}
-		if ls, status, _ := v.run("status"); status != 0 || attention(t, ls) != "" {
-			t.Fatalf("status, latest %q: exit %d, %v", latest, status, ls)
 		}
 	}
 	// A clock that steps back past the last read reads again.
@@ -427,7 +425,7 @@ func TestTheVersionHeadersPrintNoneOfTheServersWords(t *testing.T) {
 		next.ServeHTTP(&forged{ResponseWriter: w, set: map[string]string{protocol.DeprecationHeader: "@1", protocol.SunsetHeader: "Sat, 02 Jan 2027 03:04:05 GMT"}}, r)
 	})
 	ls, status, _ := v.run("recv")
-	if status != 3 || lineOf(ls, "deprecated")["deprecated_at"] != "1970-01-01T00:00:01Z" || lineOf(ls, "sunset")["sunset_at"] != "2027-01-02T03:04:05Z" {
+	if status != 0 || lineOf(ls, "deprecated")["deprecated_at"] != "1970-01-01T00:00:01Z" || lineOf(ls, "sunset")["sunset_at"] != "2027-01-02T03:04:05Z" {
 		t.Fatalf("the control: exit %d, %v", status, ls)
 	}
 }

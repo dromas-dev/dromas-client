@@ -54,9 +54,9 @@ go to it one for one: no shell runs, and nothing is split or expanded. The
 config file's [recv] exec names the program and its arguments as one list, for
 example exec = ["/usr/local/bin/notify", "--quiet"]. recv runs that program only
 with --wait or --follow, and only when the command line has no --exec, which
-replaces it. The file's [recv] exec-timeout sets the default of --exec-timeout,
-and the file can set it only beside exec. On Windows, cmd.exe runs a .bat or
-.cmd program, and cmd.exe splits and expands its arguments.
+replaces it. The file's [recv] exec-timeout sets the default of --exec-timeout.
+On Windows, cmd.exe runs a .bat or .cmd program, and cmd.exe splits and expands
+its arguments.
 
 Nothing of a message is ever on the command line. recv discards the program's
 stdout and stderr. The programs run one at a time, with the mailbox's lock free,

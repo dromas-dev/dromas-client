@@ -189,7 +189,6 @@ func TestAConfigThatIsWrongIsFatal(t *testing.T) {
 		{"a lifetime", good + "prekey-lifetime = \"1h\"\n", "prekey-lifetime", "is from"},
 		{"a policy", good + "[policy]\nunknown = \"deliver\"\n", "policy.unknown", "policy.unknown"},
 		{"a policy", good + "[policy]\nadmit = \"some\"\n", "policy.admit", "policy.admit"},
-		{"a renamed key", good + "[policy]\nserver = \"all\"\n", "policy.server", "is now policy.admit"},
 		{"a drain time", good + "[recv]\ndrain-time = \"0s\"\n", "recv.drain-time", "above zero"},
 		{"a wait", good + "[recv]\nwait = \"soon\"\n", "recv.wait", "recv.wait"},
 		{"an empty server", good + "server = \"\"\n", "server", "is empty"},

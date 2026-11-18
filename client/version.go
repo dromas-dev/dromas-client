@@ -84,7 +84,6 @@ func asRequestVersion(v string) string {
 type Versions struct {
 	mu         sync.Mutex
 	own        string
-	now        func() time.Time
 	answered   bool // a server answered one of the command's calls
 	deprecated time.Time
 	sunset     time.Time
@@ -110,20 +109,12 @@ func (v *Versions) Sunset() (time.Time, bool) {
 
 // Deprecation is the date of the earliest Deprecation an answer the command
 // met carried, from which its server deems this client's version deprecated,
-// and whether that date has passed at this client's clock; ok is false where
-// none carried one of its form. A date to come says the version will be
-// deprecated then (RFC 9745 §2.1).
-func (v *Versions) Deprecation() (at time.Time, passed, ok bool) {
+// and false where none carried one of its form. A date to come says the
+// version will be deprecated then (RFC 9745 §2.1).
+func (v *Versions) Deprecation() (time.Time, bool) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
-	if v.deprecated.IsZero() {
-		return time.Time{}, false, false
-	}
-	now := v.now
-	if now == nil {
-		now = time.Now
-	}
-	return v.deprecated, !now().Before(v.deprecated), true
+	return v.deprecated, !v.deprecated.IsZero()
 }
 
 // Upgrade is the latest version the server's document names, where the
@@ -168,12 +159,10 @@ const documentEvery = 24 * time.Hour
 //	deprecation     "<version> <time>": the date the last command that had an answer met in Deprecation, and this client's version then; none where its answers carried none
 //	sunset          "<version> <time>": the same, of Sunset
 //	document-read   when the mailbox last read its server's document, a time
-//	latest          the latest_version that read found; none where it named none
 const (
 	keyDeprecation  = "deprecation"
 	keySunset       = "sunset"
 	keyDocumentRead = "document-read"
-	keyLatest       = "latest"
 )
 
 // recordVersions is the end of every command that holds the mailbox's lock
@@ -222,9 +211,8 @@ func (b *Mailbox) recordVersions(ctx context.Context) {
 
 // readDocument reads the server's document, GET /v1/, where the mailbox last
 // read it a day ago or more, or never, or at a time its clock has since gone
-// back past, and keeps when it read it and the latest version it names, where
-// that has a policy's version form (ParsePolicyVersion). Where that version
-// is an upgrade for this client, the command says so (Versions.Upgrade). It
+// back past, and keeps when it read it. Where the latest version it names is
+// an upgrade for this client, the command says so (Versions.Upgrade). It
 // reads latest_version alone: every other member, of any form, is ignored
 // (RFC 7493 §4.2). A mailbox that holds its own revocation asks nothing
 // (finished). A read that fails, or whose latest_version is no string, is no
@@ -250,24 +238,14 @@ func (b *Mailbox) readDocument(ctx context.Context) {
 	if _, err := b.exchange(ctx, http.MethodGet, protocol.DocumentPath, nil, nil, &d); err != nil {
 		return
 	}
-	latest := d.LatestVersion
-	if _, err := protocol.ParsePolicyVersion(latest); err != nil {
-		latest = ""
-	}
 	if err := b.update(func(s store) error {
-		if err := s.put(bucketMailbox, keyDocumentRead, []byte(now.Format(protocol.TimeLayout))); err != nil {
-			return err
-		}
-		if latest == "" {
-			return s.del(bucketMailbox, keyLatest)
-		}
-		return s.put(bucketMailbox, keyLatest, []byte(latest))
+		return s.put(bucketMailbox, keyDocumentRead, []byte(now.Format(protocol.TimeLayout)))
 	}); err != nil {
 		return
 	}
-	if upgrade(latest, b.version) {
+	if upgrade(d.LatestVersion, b.version) {
 		b.met.mu.Lock()
-		b.met.upgrade = latest
+		b.met.upgrade = d.LatestVersion
 		b.met.mu.Unlock()
 	}
 }
@@ -284,16 +262,14 @@ func upgrade(latest, own string) bool {
 }
 
 // versionsAttention is what status says of versions, from what the mailbox's
-// last commands kept, with no call: a deprecation of this client's version
-// once its date has passed at the mailbox's clock, a sunset of it, each with
-// its date, and an upgrade the server's document named at its last read. A
-// deprecation to come is no attention, as it changes no command's exit
-// status. What was kept of another version of this client, one since
-// upgraded from, is not said.
+// last commands kept, with no call: an upcoming removal of this client's
+// version, a sunset of it or a deprecation whose date has passed at the
+// mailbox's clock, each with its date. What was kept of another version of
+// this client, one since upgraded from, is not said.
 func (b *Mailbox) versionsAttention() []string {
-	var deprecation, sunset, latest []byte
+	var deprecation, sunset []byte
 	if err := b.view(func(s store) error {
-		deprecation, sunset, latest = s.get(bucketMailbox, keyDeprecation), s.get(bucketMailbox, keySunset), s.get(bucketMailbox, keyLatest)
+		deprecation, sunset = s.get(bucketMailbox, keyDeprecation), s.get(bucketMailbox, keySunset)
 		return nil
 	}); err != nil {
 		return nil
@@ -312,9 +288,6 @@ func (b *Mailbox) versionsAttention() []string {
 	}
 	if t, ok := dated(sunset); ok {
 		said = append(said, SunsetWords(b.version, t))
-	}
-	if upgrade(string(latest), b.version) {
-		said = append(said, UpgradeWords(b.version, string(latest)))
 	}
 	return said
 }

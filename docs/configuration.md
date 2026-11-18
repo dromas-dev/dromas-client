@@ -246,7 +246,7 @@ A program to run for each message, then its arguments, for example `exec = ["/us
 - Default: `5m`
 - Flag: `dromas recv --exec-timeout`
 
-How long one run of the `recv.exec` program may take before `recv` kills the run. `recv.exec-timeout` without `recv.exec` is an error.
+How long one run of the `recv.exec` program may take before `recv` kills the run.
 
 ### `recv.webhook`
 
@@ -262,7 +262,7 @@ A URL that `recv` posts each message's `message` line to, with or without the `r
 - Default: none
 - Flag: `dromas recv --webhook-header-file`
 
-A file of exactly one line, `Name: Value`, with or without a line ending: a header that each webhook post carries, for example `Authorization: Bearer <token>`. `recv` rejects the file, and runs nothing, when other users can access it, as `ssh` rejects a private key. `recv` also rejects a header that each post sets itself, in any case: `Content-Type`, `Content-Length`, `Host`, `Transfer-Encoding` and any `webhook-*`. In the config file, `recv.webhook-header-file` without `recv.webhook` is an error.
+A file of exactly one line, `Name: Value`, with or without a line ending: a header that each webhook post carries, for example `Authorization: Bearer <token>`. `recv` rejects the file, and runs nothing, when other users can access it, as `ssh` rejects a private key. `recv` also rejects a header that each post sets itself, in any case: `Content-Type`, `Content-Length`, `Host`, `Transfer-Encoding` and any `webhook-*`.
 
 ### `recv.webhook-secret-file`
 
@@ -270,7 +270,7 @@ A file of exactly one line, `Name: Value`, with or without a line ending: a head
 - Default: none
 - Flag: `dromas recv --webhook-secret-file`
 
-A file holding a [Standard Webhooks](https://www.standardwebhooks.com/) secret: `whsec_` and the standard, padded base64 of 24 to 64 random bytes. With it, each post carries the `webhook-id`, `webhook-timestamp` and `webhook-signature` headers of the Standard Webhooks `v1` scheme, so the endpoint can verify the post with any Standard Webhooks library. `recv` rejects the file as it rejects `recv.webhook-header-file`. In the config file, `recv.webhook-secret-file` without `recv.webhook` is an error.
+A file holding a [Standard Webhooks](https://www.standardwebhooks.com/) secret: `whsec_` and the standard, padded base64 of 24 to 64 random bytes. With it, each post carries the `webhook-id`, `webhook-timestamp` and `webhook-signature` headers of the Standard Webhooks `v1` scheme, so the endpoint can verify the post with any Standard Webhooks library. `recv` rejects the file as it rejects `recv.webhook-header-file`.
 
 ### `recv.log-file`
 
