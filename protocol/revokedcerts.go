@@ -49,9 +49,9 @@ func NewRevokedCertificates(a Address, through uint64) (*RevokedCertificates, er
 }
 
 // ParseRevokedCertificates parses a revocation of certificates exactly: the
-// tag, a lowercase address and a serial from 1 to MaxSerial with no leading
-// zero, each on a line ending in LF, and nothing else: no CR, no blank line,
-// no byte after the last LF.
+// tag, an address ParseAddress reads and a serial from 1 to MaxSerial with no
+// leading zero, each on a line ending in LF, and nothing else: no CR, no blank
+// line, no byte after the last LF.
 func ParseRevokedCertificates(statement []byte) (*RevokedCertificates, error) {
 	lines := bytes.Split(statement, []byte("\n"))
 	if len(lines) != 4 || len(lines[3]) != 0 || string(lines[0]) != RevokedCertsTag {

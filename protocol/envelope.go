@@ -92,7 +92,9 @@ type Envelope struct {
 	To     Address
 	SentAt time.Time // to the second, UTC
 	// MsgID is a random UUID (version 4), made once per logical message and
-	// kept on every re-encryption, so a retry is never acted on twice.
+	// kept on every re-encryption, so a reader whose replay set holds the
+	// message acks a retry and does not deliver it again (PROTOCOL.md §12.3,
+	// check 9).
 	MsgID string
 	// Body is the message: a JSON string, or any JSON value the sender sent
 	// as one (PROTOCOL.md §9.1).

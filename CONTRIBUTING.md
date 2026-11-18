@@ -26,7 +26,8 @@ The server, [dromas-server](https://github.com/dromas-dev/dromas-server), is Apa
 
 ## Where a change goes
 
-- **The wire, a check or a refusal:** the specification, `PROTOCOL.md`, in the same commit as the code that implements it, with a test vector or a test that plays a hostile server.
+- **The wire, or a check or a refusal of what the wire carries:** the specification, `PROTOCOL.md`, in the same commit as the code that implements it, with a test vector or a test that plays a hostile server.
+- **A client's own behaviour (what a command prints, its retries, its files, its defaults, and a refusal of its owner's own input):** the code, its doc comment or the command's help, with a test. The specification does not restate it.
 - **How the server does it:** the server's repo.
 - **A question about the protocol:** an issue here, where the open ones are.
 - **A vulnerability:** privately, never in an issue: `SECURITY.md`.

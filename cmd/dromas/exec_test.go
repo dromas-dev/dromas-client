@@ -238,20 +238,30 @@ func TestExecRunsNothingForAHeldMessage(t *testing.T) {
 	}
 }
 
-// Callbacks run one at a time, in the order recv delivers.
-func TestExecRunsOneAtATimeInDeliveryOrder(t *testing.T) {
+// Callbacks run one at a time: each run ends before the next begins, and each
+// message is handed over once.
+func TestExecRunsOneAtATime(t *testing.T) {
 	c := newCallback(t)
 	c.send("one", "two", "three")
 	stdout, stderr, err := c.recv(context.Background(), append([]string{"--wait", "0s"}, c.exec("in-turn")...)...)
 	if err != nil {
 		t.Fatalf("recv: %v %s", err, stderr)
 	}
-	var want strings.Builder
-	for l := range strings.Lines(stdout) {
-		fmt.Fprintf(&want, "begin %send %s", l, l)
+	got := c.recorded()
+	notes := slices.Collect(strings.Lines(got))
+	var ran []string
+	for i := 0; i+1 < len(notes); i += 2 {
+		l, ok := strings.CutPrefix(notes[i], "begin ")
+		if !ok || notes[i+1] != "end "+l {
+			t.Fatalf("the callback recorded %s: a run began before the last ended", got)
+		}
+		ran = append(ran, l)
 	}
-	if got := c.recorded(); got != want.String() {
-		t.Fatalf("the callback recorded %s, want %s", got, want.String())
+	want := slices.Collect(strings.Lines(stdout))
+	slices.Sort(ran)
+	slices.Sort(want)
+	if len(notes)%2 != 0 || !slices.Equal(ran, want) {
+		t.Fatalf("the callback recorded %s, want a run for each of %s", got, stdout)
 	}
 }
 

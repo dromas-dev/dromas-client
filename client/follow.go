@@ -114,40 +114,30 @@ type FollowOptions struct {
 	// A drain still follows at [ReceiveEvery], or sooner as a short prekey
 	// lifetime needs ([RecvWithin]).
 	Between func(ctx context.Context) bool
-	// Owed makes the handler's work on each delivery safe against a crash. The
-	// transaction that records a message landed in inbox/ as seen also records the
-	// message as owed its handling, and the record is cleared once the handler
-	// returns nil, [ErrStop] or [ErrGaveUp]. Follow begins by handing over what
-	// is owed, oldest first, and the handler's work is at least once: a crash
-	// before the record is cleared hands the message over again. Any other
-	// error from the handler leaves the message owed, to be handed over again
-	// when Follow next begins, and goes on to the next: a message handed over
-	// again comes after the ones delivered since, so a handler that must
-	// order them does so itself, as every webhook's receiver does.
+	// Owed makes the handler's work on each delivery at least once. The
+	// transaction that records a message landed in inbox/ records it as owed
+	// its handling, and the record is cleared once the handler returns nil,
+	// [ErrStop] or [ErrGaveUp]. Any other error, or a crash before the record
+	// is cleared, leaves the message owed, and Follow goes on to the next.
+	// Follow begins by handing over what is owed.
 	Owed bool
 	// Flush posts the outbox's messages that are due after each drain that
 	// succeeds, as [Mailbox.FlushReport] does but for the entries whose wait is not over, and ends a hold when the next waiting one
 	// comes due, so a message a refusal left waiting goes once its
 	// Retry-After has passed.
 	Flush bool
-	// Webhook, when not nil, is a second handling of each delivery, apart
-	// from the handler's, with owed and gave-up records of its own: a
-	// failure of either never stops, delays or fails the other. The
-	// transaction that records a message landed in inbox/ as seen records it
-	// as owed to Webhook too. Webhook runs on a goroutine of its own, and is
-	// handed an [EventDelivery] for each owed message, oldest first, one at a
-	// time, beginning with what is owed when Follow starts, or an
-	// [EventOwedGone] where inbox/ no longer keeps the message. The record is
-	// cleared once Webhook returns nil or [ErrGaveUp], which it records, or
-	// [ErrStop], which ends neither Follow nor the handover. Any other error
-	// leaves the message owed and goes on to the next: delivery is at least
-	// once, and in order only while Webhook succeeds. A message left owed is
-	// handed over again at the next handover, which a drain that delivers
-	// begins, as does a fault's retry and the next Follow: a Webhook that must
-	// try again sooner tries within its own call, as recv's does. Follow
-	// waits for Webhook to hand over what is owed before it returns, but
-	// where its context ended: what is cut short stays owed for the next
-	// Follow.
+	// Webhook, when not nil, is a second handling of each delivery, at least
+	// once, with owed and gave-up records of its own: a failure of either
+	// handling never stops, delays or fails the other. Webhook runs on a
+	// goroutine of its own, and is handed, one at a time, an [EventDelivery]
+	// for each owed message, or an [EventOwedGone] where inbox/ no longer
+	// keeps the message. The record is cleared once Webhook returns nil,
+	// [ErrGaveUp], which it records, or [ErrStop], which ends neither Follow
+	// nor the handover. Any other error leaves the message owed, handed over
+	// again at the next handover: a drain that delivers, a fault's retry and
+	// the next Follow each begin one. Follow returns once Webhook has handed
+	// over what is owed, but where its context ended: what is cut short stays
+	// owed.
 	Webhook Handler
 }
 

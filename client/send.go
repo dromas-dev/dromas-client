@@ -424,8 +424,8 @@ var undeliverable = []protocol.Code{
 // more than protocol.TTL ago. Then it moves to outbox/failed/. Each post is
 // dated afresh, so the TTL an outbox posts an entry for is counted from the
 // envelope it keeps, as written: a reader's replay set reaches back that far
-// past a first post (protocol.SeenFor), so a retry of a message already
-// delivered is dropped by its msg_id however late it comes.
+// past a first post (protocol.SeenFor), so a reader whose replay set is
+// intact drops a retry of a message already delivered by its msg_id.
 //
 // Each seal reads the recipient's mailbox first, with what the server holds of
 // its revocations ([Mailbox.resolve]). The seal is made to what this mailbox then holds:

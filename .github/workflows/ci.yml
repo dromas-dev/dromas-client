@@ -3,7 +3,7 @@
 # request on main and those queued ahead of it, GitHub's merge_group event),
 # so each commit's result is on the public record, and
 # once a day, when govulncheck meets advisories published since. The fuzz
-# targets run once a week, an hour each, or by hand. release.yml runs it all
+# targets run once a week, an hour each. release.yml runs it all
 # again on a release's tag before it builds (workflow_call). Actions are
 # pinned by commit, each with its release beside it.
 name: ci
@@ -92,8 +92,10 @@ jobs:
     # one's lists say. Beside them a FAT32 and an exFAT volume, which keep no
     # access list. scripts/windows-accounts.ps1 makes these, on this runner only:
     # the tests skip without them, by DROMAS_TEST_ACCOUNT. The daily run or a
-    # hand-run alone, never a pull request's or a release's: it compiles from a cold
-    # cache, and what it holds changes only with the Windows access-list code.
+    # hand-run alone, release.yml's hand-run among them, so a release waits on
+    # it before its tag; never a pull request's or the tag's run: it compiles
+    # from a cold cache, and what it holds changes only with the Windows
+    # access-list code.
     name: test (windows accounts)
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: windows-2025

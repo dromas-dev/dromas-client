@@ -123,7 +123,7 @@ func (e *APIError) words() string {
 		if p.MaxCertificateLifetime != nil && *p.MaxCertificateLifetime <= protocol.MaxInteger {
 			s += fmt.Sprintf(", %d seconds", *p.MaxCertificateLifetime)
 		}
-		return s + ": a certificate this client makes runs for the maximum the server's document names, which may have changed since, so dromas prekey renew makes one again"
+		return s + ": a certificate this client makes runs for the maximum the server's document names, which may have changed since, so dromas prekey renew makes one again where this mailbox's identity can sign, and otherwise the identity's holder certifies one from dromas cert request"
 	case protocol.CodeUnsupportedKeyType:
 		s := "the server does not register identities of this mailbox's key type"
 		if t := knownTypes(p.KeyTypes); t != "" {

@@ -260,7 +260,7 @@ func (b *Mailbox) notMade() (nm *NotMade, err error) {
 // Words says what nm is, to the mailbox's owner, and recommends what to do: in
 // every case, revoking the address (PROTOCOL.md §12.4).
 func (nm *NotMade) Words() string {
-	tail := "recv renews nothing above it. dromas revocation publish, with the address in full, ends the address for good, and its correspondents need a new one; dromas prekey renew renews above the statement instead, for an owner who knows whose it is. The mailbox's next read of itself that serves its own clears this"
+	tail := "recv renews nothing above it. dromas revocation publish, with the address in full, ends the address for good, and its correspondents need a new one; dromas prekey renew renews above the statement instead, where this mailbox can sign a renewal, for an owner who knows whose it is. The mailbox's next read of itself that serves its own clears this"
 	if nm.RenewedAbove != 0 {
 		tail = fmt.Sprintf("Its server has since taken this mailbox's own statement above it, serial %d, which takes the address back but not the identity. dromas revocation publish, with the address in full, ends the address for good, and its correspondents need a new one. The mailbox's next read of itself that serves its own clears this", nm.RenewedAbove)
 	}

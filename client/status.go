@@ -88,9 +88,9 @@ type Status struct {
 	// PrekeyNotMade is a statement the mailbox's server served in its name, at
 	// its last read of itself, that it did not make, or nil ([NotMade]).
 	PrekeyNotMade *NotMade `json:"prekey_not_made,omitempty"`
-	// Owed counts the messages inbox/ keeps whose handling, a callback's where
-	// recv --exec runs one, has not ended ([Mailbox.Follow]): the next such run
-	// begins with them.
+	// Owed counts the messages whose handling, a callback's where recv --exec
+	// runs one, has not ended ([Mailbox.Follow]): the next such run begins with
+	// them.
 	Owed int `json:"exec_pending,omitempty"`
 	// GaveUp names the messages inbox/ keeps whose handling gave up
 	// ([ErrGaveUp]), which nothing tries again, until [Mailbox.ClearFailed]

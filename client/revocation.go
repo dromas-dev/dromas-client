@@ -222,10 +222,9 @@ func (b *Mailbox) keepRevocation(id *protocol.Identity, sig []byte) error {
 		})
 	}
 	// The mailbox's own: the pass it kept is a signature already made, which
-	// nothing may use now, and a renewal that failed, or the read of its
-	// server's ACL a renewal owed (aclAt), is one nothing tries again. Kept
-	// by a command that began with none, it is the event that ends the
-	// command: it asks nothing more (call), and says that alone (locked).
+	// nothing may use now, and a renewal that failed is one nothing tries
+	// again. Kept by a command that began with none, it is the event that ends
+	// the command: it asks nothing more (call), and says that alone (locked).
 	learned := false
 	if err := b.update(func(s store) error {
 		learned = s.get(bucketMailbox, "revoked") == nil

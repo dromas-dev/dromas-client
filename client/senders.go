@@ -69,12 +69,12 @@ func (p Policy) checkSet() error {
 	return nil
 }
 
-// keyPolicy is what SetPolicy or a restore recorded, in the mailbox's bucket.
+// keyPolicy is what SetPolicy recorded, in the mailbox's bucket.
 const keyPolicy = "policy"
 
 // Policy is the mailbox's policy, each field from the first that says it: what
-// its owner set (Options.Policy), what SetPolicy or a restore adopting its
-// server's ACL recorded in the state file, and the default.
+// its owner set (Options.Policy), what SetPolicy recorded in the state file,
+// and the default.
 func (b *Mailbox) Policy(ctx context.Context) (Policy, error) {
 	return reading(ctx, b, b.policy)
 }
