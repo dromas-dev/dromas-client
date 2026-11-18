@@ -106,7 +106,7 @@ func (b *Mailbox) certifiedSigner(serial uint64, life time.Duration, st *ownRead
 	if !errors.Is(herr, errNoHeldWorker) {
 		return nil, nil, herr // a fault of the mailbox's own, said as it is
 	}
-	return nil, nil, &IdentityLockedError{File: locked.File, Agent: locked.Agent, Reason: locked.Reason + ", and the certificate in use cannot sign a renewal (it has ended, began less than an hour ago, is revoked, or has a working key someone else holds): where the identity is kept elsewhere, dromas cert request asks its holder for a certificate"}
+	return nil, nil, &IdentityLockedError{File: locked.File, Agent: locked.Agent, Reason: locked.Reason + ", and no certificate in use can sign a renewal (none is, or it has ended, began less than an hour ago, is revoked, has a working key someone else holds, or its working key cannot be read): where the identity is kept elsewhere, dromas cert request asks its holder for a certificate"}
 }
 
 // heldWorker is the working key of the certificate in use, where that
@@ -132,9 +132,9 @@ func (b *Mailbox) heldWorker() (*sign.Work, *protocol.Certificate, error) {
 	return w, c, nil
 }
 
-// errNoHeldWorker is heldWorker's answer where the certificate in use cannot
-// sign a renewal: every other error of its is a fault.
-var errNoHeldWorker = errors.New("the certificate in use cannot sign a renewal")
+// errNoHeldWorker is heldWorker's answer where no certificate in use can sign
+// a renewal: every other error of its is a fault.
+var errNoHeldWorker = errors.New("no certificate in use can sign a renewal")
 
 // heldCertificates is the serial of every certificate the mailbox holds a
 // working key's certificate file of, lowest first.

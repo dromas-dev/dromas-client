@@ -90,9 +90,10 @@ type Options struct {
 	// RevocationFile, if not empty, is a new file Init writes the mailbox's
 	// revocation record to, once the mailbox is registered: the line
 	// [Mailbox.Revocation] gives, as dromas revocation make prints it. Before
-	// it makes anything, Init refuses a path inside a directory of the mailbox,
-	// one where something is, and one whose directory is not there
-	// (checkRevocationFile, writeRevocationFile).
+	// it makes anything, Init refuses a path where something is and one whose
+	// directory is not there (checkRevocationFile); a path Init itself makes,
+	// the base directory or a file of the mailbox, is refused at the write,
+	// after the mailbox is registered (writeRevocationFile).
 	RevocationFile string
 	// Restore has Init acknowledge a restore (dromas init --restore): where
 	// prekeys/ holds keys the state names nowhere (RestoreRequired), it adopts

@@ -23,7 +23,7 @@ import (
 // sent (PROTOCOL.md §12.4): it has expired or does not verify by this clock,
 // it is the identity's where the renewal is under a certificate, its certificate began
 // less than an hour before the clock or is at or below a serial the identity
-// revoked or runs longer than the server's maximum, it was made for longer
+// revoked or runs longer than the server's maximum a refusal of this command gave, it was made for longer
 // than the mailbox's lifetime now allows or has no record of when it was made,
 // its server serves a statement no earlier than it, or this mailbox no longer holds its key or its working key. The key passed
 // over is kept, and deleted as a retired prekey. A key is signed once, so no key is
