@@ -201,10 +201,12 @@ that was under certificates, run dromas cert switch <address> next.
 A profile without a config file gets one, with each path in full.
 
 With --revocation-file, init also writes the mailbox's revocation record, as
-dromas revocation make prints it, to a new file outside every directory of the
-mailbox, for the day the mailbox is lost: keep the file where only you can read
-it. On a mailbox already registered, init with --revocation-file writes the
-record and changes nothing else.
+dromas revocation make prints it, to the new file you name, for the day the
+mailbox is lost: keep the file where only you can read it. A record kept beside
+the mailbox is lost and stolen with it, and with the identity kept elsewhere it
+lets whoever copies the mailbox end the address. On a mailbox already
+registered, init with --revocation-file writes the record and changes nothing
+else.
 
 A mailbox whose state does not match its prekeys/, as after state is lost, or
 restored from an older copy while prekeys/ was kept, has failed: it receives,
@@ -273,7 +275,7 @@ restored from its identity alone needs no --restore.`,
 		})
 	c.Flags().BoolVar(&restore, "restore", false, "acknowledge a state that does not match prekeys/, as after state is lost or restored from an older copy, so the mailbox runs again; on a state that matches, it changes nothing")
 	c.Flags().BoolVar(&offline, "offline", false, "register the mailbox under a certificate, whose working key signs in place of its identity: permanent")
-	c.Flags().StringVar(&revocationFile, "revocation-file", "", "write this mailbox's revocation record, as dromas revocation make prints it, to this new `file`, outside every directory of the mailbox: $DROMAS_REVOCATION_FILE")
+	c.Flags().StringVar(&revocationFile, "revocation-file", "", "write this mailbox's revocation record, as dromas revocation make prints it, to this new `file`: $DROMAS_REVOCATION_FILE")
 	c.Flags().StringVar(&idType, "identity-type", "", "make the identity a key of this `type`, not ssh-ed25519: "+protocol.IdentityP256+", which every client verifies too")
 	return c
 }
@@ -1200,10 +1202,11 @@ func formatTime(d time.Duration) string {
 
 func (e *cli) switchCmd() *cobra.Command {
 	return command("switch <address>", "renew under a certificate, permanently; the address in full confirms it",
-		`Publish a new prekey now under a new working key and certificate, as dromas init
---offline registers one. From then on, the mailbox signs under certificates
-permanently, because its server and its correspondents accept no statement its
-identity signs below one. Messages its identity signed stay valid.
+		`Publish a new prekey now under a certificate, as dromas init --offline registers
+one. From then on, the mailbox signs under certificates permanently, because its
+server and its correspondents accept no statement its identity signs below one.
+Messages its identity signed stay valid. On a mailbox already under certificates,
+it is a renewal like dromas prekey renew, with the identity's key here.
 
 Type the mailbox's address in full as the confirmation.`,
 		checked(nargs(1, 1), func(c *cobra.Command, args []string) error {
@@ -1352,8 +1355,7 @@ func (e *cli) installCmd() *cobra.Command {
 		`Check the certificate in the file, as ssh-keygen -s writes one for the request
 dromas cert request printed last, and publish a new prekey under it. The
 certificate is checked by every rule a verifier holds it to, for this mailbox's
-working key, at a serial no lower than the request's, running no longer than
-its server takes.
+working key, at a serial no lower than the request's.
 
 A certificate that began less than an hour ago is refused until that hour has
 passed. A certificate is refused, too, where the identity has revoked

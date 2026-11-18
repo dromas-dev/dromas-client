@@ -30,11 +30,10 @@ import (
 //	work/<n>-cert.pub   its certificate, serial n
 //
 // so "ssh-keygen -Y sign -f work/<n>-cert.pub" signs with it. Where the
-// identity's key is not here, a renewal is signed under the newest
-// certificate the mailbox holds that can sign one (heldWorker), and its
-// identity holder certifies the next working key (certrequest.go): between
-// certificates, the mailbox renews under its current one (PROTOCOL.md
-// §12.7). The one in use is the one under the certificate of the prekey this
+// identity's key is not here, a renewal is signed under the certificate in
+// use (heldWorker), and its identity holder certifies the next working key
+// (certrequest.go): between certificates, the mailbox renews under its
+// current one (PROTOCOL.md §12.7). The one in use is the one under the certificate of the prekey this
 // mailbox published last. Older ones are deleted once a prekey under a later
 // certificate is published: the server then takes no pass under them, and
 // what they signed is already signed. A mailbox whose identity signs keeps
@@ -86,10 +85,10 @@ func (b *Mailbox) makeWork(n uint64, lifetime time.Duration) (*sign.Work, *proto
 // (st.under); otherwise a NEW working key of serial that the identity
 // certifies, running for life (makeWork). Where the identity's key is not
 // here and the renewal asks for no new certificate (st.fresh unset), it is
-// the newest certificate the mailbox holds that can sign one (heldWorker):
-// between certificates, the mailbox renews under its current one (PROTOCOL.md
-// §12.7). A mailbox that holds none fails as identity_locked, as its renewal
-// did before it looked, and its identity holder certifies a new working key
+// the certificate in use (heldWorker): between certificates, the mailbox
+// renews under its current one (PROTOCOL.md §12.7). Where that one cannot
+// sign a renewal, it fails as identity_locked, as its renewal did before it
+// looked, and its identity holder certifies a new working key
 // ([Mailbox.RequestCertificate]).
 func (b *Mailbox) certifiedSigner(serial uint64, life time.Duration, st *ownRead) (*sign.Work, *protocol.Certificate, error) {
 	if st.under != 0 {
@@ -107,22 +106,18 @@ func (b *Mailbox) certifiedSigner(serial uint64, life time.Duration, st *ownRead
 	if !errors.Is(herr, errNoHeldWorker) {
 		return nil, nil, herr // a fault of the mailbox's own, said as it is
 	}
-	return nil, nil, &IdentityLockedError{File: locked.File, Agent: locked.Agent, Reason: locked.Reason + ", and no certificate this mailbox holds can sign a renewal (each is below the one in use, has ended, began less than an hour ago, is revoked, or has a working key someone else holds): where the identity is kept elsewhere, dromas cert request asks its holder for a certificate"}
+	return nil, nil, &IdentityLockedError{File: locked.File, Agent: locked.Agent, Reason: locked.Reason + ", and the certificate in use cannot sign a renewal (it has ended, began less than an hour ago, is revoked, or has a working key someone else holds): where the identity is kept elsewhere, dromas cert request asks its holder for a certificate"}
 }
 
-// heldWorker is the newest working key this mailbox holds whose certificate
-// can sign a renewal: the certificate in use or a later one (between
-// certificates, the mailbox renews under its current one, PROTOCOL.md §12.7),
-// valid at the clock, begun protocol.MaxSkew or more before it (§12.4),
-// covered by none of the mailbox's own revocation of its certificates, and not
-// one whose working key a statement the mailbox did not make shows someone
-// else holds (§12.7; seal's rule).
+// heldWorker is the working key of the certificate in use, where that
+// certificate can sign a renewal (between certificates, the mailbox renews
+// under its current one, PROTOCOL.md §12.7): valid at the clock, begun
+// protocol.MaxSkew or more before it (§12.4), covered by none of the
+// mailbox's own revocation of its certificates, and not one whose working key
+// a statement the mailbox did not make shows someone else holds (§12.7;
+// seal's rule).
 func (b *Mailbox) heldWorker() (*sign.Work, *protocol.Certificate, error) {
-	ks, err := b.heldCertificates()
-	if err != nil {
-		return nil, nil, err
-	}
-	inUse, err := b.publishedRank()
+	k, err := b.publishedRank()
 	if err != nil {
 		return nil, nil, err
 	}
@@ -130,25 +125,16 @@ func (b *Mailbox) heldWorker() (*sign.Work, *protocol.Certificate, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	for _, k := range slices.Backward(ks) {
-		if k < inUse {
-			break
-		}
-		if nm.showsTaken(k) {
-			continue
-		}
-		w, c, err := b.worker(k)
-		if err != nil || c.NotBefore().After(b.now().Add(-protocol.MaxSkew)) || b.ownRevokes(k) {
-			continue
-		}
-		return w, c, nil
+	w, c, err := b.worker(k)
+	if err != nil || c.NotBefore().After(b.now().Add(-protocol.MaxSkew)) || b.ownRevokes(k) || nm.showsTaken(k) {
+		return nil, nil, errNoHeldWorker
 	}
-	return nil, nil, errNoHeldWorker
+	return w, c, nil
 }
 
-// errNoHeldWorker is heldWorker's answer where it looked and no certificate
-// the mailbox holds can sign a renewal: every other error of its is a fault.
-var errNoHeldWorker = errors.New("this mailbox holds no certificate that can sign a renewal")
+// errNoHeldWorker is heldWorker's answer where the certificate in use cannot
+// sign a renewal: every other error of its is a fault.
+var errNoHeldWorker = errors.New("the certificate in use cannot sign a renewal")
 
 // heldCertificates is the serial of every certificate the mailbox holds a
 // working key's certificate file of, lowest first.

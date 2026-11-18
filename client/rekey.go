@@ -253,11 +253,11 @@ type ownRead struct {
 	// mailbox published its last statement under one, its server serves one,
 	// or its owner asked for one.
 	certify bool
-	// fresh is set when the renewal is under a NEW working key and
-	// certificate whatever the mailbox holds: its owner asked for one (dromas
-	// cert switch), or it is the remedy. Without it, a renewal under a
-	// certificate whose identity's key is not here renews under the newest
-	// certificate the mailbox holds that can sign one (heldWorker; PROTOCOL.md
+	// fresh is set when a statement the renewal signs is under a new working
+	// key its identity certifies, never under the certificate in use: its
+	// owner asked for a certificate (dromas cert switch), or it is the
+	// remedy. Without it, a renewal under a certificate whose identity's key
+	// is not here renews under the certificate in use (heldWorker; PROTOCOL.md
 	// §12.7).
 	fresh bool
 	// under is the serial of the certificate the renewal is signed under, one
@@ -441,7 +441,7 @@ func (b *Mailbox) nextNumber(st *ownRead, unused bool) (uint64, *protocol.Prekey
 		// statement is: its key stays, as a retired one.
 		known = begun
 	case begun > known:
-		signed, spent, err := b.signedPrekey(begun, st.certify, st.fresh)
+		signed, spent, err := b.signedPrekey(begun, st.certify)
 		if err != nil {
 			return 0, nil, err
 		}
@@ -511,12 +511,9 @@ func (b *Mailbox) makeRenewal(ctx context.Context, st *ownRead, next uint64, p *
 // ahead of where it reads now: a reader whose clock a server takes may not
 // have reached its start), whose working key the mailbox holds and no
 // statement the mailbox did not make shows another holds (PROTOCOL.md §12.7;
-// heldWorker's and seal's rule), and, where the renewal is under a new working
-// key whatever the mailbox holds (fresh), the certificate made with it, never
-// one the mailbox held (heldWorker); and either way, not made after the clock
-// reads now. If it signed one that cannot be, the serial is spent. If it
+// heldWorker's and seal's rule); and not made after the clock reads now. If it signed one that cannot be, the serial is spent. If it
 // signed nothing, neither: a key it made and never signed is free to use.
-func (b *Mailbox) signedPrekey(serial uint64, certify, fresh bool) (p *protocol.Prekey, spent bool, err error) {
+func (b *Mailbox) signedPrekey(serial uint64, certify bool) (p *protocol.Prekey, spent bool, err error) {
 	rec, err := b.prekeyOf(serial)
 	if err != nil || rec == nil {
 		return nil, false, err
@@ -533,9 +530,6 @@ func (b *Mailbox) signedPrekey(serial uint64, certify, fresh bool) (p *protocol.
 		return nil, true, nil
 	}
 	if c := by.Certificate(); c != nil {
-		if fresh && c.Serial() != serial {
-			return nil, true, nil // under a held certificate, not a new one
-		}
 		if nm, err := b.notMade(); err != nil {
 			return nil, false, err
 		} else if nm.showsTaken(c.Serial()) {
@@ -980,8 +974,9 @@ func (b *Mailbox) removePrekey(n uint64) error {
 		return err
 	}
 	// Working key n goes only below the certificate in use: statements after
-	// prekey n may be signed under n's certificate (heldWorker), and one
-	// above it may be a certificate the identity holder gave.
+	// prekey n may be signed under n's certificate, the one in use
+	// (heldWorker), and one above it may be a certificate the identity holder
+	// gave.
 	if rank, err := b.publishedRank(); err == nil && n < rank {
 		for _, ext := range []string{"", ".pub", "-cert.pub"} {
 			if err := removeIfExists(b.workStem(n) + ext); err != nil {

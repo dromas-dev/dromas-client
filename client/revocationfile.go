@@ -9,29 +9,14 @@ import (
 	"path/filepath"
 )
 
-// revocationFileDirs are the directories of the mailbox that the record Init
-// writes (Options.RevocationFile) may not be in: each directory of its layout
-// (layoutParts), and the identity file's.
-func (b *Mailbox) revocationFileDirs() []layoutPart {
-	dirs := []layoutPart{{name: "identity-file's directory", path: filepath.Dir(b.layout.IdentityFile)}}
-	for _, p := range layoutParts(b.dir, b.layout) {
-		if !p.file {
-			dirs = append(dirs, p)
-		}
-	}
-	return dirs
-}
-
 // revocationFileThere is the refusal of a revocation file where something is.
 func revocationFileThere(name string) error {
 	return fmt.Errorf("revocation-file, %s, is there already: init writes the record to a new file, and replaces none", name)
 }
 
 // checkRevocationFile refuses Options.RevocationFile where its directory is not
-// there, where something is there, a link among them, and where it is inside a
-// directory of the mailbox (revocationFileDirs) or is one. Each place is
-// compared where it really is, through symlinks, as CheckLayout compares the
-// parts. A record kept beside the identity is lost and stolen with it.
+// there, and where something is there, a link among them. A record kept beside
+// the mailbox is lost and stolen with it.
 func (b *Mailbox) checkRevocationFile() error {
 	name := b.revocationFile
 	if fi, err := os.Stat(filepath.Dir(name)); err != nil || !fi.IsDir() {
@@ -41,20 +26,6 @@ func (b *Mailbox) checkRevocationFile() error {
 		return revocationFileThere(name)
 	} else if !errors.Is(err, fs.ErrNotExist) {
 		return fmt.Errorf("revocation-file, %s: %w", name, err)
-	}
-	where, err := realPath(name)
-	if err != nil {
-		return fmt.Errorf("revocation-file, %s: %w", name, err)
-	}
-	seen := places{}
-	for _, d := range b.revocationFileDirs() {
-		dir, err := realPath(d.path)
-		if err != nil {
-			return fmt.Errorf("%s, %s: %w", d.name, d.path, err)
-		}
-		if seen.same(where, dir) || seen.inside(where, dir) {
-			return fmt.Errorf("revocation-file, %s, is inside %s, %s: a record kept beside the identity is lost and stolen with it, so write it outside every directory of the mailbox", name, d.name, d.path)
-		}
 	}
 	return nil
 }

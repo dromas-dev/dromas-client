@@ -362,7 +362,7 @@ umask 077; dromas revocation make > <file>
 dromas revocation publish --record <file> <address>   # later, without the mailbox or its key
 ```
 
-`dromas init --revocation-file <file>` writes the record to a new file when it creates the mailbox. `dromas init` rejects a path inside one of the mailbox's directories.
+`dromas init --revocation-file <file>` writes the record to a new file when it creates the mailbox. A record kept beside the mailbox is lost and stolen with it, and with the identity kept elsewhere it lets whoever copies the mailbox end the address.
 
 To learn of another mailbox's revocation:
 
@@ -399,7 +399,7 @@ The mailbox signs messages under its certificate until `certificate_signs_messag
 2. On the holder, save `working_key` as `request.pub` in the directory of the identity key file, and run `command` there. `command` names the key file `identity`: give the file's own name if it differs. For an identity in the holder's ssh-agent, put `-U` before `-s`, and give the identity's public key file in place of `identity`. `ssh-keygen` writes `request-cert.pub`.
 3. On the mailbox, run `dromas cert install request-cert.pub`. The mailbox checks the certificate and renews under it.
 
-`command` makes a certificate that runs for the longest the server takes, and dates its start an hour back, so `cert install` accepts it at once. A request made later replaces the one before. `cert install` rejects a certificate for another request, one whose serial is below the request's `lowest_serial`, one that runs longer than the server takes, one whose start is less than an hour before the mailbox's clock, and one for a request made before the identity revoked certificates, wherever the revocation was published.
+`command` makes a certificate that runs for the longest the server takes, and dates its start an hour back, so `cert install` accepts it at once. A request made later replaces the one before. `cert install` rejects a certificate for another request, one whose serial is below the request's `lowest_serial`, one whose start is less than an hour before the mailbox's clock, and one for a request made before the identity revoked certificates, wherever the revocation was published.
 
 ### If the working key is stolen
 

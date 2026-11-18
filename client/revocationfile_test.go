@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -75,55 +74,6 @@ func TestInitWritesTheRevocationRecordWhereItsOwnerSays(t *testing.T) {
 	}
 	if more := e.srv.Requests()[calls:]; len(more) != 0 {
 		t.Errorf("init again called the server: %+v", more)
-	}
-}
-
-// Init refuses a revocation file inside a directory of the mailbox, or at one,
-// before it makes anything: no directory, no key, no call to its server. A path
-// through a link that leads into one is refused as the place the link leads to.
-// The directory that holds every part of the mailbox is none of them.
-func TestARevocationFileInsideTheMailboxIsRefused(t *testing.T) {
-	t.Parallel()
-	e := newEnv(t)
-	root := t.TempDir()
-	dir := filepath.Join(root, "base")
-	opt := e.opts()
-	opt.Layout = layoutIn(root)
-	refused := func(what, record string) {
-		t.Helper()
-		o := opt
-		o.RevocationFile = record
-		if _, err := client.Init(t.Context(), dir, o); err == nil || !strings.Contains(err.Error(), "is inside") {
-			t.Errorf("%s: %v", what, err)
-		}
-		if exists(record) || exists(opt.Layout.IdentityFile) || len(e.srv.Requests()) != 0 {
-			t.Errorf("%s: init made something before it refused", what)
-		}
-	}
-	refused("the base directory itself", dir)
-	if _, err := os.Lstat(dir); err == nil {
-		t.Error("init made the base directory before it refused")
-	}
-	dirs := client.RevocationFileDirs(dir, opt.Layout)
-	if !strings.Contains(strings.Join(dirs, "\n"), filepath.Dir(opt.Layout.IdentityFile)) {
-		t.Fatalf("the identity file's directory is not among %q", dirs)
-	}
-	for i, d := range dirs {
-		if err := os.MkdirAll(d, 0o700); err != nil {
-			t.Fatal(err)
-		}
-		refused(d, filepath.Join(d, "record.json"))
-		link := filepath.Join(root, "link"+strconv.Itoa(i))
-		if err := os.Symlink(d, link); err != nil {
-			t.Logf("no link: %v", err) // Windows may not let this user make one
-			continue
-		}
-		refused("a link to "+d, filepath.Join(link, "record.json"))
-	}
-	o := opt
-	o.RevocationFile = filepath.Join(root, "record.json")
-	if _, err := client.Init(t.Context(), dir, o); err != nil {
-		t.Fatalf("a record beside the mailbox's directories: %v", err)
 	}
 }
 

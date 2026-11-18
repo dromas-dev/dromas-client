@@ -210,7 +210,7 @@ func (b *Mailbox) status() (*Status, error) {
 	// then, unless the key is unlocked, senders are refused once the prekey
 	// expires. A drain or a send the lock stops fails as identity_locked
 	// itself.
-	// A mailbox under a certificate renews under the one it holds while the
+	// A mailbox under a certificate renews under the one in use while the
 	// key is locked (heldWorker), so only its certificate's end needs a look.
 	if !s.Revoked && !certified && (s.IdentityKey == KeyPassphrase || s.IdentityKey == KeyNone) && b.renewDue() {
 		when := "once the prekey expires"
