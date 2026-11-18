@@ -65,9 +65,8 @@ type Certificate struct {
 // key, byte for byte; both dates at or before LastDate; running no longer than
 // MaxCertificateLifetime; begun, and not ended. It is in the one form its makers
 // write, NewCertificate and "ssh-keygen -s … -O clear": a nonce of 32 bytes,
-// no critical option, no extension and an empty reserved field, so a
-// signature under it is as long as its identity's type gives
-// (SignatureBound), and the identity's signature on it in its one form.
+// no critical option, no extension and an empty reserved field, and the
+// identity's signature on it in its one form.
 func CheckCertificate(id *Identity, key ssh.PublicKey, now time.Time) (*Certificate, error) {
 	cert, err := certificateForm(id, key)
 	if err != nil {

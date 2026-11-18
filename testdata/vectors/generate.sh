@@ -742,10 +742,7 @@ at record-ok-revocation-signature '{"identity":"%s","revocation_signature":"%s"}
 at record-ok-null-members '{"identity":"%s","revocation_signature":"%s","revoked_certificates":null,"revoked_certificates_signature":null}' "$ID_A" "$REV"
 at record-ok-unknown-member '{"identity":"%s","revocation_signature":"%s","later":[1,{"x":true}]}' "$ID_A" "$REV"
 at record-ok-names-in-another-case '{"identity":"%s","revocation_signature":"%s","Revoked_Certificates":"%s","REVOKED_CERTIFICATES_SIGNATURE":"%s"}' "$ID_A" "$REV" "$RC" "$RCS" # members it does not know: no revocation of certificates
-at record-bad-empty-object '{}' # a record holds the identity and at least one of its revocations
-at record-bad-null-members '{"identity":null,"revocation_signature":null,"revoked_certificates":null,"revoked_certificates_signature":null}'
-at record-bad-identity-alone '{"type":"revocation_record","identity":"%s"}' "$ID_A"
-at record-bad-no-identity '{"revocation_signature":"%s"}' "$REV"
+at record-ok-empty-object '{}'
 at record-bad-empty ''
 at record-bad-an-array '[]'
 at record-bad-identity-a-number '{"identity":5,"revocation_signature":"%s"}' "$REV"

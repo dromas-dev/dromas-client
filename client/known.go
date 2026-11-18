@@ -44,11 +44,6 @@ type own struct {
 	statement *protocol.Prekey
 	signer    *protocol.Signer
 	bad       error
-	// certs is the revocation of this mailbox's certificates the read showed,
-	// verified, or nil: there beside a fault in keeping it too, since what
-	// its server holds and showed is so whether or not this mailbox could keep
-	// it (#406 item 1).
-	certs *protocol.RevokedCertificates
 	// notMade is set when the statement served verifies and is one this mailbox
 	// did not make (noteServed).
 	notMade bool
@@ -68,8 +63,6 @@ type own struct {
 // The error is a fault here, after which nothing more is kept, or the mailbox's
 // own revocation, a [RevokedError], once the read showed one that verifies:
 // final for whatever read. What the server did not answer is the value's err.
-// The value comes back beside an error too: the revocation of the mailbox's
-// certificates the read showed, verified, is its certs, kept or not.
 func (b *Mailbox) known(ctx context.Context) (*own, error) {
 	o := &own{at: atUnread}
 	var br protocol.MailboxResponse
@@ -85,10 +78,7 @@ func (b *Mailbox) known(ctx context.Context) (*own, error) {
 	case code(err) == protocol.CodeMailboxNotFound:
 		o.at = atNone
 		var held protocol.Revocations
-		resp, err := b.call(ctx, http.MethodGet, revocationPath(b.id.Address()), nil, nil, &held)
-		if err == nil {
-			err = recordAnswer(revocationPath(b.id.Address()), resp, &held)
-		}
+		_, err := b.call(ctx, http.MethodGet, revocationPath(b.id.Address()), nil, nil, &held)
 		switch {
 		case errors.As(err, &gone):
 			return o, err
@@ -108,10 +98,6 @@ func (b *Mailbox) known(ctx context.Context) (*own, error) {
 		o.err = err
 	}
 	if rec != nil {
-		if len(rec.RevokedCertificates) > 0 {
-			// What does not verify counts as nothing shown.
-			o.certs, _ = protocol.VerifyRevokedCertificates(b.id.Address(), rec.Identity, rec.RevokedCertificates, rec.RevokedCertificatesSignature)
-		}
 		if gone, err := b.take(b.id.Address(), rec); err != nil {
 			return o, err
 		} else if gone {

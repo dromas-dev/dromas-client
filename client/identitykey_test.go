@@ -676,49 +676,6 @@ func TestARevocationLetsGoOfTheIdentitysKey(t *testing.T) {
 	}
 }
 
-// A revoked mailbox reaches no agent: status of one makes no connection to the
-// agent's socket, and says where its key file is alone.
-func TestStatusOfARevokedMailboxAsksNoAgent(t *testing.T) {
-	t.Parallel()
-	e := newEnv(t)
-	b := e.mailbox()
-	revoke(t, e, b)
-	if _, err := b.Receive(t.Context()); err == nil {
-		t.Fatal("a revoked mailbox received")
-	}
-	var dialed atomic.Int32
-	dir, err := os.MkdirTemp("", "dra")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(dir) })
-	socket := filepath.Join(dir, "s")
-	l, err := net.Listen("unix", socket)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = l.Close() })
-	go func() {
-		for {
-			c, err := l.Accept()
-			if err != nil {
-				return
-			}
-			dialed.Add(1)
-			_ = c.Close()
-		}
-	}()
-	opt := e.opts()
-	opt.Agent = socket
-	st, err := reopen(t, b, opt).Status(t.Context())
-	if err != nil || !st.Revoked || st.IdentityKey != client.KeyFile {
-		t.Fatalf("status of a revoked mailbox: %v, %+v", err, st)
-	}
-	if dialed.Load() != 0 {
-		t.Errorf("status of a revoked mailbox reached its agent %d times", dialed.Load())
-	}
-}
-
 // init takes an identity.pub it cannot read for an identity it cannot read,
 // never for no identity: a link to nothing (a volume not mounted), an empty
 // file and one it may not read are refused, and init writes no key and leaves

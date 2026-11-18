@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	jsonv2 "encoding/json/v2"
 	"io"
 	"os"
 	"path/filepath"
@@ -27,15 +26,16 @@ func unseen(s string) bool {
 	})
 }
 
-// show and peer allow print a line inbox/ or held/ keeps only when it is,
-// byte for byte, the line recv writes (#298): recv's own lines, with every
-// member it may write and with a JSON body, read back unchanged, what nobody
-// sees escaped in them. A file someone else wrote is none, though it reads
-// as the same record: its tag characters raw, a member recv never writes
-// (a type and an id, which would stand twice in the line printed), a space
-// after it, or its members in another order. show refuses it, and peer allow
-// delivers nothing of it; neither prints anything of it. Each file is edited
-// from its own line, so held/'s is c's, which peer allow of c reaches (#390).
+// show and peer allow print a message inbox/ or held/ keeps as the line recv
+// writes of its record (#298), rebuilt: recv's own lines, with every member it
+// may write and with a JSON body, read back unchanged, what nobody sees
+// escaped in them. A file someone else wrote that reads as the same record,
+// with its tag characters raw, a space after it, or its members in another
+// order, is printed as that line, rebuilt. A file that is no message to this
+// mailbox, here the message line around one, is none: show refuses it, and
+// peer allow delivers nothing of it; neither prints anything of it. Each file
+// is edited from its own line, so held/'s is c's, which peer allow of c
+// reaches (#390).
 func TestOnlyRecvsOwnLineIsShown(t *testing.T) {
 	ctx := context.Background()
 	srv := fakeserver.New(t, time.Now)
@@ -102,45 +102,51 @@ func TestOnlyRecvsOwnLineIsShown(t *testing.T) {
 	}
 	lines := map[string][]byte{inbox: must(t, inbox), held: must(t, held)}
 	for name, edit := range map[string]func([]byte) []byte{
-		"its tag characters raw": bare,
-		"the message line around it": func(kept []byte) []byte {
-			return slices.Concat([]byte(`{"type":"message","id":"`+strings.Repeat("0", 64)+`","envelope":`), kept, []byte("}"))
-		},
+		"its tag characters raw":       bare,
 		"a space after it":             func(kept []byte) []byte { return append(append([]byte{}, kept...), ' ') },
 		"its members in another order": reordered,
 	} {
-		for f, kept := range lines {
-			if err := os.WriteFile(f, edit(kept), 0o600); err != nil {
-				t.Fatal(err)
-			}
+		if err := os.WriteFile(inbox, edit(lines[inbox]), 0o600); err != nil {
+			t.Fatal(err)
 		}
 		var out bytes.Buffer
-		if err := do(ctx, "inbox show", []string{res.Delivered[0].ID}, strings.NewReader(""), &out, io.Discard); err == nil || out.Len() != 0 {
+		if err := do(ctx, "inbox show", []string{res.Delivered[0].ID}, strings.NewReader(""), &out, io.Discard); err != nil || out.String() != `{"type":"message","id":"`+res.Delivered[0].ID+`","envelope":`+string(lines[inbox])+"}\n" {
 			t.Errorf("show of a file with %s: %v, printed %+q", name, err, out.String())
 		}
-		out.Reset()
-		err := do(ctx, "peer allow", []string{c.Address().String()}, strings.NewReader(""), &out, io.Discard)
-		_, gone := os.Stat(held)
-		if err != nil || strings.Contains(out.String(), `"type":"message"`) || unseen(out.String()) || gone != nil {
-			t.Errorf("peer allow of c with its held file with %s: %v, printed %+q, moved out of held/ %v", name, err, out.String(), gone != nil)
+	}
+	around := func(kept []byte) []byte {
+		return slices.Concat([]byte(`{"type":"message","id":"`+strings.Repeat("0", 64)+`","envelope":`), kept, []byte("}"))
+	}
+	for f, kept := range lines {
+		if err := os.WriteFile(f, around(kept), 0o600); err != nil {
+			t.Fatal(err)
 		}
 	}
-	// Control: c's line as recv kept it, which peer allow of c moves and
-	// prints.
-	if err := os.WriteFile(held, lines[held], 0o600); err != nil {
+	var out bytes.Buffer
+	if err := do(ctx, "inbox show", []string{res.Delivered[0].ID}, strings.NewReader(""), &out, io.Discard); err == nil || out.Len() != 0 {
+		t.Errorf("show of a file with the message line around it: %v, printed %+q", err, out.String())
+	}
+	out.Reset()
+	err = do(ctx, "peer allow", []string{c.Address().String()}, strings.NewReader(""), &out, io.Discard)
+	if _, gone := os.Stat(held); err != nil || strings.Contains(out.String(), `"type":"message"`) || gone != nil {
+		t.Errorf("peer allow of c with its held file with the message line around it: %v, printed %+q, moved out of held/ %v", err, out.String(), gone != nil)
+	}
+	// c's line with its tag characters raw, which peer allow of c moves and
+	// prints as recv kept it.
+	if err := os.WriteFile(held, bare(lines[held]), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	var out bytes.Buffer
+	out.Reset()
 	err = do(ctx, "peer allow", []string{c.Address().String()}, strings.NewReader(""), &out, io.Discard)
-	if _, gone := os.Stat(held); err != nil || !strings.Contains(out.String(), `"type":"message"`) || gone == nil {
-		t.Errorf("control: peer allow of c with its held line as recv kept it: %v, printed %+q, moved out of held/ %v", err, out.String(), gone != nil)
+	if _, gone := os.Stat(held); err != nil || !strings.Contains(out.String(), `"envelope":`+string(lines[held])+"}") || unseen(out.String()) || gone == nil {
+		t.Errorf("peer allow of c with its held line's tag characters raw: %v, printed %+q, moved out of held/ %v", err, out.String(), gone != nil)
 	}
 }
 
 // show prints the line inbox/<id>.json keeps, as recv printed it. A file
-// that is not that one line, as a recv stopped midway can leave one, is an
-// error line and exit 1: never a panic, a line that is not JSON, or two
-// lines. peer allow skips such a file in held/.
+// that is no message to this mailbox is an error line and exit 1: never a
+// panic, a line that is not JSON, or two lines. One with a space before it or
+// a line feed after it is printed as recv's one line, rebuilt.
 func TestShowHoldsTheFileToTheLineRecvKept(t *testing.T) {
 	ctx := context.Background()
 	srv := fakeserver.New(t, time.Now)
@@ -169,10 +175,8 @@ func TestShowHoldsTheFileToTheLineRecvKept(t *testing.T) {
 	for _, c := range []struct{ name, kept string }{
 		{"empty", ""},
 		{"cut short", string(line[:len(line)/2])},
-		{"a line feed after it", string(line) + "\n"},
 		{"two lines", string(line) + "\n" + `{"type":"refused","id":"` + strings.Repeat("0", 64) + `","code":"invalid_signature","detail":"x"}`},
-		{"a space before it", " " + string(line)},
-		{"one JSON object that is no line recv keeps", `{"v":1}`},
+		{"one JSON object that is no message", `{"v":1}`},
 		{"a line to another mailbox", strings.ReplaceAll(string(line), b.Address().String(), a.Address().String())},
 	} {
 		if err := os.WriteFile(inbox, []byte(c.kept), 0o600); err != nil {
@@ -188,25 +192,28 @@ func TestShowHoldsTheFileToTheLineRecvKept(t *testing.T) {
 			}()
 			code = report(do(ctx, "inbox show", []string{id}, strings.NewReader(""), &out, &errs), &errs)
 		}()
-		if code != 1 || out.Len() != 0 || !strings.Contains(errs.String(), "is not the line recv keeps") {
+		if code != 1 || out.Len() != 0 || !strings.Contains(errs.String(), "is not a message to this mailbox") {
 			t.Errorf("%s: exit %d, stdout %q, stderr %q", c.name, code, out.String(), errs.String())
 		}
 	}
-	// The line itself, in inbox/, is shown as it is: one message line.
-	if err := os.WriteFile(inbox, line, 0o600); err != nil {
-		t.Fatal(err)
+	// The line itself, in inbox/, is shown as it is, and with a space before
+	// it or a line feed after it as the same one message line.
+	for _, kept := range [][]byte{line, slices.Concat([]byte(" "), line), slices.Concat(line, []byte("\n"))} {
+		if err := os.WriteFile(inbox, kept, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		var out bytes.Buffer
+		if err := do(ctx, "inbox show", []string{id}, strings.NewReader(""), &out, io.Discard); err != nil || out.String() != `{"type":"message","id":"`+id+`","envelope":`+string(line)+"}\n" {
+			t.Errorf("show of %q: %v %q", kept, err, out.String())
+		}
 	}
-	var out bytes.Buffer
-	if err := do(ctx, "inbox show", []string{id}, strings.NewReader(""), &out, io.Discard); err != nil || strings.Count(out.String(), "\n") != 1 || jsonv2.Unmarshal(out.Bytes(), new(map[string]any)) != nil {
-		t.Fatalf("show of the line recv kept: %v %q", err, out.String())
-	}
-	// In held/, a line feed after the line is no line: peer allow moves
-	// nothing, and prints no empty line.
+	// In held/, a line feed after the line is the same line: peer allow
+	// moves it, and prints no empty line.
 	if err := os.WriteFile(held, append(line, '\n'), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	out.Reset()
-	if err := do(ctx, "peer allow", []string{a.Address().String()}, strings.NewReader(""), &out, io.Discard); err != nil || strings.Contains(out.String(), "\n\n") || strings.Contains(out.String(), `"type":"message"`) {
+	var out bytes.Buffer
+	if err := do(ctx, "peer allow", []string{a.Address().String()}, strings.NewReader(""), &out, io.Discard); err != nil || strings.Contains(out.String(), "\n\n") || !strings.Contains(out.String(), `"envelope":`+string(line)+"}") {
 		t.Errorf("peer allow of a held/ file with a line feed after its line: %v %q", err, out.String())
 	}
 }

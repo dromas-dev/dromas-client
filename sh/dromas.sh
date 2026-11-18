@@ -93,7 +93,7 @@ dr_wait(){ sed -n '2{/^[0-9]\{1,\}$/p;}' "$DR/error.meta" 2> /dev/null | sed 's/
 dr_dated(){ local d; d=$(sed -n '3{/^[A-Za-z0-9 ,:]*$/p;}' "$DR/error.meta" 2> /dev/null) && [ -n "$d" ] && jq -nr --arg d "$d" '$d | strptime("%a, %d %b %Y %H:%M:%S GMT") | mktime | todate' 2> /dev/null; }      # the time the last API error's Date header gives, the server's word
 dr_shape(){ # <answer> <mailbox|list|record|receipt|problem> → 0 only for one JSON object of that kind, each member this script reads of its type, and null as if the member were left out. An integer is from 0 to 2^53 - 1 and jq gives it back as digits, since bash reads it. A byte member is a string, read by dr_bytes. Members it does not read are ignored
   jq -en --arg k "$2" 'def s: . == null or type == "string"; def n: . == null or (type == "number" and . == floor and . >= 0 and . <= 9007199254740991 and (tostring | test("\\A(0|[1-9][0-9]*)\\z")));
-    def record: (.type | . == null or . == "revocation_record") and all(.identity, .revocation_signature, .revoked_certificates, .revoked_certificates_signature; s);
+    def record: all(.identity, .revocation_signature, .revoked_certificates, .revoked_certificates_signature; s);
     [inputs] | length == 1 and (.[0] | type == "object" and
     {mailbox: all(.identity, .prekey, .prekey_signature, .revoked_certificates, .revoked_certificates_signature; s),
      list: ((.next_cursor | . == null or (type == "string" and test("\\A[A-Za-z0-9_-]+\\z"))) and (.messages | . == null or (type == "array" and all(.[]; . == null or (type == "object" and (.id | s) and (.size | n and (. // 0) <= 16777216)))))),
@@ -269,9 +269,7 @@ dr_idcheck(){ # <identity document> [address] → 0 only for a two-line document
     ssh-ed25519) dr_keycheck "$(printf %s "${l#* }" | base64 -d | tail -c 32 | od -An -v -tx1 | tr -d ' \n')" ;;
   esac
 }
-dr_sigmax(){ case $(sed -n 2p "$1" | cut -d' ' -f1) in ssh-ed25519) echo 850 ;; ecdsa-sha2-nistp256) echo 947 ;; *) return 1 ;; esac; }      # <identity document> → the most bytes a signature by a mailbox of its key type may be, every byte of the file (PROTOCOL.md §3.2): its largest in the one form, in any namespace, by the identity or under a certificate it made. Nothing for a type this script does not verify
-dr_bound(){ local m; m=$(dr_sigmax "$2") && [ "$(wc -c < "$1")" -le "$m" ]; }      # <signature file> <identity document> → 0 only for a signature no longer than its identity's key type allows
-dr_blob(){ # <signature file> → the SSHSIG blob it armors, in hex, only for armour in its one form, the bytes ssh-keygen -Y sign and the Go client write (PROTOCOL.md §3.2), and at most 947 bytes, the most any identity key type allows (dr_sigmax): the BEGIN line, the base64 of the blob in its one encoding in lines of 70 characters, the END line, each ending in LF, and nothing before or after. The file is compared, as bytes, with the armour written back from the blob it holds, as the Go client's Dearmor compares it: any other form, CRLF, whitespace or a NUL among them, is refused. 1 for anything else
+dr_blob(){ # <signature file> → the SSHSIG blob it armors, in hex, only for armour in its one form, the bytes ssh-keygen -Y sign and the Go client write (PROTOCOL.md §3.2), and at most 947 bytes, the bound on a signature (PROTOCOL.md §3.2): the BEGIN line, the base64 of the blob in its one encoding in lines of 70 characters, the END line, each ending in LF, and nothing before or after. The file is compared, as bytes, with the armour written back from the blob it holds, as the Go client's Dearmor compares it: any other form, CRLF, whitespace or a NUL among them, is refused. 1 for anything else
   local t h
   [ "$(wc -c < "$1")" -le 947 ] || return 1
   t=$(sed '1d;$d' "$1" | tr -d '\n')      # what lies between the first line and the last, read as text: whatever it drops or a file holds besides, the comparison below refuses
@@ -327,7 +325,7 @@ dr_rank(){ # <signature> <identity document> <address> [namespace] → the rank 
 }
 dr_signed(){ # <address> <identity document> <namespace> <signature> <message> [at] → the rank of its signer (dr_rank), only for a signature by that identity's own key, or by a working key under a certificate of it that holds at the time given (now, without one): begun and not ended. 1 otherwise; 2 when all that fails is that the certificate has ended, 3 that it has not begun. Whether the address's revocation of certificates covers that signer is dr_certrevoked's
   local A=$1 r n a b t=${6:-$(dr_now)}
-  dr_bound "$4" "$2" && n=$(dr_rank "$4" "$2" "$A" "$3") || return 1
+  n=$(dr_rank "$4" "$2" "$A" "$3") || return 1
   if [ "$n" = 0 ]; then
     printf '%s %s\n' "$A" "$(sed -n 2p "$2")" > "$DR/signers"      # ONE line, built from checked bytes, chosen by the signing key's form: the identity's own key, with no cert-authority
     ssh-keygen -Y verify -f "$DR/signers" -I "$A" -n "$3" -s "$4" < "$5" > /dev/null 2>&1 && echo 0; return
@@ -427,7 +425,7 @@ dr_meet(){ local d="$DR/peers/$1"; mkdir -p "$d" && { [ -e "$d/identity.doc" ] |
 # recipe: revocation
 dr_revcheck(){ # <address> <identity document> <signature> → 0 only for a revocation of that address: the document hashes to it and is one this script verifies, and the signature is that identity's OWN over the fixed statement. The signers line names the identity's key with no cert-authority, so a working key's signature, which carries a certificate, is not taken: a working key can be stolen without the identity, and must not end the address
   local x k ns
-  dr_idcheck "$2" "$1" && dr_bound "$3" "$2" && dr_sshsig "$3" && [ "$k" = "$(dr_idkey "$2")" ] && [ "$ns" = "$(dr_asc "dromas-revoke-v1:$1")" ] || return 1      # in its one form: the identity's key byte for byte, in exactly its namespace
+  dr_idcheck "$2" "$1" && dr_sshsig "$3" && [ "$k" = "$(dr_idkey "$2")" ] && [ "$ns" = "$(dr_asc "dromas-revoke-v1:$1")" ] || return 1      # in its one form: the identity's key byte for byte, in exactly its namespace
   printf '%s %s\n' "$1" "$(sed -n 2p "$2")" > "$DR/signers"
   printf 'dromas-revoke-v1\n%s\n' "$1" | ssh-keygen -Y verify -f "$DR/signers" -I "$1" -n "dromas-revoke-v1:$1" -s "$3" > /dev/null 2>&1
 }
@@ -439,7 +437,7 @@ dr_gone(){ # <address> → 0 if this mailbox holds a revocation of it: peers/<ad
 }
 dr_certscheck(){ # <address> <identity document> <statement> <signature> → the serial it revokes through, only for a revocation of that address's certificates: signed by its identity's OWN key, as a revocation of the address is (no cert-authority, so a certificate cannot revoke another, or itself), and in its one exact form, the tag, the address and a serial, each on a line ending in LF, and nothing else. The serial is from 1 to 2^53 - 1 with no leading zero, compared by bash, whose numbers are exact there where awk's are not
   local L x k ns
-  dr_idcheck "$2" "$1" && dr_bound "$4" "$2" && dr_sshsig "$4" && [ "$k" = "$(dr_idkey "$2")" ] && [ "$ns" = "$(dr_asc "dromas-revoke-certs-v1:$1")" ] || return 1      # in its one form: the identity's key byte for byte, in exactly its namespace
+  dr_idcheck "$2" "$1" && dr_sshsig "$4" && [ "$k" = "$(dr_idkey "$2")" ] && [ "$ns" = "$(dr_asc "dromas-revoke-certs-v1:$1")" ] || return 1      # in its one form: the identity's key byte for byte, in exactly its namespace
   printf '%s %s\n' "$1" "$(sed -n 2p "$2")" > "$DR/signers"
   ssh-keygen -Y verify -f "$DR/signers" -I "$1" -n "dromas-revoke-certs-v1:$1" -s "$4" < "$3" > /dev/null 2>&1 || return 1
   mapfile -t L < "$3"
@@ -465,7 +463,7 @@ dr_keepcerts(){ # <address> <identity document> <statement> <signature> → keep
 dr_keep(){ # <address> <its identity document> <signature> → the revocation, kept for good: called only once dr_revcheck took it. A revoked address stays revoked
   if [ "$1" = "$(cat "$DR/address" 2> /dev/null)" ]; then dr_put "$3" "$DR/revoked.sig"; else dr_meet "$1" "$2" && dr_put "$3" "$DR/peers/$1/revoke.sig"; fi
 }
-dr_record(){ # <record> → the address it is a revocation of, only if it verifies; its parts are left in $DR/rev.doc and $DR/rev.sig. A record is one line of JSON, {type, identity, revocation_signature}: its type, revocation_record or left out (dr_shape), then the identity document and the signature, each base64
+dr_record(){ # <record> → the address it is a revocation of, only if it verifies; its parts are left in $DR/rev.doc and $DR/rev.sig. A record is one line of JSON, {type, identity, revocation_signature}: its type, which this script does not read, then the identity document and the signature, each base64
   local A
   dr_isrecord "$1" && dr_bytes "$1" identity "$DR/rev.doc" && dr_bytes "$1" revocation_signature "$DR/rev.sig" || return 1
   A=$(dr_address "$DR/rev.doc") && dr_revcheck "$A" "$DR/rev.doc" "$DR/rev.sig" && printf '%s\n' "$A"
@@ -506,8 +504,7 @@ dr_revocations(){ # <address> → reads the address's revocations from this mail
   local r w=$1; [ "$1" != "$(cat "$DR/address" 2> /dev/null)" ] || w="this mailbox"
   dr_gone "$1"; case $? in 0) return 0 ;; 3) return 3 ;; esac
   if dr_api GET "/v1/$1/revocation" > "$DR/rev.json" 2> "$DR/read.err"; then
-    [ "$(sed -n 1p "$DR/response.meta")" = 200 ] && dr_isrecord "$DR/rev.json" && jq -e '(.identity | strings | length > 0) and ([.revocation_signature, .revoked_certificates] | any(strings | length > 0))' "$DR/rev.json" > /dev/null 2>&1 ||
-      { dr_refuse "the server's answer for $w's revocations is not one this client reads: a 200 with a record that holds the identity and at least one revocation, each byte field base64"; return 2; }      # another 2xx, or a 2xx that is no record, is no answer, as one that is no JSON is (PROTOCOL.md §10.3, §12.3 check 7)
+    dr_isrecord "$DR/rev.json" || { dr_refuse "the server's answer for $w's revocations is not one this client reads: a record, each byte field base64"; return 2; }      # a 2xx that is no record is no answer, as one that is no JSON is (PROTOCOL.md §12.3 check 7)
     dr_take "$1"; return
   fi
   case $(dr_code) in
@@ -566,8 +563,6 @@ dr_seal(){ # <address> <envelope stem> [the mailbox dr_lookup read] → what to 
   local B=$1 o=$2 s="$DR/seal" A r k f t why ps pc ph d; rm -f "$s.P" "$s.sig" "$s.age" "$s.query"; A=$(cat "$DR/address") || return 1
   why=$(dr_envcheck "$o.P" "$A" "$B") && [ "$(wc -l < "$o.P")" -eq 1 ] && [ "$(jq -r .identity "$o.P")" = "$(dr_b64 "$DR/identity.doc")" ] || dr_refuse "the envelope is not one this mailbox made for that address${why:+: $why}" || return 1
   d=$(jq -nr --argjson t "$(dr_now)" '$t | todate') && jq -c --arg d "$d" '.sent_at = $d' "$o.P" > "$s.P" || return 1      # written again by jq, as dr_send wrote it: the script seals only an envelope it has just built
-  why=$(dr_envcheck "$s.P" "$A" "$B") && [ "$(wc -l < "$s.P")" -eq 1 ] && jq -e --arg d "$d" --slurpfile w "$o.P" '.sent_at == $d and del(.sent_at) == ($w[0] | del(.sent_at))' "$s.P" > /dev/null 2>&1 ||
-    dr_refuse "the envelope does not read back as itself once dated at this post${why:+: $why}" || return 1
   r=$(dr_resolve "$B" "${3-}") && read -r ps k pc ph <<< "$r" && [ -n "$ph" ] || return 1
   dr_finished || { dr_done $?; return 1; }      # at every signature, as at every pass and statement
   ssh-keygen -q -Y sign -n "dromas-msg-v1:$B" -f "$DR/identity" < "$s.P" > "$s.sig" && tail -n 1 "$s.sig" | cmp -s - <(printf -- '-----END SSH SIGNATURE-----\n') ||

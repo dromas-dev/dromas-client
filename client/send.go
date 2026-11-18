@@ -595,8 +595,7 @@ func (b *Mailbox) postSealed(ctx context.Context, to protocol.Address, s *sealed
 // attempt (PROTOCOL.md §9.1, §12.2), so the server keeps a message about as
 // long as its reader takes it (protocol.Retention). The line is written again
 // by the envelope's one writer (Envelope.Line), as sendWith wrote the entry:
-// the outbox is this mailbox's own, which no other client writes. It is read back
-// as the envelope it was, dated at this post, before it is signed. The msg_id
+// the outbox is this mailbox's own, which no other client writes. The msg_id
 // stays, and the reader drops a retry by it.
 //
 // The envelope is read as its recipient will read it, so one the recipient
@@ -677,9 +676,6 @@ func (b *Mailbox) seal(ctx context.Context, to protocol.Address, stem string, l 
 	if err != nil {
 		return nil, err
 	}
-	if dated, err := protocol.OpenEnvelopeRecord(line, b.id.Address(), to); err != nil || !sameEnvelope(dated, env) {
-		return nil, refuse("the outbox entry does not read back as itself once dated at this post")
-	}
 	r, err := pk.Recipient()
 	if err != nil {
 		return nil, err
@@ -708,11 +704,4 @@ func (b *Mailbox) seal(ctx context.Context, to protocol.Address, stem string, l 
 	// mailbox recorded: that is the highest seen, which another statement may
 	// have raised.
 	return &sealed{query: protocol.SendQuery{Statement: protocol.StatementHash(rs.statement)}, ciphertext: ct.Bytes(), line: line}, nil
-}
-
-// sameEnvelope reports whether two envelopes are one message, dated alike.
-func sameEnvelope(a, b *protocol.Envelope) bool {
-	return a.From == b.From && a.To == b.To && a.SentAt.Equal(b.SentAt) && a.MsgID == b.MsgID &&
-		bytes.Equal(a.Body, b.Body) && a.Subject == b.Subject && a.InReplyTo == b.InReplyTo &&
-		a.Supersedes == b.Supersedes && bytes.Equal(a.Identity, b.Identity)
 }

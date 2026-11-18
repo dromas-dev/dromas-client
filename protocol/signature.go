@@ -22,32 +22,14 @@ const (
 	armorWidth = 70 // ssh-keygen's line length
 )
 
-// MaxSignature is the most bytes an armored signature may be for a mailbox of any
-// identity key type defined here: the largest of their bounds
-// (SignatureBound). A field that carries one counts every byte it holds; in a
-// message it is the block from the BEGIN line through the END line and its
-// line feed. Dearmor refuses a longer one before reading it, so every
-// verifier here does, before it knows whose signature it is.
+// MaxSignature is the most bytes an armored signature may be (PROTOCOL.md
+// §3.2): the largest a mailbox of any identity key type defined here makes in
+// the one form, a P-256 identity's prekey statement under a certificate whose
+// r and s each take 33 bytes. A field that carries one counts every byte it
+// holds; in a message it is the block from the BEGIN line through the END
+// line and its line feed. Dearmor refuses a longer one before reading it, so
+// every verifier here does.
 const MaxSignature = 947
-
-// SignatureBound returns the most bytes an armored signature may be for a mailbox
-// whose identity is of key type t (PROTOCOL.md §3.2): what the mailbox signs, by its
-// identity or by a working key under a certificate its identity signed. It is
-// the largest signature a mailbox of that type makes in the one form, in any
-// namespace, under a certificate as NewCertificate makes one: the one form
-// fixes every byte but the namespace's and, for an ECDSA key, how many bytes
-// r and s take, each at most 33 for P-256. A type not defined here has none,
-// and every signature is over it.
-func SignatureBound(t string) int { return identityTypes[t].bound }
-
-// withinBound refuses a signature longer than the bound of the identity key
-// type t.
-func withinBound(signature []byte, t string) error {
-	if len(signature) > SignatureBound(t) {
-		return errors.New("a signature is longer than the most a signature may be for its identity's key type")
-	}
-	return nil
-}
 
 // Sign signs message in namespace and returns the signature armored
 // byte-for-byte as "ssh-keygen -Y sign" writes it.
@@ -61,9 +43,6 @@ func Sign(s ssh.Signer, message []byte, namespace string) ([]byte, error) {
 
 // Verify verifies an armored signature by id over message, in namespace.
 func Verify(id *Identity, message, signature []byte, namespace string) error {
-	if err := withinBound(signature, id.Type()); err != nil {
-		return err
-	}
 	blob, err := Dearmor(signature)
 	if err != nil {
 		return err

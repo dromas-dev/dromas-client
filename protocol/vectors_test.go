@@ -362,11 +362,11 @@ func TestVectorCertificates(t *testing.T) {
 		if _, err := CheckCertificate(a, key, now); !errors.Is(err, want) {
 			t.Errorf("%s: CheckCertificate: %v, want %v", name, err, want)
 		}
-		// A certificate that carries what its makers do not write (a
-		// critical option, extensions) makes a signature over the bound,
-		// which is refused before the certificate is read.
+		// A certificate that carries what its makers do not write (here,
+		// extensions) can make a signature over MaxSignature, which is
+		// refused before the certificate is read.
 		_, err := VerifySigned(a, st, sig, PrekeyNamespace(a.Address()), now)
-		if over := len(sig) > SignatureBound(a.Type()); over && err == nil || !over && !errors.Is(err, want) {
+		if over := len(sig) > MaxSignature; over && err == nil || !over && !errors.Is(err, want) {
 			t.Errorf("%s: VerifySigned: %v, want %v", name, err, want)
 		}
 		// Control: the signature is good under the certificate it carries,
@@ -933,18 +933,12 @@ func TestEveryOtherFormOfASignatureIsRefused(t *testing.T) {
 	}
 }
 
-// Each identity key type's bound is the largest signature a mailbox of that
-// type makes in the one form, and MaxSignature, what a verifier holds one to
-// before it knows the type, is the largest of them (PROTOCOL.md §3.2). The
-// largest is made here: in every namespace the protocol signs in, by the
-// identity and by a working key under a certificate as NewCertificate makes
-// it, each ECDSA signature's r and s written in the most bytes the one form
-// gives them, 33. An Ed25519 identity's signatures have one size in each
-// namespace, so its bound is exact: a prekey statement under a certificate.
-// What a mailbox signs is held to its identity's: with that bound lowered,
-// every verifier refuses the mailbox's signatures, a pass's included, and
-// another type's mailbox is untouched.
-func TestASignatureIsHeldToItsIdentitysBound(t *testing.T) {
+// MaxSignature is the largest signature a mailbox of any identity key type
+// makes in the one form (PROTOCOL.md §3.2). The largest is made here: in every
+// namespace the protocol signs in, by the identity and by a working key under
+// a certificate as NewCertificate makes it, each ECDSA signature's r and s
+// written in the most bytes the one form gives them, 33.
+func TestMaxSignatureIsTheLargestSignatureInTheOneForm(t *testing.T) {
 	now := vectorNow(t)
 	most := 0
 	for _, ty := range IdentityTypes() {
@@ -961,7 +955,6 @@ func TestASignatureIsHeldToItsIdentitysBound(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		largest, made := 0, 0
 		// What each signer signs (PROTOCOL.md §5): the identity, everything;
 		// a working key, statements, passes and messages.
 		for signer, namespaces := range map[ssh.Signer][]func(Address) string{
@@ -977,69 +970,12 @@ func TestASignatureIsHeldToItsIdentitysBound(t *testing.T) {
 				if err != nil {
 					t.Fatalf("%s: Sign wrote a signature Dearmor refuses: %v", ty, err)
 				}
-				largest, made = max(largest, len(Armor(widestECDSA(t, blob)))), max(made, len(sig))
+				most = max(most, len(Armor(widestECDSA(t, blob))))
 			}
 		}
-		if SignatureBound(ty) != largest {
-			t.Errorf("%s's bound is %d, and its largest signature in the one form %d", ty, SignatureBound(ty), largest)
-		}
-		if ty == IdentityEd25519 && made != largest {
-			t.Errorf("%s's largest signature is %d bytes as made, and %d as the one form gives it", ty, made, largest)
-		}
-		most = max(most, largest)
 	}
 	if most != MaxSignature {
-		t.Errorf("the largest bound is %d, and MaxSignature %d", most, MaxSignature)
-	}
-	if SignatureBound("no-such-key-type@dromas.invalid") != 0 {
-		t.Error("a key type not defined here has a bound")
-	}
-
-	a, b, c := vectorIdentity(t, "a"), vectorIdentity(t, "b"), vectorIdentity(t, "c")
-	pass := func(mailbox string) *Pass {
-		p, err := ParsePass(strings.TrimSuffix(string(read(t, mailbox+"/pass.authorization")), "\n"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		return p
-	}
-	pa, pb, pc := pass("a"), pass("b"), pass("c")
-	onRecord := sha256.Sum256(vectorCertificate(t, "a/work-cert.pub").Marshal())
-	bOnRecord, cOnRecord := sha256.Sum256(b.PublicKey().Marshal()), sha256.Sum256(c.PublicKey().Marshal())
-	// Ed25519's: A's under its certificate, B's by its identity. Then C's, a
-	// P-256 identity's.
-	verdicts := func() []error {
-		_, e1 := VerifySigned(a, read(t, "a/prekey-1.txt"), read(t, "a/prekey-1.txt.sig"), PrekeyNamespace(a.Address()), now)
-		e2 := Verify(a, read(t, "a/revoke.txt"), read(t, "a/revoke.sig"), RevokeNamespace(a.Address()))
-		_, e3 := pa.Verify(a, "dromas.example", now)
-		_, e4 := pa.VerifyUnder(onRecord, "dromas.example", now)
-		_, e5 := VerifySigned(b, read(t, "b/prekey-1.txt"), read(t, "b/prekey-1.txt.sig"), PrekeyNamespace(b.Address()), now)
-		_, e6 := pb.VerifyUnder(bOnRecord, "dromas.example", now)
-		_, e7 := VerifySigned(c, read(t, "c/prekey-1.txt"), read(t, "c/prekey-1.txt.sig"), PrekeyNamespace(c.Address()), now)
-		_, e8 := pc.VerifyUnder(cOnRecord, "dromas.example", now)
-		return []error{e1, e2, e3, e4, e5, e6, e7, e8}
-	}
-	for i, err := range verdicts() {
-		if err != nil {
-			t.Fatalf("control %d: %v", i, err)
-		}
-	}
-	ed := identityTypes[IdentityEd25519]
-	defer func() { identityTypes[IdentityEd25519] = ed }()
-	lowered := ed
-	lowered.bound = 396 // below every signature here
-	identityTypes[IdentityEd25519] = lowered
-	got := verdicts()
-	for i, err := range got[:6] {
-		if err == nil {
-			t.Errorf("Ed25519 identity's signature %d was taken over its identity's bound", i)
-		}
-	}
-	if !errors.Is(got[3], ErrPass) || !errors.Is(got[5], ErrPass) {
-		t.Errorf("a pass over its identity's bound, checked under the key on record: %v, %v", got[3], got[5])
-	}
-	if got[6] != nil || got[7] != nil {
-		t.Errorf("C's signatures, a P-256 identity's, were held to Ed25519's bound: %v, %v", got[6], got[7])
+		t.Errorf("the largest signature in the one form is %d bytes, and MaxSignature %d", most, MaxSignature)
 	}
 }
 

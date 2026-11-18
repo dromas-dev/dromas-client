@@ -244,9 +244,8 @@ func TestADeclarationNamesOnlyOptionalTypes(t *testing.T) {
 	identityTypes[opt] = struct {
 		check    func(ssh.PublicKey) error
 		work     string
-		bound    int
 		optional bool
-	}{work: IdentityEd25519, bound: 850, optional: true}
+	}{work: IdentityEd25519, optional: true}
 	identityOrder = append(slices.Clone(order), opt)
 	t.Cleanup(func() {
 		delete(identityTypes, opt)
