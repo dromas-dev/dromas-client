@@ -282,60 +282,18 @@ func (b *Mailbox) flush(ctx context.Context, due bool) (*Flushed, error) {
 	if len(names) > 0 {
 		aclErr = b.syncACL(ctx)
 	}
-	var errs []error
 	// The recipients the server has answered about in this flush. Each post
 	// reads its recipient's mailbox whatever is marked here (resolve).
 	asked := newLookups()
-	// The entries of one message, one to each member of its group, are one
-	// unit: the budget is checked for the unit's entries still to go before
-	// each post, and they go together or wait together (sendUnit).
-	units := unitsOf(names)
-	for ui, unit := range units {
-		uerrs, stop := b.sendUnit(ctx, unit, asked, aclErr, out)
-		errs = append(errs, uerrs...)
-		if stop != nil {
-			// Refused for a reason about the sender or the path: every entry
-			// of the units after this one waits as long, untried.
-			var rest []string
-			for _, u := range units[ui+1:] {
-				rest = append(rest, u...)
-			}
-			if werr := b.waitRest(rest, waitAfter(stop), out); werr != nil {
-				errs = append(errs, werr)
-			}
-			break
-		}
-	}
+	errs := b.sendEach(ctx, names, asked, aclErr, out)
 	return out, errors.Join(errs...)
 }
 
-// unitsOf groups outbox entries, by their paths, into units: the entries
-// that share a msg_id, one to each member of a group, in the order of each
-// unit's first entry.
-func unitsOf(names []string) [][]string {
-	var units [][]string
-	at := map[string]int{}
-	for _, n := range names {
-		_, msgID, _ := strings.Cut(filepath.Base(strings.TrimSuffix(n, ".P")), ".")
-		i, ok := at[msgID]
-		if !ok {
-			i = len(units)
-			at[msgID] = i
-			units = append(units, nil)
-		}
-		units[i] = append(units[i], n)
-	}
-	return units
-}
-
-// sendUnit posts the entries of one unit, names, in order. Before each post
-// it checks that the unit's entries still to go fit in the budget the
-// mailbox estimates (budgetDue): where they do not, those entries wait
-// together until they do, untried. A refusal about one recipient leaves
+// sendEach posts the outbox entries names, each on its own, in order, and
+// returns the errors of every entry. A refusal about one recipient leaves
 // that entry waiting and goes on; one about the sender or the path leaves
-// the unit's entries after it waiting as long, and returns that refusal as
-// stop, beside the errors of every entry, so the flush posts nothing more.
-func (b *Mailbox) sendUnit(ctx context.Context, names []string, asked *lookups, aclErr error, out *Flushed) (errs []error, stop error) {
+// every entry after it waiting as long, untried, and posts nothing more.
+func (b *Mailbox) sendEach(ctx context.Context, names []string, asked *lookups, aclErr error, out *Flushed) (errs []error) {
 	for i, n := range names {
 		stem := strings.TrimSuffix(n, ".P")
 		to, msgID, _ := strings.Cut(filepath.Base(stem), ".")
@@ -355,14 +313,6 @@ func (b *Mailbox) sendUnit(ctx context.Context, names []string, asked *lookups, 
 			errs = append(errs, fmt.Errorf("%s: %w", filepath.Base(stem), b.undelivered(stem, b.ended)))
 			continue
 		}
-		if at, err := b.budgetDue(int64(len(names) - i)); err != nil {
-			return append(errs, err), nil
-		} else if at.After(b.now()) {
-			if err := b.waitRest(names[i:], at.Sub(b.now()), out); err != nil {
-				errs = append(errs, err)
-			}
-			return errs, nil
-		}
 		if err := b.replyWaits(peer, aclErr); err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w: nothing is posted, so that no reply is refused", filepath.Base(stem), err))
 			continue
@@ -374,14 +324,14 @@ func (b *Mailbox) sendUnit(ctx context.Context, names []string, asked *lookups, 
 				if werr := b.waitRest(names[i+1:], waitAfter(err), out); werr != nil {
 					errs = append(errs, werr)
 				}
-				return errs, err
+				return errs
 			}
 			continue
 		}
 		s.ACLErr = aclErr
 		out.Sent = append(out.Sent, s)
 	}
-	return errs, nil
+	return errs
 }
 
 // waitRest leaves each entry of names waiting d, untried, and adds it to
@@ -615,7 +565,7 @@ func (b *Mailbox) postSealed(ctx context.Context, to protocol.Address, s *sealed
 	// The post carries this mailbox's pass: that is how the server knows the
 	// sender.
 	var r protocol.Receipt
-	resp, err := b.owner(ctx, http.MethodPost, "/v1/"+to.String()+"/messages?"+s.query.Encode(), &ciphertext{bytes: s.ciphertext}, &r)
+	_, err := b.owner(ctx, http.MethodPost, "/v1/"+to.String()+"/messages?"+s.query.Encode(), &ciphertext{bytes: s.ciphertext}, &r)
 	if err != nil {
 		return nil, err
 	}
@@ -629,9 +579,6 @@ func (b *Mailbox) postSealed(ctx context.Context, to protocol.Address, s *sealed
 	if r.ID != hex.EncodeToString(h[:]) || rerr != nil || eerr != nil {
 		return nil, refuse("the server's receipt does not name the ciphertext this mailbox posted, or its times are not times")
 	}
-	// The budget the answer reports, or none (noteSendAnswer). The estimate
-	// is advisory: a fault keeping it never fails the send the server took.
-	_ = b.noteSendAnswer(resp.Header, resp.StatusCode == http.StatusCreated, b.now())
 	return &r, nil
 }
 

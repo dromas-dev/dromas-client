@@ -8,8 +8,8 @@ import (
 	"github.com/dromas-dev/dromas-client/protocol"
 )
 
-// bucketWaits keeps, for each outbox entry that a refusal or the budget made
-// wait, when it may be posted again, by its name in outbox/ less ".P"
+// bucketWaits keeps, for each outbox entry that a refusal made wait, when
+// it may be posted again, by its name in outbox/ less ".P"
 // (<address>.<msg_id>), in RFC 3339 to the nanosecond, so a wait of a
 // Retry-After in whole seconds is due exactly then. An entry it names
 // no time for is due at once. The time goes when the entry is posted or moved

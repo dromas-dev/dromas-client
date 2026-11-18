@@ -18,17 +18,13 @@ import (
 // members allows each.
 //
 // Nothing is written where a member is one this mailbox holds a revocation
-// of, or where the group needs more sends than the budget at the mailbox's
-// server ever holds at once, as its last send's answer reported it.
+// of.
 //
-// The entries go as one unit: where the mailbox's estimate of its budget
-// (from the Dromas-RateLimit of its sends' answers) shows that the entries
-// still to go do not fit, they wait together, untried, until they do, and
-// [Flushed.Queued] says until when; the estimate is checked again after each
-// post. A refusal about one member leaves that member's entry waiting; one
-// about this mailbox or the path to its server leaves every entry not yet
-// tried waiting, as a flush does ([Mailbox.FlushReport]). recv --follow
-// posts what waits once it is due.
+// Each entry is posted on its own, as a flush posts it
+// ([Mailbox.FlushReport]): a refusal about one member leaves that member's
+// entry waiting; one about this mailbox or the path to its server leaves
+// every entry not yet tried waiting, and [Flushed.Queued] says until when.
+// recv --follow posts what waits once it is due.
 func (b *Mailbox) SendGroup(ctx context.Context, to []protocol.Address, body string, f Fields) (*Flushed, error) {
 	return locked(ctx, b, func() (*Flushed, error) {
 		if err := b.keysMatch(); err != nil {
@@ -91,15 +87,6 @@ func (b *Mailbox) sendGroup(ctx context.Context, members []protocol.Address, env
 			return nil, fmt.Errorf("nothing is written or sent to the group: %w", &RevokedError{Address: m})
 		}
 	}
-	// A group the budget can never hold at once is refused: it would wait
-	// for good.
-	var g *budget
-	if err := b.view(func(s store) error { g = readBudget(s); return nil }); err != nil {
-		return nil, err
-	}
-	if g != nil && int64(len(members)) > g.Cap {
-		return nil, refuse("a message to %d other members needs %d sends at once, and this mailbox's server lets it make %d at most: nothing is written or sent", len(members), len(members), g.Cap)
-	}
 	if err := env.SetGroup(members); err != nil {
 		return nil, err
 	}
@@ -144,6 +131,6 @@ func (b *Mailbox) sendGroup(ctx context.Context, members []protocol.Address, env
 		return nil, errors.Join(errs...)
 	}
 	out := &Flushed{}
-	errs, _ := b.sendUnit(ctx, names, newLookups(), aclErr, out)
+	errs := b.sendEach(ctx, names, newLookups(), aclErr, out)
 	return out, errors.Join(errs...)
 }

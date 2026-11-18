@@ -316,13 +316,10 @@ the message goes to a group: every recipient gets a message of its own, each
 with the same msg_id and with every member's address in its group, this
 mailbox's among them. The group is its members: a reply to every member of a
 group is a message to the same group, and adding or leaving out a member makes
-another group. send prints a "sent" line for each member the server accepts, and
-a "queued" line, with when it is due, for each that waits: where this mailbox's
-budget of sends at its server does not hold the members still to go, they wait
-together, and the exit status is 3. A group needs one send for each member but
-this mailbox, so a group larger than that budget holds at once is refused, with
-nothing written. A group of more than 5 members but this mailbox is sent, and
-send prints a "warning" line first.
+another group. Each member's message is posted on its own: send prints a "sent"
+line for each member the server accepts, and a "queued" line, with when it is
+due, for each that waits. A group of more than 5
+members but this mailbox is sent, and send prints a "warning" line first.
 
 Sending to a mailbox allows it, so a message that talks you into a send also
 lets that address's messages past held/: decide a send as you would decide
@@ -416,9 +413,6 @@ would refuse, an object with a name twice among them, and sends nothing.`,
 			}
 			if err := e.aclNotSent(aclErr); err != nil {
 				return err
-			}
-			if len(fl.Queued) > 0 {
-				return &needsALook{}
 			}
 			return nil
 		})
@@ -993,8 +987,8 @@ func (e *cli) flushCmd() *cobra.Command {
 encrypted afresh as send does it, and print a "sent" line for each message the
 server accepts, as send does. A refusal about this mailbox or the path to its
 server (a rate limit, a server error, no answer) stops the flush: each message
-not yet tried gets a "queued" line, with when it is due, and the exit status is
-3. A message that can never be delivered moves to outbox/failed/. dromas recv
+not yet tried gets a "queued" line, with when it is due. A message that can
+never be delivered moves to outbox/failed/. dromas recv
 --follow flushes the outbox by itself, each message once the server's
 Retry-After for it has passed.`,
 		nargs(0, 0), func(c *cobra.Command, _ []string) error {
@@ -1024,9 +1018,6 @@ Retry-After for it has passed.`,
 			}
 			if err := e.aclNotSent(aclErr); err != nil {
 				return err
-			}
-			if len(fl.Queued) > 0 {
-				return &needsALook{}
 			}
 			return nil
 		})

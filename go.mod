@@ -7,7 +7,6 @@ require (
 	filippo.io/edwards25519 v1.2.0
 	github.com/BurntSushi/toml v1.6.0
 	github.com/cpuguy83/go-md2man/v2 v2.0.7
-	github.com/dunglas/httpsfv v1.1.2
 	github.com/pb33f/libopenapi v0.42.5
 	github.com/pb33f/libopenapi-validator v0.16.3
 	github.com/spf13/cobra v1.10.2

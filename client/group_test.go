@@ -2,8 +2,6 @@ package client_test
 
 import (
 	"context"
-	"net/http"
-	"path/filepath"
 	"slices"
 	"testing"
 	"time"
@@ -11,29 +9,6 @@ import (
 	"github.com/dromas-dev/dromas-client/client"
 	"github.com/dromas-dev/dromas-client/protocol"
 )
-
-// reporting answers every send as the server does, with Dromas-RateLimit
-// set to field on its 201 and 200, or none for "".
-func reporting(e *env, field string) {
-	e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
-		if r.Method == http.MethodPost && field != "" {
-			w = &withField{ResponseWriter: w, field: field}
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
-type withField struct {
-	http.ResponseWriter
-	field string
-}
-
-func (w *withField) WriteHeader(code int) {
-	if code == http.StatusCreated || code == http.StatusOK {
-		w.Header().Set(protocol.RateLimitField, w.field)
-	}
-	w.ResponseWriter.WriteHeader(code)
-}
 
 // A message to a group is one entry to each other member, with one msg_id,
 // and each member is delivered it with the whole group, sorted (PROTOCOL.md
@@ -77,68 +52,63 @@ func cmpText(x, y protocol.Address) int {
 	return 0
 }
 
-// The members' entries go as one unit by the budget the server reports:
-// where they do not fit, they wait together, untried, until they do, and
-// the follow loop posts them then; a group larger than the budget ever
-// holds is refused with nothing written; an answer with no field leaves no
-// estimate, and the group goes.
-func TestAGroupWaitsForItsBudgetAsOneUnit(t *testing.T) {
+// Each member's entry is posted on its own: a refusal about the sender at
+// the second post leaves that member's entry and the one after it waiting
+// its Retry-After, the later one untried, and the member posted first is
+// kept in sent/ and held once by the server. The follow loop once the wait
+// is over posts the two that waited and nothing twice.
+func TestAGroupsRefusalAboutTheSenderLeavesOnlyTheUnpostedWaiting(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	e := newEnv(t)
 	a, b, c, d := e.mailbox(), e.mailbox(), e.mailbox(), e.mailbox()
-	// One back each second, three at most; after this send, one left and
-	// full in two seconds.
-	reporting(e, "sends=1;c=3;q=86400;f=2")
-	send(t, a, d, "spends the budget")
-	e.srv.SetMiddle(nil)
-	fl, err := a.SendGroup(ctx, []protocol.Address{b.Address(), c.Address()}, "waits a second", client.Fields{})
-	if err != nil || len(fl.Sent) != 0 || len(fl.Queued) != 2 {
-		t.Fatalf("a group of two with one send left: %+v, %v; want both queued", fl, err)
+	rp := refusing(e, "60", map[string]protocol.Code{postTo(c): protocol.CodeRateLimited})
+	fl, err := a.SendGroup(ctx, []protocol.Address{b.Address(), c.Address(), d.Address()}, "to the group", client.Fields{})
+	if client.Code(err) != protocol.CodeRateLimited || fl == nil || len(fl.Sent) != 1 || fl.Sent[0].To != b.Address() {
+		t.Fatalf("the group send: %+v, %v; want the first member sent and rate_limited", fl, err)
 	}
-	due := e.clock.Now().Add(time.Second)
-	for _, q := range fl.Queued {
-		if q.At.Before(due) || q.At.After(due.Add(time.Second)) {
-			t.Errorf("queued for %s at %s, want %s", q.To, q.At, due)
-		}
+	if len(fl.Queued) != 1 || fl.Queued[0].To != d.Address() || fl.Queued[0].At.Before(e.clock.Now().Add(60*time.Second)) {
+		t.Fatalf("queued %+v, want the member after the refusal waiting 60 seconds", fl.Queued)
 	}
+	if rp.count(postTo(c)) != 1 || rp.count(postTo(d)) != 0 {
+		t.Fatalf("posts to the refused member %d and to the one after it %d, want 1 and 0", rp.count(postTo(c)), rp.count(postTo(d)))
+	}
+	kept := a.Path("sent", b.Address().String()+"."+fl.Sent[0].MsgID+".json")
+	if !exists(kept) || e.srv.Count(b.Address()) != 1 {
+		t.Fatalf("the member posted: kept in sent/ %v, held by the server %d times; want kept, and held once", exists(kept), e.srv.Count(b.Address()))
+	}
+
+	rp = refusing(e, "60", nil)
 	o := oneDrain(false)
 	o.Flush = true
-	sent := 0
+	var sent []protocol.Address
 	follow := func() {
 		t.Helper()
 		if err := a.Follow(ctx, o, func(_ context.Context, ev client.Event) error {
 			if ev.Kind == client.EventSent {
-				sent++
+				sent = append(sent, ev.Sent.To)
 			}
 			return nil
 		}); err != nil {
 			t.Fatal(err)
 		}
 	}
+	e.clock.Add(59 * time.Second)
 	follow()
-	if sent != 0 {
-		t.Fatalf("the loop before the budget allows sent %d", sent)
+	if len(sent) != 0 {
+		t.Fatalf("the loop before the wait is over sent to %v", sent)
 	}
 	e.clock.Add(time.Second)
 	follow()
-	if sent != 2 {
-		t.Fatalf("the loop once the budget allows sent %d, want both", sent)
+	want := []protocol.Address{c.Address(), d.Address()}
+	slices.SortFunc(want, cmpText)
+	slices.SortFunc(sent, cmpText)
+	if !slices.Equal(sent, want) || rp.count(postTo(b)) != 0 {
+		t.Fatalf("the loop once due sent to %v and posted to the member already sent %d times; want %v and none", sent, rp.count(postTo(b)), want)
 	}
-
-	reporting(e, "sends=0;c=1;q=86400;f=1")
-	send(t, a, d, "a budget of one")
-	e.srv.SetMiddle(nil)
-	if _, err := a.SendGroup(ctx, []protocol.Address{b.Address(), c.Address()}, "never fits", client.Fields{}); err == nil {
-		t.Fatal("a group of two past a budget of one was taken")
-	}
-	if n, _ := filepath.Glob(filepath.Join(a.Dir(), "outbox", "*.P")); len(n) != 0 {
-		t.Fatalf("%d entries written for a group refused", len(n))
-	}
-
-	reporting(e, "")
-	send(t, a, d, "an answer with no field")
-	if fl, err := a.SendGroup(ctx, []protocol.Address{b.Address(), c.Address()}, "goes", client.Fields{}); err != nil || len(fl.Sent) != 2 {
-		t.Fatalf("a group after an answer with no field: %+v, %v; want both sent", fl, err)
+	for _, m := range []*client.Mailbox{b, c, d} {
+		if n := e.srv.Count(m.Address()); n != 1 {
+			t.Errorf("%s: the server holds %d, want 1", m.Address(), n)
+		}
 	}
 }
