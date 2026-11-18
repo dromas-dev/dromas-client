@@ -164,6 +164,48 @@ func TestWhatTheWebhookLeavesOwedIsHandedOverAtTheNextStart(t *testing.T) {
 	}
 }
 
+// A message the webhook's error leaves owed holds nothing back: the handover
+// goes on to the messages after it, and the one left owed is handed over again
+// at the next handover (#927 item 4). Which messages are handed is held, never
+// their order after the error.
+func TestAMessageTheWebhookLeavesOwedHoldsNothingBack(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	e := newEnv(t)
+	a, b := e.mailbox(), e.mailbox()
+	for _, body := range []string{"one", "two", "three"} {
+		send(t, a, b, body)
+	}
+	cut := &bodies{result: func(string) error { return errors.New("cut short") }}
+	if err := b.Follow(ctx, client.FollowOptions{Until: time.Now(), Webhook: cut.handle}, nil); err != nil {
+		t.Fatal(err)
+	}
+	failed := false
+	hook := &bodies{result: func(body string) error {
+		if body == "one" && !failed {
+			failed = true
+			return errors.New("not yet")
+		}
+		return nil
+	}}
+	if err := b.Follow(ctx, client.FollowOptions{Until: time.Now(), Webhook: hook.handle}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := slices.Sorted(slices.Values(hook.list())); !slices.Equal(got, []string{"one", "three", "two"}) {
+		t.Fatalf("the webhook was handed %q, want each of the three, one of them failed", hook.list())
+	}
+	if st, err := b.Status(ctx); err != nil || st.WebhookOwed != 1 {
+		t.Fatalf("status: %+v, %v; want the one left owed", st, err)
+	}
+	again := &bodies{}
+	if err := b.Follow(ctx, client.FollowOptions{Until: time.Now(), Webhook: again.handle}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(again.list(), []string{"one"}) {
+		t.Fatalf("the next Follow handed the webhook %q, want the one left owed", again.list())
+	}
+}
+
 // A message owed the webhook that inbox/ no longer keeps is an EventOwedGone
 // to the webhook, whose record then goes once the webhook returns nil,
 // ErrGaveUp or ErrStop, as for any owed message.

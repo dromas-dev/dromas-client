@@ -138,10 +138,13 @@ type FollowOptions struct {
 	// handed an [EventDelivery] for each owed message, oldest first, one at a
 	// time, beginning with what is owed when Follow starts, or an
 	// [EventOwedGone] where inbox/ no longer keeps the message. The record is
-	// cleared once Webhook returns nil, [ErrStop] or [ErrGaveUp], which it
-	// records; any other error leaves the message owed, for the next
-	// handover, and goes on to the next: delivery is at least once, and in
-	// order only while Webhook succeeds. Follow
+	// cleared once Webhook returns nil or [ErrGaveUp], which it records, or
+	// [ErrStop], which ends neither Follow nor the handover. Any other error
+	// leaves the message owed and goes on to the next: delivery is at least
+	// once, and in order only while Webhook succeeds. A message left owed is
+	// handed over again at the next handover, which a drain that delivers
+	// begins, as does a fault's retry and the next Follow: a Webhook that must
+	// try again sooner tries within its own call, as recv's does. Follow
 	// waits for Webhook to hand over what is owed before it returns, but
 	// where its context ended: what is cut short stays owed for the next
 	// Follow.
@@ -232,7 +235,9 @@ func (b *Mailbox) Follow(ctx context.Context, o FollowOptions, h Handler) (err e
 			keep(serr)
 			owed = err != nil
 		}
-		if err == nil {
+		// A handler that ended the loop while what was owed was handed over is
+		// handed nothing more: no drain is made.
+		if err == nil && stopped == nil {
 			res, err = locked(ctx, b, func() (*Result, error) { return b.receive(ctx, owing) })
 			if res != nil && len(res.Delivered) > 0 {
 				delivered()
