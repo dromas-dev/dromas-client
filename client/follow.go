@@ -140,7 +140,7 @@ type FollowOptions struct {
 	// cleared once Webhook returns nil or [ErrGaveUp], which it records; any
 	// other error leaves the message owed, and ends the handover there, so
 	// the messages after it stay owed behind it, in delivery order, for the
-	// next handover. Follow
+	// next handover: at the next drain that delivers, or a minute on. Follow
 	// waits for Webhook to hand over what is owed before it returns, but
 	// where its context ended: what is cut short stays owed for the next
 	// Follow.
@@ -233,7 +233,10 @@ func (b *Mailbox) Follow(ctx context.Context, o FollowOptions, h Handler) (err e
 			keep(serr)
 			owed = err != nil
 		}
-		if err == nil {
+		// A handler's error ends the loop after this round, and a drain now
+		// would hand it deliveries ahead of the messages that error left
+		// owed: none is made.
+		if err == nil && stopped == nil {
 			res, err = locked(ctx, b, func() (*Result, error) { return b.receive(ctx, owing) })
 			if res != nil && len(res.Delivered) > 0 {
 				delivered()
@@ -465,6 +468,19 @@ func (b *Mailbox) handOwed(ctx context.Context, r records, d *Delivery, res *Res
 	step("handler begun")
 	err := h(ctx, Event{Kind: EventDelivery, Delivery: d, Result: res})
 	step("handler returned")
+	stopped, fault = b.settleOwed(ctx, r, d.owed, d.ID, err)
+	if fault == nil && !leftOwed(stopped) {
+		step("owed cleared")
+	}
+	return stopped, fault
+}
+
+// settleOwed clears the record of the message id, owed under key in r, once
+// its handling has ended with err: nil, ErrStop or ErrGaveUp, which it
+// records. Any other error leaves it owed. It returns err, but nil for
+// ErrGaveUp, beside a fault at clearing the record, which leaves it owed
+// too.
+func (b *Mailbox) settleOwed(ctx context.Context, r records, key, id string, err error) (stopped, fault error) {
 	gaveUp := errors.Is(err, ErrGaveUp)
 	if err != nil && !gaveUp && !errors.Is(err, ErrStop) {
 		return err, nil
@@ -472,11 +488,7 @@ func (b *Mailbox) handOwed(ctx context.Context, r records, d *Delivery, res *Res
 	if gaveUp {
 		err = nil
 	}
-	if cerr := b.clearOwed(ctx, r, d.owed, d.ID, gaveUp); cerr != nil {
-		return err, cerr
-	}
-	step("owed cleared")
-	return err, nil
+	return err, b.clearOwed(ctx, r, key, id, gaveUp)
 }
 
 // owedMessage is a message the state file records as owed its handling: the
@@ -501,14 +513,11 @@ func (b *Mailbox) handOverOwed(ctx context.Context, r records, h Handler) (stopp
 		var herr, cerr error
 		left := false
 		if m.delivery == nil {
-			if herr = h(ctx, Event{Kind: EventOwedGone, ID: m.id}); herr == nil {
-				cerr = b.clearOwed(ctx, r, m.key, m.id, false)
-			}
-			left = herr != nil
+			herr, cerr = b.settleOwed(ctx, r, m.key, m.id, h(ctx, Event{Kind: EventOwedGone, ID: m.id}))
 		} else {
 			herr, cerr = b.handOwed(ctx, r, m.delivery, nil, h)
-			left = leftOwed(herr)
 		}
+		left = leftOwed(herr)
 		if herr != nil && stopped == nil {
 			stopped = herr
 		}
@@ -704,15 +713,16 @@ func (w *webhooks) kick() {
 }
 
 // run hands over what is owed at the start, again at each kick, and once more
-// after a fault (webhookRetry), until Follow's loop ends. It then hands over
+// webhookRetry after a handover that a fault cut short or that stopped at a
+// message its handler left owed, until Follow's loop ends. It then hands over
 // what a kick asked for during the last handover, and returns the last
 // handover's fault. Where the end and a kick are both ready, either case
 // hands that kick's deliveries over before run returns.
 func (w *webhooks) run(ctx context.Context) error {
 	for {
-		err := w.handOver(ctx)
+		left, err := w.handOver(ctx)
 		var retry <-chan time.Time
-		if err != nil {
+		if err != nil || left {
 			retry = time.After(webhookRetry)
 		}
 		select {
@@ -721,7 +731,8 @@ func (w *webhooks) run(ctx context.Context) error {
 		case <-w.done:
 			select {
 			case <-w.kicked:
-				return w.handOver(ctx)
+				_, err := w.handOver(ctx)
+				return err
 			default:
 				return err
 			}
@@ -729,9 +740,10 @@ func (w *webhooks) run(ctx context.Context) error {
 	}
 }
 
-// handOver hands the webhook's handler what is owed it. Its handler's errors
-// leave a message owed, and are not a fault of the handover.
-func (w *webhooks) handOver(ctx context.Context) error {
-	_, fault := w.b.handOverOwed(ctx, webhookRecords, w.h)
-	return fault
+// handOver hands the webhook's handler what is owed it, and reports whether
+// it stopped at a message its handler's error left owed. Its handler's errors
+// are not a fault of the handover.
+func (w *webhooks) handOver(ctx context.Context) (left bool, fault error) {
+	stopped, fault := w.b.handOverOwed(ctx, webhookRecords, w.h)
+	return leftOwed(stopped), fault
 }

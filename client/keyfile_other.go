@@ -8,7 +8,7 @@ const keyFix = "Keep it where only its owner can read it."
 
 // checkKeyFile takes any key file where the system has neither Unix modes nor
 // Windows' access lists to read.
-func checkKeyFile(_, _ string) error { return nil }
+func checkKeyFile(keyFile, string) error { return nil }
 
 // CheckConfigFile takes any config file where the system has neither Unix
 // modes nor Windows' access lists to read.

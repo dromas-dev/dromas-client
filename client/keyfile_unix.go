@@ -16,13 +16,13 @@ const keyFix = "chmod 600 it, or set the mode of the mount it comes from: a Kube
 // place (privateKey), and a webhook's header and secret files. As OpenSSH's
 // sshkey_perm_ok does, it leaves a file another user owns to that user. The
 // keys and the ticket the client writes are private files (checkPrivateFile).
-func checkKeyFile(what, path string) error {
+func checkKeyFile(f keyFile, path string) error {
 	fi, err := os.Stat(path)
 	if err != nil {
 		return err
 	}
 	if m := fi.Mode().Perm(); m&0o077 != 0 {
-		return keyRefusal(what, path, fmt.Sprintf("is accessible by others (mode %04o)", m), keyFix)
+		return keyRefusal(f, path, fmt.Sprintf("is accessible by others (mode %04o)", m), keyFix)
 	}
 	return nil
 }

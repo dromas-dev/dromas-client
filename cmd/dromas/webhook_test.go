@@ -462,8 +462,9 @@ func TestTheConfigFilesWebhookServesARecvThatWaits(t *testing.T) {
 // recv's two pipelines are one command: with no other command of the mailbox
 // running, recv --webhook, alone or beside --exec, says no wait for the
 // mailbox's lock, though the webhook's goroutine and the loop's take turns in
-// the Mailbox's slot (#927 item 2). A wait for another command is told by the
-// slot's test, TestAFollowsOwnGoroutinesWaitForEachOtherUntold.
+// the Mailbox's slot (#927 item 2). That the slot tells nothing is
+// client's TestAMailboxsOwnGoroutinesTellNoWaitForTheSlot; that a wait for
+// another command's lock is told, client/lock_test.go's.
 func TestOneRecvSaysNoWaitForItsOwnLock(t *testing.T) {
 	for _, exec := range []bool{false, true} {
 		t.Run(map[bool]string{false: "webhook alone", true: "beside --exec"}[exec], func(t *testing.T) {

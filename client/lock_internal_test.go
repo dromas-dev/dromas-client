@@ -184,6 +184,11 @@ func TestAMailboxsOwnGoroutinesTellNoWaitForTheSlot(t *testing.T) {
 			done <- err
 		}()
 		synctest.Wait() // the second claim waits for the slot
+		select {
+		case err := <-done:
+			t.Fatalf("the second claim did not wait for the slot: %v", err)
+		default:
+		}
 		release()
 		if err := <-done; err != nil {
 			t.Fatal(err)
