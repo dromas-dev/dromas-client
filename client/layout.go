@@ -402,7 +402,17 @@ func (b *Mailbox) KeysInGit() []string {
 	return out
 }
 
-// keyRefusal is the refusal of a private key file others can reach.
-func keyRefusal(path, why string) error {
-	return fmt.Errorf("the private key %s %s: ssh would refuse it too. %s", path, why, strings.TrimSpace(keyFix))
+// privateKey is what checkKeyFile's refusal calls the identity's key file:
+// the one file it judges that ssh would refuse too.
+const privateKey = "the private key"
+
+// keyRefusal is the refusal of what, the file at path, that others can reach
+// (why), and how to fix it. It says ssh would refuse the file too only for the
+// identity's key (privateKey): a webhook's header or secret file is no key of
+// ssh's.
+func keyRefusal(what, path, why, fix string) error {
+	if what == privateKey {
+		return fmt.Errorf("%s %s %s: ssh would refuse it too. %s", what, path, why, strings.TrimSpace(fix))
+	}
+	return fmt.Errorf("%s %s %s. %s", what, path, why, strings.TrimSpace(fix))
 }

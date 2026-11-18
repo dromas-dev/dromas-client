@@ -97,7 +97,7 @@ type WebhookHeader struct{ Name, Value string }
 // A header that a post writes itself is refused. Its words name the file,
 // never what it holds.
 func ReadWebhookHeader(name string) (WebhookHeader, error) {
-	line, err := readWebhookFile(name)
+	line, err := readWebhookFile("the webhook's header file", name)
 	if err != nil {
 		return WebhookHeader{}, err
 	}
@@ -113,7 +113,7 @@ func ReadWebhookHeader(name string) (WebhookHeader, error) {
 // judges and reads the file as ReadWebhookHeader does, and refuses a secret of
 // another form.
 func ReadWebhookSecret(name string) ([]byte, error) {
-	line, err := readWebhookFile(name)
+	line, err := readWebhookFile("the webhook's secret file", name)
 	if err != nil {
 		return nil, err
 	}
@@ -157,11 +157,11 @@ func NewWebhook(raw string, h *WebhookHeader, secret []byte, hc *http.Client) (*
 	return w, nil
 }
 
-// readWebhookFile reads a webhook's header or secret file, refused where others
-// can reach it (checkKeyFile), and returns its one line: what it holds, less
-// one line ending, LF or CRLF.
-func readWebhookFile(name string) (string, error) {
-	if err := checkKeyFile(name); err != nil {
+// readWebhookFile reads what, a webhook's header or secret file at name,
+// refused where others can reach it (checkKeyFile), and returns its one line:
+// what it holds, less one line ending, LF or CRLF.
+func readWebhookFile(what, name string) (string, error) {
+	if err := checkKeyFile(what, name); err != nil {
 		return "", err
 	}
 	raw, err := os.ReadFile(name) //nolint:gosec // a file the mailbox's owner named
@@ -170,7 +170,7 @@ func readWebhookFile(name string) (string, error) {
 	}
 	s := strings.TrimSuffix(strings.TrimSuffix(string(raw), "\n"), "\r")
 	if strings.ContainsAny(s, "\r\n") {
-		return "", fmt.Errorf("the webhook's file %s holds more than one line", name)
+		return "", fmt.Errorf("%s %s holds more than one line", what, name)
 	}
 	return s, nil
 }

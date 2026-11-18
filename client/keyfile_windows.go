@@ -141,18 +141,19 @@ func trustedOwner(owner *windows.SID) (bool, error) {
 	return trusted(owner)
 }
 
-// checkKeyFile refuses a private key file anyone but its owner, SYSTEM and the
-// Administrators can reach (readAccess).
-func checkKeyFile(path string) error {
+// checkKeyFile refuses what, the file at path, where anyone but its owner,
+// SYSTEM and the Administrators can reach it (readAccess): the identity's key
+// (privateKey), or a webhook's header or secret file.
+func checkKeyFile(what, path string) error {
 	a, err := readAccess(path)
 	if err != nil {
 		return err
 	}
 	if len(a.others) > 0 {
-		return keyRefusal(path, "is accessible by "+a.others[0].trustee())
+		return keyRefusal(what, path, "is accessible by "+a.others[0].trustee(), keyFix)
 	}
 	if a.foreignOwner {
-		return fmt.Errorf("the private key %s is owned by %s: ssh would refuse it too. Take its ownership (icacls /setowner), and check who else holds a copy", path, accountName(a.owner))
+		return keyRefusal(what, path, "is owned by "+accountName(a.owner), "Take its ownership (icacls /setowner), and check who else holds a copy")
 	}
 	return nil
 }

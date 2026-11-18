@@ -73,7 +73,7 @@ func (b *Mailbox) identityPublicKey() (ssh.PublicKey, error) {
 	if err != nil {
 		return nil, fmt.Errorf("no mailbox here: %w", err)
 	}
-	if err := checkKeyFile(file); err != nil {
+	if err := checkKeyFile(privateKey, file); err != nil {
 		return nil, err
 	}
 	raw, err := ssh.ParseRawPrivateKey(pemBytes)
@@ -149,7 +149,7 @@ func (b *Mailbox) unlockIdentity() (ssh.Signer, func(), error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	if err := checkKeyFile(file); err != nil {
+	if err := checkKeyFile(privateKey, file); err != nil {
 		return nil, nil, err
 	}
 	raw, err := ssh.ParseRawPrivateKey(pemBytes)
