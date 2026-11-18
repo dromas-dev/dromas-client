@@ -399,7 +399,7 @@ The mailbox signs messages under its certificate until `certificate_signs_messag
 2. On the holder, save `working_key` as `request.pub` in the directory of the identity key file, and run `command` there. `command` names the key file `identity`: give the file's own name if it differs. For an identity in the holder's ssh-agent, put `-U` before `-s`, and give the identity's public key file in place of `identity`. `ssh-keygen` writes `request-cert.pub`.
 3. On the mailbox, run `dromas cert install request-cert.pub`. The mailbox checks the certificate and renews under it.
 
-`command` makes a certificate that runs for the longest the server takes, and dates its start an hour back, so `cert install` accepts it at once. A request made later replaces the one before. `cert install` rejects a certificate for another request, one whose serial is below the request's `lowest_serial`, one whose start is less than an hour before the mailbox's clock, and one the identity has revoked.
+`command` makes a certificate that runs for the longest the server takes, and dates its start an hour back, so `cert install` accepts it at once. A request made later replaces the one before. `cert install` rejects a certificate for another request, one whose serial is below the request's `lowest_serial`, one that runs longer than the server takes, one whose start is less than an hour before the mailbox's clock, and one for a request made before the identity revoked certificates, wherever the revocation was published.
 
 ### If the working key is stolen
 
@@ -413,7 +413,7 @@ The mailbox signs messages under its certificate until `certificate_signs_messag
    ```
 
 2. On the mailbox, run `dromas cert publish-revoked record`.
-3. On the mailbox, get the next certificate as above. A request made before `cert publish-revoked` ran is rejected, because its working key may be stolen too.
+3. On the mailbox, get the next certificate as above. A certificate for a request made before the revocation is rejected, because the request's working key may be stolen too.
 
 ### If the identity is lost or stolen
 
