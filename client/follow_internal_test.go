@@ -5,10 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"strings"
 	"testing"
-	"testing/synctest"
-	"time"
 
 	"github.com/dromas-dev/dromas-client/protocol"
 )
@@ -97,42 +94,4 @@ func TestAKickDuringTheLastHandoverIsHandedOverBeforeRunReturns(t *testing.T) {
 			t.Fatalf("run %d: %v, having handed over %q", i, err, handed)
 		}
 	}
-}
-
-// A handover that stops at a message its handler's error left owed is tried
-// again webhookRetry after it, as one a fault cut short is, with no kick: the
-// messages owed behind that one wait no longer than that (#934 review, item
-// 3). In a bubble, on its fake clock.
-func TestAWebhookHandoverStoppedAtAMessageLeftOwedIsTriedAgain(t *testing.T) {
-	t.Parallel()
-	a, _, _ := twoOpens(t)
-	synctest.Test(t, func(t *testing.T) {
-		b, err := Open(a.Dir(), Options{Base: a.base})
-		if err != nil {
-			t.Fatal(err)
-		}
-		first, second := strings.Repeat("a", 64), strings.Repeat("b", 64)
-		owedAs(t, b, webhookRecords, first)
-		owedAs(t, b, webhookRecords, second)
-		var handed []string
-		w := &webhooks{b: b, kicked: make(chan struct{}, 1), done: make(chan struct{}), h: func(_ context.Context, ev Event) error {
-			handed = append(handed, ev.ID)
-			if len(handed) == 1 {
-				return errors.New("not yet")
-			}
-			return nil
-		}}
-		ended := make(chan error, 1)
-		go func() { ended <- w.run(context.Background()) }()
-		synctest.Wait()
-		if !slices.Equal(handed, []string{first}) {
-			t.Fatalf("the first handover handed over %q, want the first message alone", handed)
-		}
-		time.Sleep(webhookRetry)
-		synctest.Wait()
-		close(w.done)
-		if err := <-ended; err != nil || !slices.Equal(handed, []string{first, first, second}) {
-			t.Errorf("run: %v, having handed over %q", err, handed)
-		}
-	})
 }

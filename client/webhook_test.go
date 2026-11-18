@@ -166,8 +166,7 @@ func TestWhatTheWebhookLeavesOwedIsHandedOverAtTheNextStart(t *testing.T) {
 
 // A message owed the webhook that inbox/ no longer keeps is an EventOwedGone
 // to the webhook, whose record then goes once the webhook returns nil,
-// ErrGaveUp or ErrStop, as for any owed message; the messages owed after it
-// are then handed over (#934 review, item 2).
+// ErrGaveUp or ErrStop, as for any owed message.
 func TestAMessageOwedTheWebhookAndGoneFromInboxIsSaidOnce(t *testing.T) {
 	t.Parallel()
 	for name, answer := range map[string]error{"nil": nil, "ErrGaveUp": client.ErrGaveUp, "ErrStop": client.ErrStop} {
@@ -252,46 +251,6 @@ func TestAHeldMessageIsOwedTheWebhookNothing(t *testing.T) {
 	}
 	if st, err := b.Status(context.Background()); err != nil || st.Held != 1 || st.WebhookOwed != 0 {
 		t.Fatalf("status: %+v, %v", st, err)
-	}
-}
-
-// A webhook's error other than ErrGaveUp leaves its message owed and ends the
-// handover there: the messages after it stay owed behind it, and the next
-// handover begins with it, so the webhook is handed them in delivery order
-// (#927 item 4).
-func TestAWebhooksErrorKeepsTheDeliveryOrder(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	e := newEnv(t)
-	a, b := e.mailbox(), e.mailbox()
-	for _, body := range []string{"one", "two", "three"} {
-		send(t, a, b, body)
-	}
-	failed := false
-	hook := &bodies{result: func(body string) error {
-		if body == "one" && !failed {
-			failed = true
-			return errors.New("not now")
-		}
-		return nil
-	}}
-	if err := b.Follow(ctx, client.FollowOptions{Until: time.Now(), Webhook: hook.handle}, nil); err != nil {
-		t.Fatal(err)
-	}
-	// The first Follow hands "one" alone, or, where a kick came during that
-	// handover, hands the three again after it: either is the order.
-	want := []string{"one", "one", "two", "three"}
-	if got := hook.list(); !slices.Equal(got, want[:1]) && !slices.Equal(got, want) {
-		t.Fatalf("after the first Follow: handed %q", got)
-	}
-	if err := b.Follow(ctx, client.FollowOptions{Until: time.Now(), Webhook: hook.handle}, nil); err != nil {
-		t.Fatal(err)
-	}
-	if !slices.Equal(hook.list(), want) {
-		t.Errorf("the webhook was handed %q, want %q", hook.list(), want)
-	}
-	if st, err := b.Status(ctx); err != nil || st.WebhookOwed != 0 {
-		t.Errorf("after: %+v, %v", st, err)
 	}
 }
 
