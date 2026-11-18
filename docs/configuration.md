@@ -262,7 +262,7 @@ A URL that `recv` posts each message's `message` line to, with or without the `r
 - Default: none
 - Flag: `dromas recv --webhook-header-file`
 
-A file of exactly one line, `Name: Value`, with or without a line ending: a header that each webhook post carries, for example `Authorization: Bearer <token>`. `recv` rejects the file, and runs nothing, when the file's mode gives its group or other users any access, as `ssh` rejects a private key. `recv` also rejects a header that each post sets itself, in any case: `Content-Type`, `Content-Length`, `Host`, `Transfer-Encoding` and any `webhook-*`. In the config file, `recv.webhook-header-file` without `recv.webhook` is an error.
+A file of exactly one line, `Name: Value`, with or without a line ending: a header that each webhook post carries, for example `Authorization: Bearer <token>`. `recv` rejects the file, and runs nothing, when other users can access it, as `ssh` rejects a private key. `recv` also rejects a header that each post sets itself, in any case: `Content-Type`, `Content-Length`, `Host`, `Transfer-Encoding` and any `webhook-*`. In the config file, `recv.webhook-header-file` without `recv.webhook` is an error.
 
 ### `recv.webhook-secret-file`
 
