@@ -8,21 +8,21 @@ import (
 	"syscall"
 )
 
-const keyFix = "chmod 600 it, or set the mode of the mount it comes from: a Kubernetes volume's defaultMode: 0400, a Compose secret's mode: 0400."
+const keyFix = "chmod 600 it, or set the mode of the mount it comes from: a Kubernetes volume's defaultMode: 0400, a Compose secret's mode: 0400"
 
-// checkKeyFile refuses what, the file at path, where others can reach it, as
+// checkKeyFile refuses the file at path where others can reach it, as
 // ssh(1) refuses a private key ("accessible by others"): any mode bit for its
 // group or for everyone. It judges the identity, a key its owner may put in
-// place (privateKey), and a webhook's header and secret files. As OpenSSH's
+// place, and a webhook's header and secret files. As OpenSSH's
 // sshkey_perm_ok does, it leaves a file another user owns to that user. The
 // keys and the ticket the client writes are private files (checkPrivateFile).
-func checkKeyFile(f keyFile, path string) error {
+func checkKeyFile(path string) error {
 	fi, err := os.Stat(path)
 	if err != nil {
 		return err
 	}
 	if m := fi.Mode().Perm(); m&0o077 != 0 {
-		return keyRefusal(f, path, fmt.Sprintf("is accessible by others (mode %04o)", m), keyFix)
+		return keyRefusal(path, fmt.Sprintf("is accessible by others (mode %04o)", m), keyFix)
 	}
 	return nil
 }

@@ -505,17 +505,23 @@ func calls(body *ast.BlockStmt, recv string, names ...string) bool {
 }
 
 // endsWithItsContext runs each of waits with a context of 200 ms while what
-// it waits for is held, and fails the test unless each ended with it.
+// it waits for is held, and fails the test unless each ended with it, within
+// 5 s: a wait that does not end fails the test rather than hanging it.
 func endsWithItsContext(t *testing.T, held string, waits map[string]func(context.Context) error) {
 	t.Helper()
 	for name, f := range waits {
 		ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
-		start := time.Now()
-		err := f(ctx)
-		cancel()
-		if !errors.Is(err, context.DeadlineExceeded) || time.Since(start) > 5*time.Second {
-			t.Errorf("%s while %s: %v after %v", name, held, err, time.Since(start))
+		done := make(chan error, 1)
+		go func() { done <- f(ctx) }()
+		select {
+		case err := <-done:
+			if !errors.Is(err, context.DeadlineExceeded) {
+				t.Errorf("%s while %s: %v", name, held, err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Errorf("%s while %s: no end 5 s after its context's", name, held)
 		}
+		cancel()
 	}
 }
 
@@ -560,7 +566,6 @@ func TestAWaitForTheSlotEndsWithItsContext(t *testing.T) {
 	if testing.Short() {
 		t.Skip("long: -short skips it; scripts/check.sh full and CI run it")
 	}
-	client.SetLockPatience(t, 3*time.Second) // a wait that ignores its context ends at this, refused, not at two minutes
 	e := newEnv(t)
 	b, c := e.mailbox(), e.mailbox()
 	rec, err := c.Revocation(t.Context())

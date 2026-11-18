@@ -382,6 +382,12 @@ func openFile(t *testing.T, path string) {
 	setList(t, path, "(A;;FR;;;BU)")
 }
 
+// openFileToWrites gives the local Users every right to the file at path.
+func openFileToWrites(t *testing.T, path string) { t.Helper(); setList(t, path, "(A;;FA;;;BU)") }
+
+// closeFile leaves the file at path to its user, SYSTEM and the Administrators.
+func closeFile(t *testing.T, path string) { t.Helper(); setList(t, path, "") }
+
 // openToWrites lets the users write in dir, as widen does.
 func openToWrites(t *testing.T, dir string) { t.Helper(); widen(t, dir) }
 

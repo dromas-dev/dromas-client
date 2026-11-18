@@ -53,6 +53,22 @@ func openFile(t *testing.T, path string) {
 	}
 }
 
+// openFileToWrites lets others write the file at path: mode 0666.
+func openFileToWrites(t *testing.T, path string) {
+	t.Helper()
+	if err := os.Chmod(path, 0o666); err != nil { //nolint:gosec // open on purpose
+		t.Fatal(err)
+	}
+}
+
+// closeFile makes the file at path its owner's alone: mode 0600.
+func closeFile(t *testing.T, path string) {
+	t.Helper()
+	if err := os.Chmod(path, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // runFix runs the line a refusal gives, as a person's shell would.
 func runFix(t *testing.T, line string) {
 	t.Helper()

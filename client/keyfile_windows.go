@@ -14,7 +14,7 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-const keyFix = "Give it a protected access list of its user, SYSTEM and the Administrators alone (icacls), as OpenSSH for Windows takes on a key file."
+const keyFix = "give it a protected access list of its user, SYSTEM and the Administrators alone (icacls), as OpenSSH for Windows takes on a key file"
 
 // readOnlyRights are the rights of an access list entry that write nothing. Any
 // other reads as a write, so a right this list does not name refuses a file and
@@ -141,19 +141,19 @@ func trustedOwner(owner *windows.SID) (bool, error) {
 	return trusted(owner)
 }
 
-// checkKeyFile refuses what, the file at path, where anyone but its owner,
-// SYSTEM and the Administrators can reach it (readAccess): the identity's key
-// (privateKey), or a webhook's header or secret file.
-func checkKeyFile(f keyFile, path string) error {
+// checkKeyFile refuses the file at path where anyone but its owner,
+// SYSTEM and the Administrators can reach it (readAccess): the identity's key,
+// or a webhook's header or secret file.
+func checkKeyFile(path string) error {
 	a, err := readAccess(path)
 	if err != nil {
 		return err
 	}
 	if len(a.others) > 0 {
-		return keyRefusal(f, path, "is accessible by "+a.others[0].trustee(), keyFix)
+		return keyRefusal(path, "is accessible by "+a.others[0].trustee(), keyFix)
 	}
 	if a.foreignOwner {
-		return keyRefusal(f, path, "is owned by "+accountName(a.owner), "Take its ownership (icacls /setowner), and check who else holds a copy")
+		return keyRefusal(path, "is owned by "+accountName(a.owner), "take its ownership (icacls /setowner), and check who else holds a copy")
 	}
 	return nil
 }
