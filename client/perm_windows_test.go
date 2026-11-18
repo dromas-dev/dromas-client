@@ -382,6 +382,9 @@ func openFile(t *testing.T, path string) {
 	setList(t, path, "(A;;FR;;;BU)")
 }
 
+// openFileToWrites gives the local Users every right to the file at path.
+func openFileToWrites(t *testing.T, path string) { t.Helper(); setList(t, path, "(A;;FA;;;BU)") }
+
 // openToWrites lets the users write in dir, as widen does.
 func openToWrites(t *testing.T, dir string) { t.Helper(); widen(t, dir) }
 
@@ -398,8 +401,8 @@ func runFix(t *testing.T, line string) {
 // fixWord is what a refusal of an open file names.
 const fixWord = "icacls"
 
-// A state file planted in a directory that gives others access, and the lists
-// planted beside it, keep the list they inherit there, so init refuses them.
+// A state file planted in a directory that gives others access keeps the list
+// it inherits there, so init refuses it.
 func TestAFilePlantedInAWideDirectoryIsRefusedByInit(t *testing.T) {
 	t.Parallel()
 	for _, f := range client.PrivateFiles() {

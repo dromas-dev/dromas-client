@@ -38,7 +38,7 @@ func HTTPOf(b *Mailbox) *http.Client { return b.http }
 func HealthCheck() (after, wait time.Duration) { return healthCheckAfter, healthCheckWait }
 
 // CheckKeyFile is checkKeyFile, for a test of what it refuses.
-func CheckKeyFile(path string) error { return checkKeyFile(privateKey, path) }
+func CheckKeyFile(path string) error { return checkKeyFile(path) }
 
 // CheckPrivateFile is checkPrivateFile, for a test of what it refuses.
 func CheckPrivateFile(path string) error { return checkPrivateFile(path) }
@@ -46,11 +46,16 @@ func CheckPrivateFile(path string) error { return checkPrivateFile(path) }
 // CheckKeptDir is checkKeptDir, for a test of what it refuses.
 func CheckKeptDir(path string) error { return checkKeptDir(path) }
 
-// PrivateFiles are the base directory's files judged at every open, read from
-// baseFiles and publicFiles.
+// PrivateFiles are the base directory's files judged private at every open,
+// read from baseFiles, publicFiles and listFiles.
 func PrivateFiles() []string {
-	return slices.DeleteFunc(slices.Clone(baseFiles), func(f string) bool { return slices.Contains(publicFiles, f) })
+	return slices.DeleteFunc(slices.Clone(baseFiles), func(f string) bool {
+		return slices.Contains(publicFiles, f) || slices.Contains(listFiles, f)
+	})
 }
+
+// ListFiles are the lists, judged at every open as a config file is.
+func ListFiles() []string { return slices.Clone(listFiles) }
 
 // KeptDirs are the directories judged as keeping delivered messages, read from
 // keptDirs.
@@ -270,10 +275,8 @@ func PutRevocations(ctx context.Context, opt Options, a protocol.Address, rec *p
 // prekey.sig, revoke.sig, revoked-certs.json), "prekeys/<serial>.<part>"
 // (txt, txt.sig, made, and taken where it keeps one) and "refused/<id>.reason" ("<code>: <reason>"),
 // each a record's bytes as that file held them; and the records no file held,
-// "renewal" (the number of the renewal under way), "acl-read" (the read of
-// the server's ACL a renewal recv began owes), "adopt-acl" (a restore's
-// adoption of its server's ACL, begun), "renew-failed", "not-made",
-// "acl-another-writer", "acl-replaced", "partial" (the message the
+// "renewal" (the number of the renewal under way), "renew-failed",
+// "not-made", "partial" (the message the
 // partial file is of, and how many of its bytes are synced) and "format"
 // (the mailbox's format, as it is recorded). So a test
 // reads and changes the mailbox's state as it did its files.
@@ -283,7 +286,7 @@ func (b *Mailbox) Records() (map[string][]byte, error) {
 		for _, r := range []struct{ key, name string }{
 			{"serial", "serial"}, {"pass", "pass"}, {"etag", "etag"}, {"seen-floor", "seen-floor"},
 			{"acl", "acl.json"}, {"revoked", "revoked.sig"}, {"revoked-certs", "revoked-certs.json"},
-			{"renew-failed", "renew-failed"}, {"not-made", "not-made"}, {"acl-another-writer", "acl-another-writer"}, {"acl-replaced", "acl-replaced"}, {"partial", "partial"},
+			{"renew-failed", "renew-failed"}, {"not-made", "not-made"}, {"partial", "partial"},
 			{"deprecation", "deprecation"}, {"sunset", "sunset"}, {"document-read", "document-read"}, {"latest", "latest"},
 		} {
 			if v := s.get(bucketMailbox, r.key); v != nil {
@@ -352,10 +355,8 @@ func (b *Mailbox) Records() (map[string][]byte, error) {
 		if v := s.get(bucketMeta, keyFormat); v != nil {
 			out["format"] = v
 		}
-		for _, k := range []string{"renewal", "acl-read", "adopt-acl"} {
-			if v := s.get(bucketIntent, k); v != nil {
-				out[k] = v
-			}
+		if v := s.get(bucketIntent, "renewal"); v != nil {
+			out["renewal"] = v
 		}
 		if err := s.each(bucketOwed, func(_, v []byte) error {
 			out["owed/"+string(v)] = v
@@ -406,7 +407,7 @@ func (b *Mailbox) SetRecord(t *testing.T, name string, v []byte) {
 				}
 				return s.put(bucket, key, v)
 			}
-			for key, file := range map[string]string{"serial": "serial", "pass": "pass", "etag": "etag", "seen-floor": "seen-floor", "acl": "acl.json", "revoked": "revoked.sig", "revoked-certs": "revoked-certs.json", "renew-failed": "renew-failed", "not-made": "not-made", "acl-another-writer": "acl-another-writer", "acl-replaced": "acl-replaced"} {
+			for key, file := range map[string]string{"serial": "serial", "pass": "pass", "etag": "etag", "seen-floor": "seen-floor", "acl": "acl.json", "revoked": "revoked.sig", "revoked-certs": "revoked-certs.json", "renew-failed": "renew-failed", "not-made": "not-made"} {
 				if name == file {
 					return put(bucketMailbox, key, v)
 				}
@@ -490,7 +491,7 @@ func (b *Mailbox) SetRecord(t *testing.T, name string, v []byte) {
 				}
 				return s.put(bucketPrekeys, serialKey(n), raw)
 			}
-			if name == "renewal" || name == "acl-read" || name == "adopt-acl" {
+			if name == "renewal" {
 				return put(bucketIntent, name, v)
 			}
 			if rest, ok := strings.CutPrefix(name, "refused/"); ok {
