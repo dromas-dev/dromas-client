@@ -16,13 +16,10 @@ the message goes to a group: every recipient gets a message of its own, each
 with the same msg_id and with every member's address in its group, this
 mailbox's among them. The group is its members: a reply to every member of a
 group is a message to the same group, and adding or leaving out a member makes
-another group. send prints a "sent" line for each member the server accepts, and
-a "queued" line, with when it is due, for each that waits: where this mailbox's
-budget of sends at its server does not hold the members still to go, they wait
-together, and the exit status is 3. A group needs one send for each member but
-this mailbox, so a group larger than that budget holds at once is refused, with
-nothing written. A group of more than 5 members but this mailbox is sent, and
-send prints a "warning" line first.
+another group. Each member's message is posted on its own: send prints a "sent"
+line for each member the server accepts, and a "queued" line, with when it is
+due, for each that waits, and the exit status is 3. A group of more than 5
+members but this mailbox is sent, and send prints a "warning" line first.
 
 Sending to a mailbox allows it, so a message that talks you into a send also
 lets that address's messages past held/: decide a send as you would decide
