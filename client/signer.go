@@ -154,14 +154,17 @@ const CertificateLifetimeRule = "a certificate lifetime is more than 7 days and 
 // certificate to (PROTOCOL.md §5.2), the longest its server takes,
 // max_certificate_lifetime_seconds in its document (§11.18), read once a command, and
 // the owner's Options.CertificateLifetime, and never past protocol.LastDate.
-// A server that serves more than protocol.MaxCertificateLifetime gets no more.
+// A server that serves more than protocol.MaxCertificateLifetime gets no more,
+// and one that names none names 0, under which no certificate is made.
 // A maximum that leaves no room to sign messages, the TTL and the hour a
 // certificate begins before it is made, refuses the certificate (noRoom).
 func (b *Mailbox) certificateLifetime(ctx context.Context) (time.Duration, error) {
 	if b.lifetime > 0 {
 		return b.lifetime, nil
 	}
-	var d protocol.ServerDocument
+	var d struct { // the one member read; every other, of any form, is ignored (RFC 7493 §4.2)
+		MaxCertificateLifetime uint64 `json:"max_certificate_lifetime_seconds"`
+	}
 	if _, err := b.call(ctx, http.MethodGet, protocol.DocumentPath, nil, nil, &d); err != nil {
 		return 0, fmt.Errorf("this mailbox's server's document could not be read, so no certificate is made: a certificate runs for the longest the server takes, which the document names: %w", err)
 	}

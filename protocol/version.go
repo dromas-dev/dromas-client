@@ -200,9 +200,9 @@ var capabilityGrammar = regexp.MustCompile(`\A[a-z][a-z0-9_]{0,63}\z`)
 
 // ServerDocument is GET /v1/, the server's version policy and the
 // capabilities it serves (PROTOCOL.md §11.18). Its versions and times are
-// strings, as they travel, each held to its form when the document is read
-// ([Unmarshal]) or checked ([ServerDocument.Check]). A writer writes both
-// lists, empty or not.
+// strings, as they travel, each held to its form by [ServerDocument.Check],
+// which a read does not make: a client reads only the members it uses. A
+// writer writes both lists, empty or not.
 type ServerDocument struct {
 	// MinVersion is the floor, "" for none.
 	MinVersion string `json:"min_version,omitempty"`
@@ -311,9 +311,6 @@ func (d *ServerDocument) Check() error {
 	}
 	return nil
 }
-
-// checkType is Check, as a read of the document makes it.
-func (d *ServerDocument) checkType() error { return d.Check() }
 
 // parse is s's version, as below or as version, and its date, or the member
 // that breaks its form.

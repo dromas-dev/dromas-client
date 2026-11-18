@@ -1192,7 +1192,6 @@ A mailbox's ACL says from which senders the mailbox's server accepts messages to
   - An ACL with more entries than the server accepts, in both lists together → `413 content_too_large`. The server counts entries as sent, before a repeated entry is read as one entry. A server MUST NOT accept more than 10,000 entries, and MAY accept fewer.
   - The answer is `200` with the ACL as stored, and no `ETag`. The answer lists `*` first, then each address once, in ascending order of the addresses' 48 bytes (not of their text: base64url's alphabet is not in ASCII order, so the two orders differ).
 - **Get the ACL: `GET /v1/<B>/acl`.** The call carries the mailbox's pass. The server answers the ACL as stored, in that order, with the ACL's `ETag`. That `ETag` is a strong validator that changes whenever the lists change. For a mailbox with no ACL, the server answers `{"allow":["*"],"deny":[]}`, also with a tag. There is no `DELETE` of the ACL.
-- **A client MUST treat as malformed an ACL answer with more than 10,000 entries in both lists together.**
 - **A `PUT` MAY carry `If-Match` (RFC 9110 §13.1.1), so that the `PUT` replaces only the ACL its writer read.**
 - **Every mailbox has an ACL and the ACL's tag, a mailbox with no ACL set included.** Therefore `If-None-Match: *` on a `PUT` is false (§13.1.2).
 - **Setting the ACL deletes no message.** A change to the ACL refuses only later sends. A send that passed the ACL check while the ACL changed may still be stored after the change.
@@ -1316,7 +1315,7 @@ A mailbox may belong to one account at its server. The protocol fixes how a mail
   implementation-text = 1*128%x21-7E
   ```
 
-A server lists at most 64 deprecations, 64 sunsets and 64 capabilities. A client reads at most that many of each. A document with more, or with a sunset earlier than a deprecation of the same `below` or `version`, is malformed.
+A server lists at most 64 deprecations, 64 sunsets and 64 capabilities. A client reads only the members it uses.
 
 ## 12. Clients
 
@@ -1435,7 +1434,7 @@ A client drains every page of its list (Section 11.11) and fetches the message o
 
 - **With the `ETag` of the answer for an empty mailbox, a `304` means the mailbox is still empty.** A client that keeps the tag of a page with messages MUST act on the page it kept when the client is answered `304`.
 - **A `304` whose `ETag`, compared weakly, is not the tag the poll sent is no answer.** The drain stops.
-- **A `304` to a list that sent no `If-None-Match` is malformed.** A list answer without `Retry-After` is malformed too.
+- **A `304` to a list that sent no `If-None-Match` is malformed.**
 - **A client treats a list's answer as no answer in any of these cases:**
   - the answer's cursor does not have the form Section 11.11 gives;
   - a list entry's `id` does not have the form `message-id` (Section 11.10);

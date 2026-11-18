@@ -88,19 +88,21 @@ func TestWritingOrNamingAPeerAllowsIt(t *testing.T) {
 	if res := receive(t, b); len(res.Delivered) != 1 || len(res.Held) != 0 {
 		t.Fatalf("a message from a mailbox named, then un-named: %+v", res)
 	}
-	// An alias written by hand, which allowed never heard of, allows too.
+	// A name written by hand allows nothing, and naming it again allows it.
 	d := e.heldMailbox()
-	f, err := os.OpenFile(filepath.Join(b.Dir(), "aliases"), os.O_WRONLY|os.O_APPEND, 0o600)
-	if err != nil {
+	if err := os.WriteFile(filepath.Join(b.Dir(), "aliases"), []byte("dan "+d.Address().String()+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.WriteString("dan " + d.Address().String() + "\n"); err != nil {
-		t.Fatal(err)
-	}
-	_ = f.Close()
 	send(t, d, b, "named by hand")
-	if res := receive(t, b); len(res.Delivered) != 1 {
-		t.Fatalf("a message from a mailbox an alias written by hand names: %+v", res)
+	if res := receive(t, b); len(res.Held) != 1 {
+		t.Fatalf("a message from a mailbox named by hand: %d held", len(res.Held))
+	}
+	if err := b.SetAlias(t.Context(), "dan", d.Address()); err != nil {
+		t.Fatal(err)
+	}
+	send(t, d, b, "named again")
+	if res := receive(t, b); len(res.Delivered) != 1 || len(res.Held) != 0 {
+		t.Fatalf("a message from a mailbox named again: %d delivered, %d held", len(res.Delivered), len(res.Held))
 	}
 }
 

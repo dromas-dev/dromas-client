@@ -54,8 +54,8 @@ func (b *Mailbox) inboxMessage(id string) (Delivery, error) {
 	return Delivery{ID: id, Envelope: env, Line: l}, nil
 }
 
-// Inbox returns the messages inbox/ keeps, oldest first by sent_at (within a
-// second as [Mailbox.keptMessages] orders it), each as
+// Inbox returns the messages inbox/ keeps, oldest first by sent_at, then by
+// id, each as
 // [Mailbox.InboxMessage] returns it: what recv delivered and nobody has pruned
 // since. A file that is not the line recv keeps is left out, as
 // [Mailbox.InboxMessage] refuses it. It reads only inbox/, once the mailbox's
