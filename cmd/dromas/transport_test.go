@@ -198,9 +198,6 @@ func TestAListsCursorIsNeverPrinted(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte("x"))
 		}},
-		{"no Retry-After", words, func(w http.ResponseWriter) {
-			fakeserver.WriteJSON(w, http.StatusOK, protocol.MessageList{Messages: []protocol.MessageInfo{}})
-		}},
 		{"a connection closed", words, func(w http.ResponseWriter) {
 			c, _, _ := w.(http.Hijacker).Hijack()
 			_ = c.Close()

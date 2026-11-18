@@ -180,12 +180,13 @@ func TestAPolicyCoversItsVersions(t *testing.T) {
 	}
 }
 
-// A document is held to its form as it is read: each version a policy's,
+// A read of a document holds only the member a client uses to its form: the
+// server's maximum certificate lifetime, which every document carries, from 1
+// to MaxInteger seconds. Check holds the rest: each version a policy's,
 // exactly one of below and version, each date a time, each name of its form,
 // no more than 64 of each list, no sunset earlier than a deprecation of the
-// same versions (RFC 9745 §4), the server's maximum certificate lifetime,
-// which every document carries, from 1 to MaxInteger seconds, and the
-// implementation's members, where it names one, each of its text.
+// same versions (RFC 9745 §4), and the implementation's members, where it
+// names one, each of its text.
 func TestTheServersDocumentBreaksItsFormAsItSays(t *testing.T) {
 	good := `{"min_version":"0.1","latest_version":"0.8","deprecations":[{"below":"0.5","effective_at":"2027-01-01T00:00:00Z"}],"sunsets":[{"below":"0.5","effective_at":"2027-01-01T00:00:00Z"},{"version":"0.6","effective_at":"2027-02-01T00:00:00Z"}],"capabilities":[{"name":"long_poll2"}],"max_certificate_lifetime_seconds":3891600,"server":{"name":"dromas-server","version":"v0.5.1","revision":"c4258bc37344474025fe2c2d6420476eb617450a"},"later":1}`
 	var d ServerDocument
@@ -201,8 +202,8 @@ func TestTheServersDocumentBreaksItsFormAsItSays(t *testing.T) {
 		return `{"` + list + `":[` + strings.TrimSuffix(strings.Repeat(item+",", n), ",") + `]}`
 	}
 	sunset := `{"below":"1.0","effective_at":"2027-01-01T00:00:00Z"}`
-	if err := Unmarshal([]byte(withMax(many("sunsets", MaxSunsets, sunset))), &d); err != nil {
-		t.Errorf("%d sunsets: %v", MaxSunsets, err)
+	if err := Unmarshal([]byte(withMax(many("sunsets", MaxSunsets, sunset))), &d); err != nil || d.Check() != nil {
+		t.Errorf("%d sunsets: %v, %v", MaxSunsets, err, d.Check())
 	}
 	for text, member := range map[string]string{
 		many("sunsets", MaxSunsets+1, sunset):                                                 "sunsets",
@@ -228,8 +229,10 @@ func TestTheServersDocumentBreaksItsFormAsItSays(t *testing.T) {
 		`{"deprecations":[{"version":"1.0","effective_at":"2027-02-01T00:00:00Z"}],"sunsets":[{"version":"1.0","effective_at":"2027-01-31T23:59:59Z"}]}`: "sunsets",
 	} {
 		var d ServerDocument
-		err := Unmarshal([]byte(withMax(text)), &d)
-		if !errors.Is(err, ErrMemberValue) || Member(err) != member {
+		if err := Unmarshal([]byte(withMax(text)), &d); err != nil || d.MaxCertificateLifetime != 1 {
+			t.Errorf("%s: read %d, %v", text, d.MaxCertificateLifetime, err)
+		}
+		if err := d.Check(); !errors.Is(err, ErrMemberValue) || Member(err) != member {
 			t.Errorf("%s: %v, naming %q, want %q", text, err, Member(err), member)
 		}
 	}
@@ -241,6 +244,9 @@ func TestTheServersDocumentBreaksItsFormAsItSays(t *testing.T) {
 	} {
 		var d ServerDocument
 		if err := Unmarshal([]byte(withMax(text)), &d); err != nil {
+			t.Fatal(err)
+		}
+		if err := d.Check(); err != nil {
 			t.Errorf("%s: %v", text, err)
 		}
 	}

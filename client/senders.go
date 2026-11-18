@@ -1,6 +1,7 @@
 package client
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -11,7 +12,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/dromas-dev/dromas-client/protocol"
 )
@@ -191,7 +191,7 @@ func (b *Mailbox) addAll(name string, addrs []protocol.Address) (int, error) {
 }
 
 // Allowed returns the senders whose messages land in inbox/ whatever the
-// policy says: those the allowed file lists and those an alias names.
+// policy says: those the allowed file lists.
 func (b *Mailbox) Allowed(ctx context.Context) ([]protocol.Address, error) {
 	return reading(ctx, b, b.allowed)
 }
@@ -201,13 +201,6 @@ func (b *Mailbox) allowed() ([]protocol.Address, error) {
 	allowed, err := b.addresses("allowed")
 	if err != nil {
 		return nil, err
-	}
-	as, err := b.aliases()
-	if err != nil {
-		return nil, err
-	}
-	for _, a := range as {
-		allowed = append(allowed, a.Address)
 	}
 	return protocol.NewACLList(false, allowed).Addrs, nil
 }
@@ -286,16 +279,11 @@ type keptMessage struct {
 	SentAt string
 	Env    *protocol.Envelope
 	Line   []byte
-	kept   time.Time // when the drain wrote it: the order it arrived in, among messages sent in one second, where the file system's clock tells them apart
 }
 
 // keptMessages reads dir, inbox/ or held/: each message this client kept there,
-// oldest first by sent_at, then in the order they were kept, then by id. Two
-// files written within one tick of the file system's clock share a
-// modification time (Windows' ticks about every 15.6 ms), so the order
-// within a second is the order recv kept them only where their times
-// differ; the id makes it the same on every run. A file that is not one of
-// this client's lines ([Mailbox.keptLine]) is skipped.
+// oldest first by sent_at, then by id. A file that is not one of this client's
+// lines ([Mailbox.keptLine]) is skipped.
 func (b *Mailbox) keptMessages(dir string) ([]keptMessage, error) {
 	names, err := matching(b.path(dir, "*.json"))
 	if err != nil {
@@ -314,24 +302,14 @@ func (b *Mailbox) keptMessages(dir string) ([]keptMessage, error) {
 		if err != nil {
 			return nil, err
 		}
-		fi, err := os.Stat(n)
-		if err != nil {
-			return nil, err
-		}
 		line, from, env, ok := b.keptLine(data)
 		if !ok {
 			continue
 		}
-		out = append(out, keptMessage{ID: id, From: from, SentAt: env.SentAt.UTC().Format(protocol.TimeLayout), Env: env, Line: line, kept: fi.ModTime()})
+		out = append(out, keptMessage{ID: id, From: from, SentAt: env.SentAt.UTC().Format(protocol.TimeLayout), Env: env, Line: line})
 	}
-	slices.SortStableFunc(out, func(x, y keptMessage) int {
-		if c := strings.Compare(x.SentAt, y.SentAt); c != 0 {
-			return c
-		}
-		if c := x.kept.Compare(y.kept); c != 0 {
-			return c
-		}
-		return strings.Compare(x.ID, y.ID)
+	slices.SortFunc(out, func(x, y keptMessage) int {
+		return cmp.Or(strings.Compare(x.SentAt, y.SentAt), strings.Compare(x.ID, y.ID))
 	})
 	return out, nil
 }
@@ -657,7 +635,7 @@ func (b *Mailbox) heldACL(ctx context.Context) (*protocol.ACL, error) {
 	if _, err := b.owner(ctx, http.MethodGet, b.mailboxPath("/acl"), nil, &d); err != nil {
 		return nil, err
 	}
-	return protocol.CheckACL(&d, protocol.MaxACLEntries)
+	return protocol.CheckACL(&d, 0)
 }
 
 // sendACL sends the mailbox's ACL, want, and keeps the server's answer as the
@@ -693,7 +671,7 @@ func (b *Mailbox) putACL(ctx context.Context, acl *protocol.ACL) (*protocol.ACL,
 	if _, err := b.owner(ctx, http.MethodPut, b.mailboxPath("/acl"), acl.Document(), &d); err != nil {
 		return nil, err
 	}
-	got, err := protocol.CheckACL(&d, protocol.MaxACLEntries)
+	got, err := protocol.CheckACL(&d, 0)
 	if err != nil || !got.SameLists(acl) {
 		return nil, errors.New("the server answered with another ACL than the one sent")
 	}

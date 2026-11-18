@@ -88,20 +88,6 @@ func TestWritingOrNamingAPeerAllowsIt(t *testing.T) {
 	if res := receive(t, b); len(res.Delivered) != 1 || len(res.Held) != 0 {
 		t.Fatalf("a message from a mailbox named, then un-named: %+v", res)
 	}
-	// An alias written by hand, which allowed never heard of, allows too.
-	d := e.heldMailbox()
-	f, err := os.OpenFile(filepath.Join(b.Dir(), "aliases"), os.O_WRONLY|os.O_APPEND, 0o600)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := f.WriteString("dan " + d.Address().String() + "\n"); err != nil {
-		t.Fatal(err)
-	}
-	_ = f.Close()
-	send(t, d, b, "named by hand")
-	if res := receive(t, b); len(res.Delivered) != 1 {
-		t.Fatalf("a message from a mailbox an alias written by hand names: %+v", res)
-	}
 }
 
 // Block deletes what held/ keeps from a sender and tells the server, which

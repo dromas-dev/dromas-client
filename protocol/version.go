@@ -291,8 +291,8 @@ func (d *ServerDocument) Check() error {
 	if len(d.Capabilities) > MaxCapabilities {
 		return &memberError{name: "capabilities", known: true}
 	}
-	if d.MaxCertificateLifetime == 0 || d.MaxCertificateLifetime > MaxInteger {
-		return &memberError{name: "max_certificate_lifetime_seconds", known: true}
+	if err := d.checkType(); err != nil {
+		return err
 	}
 	for _, c := range d.Capabilities {
 		if !capabilityGrammar.MatchString(c.Name) {
@@ -312,8 +312,14 @@ func (d *ServerDocument) Check() error {
 	return nil
 }
 
-// checkType is Check, as a read of the document makes it.
-func (d *ServerDocument) checkType() error { return d.Check() }
+// checkType holds the one member a client uses to its form:
+// max_certificate_lifetime_seconds, from 1 to MaxInteger (PROTOCOL.md §11.18).
+func (d *ServerDocument) checkType() error {
+	if d.MaxCertificateLifetime == 0 || d.MaxCertificateLifetime > MaxInteger {
+		return &memberError{name: "max_certificate_lifetime_seconds", known: true}
+	}
+	return nil
+}
 
 // parse is s's version, as below or as version, and its date, or the member
 // that breaks its form.

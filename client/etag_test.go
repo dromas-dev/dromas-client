@@ -5,8 +5,6 @@ import (
 	"maps"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -102,39 +100,56 @@ func TestAPageWithMessagesDropsTheETag(t *testing.T) {
 }
 
 // A 304 answers only the condition a poll asked: one to a poll that sent no
-// If-None-Match is no answer, and so is a list answer without a Retry-After of
-// digits alone.
+// If-None-Match is no answer.
 func TestAListAnswerOutOfItsFormIsNoAnswer(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
 	b := e.mailbox()
-	for name, answer := range map[string]func(w http.ResponseWriter){
-		"a 304 unasked": func(w http.ResponseWriter) {
+	e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
+		if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/messages") {
 			w.Header().Set("Retry-After", "60")
 			w.WriteHeader(http.StatusNotModified)
-		},
-		"no Retry-After": func(w http.ResponseWriter) {
-			fakeserver.WriteJSON(w, http.StatusOK, protocol.MessageList{Messages: []protocol.MessageInfo{}})
-		},
-		"a Retry-After of another form": func(w http.ResponseWriter) {
-			w.Header().Set("Retry-After", "1e2")
-			fakeserver.WriteList(w, protocol.MessageList{Messages: []protocol.MessageInfo{}})
-		},
-	} {
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+	if _, err := b.Receive(context.Background()); err == nil {
+		t.Error("the drain went on")
+	}
+}
+
+// A list answer without a Retry-After of digits alone gives no poll interval,
+// and the drain goes on.
+func TestAListAnswerWithoutARetryAfterDrains(t *testing.T) {
+	t.Parallel()
+	for _, v := range []string{"", "1e2"} {
+		e := newEnv(t)
+		a, b := e.mailbox(), e.mailbox()
+		send(t, a, b, "delivered")
 		e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
 			if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/messages") {
-				answer(w)
-				return
+				w = retryAfterOf{w, v}
 			}
 			next.ServeHTTP(w, r)
 		})
-		if err := os.Remove(filepath.Join(b.Dir(), "etag")); err != nil && !os.IsNotExist(err) {
-			t.Fatal(err)
-		}
-		if _, err := b.Receive(context.Background()); err == nil {
-			t.Errorf("%s: the drain went on", name)
+		if res := receive(t, b); len(res.Delivered) != 1 || res.PollAfter != 0 {
+			t.Errorf("Retry-After %q: %d delivered, PollAfter %d", v, len(res.Delivered), res.PollAfter)
 		}
 	}
+}
+
+// retryAfterOf answers with a Retry-After of v, or none where v is empty.
+type retryAfterOf struct {
+	http.ResponseWriter
+	v string
+}
+
+func (w retryAfterOf) WriteHeader(code int) {
+	w.Header().Del("Retry-After")
+	if w.v != "" {
+		w.Header().Set("Retry-After", w.v)
+	}
+	w.ResponseWriter.WriteHeader(code)
 }
 
 // A server's tag is sent back only in the form of an entity-tag (RFC 9110

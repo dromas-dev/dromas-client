@@ -88,7 +88,7 @@ type Result struct {
 	// Retry-After, on a fetch); zero otherwise.
 	Paced time.Duration
 	// PollAfter is the server's poll interval, in seconds: the list's
-	// Retry-After.
+	// Retry-After (retryAfter).
 	PollAfter int64
 	// Renewed is the prekey this Receive published, the current one being
 	// due (more than a day old, or sooner for a short lifetime: renewAt); nil
@@ -387,11 +387,7 @@ func (b *Mailbox) drainPages(ctx context.Context, asked *lookups, res *Result) e
 				return err
 			}
 		}
-		n, err := protocol.PollInterval(resp.Header.Get("Retry-After"))
-		if err != nil {
-			return fmt.Errorf("GET %s: %w", listed, err)
-		}
-		res.PollAfter = int64(min(n, maxWaitSeconds))
+		res.PollAfter = int64(retryAfter(resp.Header.Get("Retry-After")) / time.Second)
 		if resp.StatusCode == http.StatusNotModified {
 			// A 304 carries the tag of the page it is about (RFC 9110
 			// §15.4.5). One about another tag than the one sent says

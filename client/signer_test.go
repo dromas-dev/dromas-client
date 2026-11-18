@@ -153,6 +153,27 @@ func TestACertificateIsRefusedWhereTheServersMaximumLeavesNoRoom(t *testing.T) {
 	}
 }
 
+// A client reads only the member of its server's document it uses: a
+// document whose server name breaks its form still gives the maximum, and a
+// mailbox registers under a certificate of that one (PROTOCOL.md §11.18).
+func TestADocumentIsReadForItsMaximumAlone(t *testing.T) {
+	t.Parallel()
+	e := newWorkEnv(t)
+	short := fakeserver.MaxCertificateLifetime - 86400
+	e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
+		if r.URL.Path == protocol.DocumentPath {
+			fakeserver.WriteJSON(w, http.StatusOK, protocol.ServerDocument{MaxCertificateLifetime: short, Deprecations: []protocol.Scheduled{}, Sunsets: []protocol.Scheduled{}, Capabilities: []protocol.Capability{}, Server: &protocol.Implementation{Name: "a b", Version: "v1"}})
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+	a := e.mailbox()
+	st, sig := e.srv.Prekey(a.Address())
+	if _, by, err := protocol.VerifyPrekey(a.Identity(), st, sig, e.clock.Now()); err != nil || by.Certificate() == nil || by.Certificate().Lifetime() != time.Duration(short)*time.Second {
+		t.Fatalf("the statement taken: %v, %+v", err, by)
+	}
+}
+
 // A certificate runs for the longest its server's document names. A server
 // whose maximum is shorter than that, its document read before it changed,
 // answers certificate_lifetime_too_long with its maximum, and the mailbox makes the

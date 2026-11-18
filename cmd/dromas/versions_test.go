@@ -275,20 +275,9 @@ func TestAnUpgradeIsSaidOnceADay(t *testing.T) {
 	if ls, status, errs := v.run("recv"); status != 0 || lineOf(ls, "upgrade_available") != nil || errs != "" || v.documentReads() != 3 {
 		t.Fatalf("recv whose read failed: exit %d, %v, %q, %d reads", status, ls, errs, v.documentReads())
 	}
-	// A document that breaks its form is no read either.
-	v.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
-		if r.URL.Path == protocol.DocumentPath {
-			fakeserver.WriteJSON(w, http.StatusOK, map[string]any{"latest_version": "v1.6", "deprecations": []any{}, "sunsets": []any{}, "capabilities": []any{}})
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-	if ls, status, _ := v.run("recv"); status != 0 || lineOf(ls, "upgrade_available") != nil || v.documentReads() != 4 {
-		t.Fatalf("recv whose document broke its form: exit %d, %v, %d reads", status, ls, v.documentReads())
-	}
 	v.srv.SetMiddle(nil)
-	if ls, status, _ := v.run("recv"); status != 0 || lineOf(ls, "upgrade_available") == nil || v.documentReads() != 5 {
-		t.Fatalf("recv after the failed reads: exit %d, %v, %d reads", status, ls, v.documentReads())
+	if ls, status, _ := v.run("recv"); status != 0 || lineOf(ls, "upgrade_available") == nil || v.documentReads() != 4 {
+		t.Fatalf("recv after the failed read: exit %d, %v, %d reads", status, ls, v.documentReads())
 	}
 	// A latest equal in every part it writes is no upgrade, and status stops
 	// saying one once a read finds none; nor does one with no latest.
