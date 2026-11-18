@@ -38,8 +38,8 @@ const (
 	AdmitAllowed = "allowed"
 )
 
-// Policy is a mailbox's policy. A field left empty takes the next source's
-// ([Mailbox.Policy]).
+// Policy is a mailbox's policy, from two sources: what its owner set
+// (Options.Policy), and DefaultPolicy for each field left empty.
 type Policy struct {
 	// Unknown is where a message from a sender the mailbox has not allowed lands:
 	// LandHeld or LandInbox.
@@ -49,17 +49,10 @@ type Policy struct {
 	Server string `json:"server"`
 }
 
-// DefaultPolicy is the policy of a mailbox nothing has set one for: a message
+// DefaultPolicy is the policy of a mailbox whose owner set none: a message
 // from a sender the mailbox has not allowed is held, and the server refuses
 // only senders the mailbox has blocked.
 func DefaultPolicy() Policy { return Policy{Unknown: LandHeld, Server: AdmitAll} }
-
-func (p Policy) check() error {
-	if (p.Unknown != LandHeld && p.Unknown != LandInbox) || (p.Server != AdmitAll && p.Server != AdmitAllowed) {
-		return errors.New(`a policy is "unknown held" or "unknown inbox", and "server all" or "server allowed"`)
-	}
-	return nil
-}
 
 // checkSet holds a policy whose fields may be left empty to the values there are.
 func (p Policy) checkSet() error {
@@ -69,54 +62,17 @@ func (p Policy) checkSet() error {
 	return nil
 }
 
-// keyPolicy is what SetPolicy recorded, in the mailbox's bucket.
-const keyPolicy = "policy"
-
-// Policy is the mailbox's policy, each field from the first that says it: what
-// its owner set (Options.Policy), what SetPolicy recorded in the state file,
-// and the default.
-func (b *Mailbox) Policy(ctx context.Context) (Policy, error) {
-	return reading(ctx, b, b.policy)
-}
-
-// policy is Policy, read under the reading or command that holds the mailbox.
-func (b *Mailbox) policy() (Policy, error) {
+// Policy is the mailbox's policy, each field from what its owner set
+// (Options.Policy) or else from DefaultPolicy.
+func (b *Mailbox) Policy() Policy {
 	p := DefaultPolicy()
-	if err := b.view(func(s store) error {
-		raw := s.get(bucketMailbox, keyPolicy)
-		if raw == nil {
-			return nil
-		}
-		return json.Unmarshal(raw, &p)
-	}); err != nil {
-		return p, err
-	}
 	if b.policySet.Unknown != "" {
 		p.Unknown = b.policySet.Unknown
 	}
 	if b.policySet.Server != "" {
 		p.Server = b.policySet.Server
 	}
-	return p, nil
-}
-
-// recordPolicy keeps p in the state file.
-func (b *Mailbox) recordPolicy(p Policy) error {
-	raw, err := json.Marshal(p)
-	if err != nil {
-		return err
-	}
-	return b.update(func(s store) error { return s.put(bucketMailbox, keyPolicy, raw) })
-}
-
-// SetPolicy records the mailbox's policy in its state file, under what its owner
-// set in Options.Policy. The server learns what it changes at the mailbox's next
-// send, recv, allow or block ([Mailbox.SyncACL]).
-func (b *Mailbox) SetPolicy(ctx context.Context, p Policy) error {
-	if err := p.check(); err != nil {
-		return err
-	}
-	return b.lockedFinishedDo(ctx, func() error { return b.recordPolicy(p) })
+	return p
 }
 
 // addresses reads one of the mailbox's address lists, allowed or blocked: an
@@ -234,10 +190,6 @@ type senders struct {
 }
 
 func (b *Mailbox) readSenders() (*senders, error) {
-	p, err := b.policy()
-	if err != nil {
-		return nil, err
-	}
 	allowed, err := b.allowed()
 	if err != nil {
 		return nil, err
@@ -246,7 +198,7 @@ func (b *Mailbox) readSenders() (*senders, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &senders{policy: p, allowed: protocol.ACLList{Addrs: allowed}, blocked: protocol.ACLList{Addrs: blocked}}, nil
+	return &senders{policy: b.Policy(), allowed: protocol.ACLList{Addrs: allowed}, blocked: protocol.ACLList{Addrs: blocked}}, nil
 }
 
 // land says where a message from a verified sender lands: dropped if the mailbox

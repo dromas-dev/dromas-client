@@ -178,7 +178,6 @@ func TestRestoreFromIdentity(t *testing.T) {
 	if exists(filepath.Join(dir, ".gitignore")) {
 		t.Error("the restored mailbox wrote a .gitignore")
 	}
-	landAll(t, r)
 	p, err := r.Rekey(context.Background())
 	if err != nil {
 		t.Fatal(err)

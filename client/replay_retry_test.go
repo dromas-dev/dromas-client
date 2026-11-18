@@ -32,7 +32,6 @@ func TestARetryAfterAStepOfTheHour(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	landAll(t, r)
 	s := e.mailbox()
 	mode := "lose"
 	var retry []byte
@@ -118,7 +117,6 @@ func TestAStretchedRetryAtClocksAnHonestServerTakes(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			landAll(t, r)
 			s := e.mailbox()
 			mailbox := "/v1/" + r.Address().String()
 			mode := "lose"

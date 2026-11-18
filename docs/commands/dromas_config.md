@@ -8,9 +8,8 @@ Print a "config" line: the config file, the profile, and each setting's value
 and where it came from, "flag", "environment", "file" or "default". Each setting
 comes from the first of those that sets it.
 
-A [policy] key that the config file does not set comes from the state file, as
-after a restore, and status reports the policy in force. config does not touch
-the mailbox.
+A [policy] key that the config file does not set takes its default, and status
+reports the policy in force. config does not touch the mailbox.
 
 ```
 dromas config

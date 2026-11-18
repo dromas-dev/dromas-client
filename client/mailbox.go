@@ -118,11 +118,6 @@ type Options struct {
 	// (Result.More), and a fetch under way keeps what it read for the next
 	// Receive to go on from. Zero is DefaultDrainTime.
 	DrainTime time.Duration
-	// Version is the version every request names in Dromas-Version
-	// (PROTOCOL.md §11.17): the function [Version] if empty, and that is the one to
-	// use. Another is for a test, and must be of a request's form
-	// (protocol.ParseVersion).
-	Version string
 	// Layout says where the parts of the mailbox are that need not be under its
 	// base directory.
 	Layout Layout
@@ -130,7 +125,8 @@ type Options struct {
 	// names; empty if none did.
 	ConfigFile string
 	// Policy is what its owner set of the mailbox's policy: a field left empty
-	// takes what SetPolicy recorded, or the default ([Mailbox.Policy]).
+	// takes DefaultPolicy's ([Mailbox.Policy]). Nothing of it is kept in the
+	// mailbox: each process that opens it lands by its own Options.Policy.
 	Policy Policy
 	// PrekeyLifetime is how long each new prekey is valid for, from
 	// MinPrekeyLifetime to protocol.PrekeyLifetime, in whole seconds; zero is
@@ -256,7 +252,7 @@ type Mailbox struct {
 	// holding is what the mailbox has learned of its network while it holds
 	// its list (Hold), which the default client's connections follow.
 	holding holding
-	// version is the version every request names (Options.Version), and met
+	// version is the version every request names ([Version]), and met
 	// what the answers to them said of it (Versions).
 	version string
 	met     *Versions
@@ -345,12 +341,7 @@ func newMailbox(dir string, opt Options) (*Mailbox, error) {
 	if b.drainTime <= 0 {
 		b.drainTime = DefaultDrainTime
 	}
-	b.version = opt.Version
-	if b.version == "" {
-		b.version = Version()
-	} else if _, err := protocol.ParseVersion(b.version); err != nil {
-		return nil, fmt.Errorf("%.80q is not a version a request names: MAJOR.MINOR.PATCH and an optional pre-release, with no v", b.version)
-	}
+	b.version = Version()
 	b.met = opt.Versions
 	if b.met == nil {
 		b.met = &Versions{}

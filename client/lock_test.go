@@ -329,15 +329,11 @@ func waits(b, c *client.Mailbox, rec *protocol.Revocations, opt client.Options) 
 		},
 		"HeldMessages":   func(ctx context.Context) error { _, err := b.HeldMessages(ctx); return err },
 		"Aliases":        func(ctx context.Context) error { _, err := b.Aliases(ctx); return err },
-		"Policy":         func(ctx context.Context) error { _, err := b.Policy(ctx); return err },
 		"Allowed":        func(ctx context.Context) error { _, err := b.Allowed(ctx); return err },
 		"Blocked":        func(ctx context.Context) error { _, err := b.Blocked(ctx); return err },
 		"PrekeyLifetime": func(ctx context.Context) error { _, err := b.PrekeyLifetime(ctx); return err },
 		"SetAlias":       func(ctx context.Context) error { return b.SetAlias(ctx, "carol", c.Address()) },
 		"RemoveAlias":    func(ctx context.Context) error { return b.RemoveAlias(ctx, "carol") },
-		"SetPolicy": func(ctx context.Context) error {
-			return b.SetPolicy(ctx, client.Policy{Unknown: client.LandInbox, Server: client.AdmitAll})
-		},
 		"KeepRevocation": func(ctx context.Context) error { _, _, err := b.KeepRevocation(ctx, rec); return err },
 		"RebuildAllowed": func(ctx context.Context) error { _, err := b.RebuildAllowed(ctx); return err },
 		"RemoveRefused":  func(ctx context.Context) error { _, err := b.RemoveRefused(ctx, nil); return err },
