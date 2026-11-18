@@ -107,13 +107,15 @@ norace() {
 
 full() {
   norace
-  # A Mailbox shared by goroutines, and every test of a held list (hold_test.go),
-  # whose request runs beside the mailbox's other commands, under the race
-  # detector where Go has one (go.dev/doc/articles/race_detector,
-  # Requirements).
+  # A Mailbox shared by goroutines, every test of a held list (hold_test.go),
+  # whose request runs beside the mailbox's other commands, and every test of
+  # recv --webhook's (cmd/dromas/webhook_test.go), whose goroutine prints beside
+  # the loop's, under the race detector where Go has one
+  # (go.dev/doc/articles/race_detector, Requirements).
   case $(go env GOOS)/$(go env GOARCH) in
     linux/amd64 | linux/ppc64le | linux/arm64 | linux/s390x | linux/loong64 | freebsd/amd64 | netbsd/amd64 | darwin/amd64 | darwin/arm64 | windows/amd64)
       go test -tags "$tags" -race -count=1 -timeout "$timeout" -run "SharedByGoroutines|^($(sed -n 's/^func \(Test[A-Za-z0-9_]*\).*/\1/p' client/hold_test.go | paste -sd '|' -))\$" ./client
+      go test -tags "$tags" -race -count=1 -timeout "$timeout" -run "^($(sed -n 's/^func \(Test[A-Za-z0-9_]*\).*/\1/p' cmd/dromas/webhook_test.go | paste -sd '|' -))\$" ./cmd/dromas
       ;;
     *) echo "$(go env GOOS)/$(go env GOARCH): the race test is left out: Go's race detector does not run here" >&2 ;;
   esac

@@ -169,12 +169,18 @@ func messageHeaders(d client.Delivery, n names) []byte {
 
 // out prints a line on stdout.
 func (e *cli) out(b []byte) error {
+	e.written.Lock()
+	defer e.written.Unlock()
 	_, err := e.stdout.Write(append(b, '\n'))
 	return err
 }
 
 // say prints a line on stderr, where nothing waits on whether it was written.
-func (e *cli) say(b []byte) { _, _ = e.stderr.Write(append(b, '\n')) }
+func (e *cli) say(b []byte) {
+	e.written.Lock()
+	defer e.written.Unlock()
+	_, _ = e.stderr.Write(append(b, '\n'))
+}
 
 // logTo sends stdout's and stderr's lines to the file name from here on, appended
 // to it, and the line runWith reports the command's error in. The file is its

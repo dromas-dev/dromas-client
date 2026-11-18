@@ -208,8 +208,8 @@ type recvRun struct {
 	got   bool // a drain delivered a message
 	// werr is the first failed write to stdout: every delivery is also kept in
 	// inbox/, and every refusal in refused/, so it loses nothing, and it ends
-	// the run once the drain's events are handed over. mu holds it and
-	// stdout, which the webhook's goroutine prints to as well.
+	// the run once the drain's events are handed over. mu holds it: the
+	// webhook's goroutine prints as well (cli.written holds each write).
 	mu   sync.Mutex
 	werr error
 	// renewErr is a renewal that was due and failed, and that no later drain
