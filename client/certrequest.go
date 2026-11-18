@@ -26,8 +26,8 @@ import (
 // with the request's lowest serial in the mailbox's state, and says what the
 // holder certifies; InstallCertificate checks the certificate the holder gives
 // back by every rule of §12.7 step 3, keeps it as work/<serial>, and renews
-// under it. Between certificates, the mailbox renews under the newest one it
-// holds (heldWorker).
+// under it. Between certificates, the mailbox renews under the one in use
+// (heldWorker).
 
 // keyCertificateRequest is the record, in the mailbox's own bucket, of the
 // certificate request the mailbox made last.
@@ -196,9 +196,8 @@ func (b *Mailbox) highestCertificate(st *ownRead) (highest, revoked uint64, err 
 // under it, as the mailbox's owner asking (PROTOCOL.md §12.4). It reads the
 // mailbox at its server first, keeping what verifies of its own revocations,
 // and then checks the certificate by every rule of §12.7 step 3 before
-// anything is kept: every rule of §5.2 at this machine's clock, a lifetime no
-// longer than its server takes (serverCertificateLifetime), a serial no lower
-// than the request's lowest, and the request's working key. It is refused,
+// anything is kept: every rule of §5.2 at this machine's clock, a serial no
+// lower than the request's lowest, and the request's working key. It is refused,
 // too, where it began less than an hour before the clock (§12.4), and where
 // the identity has revoked certificates above what the request knew of, kept
 // at this mailbox or taken by its server from anywhere: the request's working
@@ -210,11 +209,11 @@ func (b *Mailbox) highestCertificate(st *ownRead) (highest, revoked uint64, err 
 // so a revocation its server held then refuses the certificate too: the cost
 // is a new request.
 //
-// Where the read or the server's document goes unanswered, nothing is kept,
-// and the install is run again. Once checked, the certificate and its working
-// key are kept as work/<serial> first, and the request goes once the renewal
-// is taken: run again, it does the same, and recv's next renewal is under
-// that certificate too (heldWorker).
+// Where the read goes unanswered, nothing is kept, and the install is run
+// again. Once checked, the certificate and its working key are kept as
+// work/<serial> first, and the request goes once the renewal is taken: run
+// again, it does the same. Until then, recv renews under the certificate in
+// use (heldWorker).
 func (b *Mailbox) InstallCertificate(ctx context.Context, line []byte) (*protocol.Prekey, error) {
 	return locked(ctx, b, func() (*protocol.Prekey, error) {
 		if err := b.keysMatch(); err != nil {
@@ -232,11 +231,7 @@ func (b *Mailbox) InstallCertificate(ctx context.Context, line []byte) (*protoco
 		if err != nil {
 			return nil, fmt.Errorf("the certificate is not checked or kept, since this mailbox could not read itself at its server: dromas cert install runs again with the same file once it can: %w", err)
 		}
-		life, err := b.serverCertificateLifetime(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("the certificate is not checked or kept, since this mailbox's server's document, which names the longest certificate it takes, could not be read: dromas cert install runs again with the same file once it can: %w", err)
-		}
-		cert, err := b.checkInstalled(line, life)
+		cert, err := b.checkInstalled(line)
 		if err != nil {
 			return nil, err
 		}
@@ -275,9 +270,8 @@ func (b *Mailbox) InstallCertificate(ctx context.Context, line []byte) (*protoco
 }
 
 // checkInstalled holds line, a certificate the identity holder made, to the
-// request this mailbox made last and to life, the longest its server takes
-// (serverCertificateLifetime), and returns it (InstallCertificate).
-func (b *Mailbox) checkInstalled(line []byte, life time.Duration) (*protocol.Certificate, error) {
+// request this mailbox made last, and returns it (InstallCertificate).
+func (b *Mailbox) checkInstalled(line []byte) (*protocol.Certificate, error) {
 	var req certificateRequest
 	if err := b.view(func(s store) error {
 		raw := s.get(bucketMailbox, keyCertificateRequest)
@@ -307,11 +301,6 @@ func (b *Mailbox) checkInstalled(line []byte, life time.Duration) (*protocol.Cer
 	}
 	if !bytes.Equal(cert.WorkingKey().Marshal(), asked.Marshal()) {
 		return nil, refuse("the certificate certifies another key than the working key of this mailbox's last request: dromas cert request prints that key, and a request made since replaces the one before")
-	}
-	// Longer than its server takes, its renewal would be refused, and a
-	// certificate kept would be one no renewal can sign under.
-	if cert.Lifetime() > life {
-		return nil, refuse("the certificate runs %d seconds, longer than the %d its server takes: dromas cert request makes a new request, whose command its identity holder runs", int64(cert.Lifetime()/time.Second), int64(life/time.Second))
 	}
 	if cert.Serial() < req.Lowest {
 		return nil, refuse("the certificate's serial is %d, below %d, the lowest serial this mailbox's request gave: its identity holder certifies the request again at that serial or above", cert.Serial(), req.Lowest)

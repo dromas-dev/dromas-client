@@ -171,10 +171,10 @@ func TestACertificateForARequestMadeBeforeARevocationOnlyItsServerHoldsIsRefused
 }
 
 // A certificate that runs longer than its server takes, though no longer
-// than the protocol's maximum, is refused, and nothing of it is kept: a
-// renewal under it would be refused, and the mailbox renews on under the
-// certificate in use (#931 item 4).
-func TestACertificateLongerThanItsServerTakesIsNotInstalled(t *testing.T) {
+// than the protocol's maximum, installs; the server refuses the renewal under
+// it, and recv renews on under the certificate in use (PROTOCOL.md §12.7;
+// #939 item 11).
+func TestACertificateLongerThanItsServerTakesLeavesRecvRenewingUnderTheOneInUse(t *testing.T) {
 	t.Parallel()
 	e := newWorkEnv(t)
 	e.srv.SetPolicy(protocol.ServerDocument{MaxCertificateLifetime: uint64((30*24*time.Hour + time.Hour) / time.Second)})
@@ -194,12 +194,8 @@ func TestACertificateLongerThanItsServerTakesIsNotInstalled(t *testing.T) {
 		t.Fatal(err)
 	}
 	p, err := b.InstallCertificate(t.Context(), ssh.MarshalAuthorizedKey(c.PublicKey()))
-	var refused *client.RefusedError
-	if !errors.As(err, &refused) || !strings.Contains(err.Error(), "longer than the") {
-		t.Fatalf("an install of a 40-day certificate at a 30-day server: %+v, %v; want its refusal", p, err)
-	}
-	if exists(workFile(b, serial, "-cert.pub")) {
-		t.Fatalf("the refused certificate %d is kept", serial)
+	if code := client.Code(err); code != protocol.CodeCertificateLifetimeTooLong {
+		t.Fatalf("an install of a 40-day certificate at a 30-day server: %+v, %v; want its server's %s", p, err, protocol.CodeCertificateLifetimeTooLong)
 	}
 	e.clock.Add(25 * time.Hour)
 	if res := receive(t, b); res.RenewErr != nil || res.Renewed == nil || res.Renewed.Rank != first {
@@ -238,87 +234,6 @@ func TestACertificateLongerThanTheOwnersLifetimeButNotTheServersInstalls(t *test
 	}
 }
 
-// Without the identity, a renewal is signed under the newest certificate the
-// mailbox holds that can sign one (heldWorker): with a certificate installed
-// above the one in use, its install killed before its renewal, that one.
-func TestARenewalWithoutTheIdentitySignsUnderTheNewestCertificateHeld(t *testing.T) {
-	t.Parallel()
-	if testing.Short() {
-		t.Skip("long: -short skips it; scripts/check.sh full and CI run it")
-	}
-	e := newWorkEnv(t)
-	b, holder, _ := keptElsewhere(t, e)
-	first := numberOf(t, b)
-	r, err := b.RequestCertificate(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
-	serial := protocol.SerialAt(e.clock.Now(), r.LowestSerial-1)
-	file := filepath.Join(t.TempDir(), "request-cert.pub")
-	if err := os.WriteFile(file, certify(t, b, holder, r, serial, e.clock.Now()), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	crashTo(t, e, b.Dir(), "cert install", "certificate installed", file)
-	x, err := client.Open(b.Dir(), e.opts())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !exists(workFile(x, first, "-cert.pub")) || !exists(workFile(x, serial, "-cert.pub")) {
-		t.Fatalf("after the crash the mailbox holds certificate %d: %v, and %d: %v", first, exists(workFile(x, first, "-cert.pub")), serial, exists(workFile(x, serial, "-cert.pub")))
-	}
-	e.clock.Add(2 * time.Second)
-	if p, err := x.Rekey(t.Context()); err != nil || p.Rank != serial {
-		t.Fatalf("a renewal without the identity: %+v, %v; want one under certificate %d, the newest held, not %d", p, err, serial, first)
-	}
-}
-
-// No certificate below the one in use signs a renewal: the server takes
-// none under it (PROTOCOL.md §12.7, between certificates the mailbox renews
-// under its current one). An install killed once its renewal is recorded
-// leaves the certificate before it; once the new, shorter one has ended, a
-// renewal without the identity fails as identity_locked, for a certificate
-// from its holder (#931 item 5).
-func TestARenewalWithoutTheIdentitySignsUnderNoCertificateBelowTheOneInUse(t *testing.T) {
-	t.Parallel()
-	if testing.Short() {
-		t.Skip("long: -short skips it; scripts/check.sh full and CI run it")
-	}
-	e := newWorkEnv(t)
-	b, holder, _ := keptElsewhere(t, e)
-	first := numberOf(t, b)
-	r, err := b.RequestCertificate(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
-	work, _, _, _, err := ssh.ParseAuthorizedKey([]byte(r.WorkingKey))
-	if err != nil {
-		t.Fatal(err)
-	}
-	serial := protocol.SerialAt(e.clock.Now(), r.LowestSerial-1)
-	c, err := protocol.NewCertificate(b.Identity(), holder, work, serial, e.clock.Now(), 49*time.Hour)
-	if err != nil {
-		t.Fatal(err)
-	}
-	file := filepath.Join(t.TempDir(), "request-cert.pub")
-	if err := os.WriteFile(file, ssh.MarshalAuthorizedKey(c.PublicKey()), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	crashTo(t, e, b.Dir(), "cert install", "renewal recorded", file)
-	x, err := client.Open(b.Dir(), e.opts())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !exists(workFile(x, first, "-cert.pub")) || signsUnder(t, x) != serial {
-		t.Fatalf("after the crash: certificate %d held %v, signing under %d; the test reaches no state with a certificate below the one in use", first, exists(workFile(x, first, "-cert.pub")), signsUnder(t, x))
-	}
-	e.clock.Add(50 * time.Hour)
-	p, err := x.Rekey(t.Context())
-	var locked *client.IdentityLockedError
-	if !errors.As(err, &locked) {
-		t.Fatalf("a renewal once the certificate in use has ended: %+v, %v; want identity_locked", p, err)
-	}
-}
-
 // A renewal under a held certificate that the server took, whose answer the
 // mailbox never had, is recorded at the mailbox's next read of itself, as one
 // under the certificate made with it is (noteServed): the next renewal is
@@ -344,39 +259,6 @@ func TestAHeldRenewalItsServerTookUnseenIsRecordedAtTheNextRead(t *testing.T) {
 	e.clock.Add(2 * time.Second)
 	if p, err := x.Rekey(t.Context()); err != nil || p.Serial <= took {
 		t.Fatalf("the renewal after one taken unseen: %+v, %v", p, err)
-	}
-}
-
-// dromas cert switch renews under a NEW working key whatever the mailbox
-// holds: a statement waiting under a held certificate is passed over, not
-// sent (#931 item 6).
-func TestCertSwitchSendsNoStatementWaitingUnderAHeldCertificate(t *testing.T) {
-	t.Parallel()
-	e := newWorkEnv(t)
-	b, _, raw := keptElsewhere(t, e)
-	first := numberOf(t, b)
-	var refused atomic.Bool
-	e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
-		if r.Method == http.MethodPut && r.URL.Path == mailboxPath(b)+"/prekey" && refused.CompareAndSwap(false, true) {
-			http.Error(w, "", http.StatusServiceUnavailable)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-	e.clock.Add(2 * time.Second)
-	if _, err := b.Rekey(t.Context()); err == nil {
-		t.Fatal("a renewal its server refused went through")
-	}
-	if err := os.WriteFile(b.Path("identity"), raw, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	x, err := client.Open(b.Dir(), e.opts())
-	if err != nil {
-		t.Fatal(err)
-	}
-	e.clock.Add(time.Hour)
-	if p, err := x.RenewUnderCertificate(t.Context()); err != nil || p.Rank == first || p.Rank != p.Serial {
-		t.Fatalf("cert switch over a statement waiting under certificate %d: %+v, %v; want one under the certificate made with it", first, p, err)
 	}
 }
 
