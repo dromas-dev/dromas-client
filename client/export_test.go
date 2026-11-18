@@ -38,7 +38,7 @@ func HTTPOf(b *Mailbox) *http.Client { return b.http }
 func HealthCheck() (after, wait time.Duration) { return healthCheckAfter, healthCheckWait }
 
 // CheckKeyFile is checkKeyFile, for a test of what it refuses.
-func CheckKeyFile(path string) error { return checkKeyFile(path) }
+func CheckKeyFile(path string) error { return checkKeyFile(privateKey, path) }
 
 // CheckPrivateFile is checkPrivateFile, for a test of what it refuses.
 func CheckPrivateFile(path string) error { return checkPrivateFile(path) }

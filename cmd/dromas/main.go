@@ -23,6 +23,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 
 	"github.com/dromas-dev/dromas-client/client"
@@ -156,6 +157,9 @@ type cli struct {
 	cfg            *config
 	stdin          io.Reader
 	stdout, stderr io.Writer
+	// written holds each line's write to stdout and stderr (out, say): recv
+	// --webhook's goroutine writes beside its loop's.
+	written sync.Mutex
 	// log is recv --log-file's file, which takes stdout's and stderr's lines
 	// (logTo), and the line the command's error is reported in (runWith).
 	log *os.File

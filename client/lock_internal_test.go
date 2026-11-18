@@ -8,6 +8,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/dromas-dev/dromas-client/internal/fakeserver"
@@ -154,4 +155,46 @@ func TestWhereThereIsNoGateNeitherAReadingNorACommandWaitsForOne(t *testing.T) {
 	if d := time.Since(began); d > time.Second {
 		t.Errorf("they took %v, as if waiting for a gate", d)
 	}
+}
+
+// The goroutines of one Mailbox wait for each other in its slot and tell
+// Options.Waiting nothing: they are one program's, as recv's loop and its
+// webhook are (#927 item 2). The second claim's wait is seen in a bubble, on
+// no clock: the Mailbox is opened in it, so its slot is the bubble's.
+func TestAMailboxsOwnGoroutinesTellNoWaitForTheSlot(t *testing.T) {
+	t.Parallel()
+	a, _, _ := twoOpens(t)
+	synctest.Test(t, func(t *testing.T) {
+		b, err := Open(a.Dir(), Options{Base: a.base})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var told atomic.Int32
+		b.waiting = func() { told.Add(1) }
+		release, err := b.claim(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		done := make(chan error, 1)
+		go func() {
+			r, err := b.claim(context.Background())
+			if err == nil {
+				r()
+			}
+			done <- err
+		}()
+		synctest.Wait() // the second claim waits for the slot
+		select {
+		case err := <-done:
+			t.Fatalf("the second claim did not wait for the slot: %v", err)
+		default:
+		}
+		release()
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+		if n := told.Load(); n != 0 {
+			t.Errorf("Waiting was told %d times for this Mailbox's own goroutine", n)
+		}
+	})
 }

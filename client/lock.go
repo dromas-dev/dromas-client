@@ -132,15 +132,15 @@ func (b *Mailbox) makeState() error {
 
 // claim takes the Mailbox's slot for one command or reading, waiting while
 // another goroutine's holds it as hold waits for the state file: up to
-// lockPatience, while ctx lasts, telling Options.Waiting once (#329).
+// lockPatience, while ctx lasts (#329). It tells Options.Waiting nothing: the
+// goroutines of one Mailbox are one program's, which knows of them (recv's
+// are its loop and its webhook, #927 item 2). A wait for another command's
+// lock on the state file is told there (openState).
 func (b *Mailbox) claim(ctx context.Context) (func(), error) {
 	select {
 	case b.slot <- struct{}{}:
 		return func() { <-b.slot }, nil
 	default:
-	}
-	if b.waiting != nil {
-		b.waiting()
 	}
 	wait := time.NewTimer(lockPatience)
 	defer wait.Stop()

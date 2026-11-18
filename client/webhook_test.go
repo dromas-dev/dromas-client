@@ -4,11 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -162,41 +165,53 @@ func TestWhatTheWebhookLeavesOwedIsHandedOverAtTheNextStart(t *testing.T) {
 }
 
 // A message owed the webhook that inbox/ no longer keeps is an EventOwedGone
-// to the webhook, whose record then goes.
+// to the webhook, whose record then goes once the webhook returns nil,
+// ErrGaveUp or ErrStop, as for any owed message; the messages owed after it
+// are then handed over (#934 review, item 2).
 func TestAMessageOwedTheWebhookAndGoneFromInboxIsSaidOnce(t *testing.T) {
 	t.Parallel()
-	e := newEnv(t)
-	a, b := e.mailbox(), e.mailbox()
-	send(t, a, b, "deleted")
-	cut := &bodies{result: func(string) error { return errors.New("cut short") }}
-	if err := b.Follow(context.Background(), client.FollowOptions{Until: time.Now(), Webhook: cut.handle}, nil); err != nil {
-		t.Fatal(err)
-	}
-	ids, err := filepath.Glob(filepath.Join(b.Dir(), "mail", "inbox", "*.json"))
-	if err != nil || len(ids) != 1 {
-		t.Fatalf("inbox/: %v, %v", ids, err)
-	}
-	if err := os.Remove(ids[0]); err != nil {
-		t.Fatal(err)
-	}
-	ids[0] = strings.TrimSuffix(filepath.Base(ids[0]), ".json")
-	var gone []string
-	hook := func(_ context.Context, ev client.Event) error {
-		if ev.Kind == client.EventOwedGone {
-			gone = append(gone, ev.ID)
-		}
-		return nil
-	}
-	for range 2 {
-		if err := b.Follow(context.Background(), client.FollowOptions{Until: time.Now(), Webhook: hook}, nil); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if !slices.Equal(gone, ids) {
-		t.Fatalf("gone: %v, want %v once", gone, ids)
-	}
-	if st, err := b.Status(context.Background()); err != nil || st.WebhookOwed != 0 {
-		t.Fatalf("status: %+v, %v", st, err)
+	for name, answer := range map[string]error{"nil": nil, "ErrGaveUp": client.ErrGaveUp, "ErrStop": client.ErrStop} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			e := newEnv(t)
+			a, b := e.mailbox(), e.mailbox()
+			send(t, a, b, "deleted")
+			cut := &bodies{result: func(string) error { return errors.New("cut short") }}
+			if err := b.Follow(context.Background(), client.FollowOptions{Until: time.Now(), Webhook: cut.handle}, nil); err != nil {
+				t.Fatal(err)
+			}
+			ids, err := filepath.Glob(filepath.Join(b.Dir(), "mail", "inbox", "*.json"))
+			if err != nil || len(ids) != 1 {
+				t.Fatalf("inbox/: %v, %v", ids, err)
+			}
+			if err := os.Remove(ids[0]); err != nil {
+				t.Fatal(err)
+			}
+			ids[0] = strings.TrimSuffix(filepath.Base(ids[0]), ".json")
+			send(t, a, b, "after")
+			var gone, posted []string
+			hook := func(_ context.Context, ev client.Event) error {
+				switch ev.Kind {
+				case client.EventOwedGone:
+					gone = append(gone, ev.ID)
+					return answer
+				case client.EventDelivery:
+					posted = append(posted, bodyOf(t, *ev.Delivery))
+				}
+				return nil
+			}
+			for range 2 {
+				if err := b.Follow(context.Background(), client.FollowOptions{Until: time.Now(), Webhook: hook}, nil); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if !slices.Equal(gone, ids) || !slices.Equal(posted, []string{"after"}) {
+				t.Fatalf("gone: %v, want %v once; posted %q, want the message after it", gone, ids, posted)
+			}
+			if st, err := b.Status(context.Background()); err != nil || st.WebhookOwed != 0 {
+				t.Fatalf("status: %+v, %v", st, err)
+			}
+		})
 	}
 }
 
@@ -237,5 +252,70 @@ func TestAHeldMessageIsOwedTheWebhookNothing(t *testing.T) {
 	}
 	if st, err := b.Status(context.Background()); err != nil || st.Held != 1 || st.WebhookOwed != 0 {
 		t.Fatalf("status: %+v, %v", st, err)
+	}
+}
+
+// A webhook's error other than ErrGaveUp leaves its message owed and ends the
+// handover there: the messages after it stay owed behind it, and the next
+// handover begins with it, so the webhook is handed them in delivery order
+// (#927 item 4).
+func TestAWebhooksErrorKeepsTheDeliveryOrder(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	e := newEnv(t)
+	a, b := e.mailbox(), e.mailbox()
+	for _, body := range []string{"one", "two", "three"} {
+		send(t, a, b, body)
+	}
+	failed := false
+	hook := &bodies{result: func(body string) error {
+		if body == "one" && !failed {
+			failed = true
+			return errors.New("not now")
+		}
+		return nil
+	}}
+	if err := b.Follow(ctx, client.FollowOptions{Until: time.Now(), Webhook: hook.handle}, nil); err != nil {
+		t.Fatal(err)
+	}
+	// The first Follow hands "one" alone, or, where a kick came during that
+	// handover, hands the three again after it: either is the order.
+	want := []string{"one", "one", "two", "three"}
+	if got := hook.list(); !slices.Equal(got, want[:1]) && !slices.Equal(got, want) {
+		t.Fatalf("after the first Follow: handed %q", got)
+	}
+	if err := b.Follow(ctx, client.FollowOptions{Until: time.Now(), Webhook: hook.handle}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(hook.list(), want) {
+		t.Errorf("the webhook was handed %q, want %q", hook.list(), want)
+	}
+	if st, err := b.Status(ctx); err != nil || st.WebhookOwed != 0 {
+		t.Errorf("after: %+v, %v", st, err)
+	}
+}
+
+// A webhook made with the caller's http.Client follows no redirect either: the
+// redirect's status is the try's answer (#927 item 10).
+func TestAWebhookOfTheCallersClientFollowsNoRedirect(t *testing.T) {
+	t.Parallel()
+	var landed atomic.Bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/moved" {
+			landed.Store(true)
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		http.Redirect(w, r, "/moved", http.StatusFound)
+	}))
+	defer srv.Close()
+	w, err := client.NewWebhook(srv.URL+"/hook", nil, nil, &http.Client{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = w.Post(context.Background(), "id", []byte(`{}`))
+	var we *client.WebhookError
+	if !errors.As(err, &we) || we.Status != http.StatusFound || landed.Load() {
+		t.Errorf("Post: %v, the redirect followed %v", err, landed.Load())
 	}
 }

@@ -232,6 +232,38 @@ func TestTheWebhookFollowsNoRedirect(t *testing.T) {
 	}
 }
 
+// inBubble is a mailbox of a server in memory, with a message waiting from an
+// allowed sender for each of bodies, and --webhook's posts made to hook, in
+// memory too: what a test in a synctest bubble runs recv on. It returns the
+// options recv runs with (doWith).
+func inBubble(t *testing.T, hook http.Handler, bodies ...string) client.Options {
+	t.Helper()
+	ctx := context.Background()
+	srv := fakeserver.NewInMemory(t, time.Now)
+	opt := client.Options{Base: srv.URL, HTTPClient: srv.Client()}
+	a, err := client.Init(ctx, t.TempDir(), opt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := client.Init(ctx, t.TempDir(), opt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	allows(t, b, a)
+	for _, body := range bodies {
+		if _, err := a.Send(ctx, b.Address(), body); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ep := httptest.NewTestServer(t, hook)
+	was := webhookClient
+	webhookClient = ep.Client()
+	t.Cleanup(func() { webhookClient = was })
+	useMailbox(t, b.Dir())
+	t.Setenv("DROMAS_SERVER_URL", srv.URL)
+	return opt
+}
+
 // The tries are at once, then 5 seconds and 5 minutes later; a longer
 // Retry-After waits longer, up to 5 minutes, and a shorter one waits the
 // schedule's time.
@@ -248,21 +280,6 @@ func TestTheWebhooksTriesAreAtOnceThen5sThen5m(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
-				ctx := context.Background()
-				srv := fakeserver.NewInMemory(t, time.Now)
-				opt := client.Options{Base: srv.URL, HTTPClient: srv.Client()}
-				a, err := client.Init(ctx, t.TempDir(), opt)
-				if err != nil {
-					t.Fatal(err)
-				}
-				b, err := client.Init(ctx, t.TempDir(), opt)
-				if err != nil {
-					t.Fatal(err)
-				}
-				allows(t, b, a)
-				if _, err := a.Send(ctx, b.Address(), "retried"); err != nil {
-					t.Fatal(err)
-				}
 				hook := &endpoint{answer: func(_ int, w http.ResponseWriter) {
 					v := tc.retryAfter
 					if v == "date" {
@@ -273,14 +290,9 @@ func TestTheWebhooksTriesAreAtOnceThen5sThen5m(t *testing.T) {
 					}
 					w.WriteHeader(http.StatusServiceUnavailable)
 				}}
-				ep := httptest.NewTestServer(t, hook)
-				was := webhookClient
-				webhookClient = ep.Client()
-				t.Cleanup(func() { webhookClient = was })
-				useMailbox(t, b.Dir())
-				t.Setenv("DROMAS_SERVER_URL", srv.URL)
+				opt := inBubble(t, hook, "retried")
 				var out, errs bytes.Buffer
-				err = doWith(ctx, opt, "recv", []string{"--wait", "0s", "--webhook", "http://127.0.0.1/hook"}, strings.NewReader(""), &out, &errs)
+				err := doWith(context.Background(), opt, "recv", []string{"--wait", "0s", "--webhook", "http://127.0.0.1/hook"}, strings.NewReader(""), &out, &errs)
 				if report(err, io.Discard) != 3 {
 					t.Fatalf("recv: %v %s", err, errs.String())
 				}
@@ -297,10 +309,10 @@ func TestTheWebhooksTriesAreAtOnceThen5sThen5m(t *testing.T) {
 	}
 }
 
-// No line recv prints carries the header, the secret or the URL: the line
-// types are every one webhook.go makes, read from its source, each made once at
-// least, by an endpoint that answers 500, one that is not there, and a message
-// owed that inbox/ no longer keeps.
+// No line recv prints, and nothing dromas status prints, carries the header,
+// the secret or the URL: the line types are every one webhook.go makes, read
+// from its source, each made once at least, by an endpoint that answers 500,
+// one that is not there, and a message owed that inbox/ no longer keeps.
 func TestNoWebhookLineCarriesItsSecrets(t *testing.T) {
 	quickHook(t)
 	types := lineTypesOf(t, "webhook.go")
@@ -323,6 +335,13 @@ func TestNoWebhookLineCarriesItsSecrets(t *testing.T) {
 	gone.Close()
 	c.send("to nobody")
 	run(gone.URL + hookPath)
+	// dromas status, which lists the webhook's records, while inbox/ keeps the messages that gave up.
+	var st, sterr bytes.Buffer
+	_ = do(context.Background(), "status", nil, strings.NewReader(""), &st, &sterr)
+	if !strings.Contains(st.String(), "webhook_failed") {
+		t.Errorf("dromas status lists no webhook_failed: %s %s", st.String(), sterr.String())
+	}
+	all.WriteString(st.String() + sterr.String())
 	// A message left owed, then gone from inbox/.
 	c.send("deleted")
 	cut := func(context.Context, client.Event) error { return errors.New("cut short") }
@@ -438,4 +457,89 @@ func TestTheConfigFilesWebhookServesARecvThatWaits(t *testing.T) {
 	if _, ok := errors.AsType[*configError](err); report(err, io.Discard) != 2 || !ok {
 		t.Fatalf("a header file without a webhook: %v %s", err, stderr)
 	}
+}
+
+// recv's two pipelines are one command: with no other command of the mailbox
+// running, recv --webhook, alone or beside --exec, says no wait for the
+// mailbox's lock, though the webhook's goroutine and the loop's take turns in
+// the Mailbox's slot (#927 item 2). That the slot tells nothing is
+// client's TestAMailboxsOwnGoroutinesTellNoWaitForTheSlot; that a wait for
+// another command's lock is told, client/lock_test.go's.
+func TestOneRecvSaysNoWaitForItsOwnLock(t *testing.T) {
+	for _, exec := range []bool{false, true} {
+		t.Run(map[bool]string{false: "webhook alone", true: "beside --exec"}[exec], func(t *testing.T) {
+			c := newCallback(t)
+			hook := answering(http.StatusOK)
+			srv := httptest.NewServer(hook)
+			defer srv.Close()
+			c.send("one", "two", "three", "four", "five", "six")
+			args := []string{"--wait", "0s", "--webhook", srv.URL}
+			if exec {
+				args = append(args, c.exec("exit", "0")...)
+			}
+			_, stderr, err := c.recv(context.Background(), args...)
+			if err != nil || len(hook.got()) != 6 {
+				t.Fatalf("recv: %v, %d posts; %s", err, len(hook.got()), stderr)
+			}
+			if n := strings.Count(stderr, `"reason":"lock"`); n > 0 {
+				t.Errorf("recv said %d times that it waits for the mailbox's lock, with no other command running: %s", n, stderr)
+			}
+		})
+	}
+}
+
+// An interrupt during the wait between two tries ends recv at once: the
+// message stays owed, and no try is made or said after the one that failed
+// (#927 item 6). In a bubble, at once is no time at all.
+func TestAnInterruptDuringTheWaitBetweenTriesEndsRecvAtOnce(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, interrupt := context.WithCancel(context.Background())
+		var failedAt time.Time
+		hook := &endpoint{answer: func(_ int, w http.ResponseWriter) {
+			failedAt = time.Now()
+			w.WriteHeader(http.StatusInternalServerError)
+			go func() { time.Sleep(time.Second); interrupt() }() // within the 5 s wait
+		}}
+		opt := inBubble(t, hook, "interrupted")
+		var out, errs bytes.Buffer
+		err := doWith(ctx, opt, "recv", []string{"--wait", "0s", "--webhook", "http://127.0.0.1/hook"}, strings.NewReader(""), &out, &errs)
+		if took := time.Since(failedAt); took != time.Second {
+			t.Errorf("recv ended %v after the failed try, want 1s: %v", took, err)
+		}
+		if len(hook.got()) != 1 || len(ofType(t, out.String(), "webhook_attempt_failed")) != 1 {
+			t.Errorf("%d tries; %s", len(hook.got()), out.String())
+		}
+		var st bytes.Buffer
+		if err := doWith(context.Background(), opt, "status", nil, strings.NewReader(""), &st, io.Discard); err != nil || !strings.Contains(st.String(), `"webhook_pending":1`) {
+			t.Errorf("the message is not owed: %v %s", err, st.String())
+		}
+	})
+}
+
+// A post that the endpoint does not answer within client.WebhookTimeout, 30
+// seconds, is a failed try, each time: the tries are 30 seconds and the wait
+// after each apart (#927 item 8).
+func TestAPostWithNoAnswerFailsAfter30s(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		hook := &endpoint{}
+		hang := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			hook.ServeHTTP(w, r)
+			<-r.Context().Done()
+		})
+		opt := inBubble(t, hang, "unanswered")
+		var out, errs bytes.Buffer
+		err := doWith(context.Background(), opt, "recv", []string{"--wait", "0s", "--webhook", "http://127.0.0.1/hook"}, strings.NewReader(""), &out, &errs)
+		if report(err, io.Discard) != 3 {
+			t.Fatalf("recv: %v %s", err, errs.String())
+		}
+		posts := hook.got()
+		var at []time.Duration
+		for _, p := range posts {
+			at = append(at, p.at.Sub(posts[0].at))
+		}
+		want := []time.Duration{0, client.WebhookTimeout + 5*time.Second, 2*client.WebhookTimeout + 5*time.Second + 5*time.Minute}
+		if !slices.Equal(at, want) || strings.Count(out.String(), `"failure":"no answer within the wait"`) != 3 {
+			t.Errorf("posts at %v, want %v, each failing for no answer: %s", at, want, out.String())
+		}
+	})
 }

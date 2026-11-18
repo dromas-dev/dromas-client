@@ -646,7 +646,9 @@ refused before any file is read.`,
 func (e *cli) inboxClearFailedCmd() *cobra.Command {
 	return command("clear-failed", "clear what status reports of every --exec program and webhook that gave up",
 		`Clear the record of every message in inbox/ whose recv --exec program or recv
---webhook post gave up, and print a "failed_cleared" line with their "count".
+--webhook post gave up, and print a "failed_cleared" line with their "count": the
+programs' records and the webhook's, so a message whose program and webhook both
+gave up counts twice.
 dromas status then lists none of them, and needs no attention for them, until a
 program or a webhook gives up again.
 

@@ -106,7 +106,9 @@ type Options struct {
 	Restore bool
 	// Waiting, if not nil, is told when a command finds the mailbox's lock held
 	// by another command of the mailbox, once, before it waits for it: a mailbox's
-	// commands write its files one at a time.
+	// commands write its files one at a time. That other command is another
+	// process's, or another Mailbox's of the same directory: the goroutines of
+	// this Mailbox, which wait for each other in turn, tell it nothing.
 	Waiting func()
 	// DrainTime is how long one Receive drains while bytes move, holding the
 	// mailbox's lock: past it the drain stops, as at its other limits

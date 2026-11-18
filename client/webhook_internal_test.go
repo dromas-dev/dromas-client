@@ -91,7 +91,7 @@ func TestAWebhookFileIsOneLineItsOwnersAlone(t *testing.T) {
 			t.Errorf("ending %q: %+v, %v", ending, h, err)
 		}
 	}
-	if _, err := ReadWebhookHeader(write("two", "A: 1\nB: 2\n", 0o600)); err == nil || strings.Contains(err.Error(), "B: 2") {
+	if _, err := ReadWebhookHeader(write("two", "A: 1\nB: 2\n", 0o600)); err == nil || !strings.HasPrefix(err.Error(), "the webhook's header file ") || strings.Contains(err.Error(), "B: 2") {
 		t.Errorf("two lines: %v", err)
 	}
 	if _, err := ReadWebhookHeader(write("bad", "Content-Type: sekrit", 0o600)); err == nil || strings.Contains(err.Error(), "sekrit") {
@@ -103,13 +103,21 @@ func TestAWebhookFileIsOneLineItsOwnersAlone(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		return // modes are not access lists: perm_windows_test.go holds checkKeyFile there
 	}
+	// Each refusal names the file for what it is: ssh is named for the
+	// identity's key alone (#927 item 5).
+	named := func(err error, what string) bool {
+		return err != nil && strings.HasPrefix(err.Error(), what+" ") && !strings.Contains(err.Error(), "ssh") && !strings.Contains(err.Error(), "private key")
+	}
 	for _, mode := range []os.FileMode{0o640, 0o604, 0o660} {
-		if _, err := ReadWebhookHeader(write("open", "Authorization: Bearer sekrit", mode)); err == nil || strings.Contains(err.Error(), "sekrit") {
+		if _, err := ReadWebhookHeader(write("open", "Authorization: Bearer sekrit", mode)); !named(err, "the webhook's header file") || strings.Contains(err.Error(), "sekrit") {
 			t.Errorf("mode %04o: %v", mode, err)
 		}
-		if _, err := ReadWebhookSecret(write("open", "whsec_"+b64(strings.Repeat("k", 32)), mode)); err == nil {
-			t.Errorf("a secret at mode %04o taken", mode)
+		if _, err := ReadWebhookSecret(write("open", "whsec_"+b64(strings.Repeat("k", 32)), mode)); !named(err, "the webhook's secret file") {
+			t.Errorf("a secret at mode %04o: %v", mode, err)
 		}
+	}
+	if err := checkKeyFile(privateKey, write("key", "a key", 0o644)); err == nil || !strings.HasPrefix(err.Error(), "the private key ") || !strings.Contains(err.Error(), "ssh would refuse it too") {
+		t.Errorf("the identity's key at mode 0644: %v", err)
 	}
 }
 
