@@ -3,6 +3,8 @@ package client
 import (
 	"context"
 	"errors"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/dromas-dev/dromas-client/protocol"
@@ -41,5 +43,48 @@ func TestHandOverHandsOverEveryKindInItsOrder(t *testing.T) {
 		if k != EventKind(i)+EventDelivery {
 			t.Errorf("event %d is kind %d", i, k)
 		}
+	}
+}
+
+// A kick that came while the webhook's handover was under way, with Follow's
+// loop ended before that handover did, is handed over before run returns
+// (#927 item 9), whichever of the two run's select takes first. The order is
+// made by the handler, never timed: it holds the first handover until the
+// second message is owed, kicked, and the loop ended. Records owed for
+// messages inbox/ does not keep are handed over as EventOwedGone, so the test
+// needs no delivery.
+func TestAKickDuringTheLastHandoverIsHandedOverBeforeRunReturns(t *testing.T) {
+	t.Parallel()
+	b, _, _ := twoOpens(t)
+	ctx := context.Background()
+	record := func(id string) {
+		t.Helper()
+		if err := b.lockedFinishedDo(ctx, func() error {
+			return b.update(func(s store) error { _, err := owe(s, webhookRecords, id); return err })
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	first, second := strings.Repeat("a", 64), strings.Repeat("b", 64) // ids of kept messages' form
+	record(first)
+	begun, release := make(chan struct{}), make(chan struct{})
+	var handed []string
+	w := &webhooks{b: b, kicked: make(chan struct{}, 1), done: make(chan struct{}), h: func(_ context.Context, ev Event) error {
+		handed = append(handed, ev.ID)
+		if ev.ID == first {
+			close(begun)
+			<-release
+		}
+		return nil
+	}}
+	ended := make(chan error, 1)
+	go func() { ended <- w.run(ctx) }()
+	<-begun
+	record(second)
+	w.kick()
+	close(w.done)
+	close(release)
+	if err := <-ended; err != nil || !slices.Equal(handed, []string{first, second}) {
+		t.Errorf("run: %v, having handed over %q", err, handed)
 	}
 }

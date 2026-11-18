@@ -130,25 +130,17 @@ func (b *Mailbox) makeState() error {
 	return syncDir(b.dir)
 }
 
-// followingKey marks the goroutines of one Follow, its loop's and its
-// webhook's ([FollowOptions.Webhook]), in their context (claim).
-type followingKey struct{}
-
 // claim takes the Mailbox's slot for one command or reading, waiting while
 // another goroutine's holds it as hold waits for the state file: up to
-// lockPatience, while ctx lasts, telling Options.Waiting once (#329). A
-// goroutine of a Follow tells it nothing: in recv, a Follow's loop and its
-// webhook are the only goroutines of their Mailbox, and they wait for each
-// other as one command. A wait for another process's command is told at its
-// lock (openState).
+// lockPatience, while ctx lasts (#329). It tells Options.Waiting nothing: the
+// goroutines of one Mailbox are one program's, which knows of them (recv's
+// are its loop and its webhook, #927 item 2). A wait for another command's
+// lock on the state file is told there (openState).
 func (b *Mailbox) claim(ctx context.Context) (func(), error) {
 	select {
 	case b.slot <- struct{}{}:
 		return func() { <-b.slot }, nil
 	default:
-	}
-	if b.waiting != nil && ctx.Value(followingKey{}) == nil {
-		b.waiting()
 	}
 	wait := time.NewTimer(lockPatience)
 	defer wait.Stop()

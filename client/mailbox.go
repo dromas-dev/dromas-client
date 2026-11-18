@@ -106,9 +106,9 @@ type Options struct {
 	Restore bool
 	// Waiting, if not nil, is told when a command finds the mailbox's lock held
 	// by another command of the mailbox, once, before it waits for it: a mailbox's
-	// commands write its files one at a time. The goroutines of a
-	// [Mailbox.Follow], its loop's and its webhook's, tell it no wait for this
-	// Mailbox's other goroutines, which in recv are each other.
+	// commands write its files one at a time. That other command is another
+	// process's, or another Mailbox's of the same directory: the goroutines of
+	// this Mailbox, which wait for each other in turn, tell it nothing.
 	Waiting func()
 	// DrainTime is how long one Receive drains while bytes move, holding the
 	// mailbox's lock: past it the drain stops, as at its other limits
@@ -245,9 +245,6 @@ type Mailbox struct {
 	// slot is held by the one command or reading of this Mailbox under way, of
 	// whichever goroutine ([Mailbox.claim]).
 	slot chan struct{}
-	// followDone, a test's, is called once Follow's loop has ended and told
-	// its webhook's goroutine so (SetFollowDone).
-	followDone func()
 	// ended is this mailbox's own revocation once the command under way has kept
 	// it, having begun with none (keepRevocation): that command asks nothing
 	// more (call), and returns it (locked). Each command begins with none.

@@ -187,8 +187,6 @@ var (
 // [FollowOptions.Webhook] it returns, where it would return nil, the fault
 // that cut the webhook's last handover short.
 func (b *Mailbox) Follow(ctx context.Context, o FollowOptions, h Handler) (err error) {
-	// The loop's goroutine and the webhook's are one command (claim).
-	ctx = context.WithValue(ctx, followingKey{}, true)
 	// delivered is called after each drain that delivered a message to inbox/.
 	delivered := func() {}
 	if o.Webhook != nil {
@@ -198,9 +196,6 @@ func (b *Mailbox) Follow(ctx context.Context, o FollowOptions, h Handler) (err e
 		delivered = w.kick
 		defer func() {
 			close(w.done)
-			if b.followDone != nil {
-				b.followDone()
-			}
 			if werr := <-ended; err == nil && ctx.Err() == nil {
 				err = werr
 			}
@@ -711,7 +706,8 @@ func (w *webhooks) kick() {
 // run hands over what is owed at the start, again at each kick, and once more
 // after a fault (webhookRetry), until Follow's loop ends. It then hands over
 // what a kick asked for during the last handover, and returns the last
-// handover's fault (last).
+// handover's fault. Where the end and a kick are both ready, either case
+// hands that kick's deliveries over before run returns.
 func (w *webhooks) run(ctx context.Context) error {
 	for {
 		err := w.handOver(ctx)
@@ -719,30 +715,17 @@ func (w *webhooks) run(ctx context.Context) error {
 		if err != nil {
 			retry = time.After(webhookRetry)
 		}
-		// The loop's end first, so that a handover that the end found under
-		// way is followed by last's alone.
-		select {
-		case <-w.done:
-			return w.last(ctx, err)
-		default:
-		}
 		select {
 		case <-w.kicked:
 		case <-retry:
 		case <-w.done:
-			return w.last(ctx, err)
+			select {
+			case <-w.kicked:
+				return w.handOver(ctx)
+			default:
+				return err
+			}
 		}
-	}
-}
-
-// last is run's end: a handover of what a kick asked for, where one did since
-// the handover before, whose fault, err, it returns otherwise.
-func (w *webhooks) last(ctx context.Context, err error) error {
-	select {
-	case <-w.kicked:
-		return w.handOver(ctx)
-	default:
-		return err
 	}
 }
 

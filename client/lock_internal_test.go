@@ -157,49 +157,39 @@ func TestWhereThereIsNoGateNeitherAReadingNorACommandWaitsForOne(t *testing.T) {
 	}
 }
 
-// The goroutines of a Follow, its loop's and its webhook's, wait for each
-// other in the Mailbox's slot and tell Options.Waiting nothing, and a goroutine
-// of no Follow tells it once (#927 item 2). The second claim's wait is seen in a
-// bubble, on no clock: the Mailbox is opened in it, so its slot is the bubble's.
-func TestAFollowsGoroutinesTellNoWaitForTheSlot(t *testing.T) {
+// The goroutines of one Mailbox wait for each other in its slot and tell
+// Options.Waiting nothing: they are one program's, as recv's loop and its
+// webhook are (#927 item 2). The second claim's wait is seen in a bubble, on
+// no clock: the Mailbox is opened in it, so its slot is the bubble's.
+func TestAMailboxsOwnGoroutinesTellNoWaitForTheSlot(t *testing.T) {
 	t.Parallel()
 	a, _, _ := twoOpens(t)
-	follow := context.WithValue(context.Background(), followingKey{}, true)
-	for _, tc := range []struct {
-		name string
-		ctx  context.Context
-		want int32
-	}{
-		{"a goroutine of the Follow", follow, 0},
-		{"a goroutine of no Follow", context.Background(), 1},
-	} {
-		synctest.Test(t, func(t *testing.T) {
-			b, err := Open(a.Dir(), Options{Base: a.base})
-			if err != nil {
-				t.Fatal(err)
+	synctest.Test(t, func(t *testing.T) {
+		b, err := Open(a.Dir(), Options{Base: a.base})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var told atomic.Int32
+		b.waiting = func() { told.Add(1) }
+		release, err := b.claim(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		done := make(chan error, 1)
+		go func() {
+			r, err := b.claim(context.Background())
+			if err == nil {
+				r()
 			}
-			var told atomic.Int32
-			b.waiting = func() { told.Add(1) }
-			release, err := b.claim(follow)
-			if err != nil {
-				t.Fatal(err)
-			}
-			done := make(chan error, 1)
-			go func() {
-				r, err := b.claim(tc.ctx)
-				if err == nil {
-					r()
-				}
-				done <- err
-			}()
-			synctest.Wait() // the second claim waits for the slot
-			release()
-			if err := <-done; err != nil {
-				t.Fatalf("%s: %v", tc.name, err)
-			}
-			if n := told.Load(); n != tc.want {
-				t.Errorf("%s: Waiting was told %d times, want %d", tc.name, n, tc.want)
-			}
-		})
-	}
+			done <- err
+		}()
+		synctest.Wait() // the second claim waits for the slot
+		release()
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+		if n := told.Load(); n != 0 {
+			t.Errorf("Waiting was told %d times for this Mailbox's own goroutine", n)
+		}
+	})
 }

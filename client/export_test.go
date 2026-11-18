@@ -577,7 +577,3 @@ func (b *Mailbox) Acknowledge(ctx context.Context) (*Restored, error) {
 
 // PauseAfter is how long the loop waits before the drain after res and err.
 func PauseAfter(res *Result, err error) time.Duration { return pauseAfter(res, err) }
-
-// SetFollowDone has b's Follow call f once its loop has ended and told its
-// webhook's goroutine so, before it waits for that goroutine.
-func SetFollowDone(b *Mailbox, f func()) { b.followDone = f }

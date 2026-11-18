@@ -283,46 +283,6 @@ func TestAWebhooksErrorKeepsTheDeliveryOrder(t *testing.T) {
 	}
 }
 
-// A delivery whose kick came while the webhook's handover was under way, and
-// Follow's loop ended before that handover did, is handed to the webhook
-// before Follow returns (webhooks.run's end) (#927 item 9). The order is
-// made, never timed: the handler's owed message, handed over before the
-// drain, waits until the webhook has begun the message owed it, which waits
-// until Follow's loop has ended (SetFollowDone).
-func TestAKickDuringTheLastHandoverIsHandedOverBeforeFollowReturns(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	e := newEnv(t)
-	a, b := e.mailbox(), e.mailbox()
-	send(t, a, b, "old")
-	failing := func(context.Context, client.Event) error { return errors.New("not yet") }
-	if err := b.Follow(ctx, client.FollowOptions{Until: time.Now(), Owed: true, Webhook: failing}, failing); err != nil && err.Error() != "not yet" {
-		t.Fatal(err)
-	}
-	send(t, a, b, "new")
-	begun, ended := make(chan struct{}), make(chan struct{})
-	client.SetFollowDone(b, func() { close(ended) })
-	hook := &bodies{result: func(body string) error {
-		if body == "old" {
-			close(begun)
-			<-ended
-		}
-		return nil
-	}}
-	handler := func(_ context.Context, ev client.Event) error {
-		if ev.Kind == client.EventDelivery && ev.Result == nil { // the owed "old", before the drain
-			<-begun
-		}
-		return nil
-	}
-	if err := b.Follow(ctx, client.FollowOptions{Until: time.Now(), Owed: true, Webhook: hook.handle}, handler); err != nil {
-		t.Fatal(err)
-	}
-	if st, err := b.Status(ctx); err != nil || st.WebhookOwed != 0 || !slices.Equal(hook.list(), []string{"old", "new"}) {
-		t.Errorf("the webhook was handed %q; %+v, %v", hook.list(), st, err)
-	}
-}
-
 // A webhook made with the caller's http.Client follows no redirect either: the
 // redirect's status is the try's answer (#927 item 10).
 func TestAWebhookOfTheCallersClientFollowsNoRedirect(t *testing.T) {
