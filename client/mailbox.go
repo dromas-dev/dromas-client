@@ -125,7 +125,8 @@ type Options struct {
 	// names; empty if none did.
 	ConfigFile string
 	// Policy is what its owner set of the mailbox's policy: a field left empty
-	// takes DefaultPolicy's ([Mailbox.Policy]).
+	// takes DefaultPolicy's ([Mailbox.Policy]). Nothing of it is kept in the
+	// mailbox: each process that opens it lands by its own Options.Policy.
 	Policy Policy
 	// PrekeyLifetime is how long each new prekey is valid for, from
 	// MinPrekeyLifetime to protocol.PrekeyLifetime, in whole seconds; zero is

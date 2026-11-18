@@ -112,6 +112,7 @@ func (e *env) heldMailbox() *client.Mailbox {
 	return e.made(e.heldOpts())
 }
 
+// made makes a mailbox at a new directory with opt, against e's server.
 func (e *env) made(opt client.Options) *client.Mailbox {
 	e.t.Helper()
 	b, err := client.Init(context.Background(), e.t.TempDir(), opt)
