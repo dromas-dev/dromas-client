@@ -206,7 +206,7 @@ func TestACertificateFromItsHolderIsRefusedUnlessItMeetsTheRequest(t *testing.T)
 				t.Fatal(err)
 			}
 			return certify(t, b, holder, r, r.LowestSerial+1, e.clock.Now())
-		}, "after the request was made"},
+		}, "above those the request knew of"},
 		{"not a certificate", func(*testing.T, *env, *client.Mailbox, ssh.Signer, *client.CertificateRequest) []byte {
 			return []byte("ssh-ed25519 AAAA\n")
 		}, "no certificate"},
