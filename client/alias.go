@@ -73,18 +73,20 @@ func (b *Mailbox) setAlias(name string, a protocol.Address) error {
 	case err != nil:
 		return err
 	case len(have) == 1 && have[0] == a:
-		return nil
+		// Named already, by hand or by a command ended before it allowed:
+		// allowed below all the same.
 	case len(have) > 0:
 		return refuse("alias %s already names %s: remove it first (dromas alias rm %s)", name, have[0], name)
+	default:
+		lines, err := b.aliasLines()
+		if err != nil {
+			return err
+		}
+		if err := b.writeAliases(append(lines, name+" "+a.String())); err != nil {
+			return err
+		}
 	}
-	lines, err := b.aliasLines()
-	if err != nil {
-		return err
-	}
-	if err := b.writeAliases(append(lines, name+" "+a.String())); err != nil {
-		return err
-	}
-	_, err = b.addTo("allowed", a)
+	_, err := b.addTo("allowed", a)
 	return err
 }
 

@@ -236,8 +236,9 @@ func TestADeprecationNeedsALookOnlyOnceItsDatePasses(t *testing.T) {
 // command of the day that calls the server, and says an upgrade is available
 // where the latest version it names is higher in a part it writes: so once a
 // day at most, and never as needing a look. status says it from what the
-// read kept. A read that fails, or a document that breaks its form, fails
-// nothing, and the next command that calls the server reads it again.
+// read kept. A read that fails, or a document whose latest_version is no
+// string, fails nothing, and the next command that calls the server reads it
+// again.
 func TestAnUpgradeIsSaidOnceADay(t *testing.T) {
 	v := newVersioned(t)
 	v.srv.SetPolicy(protocol.ServerDocument{LatestVersion: "1.6"})
@@ -275,10 +276,22 @@ func TestAnUpgradeIsSaidOnceADay(t *testing.T) {
 	if ls, status, errs := v.run("recv"); status != 0 || lineOf(ls, "upgrade_available") != nil || errs != "" || v.documentReads() != 3 {
 		t.Fatalf("recv whose read failed: exit %d, %v, %q, %d reads", status, ls, errs, v.documentReads())
 	}
-	v.srv.SetMiddle(nil)
-	if ls, status, _ := v.run("recv"); status != 0 || lineOf(ls, "upgrade_available") == nil || v.documentReads() != 4 {
-		t.Fatalf("recv after the failed read: exit %d, %v, %d reads", status, ls, v.documentReads())
+	// A document whose latest_version is no string is no read either. The next
+	// reads it again, and reads that member alone: one it does not use, of
+	// another type or left out, is ignored.
+	for i, doc := range []map[string]any{{"latest_version": 16}, {"latest_version": "1.6", "server": "x"}} {
+		v.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
+			if r.URL.Path == protocol.DocumentPath {
+				fakeserver.WriteJSON(w, http.StatusOK, doc)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+		if ls, status, _ := v.run("recv"); status != 0 || (lineOf(ls, "upgrade_available") != nil) != (i == 1) || v.documentReads() != 4+i {
+			t.Fatalf("recv of %v: exit %d, %v, %d reads", doc, status, ls, v.documentReads())
+		}
 	}
+	v.srv.SetMiddle(nil)
 	// A latest equal in every part it writes is no upgrade, and status stops
 	// saying one once a read finds none; nor does one with no latest.
 	for _, latest := range []string{"1.5", ""} {

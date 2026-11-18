@@ -154,15 +154,16 @@ func TestACertificateIsRefusedWhereTheServersMaximumLeavesNoRoom(t *testing.T) {
 }
 
 // A client reads only the member of its server's document it uses: a
-// document whose server name breaks its form still gives the maximum, and a
-// mailbox registers under a certificate of that one (PROTOCOL.md §11.18).
+// document whose server is of another type, and with no lists, still gives
+// the maximum, and a mailbox registers under a certificate of that one
+// (PROTOCOL.md §11.18).
 func TestADocumentIsReadForItsMaximumAlone(t *testing.T) {
 	t.Parallel()
 	e := newWorkEnv(t)
 	short := fakeserver.MaxCertificateLifetime - 86400
 	e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
 		if r.URL.Path == protocol.DocumentPath {
-			fakeserver.WriteJSON(w, http.StatusOK, protocol.ServerDocument{MaxCertificateLifetime: short, Deprecations: []protocol.Scheduled{}, Sunsets: []protocol.Scheduled{}, Capabilities: []protocol.Capability{}, Server: &protocol.Implementation{Name: "a b", Version: "v1"}})
+			fakeserver.WriteJSON(w, http.StatusOK, map[string]any{"max_certificate_lifetime_seconds": short, "server": "x"})
 			return
 		}
 		next.ServeHTTP(w, r)

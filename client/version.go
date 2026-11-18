@@ -222,10 +222,12 @@ func (b *Mailbox) recordVersions(ctx context.Context) {
 
 // readDocument reads the server's document, GET /v1/, where the mailbox last
 // read it a day ago or more, or never, or at a time its clock has since gone
-// back past, and keeps when it read it and the latest version it names. Where
-// that version is an upgrade for this client, the command says so
-// (Versions.Upgrade). A mailbox that holds its own revocation asks nothing
-// (finished). A read that fails, or a document that breaks its form, is no
+// back past, and keeps when it read it and the latest version it names, where
+// that has a policy's version form (ParsePolicyVersion). Where that version
+// is an upgrade for this client, the command says so (Versions.Upgrade). It
+// reads latest_version alone: every other member, of any form, is ignored
+// (RFC 7493 §4.2). A mailbox that holds its own revocation asks nothing
+// (finished). A read that fails, or whose latest_version is no string, is no
 // read: the next command that has an answer tries again.
 func (b *Mailbox) readDocument(ctx context.Context) {
 	b.met.mu.Lock()
@@ -242,24 +244,30 @@ func (b *Mailbox) readDocument(ctx context.Context) {
 	if b.finished() != nil {
 		return
 	}
-	var d protocol.ServerDocument
+	var d struct {
+		LatestVersion string `json:"latest_version"`
+	}
 	if _, err := b.exchange(ctx, http.MethodGet, protocol.DocumentPath, nil, nil, &d); err != nil {
 		return
+	}
+	latest := d.LatestVersion
+	if _, err := protocol.ParsePolicyVersion(latest); err != nil {
+		latest = ""
 	}
 	if err := b.update(func(s store) error {
 		if err := s.put(bucketMailbox, keyDocumentRead, []byte(now.Format(protocol.TimeLayout))); err != nil {
 			return err
 		}
-		if d.LatestVersion == "" {
+		if latest == "" {
 			return s.del(bucketMailbox, keyLatest)
 		}
-		return s.put(bucketMailbox, keyLatest, []byte(d.LatestVersion))
+		return s.put(bucketMailbox, keyLatest, []byte(latest))
 	}); err != nil {
 		return
 	}
-	if upgrade(d.LatestVersion, b.version) {
+	if upgrade(latest, b.version) {
 		b.met.mu.Lock()
-		b.met.upgrade = d.LatestVersion
+		b.met.upgrade = latest
 		b.met.mu.Unlock()
 	}
 }

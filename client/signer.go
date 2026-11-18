@@ -183,9 +183,14 @@ func (b *Mailbox) certificateLifetime(ctx context.Context) (time.Duration, error
 // max_certificate_lifetime_seconds in the server's document (PROTOCOL.md
 // §5.2, §11.18). The owner's Options.CertificateLifetime is for the
 // certificates this mailbox makes, never one its identity holder makes. The
-// error is the read's, for the caller to say what it stops.
+// error is the read's, for the caller to say what it stops. It reads that
+// member alone: every other, of any form, is ignored (RFC 7493 §4.2). A
+// document that names none names 0, under which no certificate is made or
+// installed.
 func (b *Mailbox) serverCertificateLifetime(ctx context.Context) (time.Duration, error) {
-	var d protocol.ServerDocument
+	var d struct {
+		MaxCertificateLifetime uint64 `json:"max_certificate_lifetime_seconds"`
+	}
 	if _, err := b.call(ctx, http.MethodGet, protocol.DocumentPath, nil, nil, &d); err != nil {
 		return 0, err
 	}

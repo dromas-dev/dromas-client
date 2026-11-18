@@ -180,13 +180,13 @@ func TestAPolicyCoversItsVersions(t *testing.T) {
 	}
 }
 
-// A read of a document holds only the member a client uses to its form: the
-// server's maximum certificate lifetime, which every document carries, from 1
-// to MaxInteger seconds. Check holds the rest: each version a policy's,
-// exactly one of below and version, each date a time, each name of its form,
-// no more than 64 of each list, no sunset earlier than a deprecation of the
-// same versions (RFC 9745 §4), and the implementation's members, where it
-// names one, each of its text.
+// A read of a document holds each member only to its JSON type, as a client
+// reads it; Check holds it to its form: each version a policy's, exactly one
+// of below and version, each date a time, each name of its form, no more
+// than 64 of each list, no sunset earlier than a deprecation of the same
+// versions (RFC 9745 §4), the server's maximum certificate lifetime, which
+// every document carries, from 1 to MaxInteger seconds, and the
+// implementation's members, where it names one, each of its text.
 func TestTheServersDocumentBreaksItsFormAsItSays(t *testing.T) {
 	good := `{"min_version":"0.1","latest_version":"0.8","deprecations":[{"below":"0.5","effective_at":"2027-01-01T00:00:00Z"}],"sunsets":[{"below":"0.5","effective_at":"2027-01-01T00:00:00Z"},{"version":"0.6","effective_at":"2027-02-01T00:00:00Z"}],"capabilities":[{"name":"long_poll2"}],"max_certificate_lifetime_seconds":3891600,"server":{"name":"dromas-server","version":"v0.5.1","revision":"c4258bc37344474025fe2c2d6420476eb617450a"},"later":1}`
 	var d ServerDocument
@@ -270,7 +270,11 @@ func TestTheServersDocumentBreaksItsFormAsItSays(t *testing.T) {
 		`{"max_certificate_lifetime_seconds":"3891600"}`,
 	} {
 		var d ServerDocument
-		if err := Unmarshal([]byte(text), &d); !errors.Is(err, ErrMemberValue) || Member(err) != "max_certificate_lifetime_seconds" {
+		err := Unmarshal([]byte(text), &d)
+		if err == nil {
+			err = d.Check()
+		}
+		if !errors.Is(err, ErrMemberValue) || Member(err) != "max_certificate_lifetime_seconds" {
 			t.Errorf("%s: %v, naming %q", text, err, Member(err))
 		}
 	}

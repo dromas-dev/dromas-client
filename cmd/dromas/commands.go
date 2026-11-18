@@ -55,7 +55,8 @@ help describes it.`,
 			`An alias is this mailbox's own name for a peer. The mailbox keeps its aliases in
 its aliases file as "<name> <address>" lines, which you can also write by hand.
 
-A name allows its peer, as dromas peer allow does. A name never moves to another
+A name names its peer. dromas alias add also allows it, as dromas peer allow
+does; a line written by hand allows nothing. A name never moves to another
 address: to change one, remove it and add it again.`,
 			e.aliasAddCmd(), e.aliasRmCmd(), e.aliasListCmd()),
 		e.group("outbox", "messages the server has not accepted yet: flush",
