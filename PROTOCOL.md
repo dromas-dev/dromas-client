@@ -739,11 +739,13 @@ A revocation record carries an identity's revocations, and the record proves its
 - **`type`.** The value is `"revocation_record"`.
   - Every writer writes this member. A server writes the member in its answers, and `api/openapi.yaml` requires the member there. A client writes the member in every revocation record it sends.
   - A reader accepts a revocation record without this member.
-  - A reader MUST refuse a revocation record that names another type (a server refuses with `400 invalid_request`, and `type` in `param`).
-- **`identity`.** This member is the identity document, which MUST hash to the address and meet its key checks (Section 4.1).
+  - The Go client refuses a revocation record that names another type. A server refuses one with `400 invalid_request`, and `type` in `param`.
+  - A reader that does not read this member loses nothing, because the namespace of each revocation binds the revocation to what the revocation revokes (Sections 10.1 and 10.2). So any revocation that verifies is one this reader may act on, whatever type the record names.
+- **`identity`.** This member is the identity document. In a record that a server serves, the document MUST hash to the address and meet the document's key checks (Section 4.1).
 - **`revocation_signature`.** If present, this member is the revocation of the address (Section 10.1): the revocation's armoured signature, in base64.
 - **`revoked_certificates` and `revoked_certificates_signature`.** If present, these two members are the revocation of certificates (Section 10.2): the revocation statement's three lines and the armoured signature over those lines, each in base64. The revocation statement MUST have exactly that form, with the address as its line 2.
-- **The members are in any order.** A revocation record carries at least one of the two revocations.
+- **The members are in any order.** A revocation record that a server serves MUST carry at least one of the two revocations.
+- **A reader acts only on what verifies.** A record that is malformed by these rules shows nothing (Section 12.5). For example, a record with no identity, an identity that does not hash to the address, or neither revocation shows nothing.
 - **A reader ignores an unknown member of a revocation record, a server among them (Section 3.3).**
 - **A revocation record from a file counts the same as one from a server.**
   - A verifier rebuilds the revocation statement of the address from the address.
@@ -1397,7 +1399,7 @@ A client drains every page of its list (Section 11.11) and fetches the message o
 
 7. **Check 7, revocation.** The reader follows three steps, in this order:
    1. **What the reader keeps comes first, with no call.** A kept revocation of the sender's address (Section 12.5) refuses the message as `sender_revoked`, now and for every later message from that address (Section 10.1). A kept revocation of the sender's certificates that covers the signer (Section 5.1) refuses the message as `certificate_revoked`.
-   2. **Otherwise the reader looks up the sender's revocations (Section 11.15),** once in a drain for each sender, after that sender's signature has verified. The server serves them whether or not the server holds a mailbox for the sender. The reader accepts three answers: a well-formed revocation record (Section 10.3), whether or not the record's revocations verify; a `404 revocation_not_found`; and a `410 mailbox_revoked` whose revocation record verifies. Anything else is no answer, a `410` whose record does not verify among them, so the drain stops and the message stays on the server.
+   2. **Otherwise the reader looks up the sender's revocations (Section 11.15),** once in a drain for each sender, after that sender's signature has verified. The server serves them whether or not the server holds a mailbox for the sender. The reader accepts three answers: any 2xx answer whose body parses as a revocation record (Section 10.3); a `404 revocation_not_found`; and a `410 mailbox_revoked` whose revocation record verifies. A 2xx answer is the server's answer, so what verifies in the record is shown, and nothing else is. For example, `200 {}` shows nothing revoked, as an unsigned `404` does. Anything else is no answer, a `410` whose record does not verify among them, so the drain stops and the message stays on the server.
    3. **On an answer, the reader keeps each revocation that verifies, and applies step 1 again.** If nothing refuses the message, the message passes this check. A revocation that does not verify counts as nothing shown, as Section 12.5 says. A later message from that sender in the drain makes no second call, and the reader applies step 1 to the later message by what the reader then keeps.
 
 8. **Check 8, replay.** The reader computes the SHA-256 of the ciphertext. That hash is not in the replay set (`message_already_received`).
