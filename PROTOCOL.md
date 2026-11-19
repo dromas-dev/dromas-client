@@ -1131,7 +1131,7 @@ The server checks the steps below. Only step 9 stores anything.
   - Where such a list's `If-None-Match` would make the answer `304`, the server waits to answer.
   - When the first page's tag no longer matches the `If-None-Match`, the server answers the page as it answers any list.
   - When the wait has passed, the server answers the `304`.
-  - A server MAY hold a wait past a message's expiry; the answer at the wait's end is the page as it then stands.
+  - A server MAY hold a wait past a message's expiry; the answer at the wait's end is the page as it then stands, the expired message gone from it.
   - A server makes a long poll wait at most a time that the server chooses. That time is not part of the protocol.
   - The server MAY answer the `304` sooner. The server answers the `304` at once when it stops serving.
   - The server answers a list at once if the list's `If-None-Match` would not make the answer `304`, or if the list's `wait` is `0`.
@@ -1436,7 +1436,7 @@ A client drains every page of its list (Section 11.11) and fetches the message o
 
 ### 12.4. Renewal and key deletion
 
-- **A client MUST give each renewal a prekey unique among the prekeys that the mailbox has made.**
+- **A client MUST give each renewal a prekey unlike every prekey the mailbox has ever made.**
 - **Before each renewal, the mailbox looks itself up.** The mailbox keeps each revocation of its certificates that the lookup carries and that verifies. A renewal goes ahead only on an answer to that lookup, except in the remedy (Section 12.6).
   - A mailbox whose current statement is signed by its identity renews under that identity, or under a certificate (below).
   - A mailbox whose current statement is under a certificate renews under a certificate, because a prekey statement that the identity signs is earlier than the current statement (Section 5.3). A client that makes a new certificate gives it a certificate serial above the revocation serial of the revocation kept from that lookup (Section 5.2).
