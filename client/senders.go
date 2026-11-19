@@ -1,7 +1,6 @@
 package client
 
 import (
-	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -12,6 +11,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/dromas-dev/dromas-client/protocol"
 )
@@ -147,7 +147,7 @@ func (b *Mailbox) addAll(name string, addrs []protocol.Address) (int, error) {
 }
 
 // Allowed returns the senders whose messages land in inbox/ whatever the
-// policy says: those the allowed file lists.
+// policy says: those the allowed file lists and those an alias names.
 func (b *Mailbox) Allowed(ctx context.Context) ([]protocol.Address, error) {
 	return reading(ctx, b, b.allowed)
 }
@@ -157,6 +157,13 @@ func (b *Mailbox) allowed() ([]protocol.Address, error) {
 	allowed, err := b.addresses("allowed")
 	if err != nil {
 		return nil, err
+	}
+	as, err := b.aliases()
+	if err != nil {
+		return nil, err
+	}
+	for _, a := range as {
+		allowed = append(allowed, a.Address)
 	}
 	return protocol.NewACLList(false, allowed).Addrs, nil
 }
@@ -231,11 +238,16 @@ type keptMessage struct {
 	SentAt string
 	Env    *protocol.Envelope
 	Line   []byte
+	kept   time.Time // when the file was written: the drain's, or a later move's (peer allow) or copy's; among messages sent in one second, the order the file system's clock tells
 }
 
 // keptMessages reads dir, inbox/ or held/: each message this client kept there,
-// oldest first by sent_at, then by id. A file that is not one of this client's
-// lines ([Mailbox.keptLine]) is skipped.
+// oldest first by sent_at, then in the order they were kept, then by id. Two
+// files written within one tick of the file system's clock share a
+// modification time (Windows' ticks about every 15.6 ms), so the order
+// within a second is the order recv kept them only where their times
+// differ; the id makes it the same on every run. A file that is not one of
+// this client's lines ([Mailbox.keptLine]) is skipped.
 func (b *Mailbox) keptMessages(dir string) ([]keptMessage, error) {
 	names, err := matching(b.path(dir, "*.json"))
 	if err != nil {
@@ -254,14 +266,24 @@ func (b *Mailbox) keptMessages(dir string) ([]keptMessage, error) {
 		if err != nil {
 			return nil, err
 		}
+		fi, err := os.Stat(n)
+		if err != nil {
+			return nil, err
+		}
 		line, from, env, ok := b.keptLine(data)
 		if !ok {
 			continue
 		}
-		out = append(out, keptMessage{ID: id, From: from, SentAt: env.SentAt.UTC().Format(protocol.TimeLayout), Env: env, Line: line})
+		out = append(out, keptMessage{ID: id, From: from, SentAt: env.SentAt.UTC().Format(protocol.TimeLayout), Env: env, Line: line, kept: fi.ModTime()})
 	}
-	slices.SortFunc(out, func(x, y keptMessage) int {
-		return cmp.Or(strings.Compare(x.SentAt, y.SentAt), strings.Compare(x.ID, y.ID))
+	slices.SortStableFunc(out, func(x, y keptMessage) int {
+		if c := strings.Compare(x.SentAt, y.SentAt); c != 0 {
+			return c
+		}
+		if c := x.kept.Compare(y.kept); c != 0 {
+			return c
+		}
+		return strings.Compare(x.ID, y.ID)
 	})
 	return out, nil
 }
