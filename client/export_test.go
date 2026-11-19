@@ -162,21 +162,6 @@ func SetFormat(t *testing.T, dir string, raw []byte) {
 	}
 }
 
-// HasGate reports whether this system has the mailbox's gate (tryGate): where
-// it has none (gate_other.go), a waiting writer has no preference over
-// readings.
-func HasGate(t *testing.T) bool {
-	f, _, err := tryGate(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if f == nil {
-		return false
-	}
-	_ = f.Close()
-	return true
-}
-
 // SetRequestTimeout shortens how long the default HTTP client lets a request
 // go, for one test: one that sends or fetches a ciphertext with no byte of it
 // moving, and any other whole.

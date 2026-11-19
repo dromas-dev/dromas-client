@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -22,11 +23,20 @@ import (
 	"github.com/dromas-dev/dromas-client/protocol"
 )
 
+// fetch is one fetch largest answered: the bytes its handler's writes took,
+// and done, closed once the handler returned. The client can read a byte
+// before the write that sent it returns and is counted, so a count is the
+// fetch's whole only once done is closed (#956).
+type fetch struct {
+	n    atomic.Int64
+	done chan struct{}
+}
+
 // largest lists mailbox b's first message as a ciphertext of the protocol's
 // largest size, all zeros, and answers its fetch as the server answers one,
 // a Range included, each fetch's bytes counted in served, in chunks of 64
 // KiB after each pause: none for a link at full speed. It returns the id.
-func largest(t *testing.T, e *env, b *client.Mailbox, pause func() time.Duration, served *[]*atomic.Int64, mu *sync.Mutex) string {
+func largest(t *testing.T, e *env, b *client.Mailbox, pause func() time.Duration, served *[]*fetch, mu *sync.Mutex) string {
 	t.Helper()
 	ct := make([]byte, protocol.MaxCiphertext)
 	sum := sha256.Sum256(ct)
@@ -44,9 +54,11 @@ func largest(t *testing.T, e *env, b *client.Mailbox, pause func() time.Duration
 			list.Messages[0].ID, list.Messages[0].Size = id, protocol.MaxCiphertext
 			fakeserver.WriteList(w, list)
 		case r.Method == http.MethodGet && r.URL.Path == mailboxPath(b)+"/messages/"+id:
-			n := &atomic.Int64{}
+			f := &fetch{done: make(chan struct{})}
+			defer close(f.done)
+			n := &f.n
 			mu.Lock()
-			*served = append(*served, n)
+			*served = append(*served, f)
 			mu.Unlock()
 			from, ok := protocol.RangeAsked(r.Header.Values("Range"), r.Header.Values("If-Range"))
 			w.Header().Set("Content-Type", protocol.CiphertextContentType)
@@ -97,7 +109,7 @@ func TestADrainHoldsTheLockForItsTimeAndTheNextGoesOnFromIt(t *testing.T) {
 		a, b := e.mailbox(), e.mailbox()
 		send(t, a, b, "listed as the largest a ciphertext may be")
 		var mu sync.Mutex
-		var served []*atomic.Int64
+		var served []*fetch
 		var slow atomic.Bool
 		slow.Store(true)
 		id := largest(t, e, b, func() time.Duration {
@@ -110,8 +122,20 @@ func TestADrainHoldsTheLockForItsTimeAndTheNextGoesOnFromIt(t *testing.T) {
 			mu.Lock()
 			defer mu.Unlock()
 			var ns []int64
-			for _, n := range served {
-				ns = append(ns, n.Load())
+			for _, f := range served {
+				ns = append(ns, f.n.Load())
+			}
+			return ns
+		}
+		// whole is what each fetch was served, read once its handler returned.
+		whole := func() []int64 {
+			mu.Lock()
+			fs := slices.Clone(served)
+			mu.Unlock()
+			var ns []int64
+			for _, f := range fs {
+				<-f.done
+				ns = append(ns, f.n.Load())
 			}
 			return ns
 		}
@@ -171,8 +195,8 @@ func TestADrainHoldsTheLockForItsTimeAndTheNextGoesOnFromIt(t *testing.T) {
 			t.Fatalf("the drain at its time: %+v, %v, after %s", first.res, first.err, first.at.Sub(start))
 		}
 		got, kept, err := x.Partial()
-		if err != nil || got != id || kept <= 0 || kept >= protocol.MaxCiphertext || kept > fetched()[0] {
-			t.Fatalf("the drain kept %d bytes of %q, %v; the server served %d", kept, got, err, fetched()[0])
+		if ns := whole(); err != nil || got != id || kept <= 0 || kept >= protocol.MaxCiphertext || len(ns) != 1 || kept > ns[0] {
+			t.Fatalf("the drain kept %d bytes of %q, %v; the server served %v", kept, got, err, ns)
 		}
 
 		// The next recv finishes the fetch from what was kept: the server serves
@@ -186,7 +210,7 @@ func TestADrainHoldsTheLockForItsTimeAndTheNextGoesOnFromIt(t *testing.T) {
 		if len(res.Refused) != 1 || res.Refused[0].ID != id || res.Refused[0].Code != client.RefusedDecryptError || res.More {
 			t.Fatalf("the next recv: %+v", res)
 		}
-		if ns := fetched(); len(ns) != 2 || ns[1] != protocol.MaxCiphertext-kept {
+		if ns := whole(); len(ns) != 2 || ns[1] != protocol.MaxCiphertext-kept {
 			t.Fatalf("the fetches were served %v bytes, want the %d after the %d kept", ns, protocol.MaxCiphertext-kept, kept)
 		}
 		noPartial(t, z)
