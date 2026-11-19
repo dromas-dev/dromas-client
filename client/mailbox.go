@@ -347,7 +347,7 @@ func newMailbox(dir string, opt Options) (*Mailbox, error) {
 		b.met = &Versions{}
 	}
 	b.met.mu.Lock()
-	b.met.own, b.met.now = b.version, b.now
+	b.met.own = b.version
 	b.met.mu.Unlock()
 	return b, nil
 }

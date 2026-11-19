@@ -411,12 +411,11 @@ func TestAWrongWebhookRunsNothing(t *testing.T) {
 		return p
 	}
 	cases := map[string][]string{
-		"no wait":           {"--webhook", "http://127.0.0.1/x"},
-		"a password":        {"--wait", "0s", "--webhook", "http://me:sekrit@127.0.0.1/x"},
-		"not http":          {"--wait", "0s", "--webhook", "ftp://127.0.0.1/x"},
-		"a file and no URL": {"--wait", "0s", "--webhook-header-file", file("h", "A: sekrit", 0o600)},
-		"a header of ours":  {"--wait", "0s", "--webhook", "http://127.0.0.1/x", "--webhook-header-file", file("ct", "Content-Type: sekrit", 0o600)},
-		"no secret's form":  {"--wait", "0s", "--webhook", "http://127.0.0.1/x", "--webhook-secret-file", file("s", "sekrit", 0o600)},
+		"no wait":          {"--webhook", "http://127.0.0.1/x"},
+		"a password":       {"--wait", "0s", "--webhook", "http://me:sekrit@127.0.0.1/x"},
+		"not http":         {"--wait", "0s", "--webhook", "ftp://127.0.0.1/x"},
+		"a header of ours": {"--wait", "0s", "--webhook", "http://127.0.0.1/x", "--webhook-header-file", file("ct", "Content-Type: sekrit", 0o600)},
+		"no secret's form": {"--wait", "0s", "--webhook", "http://127.0.0.1/x", "--webhook-secret-file", file("s", "sekrit", 0o600)},
 	}
 	if os.PathSeparator == '/' {
 		cases["a header others read"] = []string{"--wait", "0s", "--webhook", "http://127.0.0.1/x", "--webhook-header-file", file("open", "Authorization: sekrit", 0o644)}
@@ -433,8 +432,7 @@ func TestAWrongWebhookRunsNothing(t *testing.T) {
 }
 
 // The config file's [recv] webhook and its two files serve a recv that waits,
-// where the command line names none; a file key without the URL is a
-// config_error.
+// where the command line names none.
 func TestTheConfigFilesWebhookServesARecvThatWaits(t *testing.T) {
 	c := newRecvEnv(t)
 	hook := answering(http.StatusOK)
@@ -451,11 +449,6 @@ func TestTheConfigFilesWebhookServesARecvThatWaits(t *testing.T) {
 	c.send("two")
 	if _, stderr, err := c.recv(context.Background(), "--wait", "0s"); err != nil || len(hook.got()) != 1 || hook.got()[0].header.Get("Authorization") != hookToken || hook.got()[0].header.Get("webhook-signature") == "" {
 		t.Fatalf("recv --wait: %v %s; %v", err, stderr, hook.got())
-	}
-	t.Setenv("DROMAS_CONFIG", writeConfig(t, base+"webhook-header-file = "+tomlString(flags[1])+"\n"))
-	_, stderr, err := c.recv(context.Background(), "--wait", "0s")
-	if _, ok := errors.AsType[*configError](err); report(err, io.Discard) != 2 || !ok {
-		t.Fatalf("a header file without a webhook: %v %s", err, stderr)
 	}
 }
 

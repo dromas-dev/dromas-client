@@ -7,8 +7,9 @@ report what this mailbox holds and what needs attention
 Report what this mailbox holds and what needs attention, as one "status" line,
 from the mailbox's own files and with no call to the server: its format and
 where it keeps each of its files, its prekey, a renewal that has not gone
-through, refused messages in refused/, held messages, and messages in outbox/
-that the server has not accepted yet.
+through, refused messages in refused/, held messages, messages in outbox/ that
+the server has not accepted yet, and a sunset of this client's version, or a
+deprecation whose date has passed, that the last command's answers carried.
 
 status refuses a mailbox in a format other than this client's, its "error" line
 naming both formats.

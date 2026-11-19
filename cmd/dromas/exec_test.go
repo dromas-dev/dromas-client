@@ -585,7 +585,6 @@ func TestExecUsageErrors(t *testing.T) {
 		"--exec with no program":                  {"--wait", "0s", "--exec", ""},
 		"a program that is not there":             {"--wait", "0s", "--exec", filepath.Join(t.TempDir(), "no-such-program")},
 		"--exec-timeout of zero":                  {"--wait", "0s", "--exec", self, "--exec-timeout", "0s"},
-		"--exec-timeout with no --exec":           {"--wait", "0s", "--exec-timeout", "1m"},
 		"arguments with no --exec":                {"--wait", "0s", "--", "x"},
 		"arguments before --":                     {"--wait", "0s", "--exec", self, "x", "--", "y"},
 		"an argument with no --":                  {"x"},
@@ -618,7 +617,8 @@ func (c *callbackEnv) execConfig(mode string, more ...string) {
 // The config file's [recv] exec is the callback of a recv that waits and names
 // no --exec, so a service manager's unit names only the profile: its program,
 // then its arguments, with its exec-timeout. A recv that does not wait runs
-// nothing, and --exec on the command line takes its place.
+// nothing, its exec-timeout timing nothing, and --exec on the command line
+// takes its place.
 func TestTheConfigsExecIsTheCallbackOfARecvThatWaits(t *testing.T) {
 	c := newCallback(t)
 	c.execConfig("args")
@@ -631,7 +631,7 @@ func TestTheConfigsExecIsTheCallbackOfARecvThatWaits(t *testing.T) {
 	}
 
 	c = newCallback(t)
-	c.execConfig("args")
+	c.execConfig("args", `exec-timeout = "1m"`)
 	c.send("one")
 	if _, stderr, err := c.recv(context.Background()); err != nil {
 		t.Fatalf("recv: %v %s", err, stderr)
@@ -667,19 +667,18 @@ func TestTheConfigsExecIsTheCallbackOfARecvThatWaits(t *testing.T) {
 }
 
 // A [recv] exec that names no program, or one that is not there, and an
-// exec-timeout with no exec or of zero, are the config's error, and take
-// nothing from the server.
+// exec-timeout of zero, are the config's error, and take nothing from the
+// server.
 func TestAWrongExecInTheConfigIsTheConfigsError(t *testing.T) {
 	c := newCallback(t)
 	c.send("waits")
 	dir := c.b.Dir()
 	good := "base-dir = " + tomlString(dir) + "\nmail-dir = " + tomlString(filepath.Join(dir, "mail")) + "\n[recv]\n"
 	for name, body := range map[string]string{
-		"an empty list":                "exec = []",
-		"an empty program":             `exec = [""]`,
-		"a program that is not there":  "exec = [" + tomlString(filepath.Join(t.TempDir(), "no-such-program")) + "]",
-		"an exec-timeout with no exec": `exec-timeout = "1m"`,
-		"an exec-timeout of zero":      "exec = [" + tomlString(os.Args[0]) + "]\n" + `exec-timeout = "0s"`,
+		"an empty list":               "exec = []",
+		"an empty program":            `exec = [""]`,
+		"a program that is not there": "exec = [" + tomlString(filepath.Join(t.TempDir(), "no-such-program")) + "]",
+		"an exec-timeout of zero":     "exec = [" + tomlString(os.Args[0]) + "]\n" + `exec-timeout = "0s"`,
 	} {
 		t.Setenv("DROMAS_CONFIG", writeConfig(t, good+body+"\n"))
 		_, _, err := c.recv(context.Background(), "--wait", "0s")

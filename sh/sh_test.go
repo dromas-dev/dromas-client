@@ -1954,9 +1954,8 @@ var landAll = client.Policy{Unknown: client.LandInbox, Server: client.AdmitAll}
 
 // dromas.sh run as a command takes the Go client's command line for the
 // commands it has, and gives help as the Go client does: asked for, on stdout
-// with exit 0, and --help after a command runs nothing, as -h does, which
-// says on stderr that --help is the flag; a bare group, or a command it does
-// not have, on stderr with exit 2.
+// with exit 0, and --help after a command runs nothing, as -h does; a bare
+// group, or a command it does not have, on stderr with exit 2.
 func TestTheCommandLine(t *testing.T) {
 	t.Parallel()
 	need(t, append(scriptTools, "curl")...)
@@ -1991,11 +1990,7 @@ func TestTheCommandLine(t *testing.T) {
 		"bash dromas.sh prekey renew ": {{"help", "prekey"}, {"prekey", "help"}, {"prekey", "renew", "--help"}},
 	} {
 		for _, line := range lines {
-			pointer := ""
-			if strings.Contains(" "+strings.Join(line, " ")+" ", " -h ") {
-				pointer = "Flag shorthand -h has been deprecated, use --help\n"
-			}
-			if out, errs, code := run("", line...); code != 0 || errs != pointer || !strings.HasPrefix(out, want) {
+			if out, errs, code := run("", line...); code != 0 || errs != "" || !strings.HasPrefix(out, want) {
 				t.Errorf("dromas.sh %v: %d %q\n%s", line, code, errs, out)
 			}
 		}

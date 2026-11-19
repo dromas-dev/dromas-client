@@ -76,25 +76,25 @@ Exit status:
      ("renewal_failed"), the server served a prekey the mailbox did not make
      ("prekey_not_made"), the mailbox's ACL was not sent to its server
      ("acl_sync_failed"), the server held an ACL the mailbox had not sent, which
-     recv replaced ("acl_replaced"), or an --exec program ran out of attempts
-     ("exec_failed"). From send and outbox flush: the post went ahead, but the
+     recv replaced ("acl_replaced"), an --exec program ran out of attempts
+     ("exec_failed"), or the webhook did ("webhook_failed"). From send and outbox flush: the post went ahead, but the
      mailbox's ACL was not sent ("acl_sync_failed"). From prekey renew:
-     "prekey_not_made". From any command that called a server: the server stops
-     accepting this client's version from a date ("sunset"), or deems it
-     deprecated from a date that has passed ("deprecated"). From status: its
-     "attention" list is not empty.
+     "prekey_not_made". From status: its "attention" list is not empty, as it
+     is when the server stops accepting this client's version from a date, or
+     deems it deprecated from a date that has passed.
   4  a refusal that no wait fixes: from recv, with "fatal" in its "error" line,
      and from any command that receives, sends, delivers or renews, refused as
      "restore_required". A restarted process meets it again.
 
-Once a day, a command that calls the server reads the server's document, and
-prints "upgrade_available" when it names a later version of this client, which
-needs no attention. recv prints a "refused" line for each message it refused,
-keeping the message in refused/, a "held" line for each message it held in
-held/, and a "dropped" line for each message from a sender this mailbox blocked.
-None of them changes recv's exit status, because any sender can cause them. A
-refusal's code comes from a closed list, and its wording is this client's own: a
-refusal never quotes a message.
+A command that calls the server prints "deprecated" or "sunset" when an answer
+carried either for this client's version, and once a day reads the server's
+document and prints "upgrade_available" when it names a later version of this
+client: none of them changes its exit status. recv prints a "refused" line for
+each message it refused, keeping the message in refused/, a "held" line for each
+message it held in held/, and a "dropped" line for each message from a sender
+this mailbox blocked. None of them changes recv's exit status, because any
+sender can cause them. A refusal's code comes from a closed list, and its
+wording is this client's own: a refusal never quotes a message.
 
 To try the whole loop, send anything to dromas.dev's echo mailbox:
 ` + client.DefaultBase + protocol.LinkPath + client.EchoAddress + `
@@ -274,25 +274,19 @@ func runWith(ctx context.Context, opt client.Options, args []string, stdin io.Re
 
 // versions says, once a command is done, what its answers said of this
 // client's version (client.Versions): a "deprecated" line where one carried
-// a Deprecation, which needs a look once its date has passed at this
-// client's clock, and none before; a "sunset" line where one carried a
-// Sunset, the date its server stops taking this version, which needs a look
-// (exit status 3, where the command did its work), and an
+// a Deprecation, a "sunset" line where one carried a Sunset, and an
 // "upgrade_available" line where its read of the server's document, at most
-// once a day, named a later version. A command that called no server says
-// neither.
+// once a day, named a later version. None changes the command's exit status,
+// and a command that called no server says none.
 func (e *cli) versions(err error) error {
 	v := e.opt.Versions
 	own := v.Own()
-	look := false
-	if at, passed, ok := v.Deprecation(); ok {
-		look = look || passed
+	if at, ok := v.Deprecation(); ok {
 		if werr := e.out(line("deprecated", "version", own, "deprecated_at", at.UTC().Format(protocol.TimeLayout), "detail", client.DeprecationWords(own, at))); werr != nil && err == nil {
 			err = werr
 		}
 	}
 	if at, ok := v.Sunset(); ok {
-		look = true
 		if werr := e.out(line("sunset", "version", own, "sunset_at", at.UTC().Format(protocol.TimeLayout), "detail", client.SunsetWords(own, at))); werr != nil && err == nil {
 			err = werr
 		}
@@ -301,9 +295,6 @@ func (e *cli) versions(err error) error {
 		if werr := e.out(line("upgrade_available", "version", own, "latest", latest, "detail", client.UpgradeWords(own, latest))); werr != nil && err == nil {
 			err = werr
 		}
-	}
-	if look && err == nil {
-		return &needsALook{}
 	}
 	return err
 }
