@@ -238,7 +238,7 @@ type keptMessage struct {
 	SentAt string
 	Env    *protocol.Envelope
 	Line   []byte
-	kept   time.Time // when the drain wrote it: the order it arrived in, among messages sent in one second, where the file system's clock tells them apart
+	kept   time.Time // when the file was written: the drain's, or a later move's (peer allow) or copy's; among messages sent in one second, the order the file system's clock tells
 }
 
 // keptMessages reads dir, inbox/ or held/: each message this client kept there,

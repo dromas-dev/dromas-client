@@ -91,7 +91,9 @@ func (b *Mailbox) setAlias(name string, a protocol.Address) error {
 }
 
 // RemoveAlias removes a name. The peer's pinned identity and messages stay, and
-// it stays allowed: un-naming a peer is not blocking it.
+// it stays allowed where the allowed file lists it, as alias add puts it there:
+// un-naming a peer is not blocking it. A peer a line written by hand alone
+// allowed is allowed no longer.
 func (b *Mailbox) RemoveAlias(ctx context.Context, name string) error {
 	return b.lockedFinishedDo(ctx, func() error { return b.removeAlias(name) })
 }
