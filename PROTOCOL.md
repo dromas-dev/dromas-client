@@ -261,7 +261,7 @@ signature-groups = *16( 4base64-char ) ( 4base64-char / base64-final )
   - a non-empty reserved field;
   - a NUL in a string;
   - an integer with an unneeded leading zero byte.
-- **ECDSA's two values of s.** If (r, s) is a P-256 signature, (r, n − s) is also a P-256 signature, where n is the group's order (FIPS 186-5). Each of the two is a signature in the one form. A verifier MUST accept both, and a signer may write either. Anyone who has seen one of the two can write the other (Sections 5.2, 8). An Ed25519 signature has no second form.
+- **ECDSA's two values of s.** If (r, s) is a P-256 signature, (r, n − s) is also a P-256 signature, where n is the group's order (FIPS 186-5). Each of the two is a signature in the one form. A verifier MUST accept both, and a signer may write either. Anyone who has seen one of the two can write the other (Section 5.2). An Ed25519 signature has no second form.
 - **A bound on size.** A signature is at most 947 bytes. That bound is the longest signature in the one form that a mailbox of a key type of Section 4.1 can make, with the mailbox's identity or with a working key under a certificate as `ssh-keygen -s` makes one. The longest is a P-256 identity's prekey statement under a certificate, with the identity's r and s on the certificate each in 33 bytes. Every verifier MUST refuse a longer signature before reading the signature. In a message, the bound limits the signature block, from the block's BEGIN line through the LF after the block's END line (Section 9.2). A key type added later whose signatures are longer raises the bound with that type (Section 14).
 - **Ed25519's S.** In an SSHSIG and on a certificate, an Ed25519 signature's S is below the group order L (RFC 8032 §5.1.7).
 - **The Ed25519 equation.** The equation is RFC 8032 §5.1.7's without the cofactor, `[S]B = R + [k]A'`, compared as encodings. So a verifier accepts a neutral R, and refuses R with a point of small order added.
@@ -410,7 +410,7 @@ A certificate is an OpenSSH user certificate. A verifier MUST check every row of
     So a certificate serial is always above the address's revocation serial.
   - A verifier MUST NOT read a certificate serial as a time, or bound a certificate serial by the verifier's clock. Of two certificate serials, the higher one ranks higher.
   - Two certificates of one identity can share a certificate serial. A verifier that meets both accepts either one, and keeps only their shared certificate serial.
-- **Nothing may depend on a P-256 identity's signature having one set of bytes.** Anyone who has seen (r, s) can write (r, n − s) (Section 3.2). This is true of a certificate that the identity made, and of the prekey statements, passes and messages that the identity signs. Section 8 applies this to passes.
+- **Nothing may depend on a P-256 identity's signature having one set of bytes.** Anyone who has seen (r, s) can write (r, n − s) (Section 3.2). This is true of a certificate that the identity made, and of the prekey statements, passes and messages that the identity signs.
 
 ### 5.3. Order
 
@@ -542,7 +542,7 @@ server-port    = %x31-39 *4DIGIT   ; no leading zero, at most 65535,
 - **A server MUST refuse a value that is too long with `401 invalid_pass`, before the server hashes, parses or verifies the value.** A value is too long when, whitespace included, the value is longer than the form a client writes with a signature as long as the bound (Section 3.2).
 - **Lifetime.** A client signs a pass to end at most 10 minutes after signing. A server accepts a pass that has not ended and that ends at most the skew allowance after the time on the server's own clock.
 - **A client MAY keep a pass, and use the kept pass for its calls until the pass is about to end.** A client MUST NOT use a kept pass with more than 10 minutes left, because the client's clock has then gone back since the client signed the pass. A client MUST NOT send a kept pass to a server whose name is not the one the pass was signed for. It keeps that name beside the pass, and signs a new pass for any other server, which could otherwise replay the kept pass at the server it names.
-- **A server MAY remember a pass it has verified, by the pass's values with the signature in the one form (Section 3.2).** So a pass is one pass, however the header wrote it. A P-256 identity's pass is one pass, with s or with n − s (Section 3.2). A server that remembers passes MUST compare a P-256 identity's pass using the lower of the two values as s.
+- **A server MAY remember a pass it has verified, by the pass's values with the signature in the one form (Section 3.2).**
 - **Which signer.** A server accepts a pass:
   - by the mailbox's identity, always;
   - by a certificate, only where that certificate is exactly the current certificate, as the bytes the server keeps.
@@ -777,7 +777,7 @@ A revocation record carries an identity's revocations, and the record proves its
 
 - **`Date`.** Every answer under `/v1/` carries `Date`. The server sets the field by the clock that the server's checks read.
 - **No caching.** Every answer of a route under `/v1/` carries `Cache-Control: no-store` (RFC 9111 §5.2.2.5).
-- **Compression.** A server MAY answer a lookup (Section 11.8) with gzip (RFC 9110 §8.4.1.3), but only when the request's `Accept-Encoding` accepts gzip. A server MUST NOT compress any other answer (Section 15.8).
+- **Compression.** A server MUST NOT compress an answer (Section 15.8).
 - **`HEAD`.** A server answers `HEAD` on every route that answers `GET` (RFC 9110 §9.1, §9.3.2).
   - A `HEAD` changes nothing. A `HEAD` spends no cursor, hands out no cursor, marks no message as fetched, and spends none of the first-fetch budget.
   - Section 11.5 gives what a `HEAD` spends.
@@ -1131,6 +1131,7 @@ The server checks the steps below. Only step 9 stores anything.
   - Where such a list's `If-None-Match` would make the answer `304`, the server waits to answer.
   - When the first page's tag no longer matches the `If-None-Match`, the server answers the page as it answers any list.
   - When the wait has passed, the server answers the `304`.
+  - A server MAY hold a wait past a message's expiry; the answer at the wait's end is the page as it then stands, the expired message gone from it.
   - A server makes a long poll wait at most a time that the server chooses. That time is not part of the protocol.
   - The server MAY answer the `304` sooner. The server answers the `304` at once when it stops serving.
   - The server answers a list at once if the list's `If-None-Match` would not make the answer `304`, or if the list's `wait` is `0`.
@@ -1435,7 +1436,8 @@ A client drains every page of its list (Section 11.11) and fetches the message o
 
 ### 12.4. Renewal and key deletion
 
-- **Each renewal brings a new prekey.** Before each renewal, the mailbox looks itself up. The mailbox keeps each revocation of its certificates that the lookup carries and that verifies. A renewal goes ahead only on an answer to that lookup, except in the remedy (Section 12.6).
+- **A client MUST give each renewal a prekey unlike every prekey the mailbox has ever made.**
+- **Before each renewal, the mailbox looks itself up.** The mailbox keeps each revocation of its certificates that the lookup carries and that verifies. A renewal goes ahead only on an answer to that lookup, except in the remedy (Section 12.6).
   - A mailbox whose current statement is signed by its identity renews under that identity, or under a certificate (below).
   - A mailbox whose current statement is under a certificate renews under a certificate, because a prekey statement that the identity signs is earlier than the current statement (Section 5.3). A client that makes a new certificate gives it a certificate serial above the revocation serial of the revocation kept from that lookup (Section 5.2).
 - **A mailbox MUST check its own certificate at its own clock before signing under that certificate.** This check stops a mailbox whose clock has gone back past the certificate's start.
@@ -1769,8 +1771,7 @@ Dromas protects a message's content from everyone but the message's recipient. D
   - Removing the signal would need a record of each acked message, which Section 13 rules out.
 - **The lookup before a post tells the server that the mailbox is about to be written to.** The post tells the server the same thing a moment later.
 - **A reader's look-up of a sender's revocations tells the server which senders the reader has just verified.** The reader makes that call during its drain, at most once for each sender, right after that sender's signature verifies (Section 12.3, check 7). So the server can link the sender to the reader at read time, from the reader's own calls. Any call that names the sender tells the server the same, so no choice of route removes this link.
-- **A lookup answered with gzip has a length that depends on the mailbox's own bytes.** So the length can help a network observer narrow down whom a sender is about to write to.
-- **Only a lookup's answer is compressed (Section 11.2).** A list, for example, sets values that senders chose beside the mailbox's own values (BREACH, RFC 7457 §2.6).
+- **A server does not compress an answer (Section 11.2).** A compressed answer has a length that depends on the answer's own bytes. So the length of a compressed lookup could help a network observer narrow down whom a sender is about to write to. A compressed list would set values that senders chose beside the mailbox's own values (BREACH, RFC 7457 §2.6).
 - **Anything that terminates TLS for a server is part of the server.** A TLS terminator sees everything the server sees, and each pass in transit. For the minutes a pass has left, the pass does at that server everything that Section 15.5 lists. A third party in that position would replace the server for every mailbox whose pass the third party sees. That is why Section 11.1 keeps TLS inside the server.
 - **An address in a URL is seen wherever URLs are logged.** Such an address is seen, for example, by the party that terminates TLS, in a chat that unfurls links, and in a transcript. A leaked address is answered by a new mailbox and by revoking the old address.
 
