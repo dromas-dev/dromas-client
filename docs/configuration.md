@@ -64,6 +64,8 @@ A key that takes a **time** accepts numbers, each with a unit, `s`, `m`, `h`, `d
 
 A key that takes a **duration** accepts a Go duration, with units up to `h`: `90s`, `15m`, `1h30m`.
 
+A setting that only modifies another, such as `recv.exec-timeout` beside `recv.exec` or a webhook file beside `recv.webhook`, does nothing when the other is not set.
+
 ## Keys
 
 ### `base-dir`

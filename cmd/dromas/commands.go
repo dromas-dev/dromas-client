@@ -1139,7 +1139,7 @@ func parseTime(s string) (time.Duration, error) {
 		p = i
 	}
 	if total > math.MaxInt32 {
-		return 0, fmt.Errorf("%.40q is longer than any prekey lifetime", s)
+		return 0, fmt.Errorf("%.40q is longer than any lifetime this client takes", s)
 	}
 	return time.Duration(int64(total)) * time.Second, nil
 }

@@ -2686,7 +2686,7 @@ func TestParseTimeReadsAsSshdConfig(t *testing.T) {
 		{"+5", -1},
 		{"", -1},
 		{".", -1},
-		{"0", 0},
+		{"0", 0}, // past the man page, which says positive: every caller refuses a lifetime under its minimum
 		{"2147483647", 2147483647},
 		{"2147483648", -1},
 		{"1h ", -1},

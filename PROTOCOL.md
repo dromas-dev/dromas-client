@@ -1291,7 +1291,7 @@ A mailbox may belong to one account at its server. The protocol fixes how a mail
   - No answer carries a `deprecation` link (RFC 9745 §3), because a URL is a server's text, and a client never shows a server's text (Section 11.3).
 - **`Sunset`.** An answer under `/v1/` carries `Sunset` (RFC 8594 §3) when a sunset covers the request's version. `Sunset` has the same scope as `Deprecation`. The field's date is the earliest date among the sunsets that cover the version. Only those answers carry `Sunset`.
 - **A retired version.** The server answers `410 client_version_unsupported` to a request whose version is below the version floor, or is covered by a sunset whose date has passed at the server's clock. Where the server sets a version floor, the answer carries `min_version`. Section 11.4, rule 0, places this refusal first. The server accepts a request for the server's document at every version.
-- **A client may read `Deprecation` and `Sunset` on any answer, and reads nothing more of them; both are information, and a client that reads neither works as well.** A `Deprecation` value in a form other than RFC 9745 §2.1's counts as absent, and so does a `Sunset` value in a form other than RFC 8594 §3's. A client shows neither field as the server's words (Section 11.3).
+- **A client may read `Deprecation` and `Sunset` on any answer, and reads nothing more of them.** A `Deprecation` value in a form other than RFC 9745 §2.1's counts as absent, and so does a `Sunset` value in a form other than RFC 8594 §3's. A client shows neither field as the server's words (Section 11.3).
 - **A client chooses how often the client gets the server's document (Section 11.18).**
 - **`latest_version` is compared with the major and minor of a client's own version.**
 

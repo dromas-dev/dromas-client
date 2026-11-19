@@ -76,8 +76,8 @@ Exit status:
      ("renewal_failed"), the server served a prekey the mailbox did not make
      ("prekey_not_made"), the mailbox's ACL was not sent to its server
      ("acl_sync_failed"), the server held an ACL the mailbox had not sent, which
-     recv replaced ("acl_replaced"), or an --exec program ran out of attempts
-     ("exec_failed"). From send and outbox flush: the post went ahead, but the
+     recv replaced ("acl_replaced"), an --exec program ran out of attempts
+     ("exec_failed"), or the webhook did ("webhook_failed"). From send and outbox flush: the post went ahead, but the
      mailbox's ACL was not sent ("acl_sync_failed"). From prekey renew:
      "prekey_not_made". From status: its "attention" list is not empty, as it
      is when the server stops accepting this client's version from a date, or
