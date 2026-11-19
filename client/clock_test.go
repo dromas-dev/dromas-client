@@ -44,7 +44,6 @@ func TestAMailboxWhoseClockIsOffByLessThanThePassAllows(t *testing.T) {
 			t.Errorf("a clock %v off: init: %v", off, err)
 			continue
 		}
-		landAll(t, b)
 		fresh := e.mailbox() // made this moment, on the server's clock: no certificate is newer
 		if _, err := fresh.Send(ctx, b.Address(), "under a certificate made this moment"); err != nil {
 			t.Errorf("a clock %v off: a message to it: %v", off, err)
@@ -182,7 +181,6 @@ func TestAMailboxWhoseClockGoesBackFetchesNothing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	landAll(t, b)
 	if res := receive(t, b); len(res.Delivered) != 0 { // the pass is in the mailbox now, with ten minutes to run
 		t.Fatal(res)
 	}
@@ -263,7 +261,6 @@ func TestInitNeverDropsAKeyAMessageMayBeWaitingFor(t *testing.T) {
 	if n := numberOf(t, b); n != first(t, keyFile) || servedSerial(t, e, b) != n {
 		t.Fatalf("init recorded %d, where the server took the first prekey, %d", n, first(t, keyFile))
 	}
-	landAll(t, b)
 	if res := receive(t, b); len(res.Delivered) != 1 || len(res.Refused) != 0 {
 		t.Fatalf("the message that waited for the first prekey: %+v", res)
 	}
@@ -311,7 +308,6 @@ func TestACertificateKeptFromARefusedAttemptLeavesTheHour(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	landAll(t, r)
 	send(t, b, r, "under the certificate the refused attempt left")
 	if res, err := r.Receive(ctx); err != nil || len(res.Delivered) != 1 || len(res.Refused) != 0 {
 		t.Errorf("%+v, %v", res, err)
@@ -344,7 +340,6 @@ func TestARenewalKeptFromARefusedAttemptLeavesTheHour(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	landAll(t, r)
 	send(t, b, r, "under the renewal made once the clock was right")
 	if res, err := r.Receive(ctx); err != nil || len(res.Delivered) != 1 || len(res.Refused) != 0 {
 		t.Errorf("%+v, %v", res, err)

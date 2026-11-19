@@ -20,13 +20,11 @@ import (
 // next. A lock-free layout, Maildir's name per message renamed into place,
 // fits a file written once, and not what a mailbox reads, compares and writes
 // again, such as its revocations and a peer's serials (decided on #62, #83 and
-// #96). A base directory on a network filesystem, where a flock is not one to rely
-// on, is refused on Linux and macOS ([CheckLayout], #188).
+// #96).
 //
 // In one process, goroutines that share a Mailbox take turns in its slot first
 // (claim), at each exported entry that reads or writes the state file, so a
-// command of one waits for another's as a command of another process does
-// (#329).
+// command of one waits for another's while its context lasts (#329).
 
 // errLocked is returned when another command still holds the mailbox's lock once
 // a command has waited for it as long as it waits.
@@ -131,26 +129,24 @@ func (b *Mailbox) makeState() error {
 }
 
 // claim takes the Mailbox's slot for one command or reading, waiting while
-// another goroutine's holds it as hold waits for the state file: up to
-// lockPatience, while ctx lasts (#329). It tells Options.Waiting nothing: the
-// goroutines of one Mailbox are one program's, which knows of them (recv's
-// are its loop and its webhook, #927 item 2). A wait for another command's
-// lock on the state file is told there (openState).
+// another goroutine's holds it for as long as ctx lasts, as
+// x/sync/semaphore's Acquire waits (#329, #936). The cost: a call to an
+// exported entry from inside another, on the same Mailbox, hangs until ctx
+// ends, as a second Lock of a sync.Mutex hangs. It tells Options.Waiting
+// nothing: the goroutines of one Mailbox are one program's, which knows of
+// them (recv's are its loop and its webhook, #927 item 2). A wait for another
+// command's lock on the state file is told there (openState).
 func (b *Mailbox) claim(ctx context.Context) (func(), error) {
 	select {
 	case b.slot <- struct{}{}:
 		return func() { <-b.slot }, nil
 	default:
 	}
-	wait := time.NewTimer(lockPatience)
-	defer wait.Stop()
 	select {
 	case b.slot <- struct{}{}:
 		return func() { <-b.slot }, nil
 	case <-ctx.Done():
 		return nil, ctx.Err()
-	case <-wait.C:
-		return nil, errLocked
 	}
 }
 

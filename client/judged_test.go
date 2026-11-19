@@ -11,15 +11,34 @@ import (
 	"github.com/dromas-dev/dromas-client/client"
 )
 
-// planted is path as a file others can reach, made empty where it is not there.
-func planted(t *testing.T, path string) {
+// planted is path as a file others can reach, or for a list one others can
+// write, made empty where it is not there. It returns what its refusal names.
+func planted(t *testing.T, path string, list bool) string {
 	t.Helper()
 	if !exists(path) {
 		if err := os.WriteFile(path, nil, 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
+	if list {
+		openFileToWrites(t, path)
+		return "writable by"
+	}
 	openFile(t, path)
+	return fixWord
+}
+
+// judgedFiles are the base directory's files an open judges, by whether each
+// is a list.
+func judgedFiles() map[string]bool {
+	files := map[string]bool{}
+	for _, f := range client.PrivateFiles() {
+		files[f] = false
+	}
+	for _, f := range client.ListFiles() {
+		files[f] = true
+	}
+	return files
 }
 
 // fixLine is the line a refusal gives to run.
@@ -32,12 +51,13 @@ func fixLine(t *testing.T, err error) string {
 	return line
 }
 
-// Each private file of the base directory, read from the code, opened to others:
-// a command that writes the mailbox, a reading and a renewal each refuse it,
-// naming it, with nothing acked. The line the refusal gives puts it right.
+// Each private file of the base directory, read from the code, opened to
+// others, and each list opened to others' writes: a command that writes the
+// mailbox, a reading and a renewal each refuse it, naming it, with nothing
+// acked. The line the refusal of a private file gives puts it right.
 func TestEveryPrivateFileIsJudgedBeforeEveryOpen(t *testing.T) {
 	t.Parallel()
-	for _, f := range client.PrivateFiles() {
+	for f, list := range judgedFiles() {
 		t.Run(f, func(t *testing.T) {
 			t.Parallel()
 			ctx := context.Background()
@@ -46,7 +66,7 @@ func TestEveryPrivateFileIsJudgedBeforeEveryOpen(t *testing.T) {
 			send(t, a, b, "waits")
 			path := filepath.Join(b.Dir(), f)
 			existed := exists(path)
-			planted(t, path)
+			word := planted(t, path, list)
 			var refusal error
 			for name, run := range map[string]func() error{
 				"recv":   func() error { _, err := b.Receive(ctx); return err },
@@ -55,7 +75,7 @@ func TestEveryPrivateFileIsJudgedBeforeEveryOpen(t *testing.T) {
 				"renew":  func() error { _, err := b.Rekey(ctx); return err },
 			} {
 				err := run()
-				if err == nil || !strings.Contains(err.Error(), path) || !strings.Contains(err.Error(), fixWord) {
+				if err == nil || !strings.Contains(err.Error(), path) || !strings.Contains(err.Error(), word) {
 					t.Fatalf("%s with %s open to others: %v", name, f, err)
 				}
 				refusal = err
@@ -63,7 +83,11 @@ func TestEveryPrivateFileIsJudgedBeforeEveryOpen(t *testing.T) {
 			if n := e.srv.Count(b.Address()); n != 1 {
 				t.Fatalf("the server holds %d, and nothing was to be acked", n)
 			}
-			runFix(t, fixLine(t, refusal))
+			if list {
+				openFile(t, path)
+			} else {
+				runFix(t, fixLine(t, refusal))
+			}
 			if !existed { // a file that was never there holds no partial or list
 				if err := os.Remove(path); err != nil {
 					t.Fatal(err)
@@ -76,18 +100,19 @@ func TestEveryPrivateFileIsJudgedBeforeEveryOpen(t *testing.T) {
 	}
 }
 
-// A file already there before init is judged, so one another user planted to
-// read what the mailbox writes there is refused, and init makes no identity.
+// A file already there before init is judged, so a private file another user
+// planted to read what the mailbox writes there, or a list others can write,
+// is refused, and init makes no identity.
 func TestAFilePlantedBeforeInitIsRefused(t *testing.T) {
 	t.Parallel()
-	for _, f := range client.PrivateFiles() {
+	for f, list := range judgedFiles() {
 		t.Run(f, func(t *testing.T) {
 			t.Parallel()
 			e := newEnv(t)
 			dir := t.TempDir()
 			path := filepath.Join(dir, f)
-			planted(t, path)
-			if _, err := client.Init(t.Context(), dir, e.opts()); err == nil || !strings.Contains(err.Error(), path) || !strings.Contains(err.Error(), fixWord) {
+			word := planted(t, path, list)
+			if _, err := client.Init(t.Context(), dir, e.opts()); err == nil || !strings.Contains(err.Error(), path) || !strings.Contains(err.Error(), word) {
 				t.Fatalf("init over a planted %s: %v", f, err)
 			}
 			if exists(filepath.Join(dir, "identity")) {
@@ -119,7 +144,8 @@ func TestAStateFileIsJudgedBeforeBboltReadsIt(t *testing.T) {
 }
 
 // An alias is read with no command holding the mailbox, so it is judged on its
-// own: a name others could change is no name to send by.
+// own: a name others could change is no name to send by, and one others can
+// only read is.
 func TestAnAliasIsJudgedBeforeItIsRead(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -133,8 +159,12 @@ func TestAnAliasIsJudgedBeforeItIsRead(t *testing.T) {
 	}
 	path := filepath.Join(b.Dir(), "aliases")
 	openFile(t, path)
+	if got, err := b.Destination("friend"); err != nil || got != a.Address() {
+		t.Fatalf("the alias with its file open to others' reads: %v, %v", got, err)
+	}
+	openFileToWrites(t, path)
 	if _, err := b.Destination("friend"); err == nil || !strings.Contains(err.Error(), path) {
-		t.Fatalf("the alias with its file open to others: %v", err)
+		t.Fatalf("the alias with its file open to others' writes: %v", err)
 	}
 }
 

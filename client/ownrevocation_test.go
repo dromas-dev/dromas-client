@@ -339,9 +339,6 @@ func lockingCommands(ctx context.Context, a, b *client.Mailbox, rec *protocol.Re
 		{"RemoveAlias", func() error { return a.RemoveAlias(ctx, "peer") }},
 		{"RemoveRefused", func() error { _, err := a.RemoveRefused(ctx, nil); return err }},
 		{"ClearFailed", func() error { _, err := a.ClearFailed(ctx); return err }},
-		{"SetPolicy", func() error {
-			return a.SetPolicy(ctx, client.Policy{Unknown: client.LandInbox, Server: client.AdmitAll})
-		}},
 		{"RebuildAllowed", func() error { _, err := a.RebuildAllowed(ctx); return err }},
 	}
 	return refused, run

@@ -338,10 +338,11 @@ An `inbox-dir` that is itself a mount point stays as an empty directory when the
 `dromas` creates each directory accessible only to you, and leaves a directory that exists as it is. `dromas` rejects:
 
 - A private key file that other users can access, as ssh does. A Kubernetes or Docker Compose secret needs mode `0400`. No setting turns this off.
-- `state`, `gate`, `partial`, `allowed`, `blocked` or `aliases` when other users can access the file or another user owns it. The error gives the command that fixes the file. A list you write yourself needs mode `0600`.
-- `inbox-dir` or `held/` when other users can write to it or another user owns it, and a message file in either that other users can access. Anyone who can write there can add a message that reads as delivered.
+- `state`, `gate` or `partial` when other users can access the file or another user owns it. The error gives the command that fixes the file.
+- `allowed`, `blocked` or `aliases` when other users can write to the file or another user owns it, as ssh does a config file.
+- `inbox-dir` or `held/`, or a message file in either, when other users can write to it or another user owns it. Anyone who can write there can add a message that reads as delivered.
 
-To turn off the last two, see [`unsafe-state-permissions`](configuration.md#unsafe-state-permissions) and [`unsafe-inbox-permissions`](configuration.md#unsafe-inbox-permissions).
+To turn off the last three, see [`unsafe-state-permissions`](configuration.md#unsafe-state-permissions) and [`unsafe-inbox-permissions`](configuration.md#unsafe-inbox-permissions).
 
 `dromas` writes no `.gitignore`. `dromas` warns when a private key is inside a `.git` working tree: make sure git ignores the key.
 

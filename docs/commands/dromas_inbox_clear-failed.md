@@ -4,8 +4,8 @@ clear what status reports of every --exec program and webhook that gave up
 
 ### Synopsis
 
-Clear the record of every message in inbox/ whose recv --exec program or recv
---webhook post gave up, and print a "failed_cleared" line with their "count": the
+Clear the record of every message whose recv --exec program or recv --webhook
+post gave up, and print a "failed_cleared" line with their "count": the
 programs' records and the webhook's, so a message whose program and webhook both
 gave up counts twice.
 dromas status then lists none of them, and needs no attention for them, until a
@@ -44,8 +44,8 @@ dromas inbox clear-failed
       --profile profile                         read this profile's config file, in the config directory: $DROMAS_PROFILE, or default
       --rotating-keys-dir directory             the directory of prekeys/, work/ and tls-ticket, which need no backup: <base-dir>/keys
       --server URL                              the server's URL: $DROMAS_SERVER_URL, or https://dromas.dev
-      --unsafe-inbox-permissions[=true|false]   read inbox-dir and held/ even when others can write to them or another user owns them, and their messages even when others can access them, although anyone who can write there can add a message that reads as delivered: $DROMAS_UNSAFE_INBOX_PERMISSIONS
-      --unsafe-state-permissions[=true|false]   open state, gate, partial and the lists even when others can access them or another user owns them; never a private key: $DROMAS_UNSAFE_STATE_PERMISSIONS
+      --unsafe-inbox-permissions[=true|false]   read inbox-dir and held/, and their messages, even when others can write to them or another user owns them, although anyone who can write there can add a message that reads as delivered: $DROMAS_UNSAFE_INBOX_PERMISSIONS
+      --unsafe-state-permissions[=true|false]   open state, gate and partial even when others can access them, and the lists even when others can write to them, or another user owns one; never a private key: $DROMAS_UNSAFE_STATE_PERMISSIONS
 ```
 
 ### SEE ALSO

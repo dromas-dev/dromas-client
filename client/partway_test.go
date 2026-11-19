@@ -143,8 +143,7 @@ func TestAReadOfRevocationsIsNotProvedAgain(t *testing.T) {
 // revoked at its server, by another holder of the record, and the call is
 // answered one way (partwayVariants). An answer to a call that names the mailbox,
 // showing its own revocation, that verifies, is the event: the mailbox then holds
-// the revocation, and no pass and no read of its server's ACL owed, the
-// command's error is it, and nothing more is asked or signed; between a call whose answer must be proved and the event, only the
+// the revocation, and no pass, the command's error is it, and nothing more is asked or signed; between a call whose answer must be proved and the event, only the
 // proof's own reads of the mailbox go out. A mailbox shown none that verifies holds
 // none, and its command is not REVOKED: a server's word revokes nothing.
 func TestEveryCommandShownItsOwnRevocationAtEachCall(t *testing.T) {
@@ -459,9 +458,6 @@ func partwayAt(t *testing.T, c partwayCase, n int, v string) {
 	if has(mailbox, "pass") {
 		t.Errorf("it keeps a pass after the event: calls %v", l.calls)
 	}
-	if has(mailbox, "acl-read") {
-		t.Errorf("it keeps a read of its server's ACL owed after the event: calls %v", l.calls)
-	}
 	if s.check != nil {
 		s.check(t, w)
 	}
@@ -591,11 +587,10 @@ func partwayCases() []partwayCase {
 		e.clock.Add(2 * time.Second)
 		return partwaySet{dir: dir, a: a, run: func(ctx context.Context) (any, error) { return client.Init(ctx, dir, e.opts()) }}
 	}
-	serverAllowed := func(t *testing.T, a *client.Mailbox) {
-		t.Helper()
-		if err := a.SetPolicy(t.Context(), client.Policy{Unknown: client.LandInbox, Server: client.AdmitAllowed}); err != nil {
-			t.Fatal(err)
-		}
+	serverAllowed := func(e *env) *client.Mailbox {
+		opt := e.opts()
+		opt.Policy.Server = client.AdmitAllowed
+		return e.made(opt)
 	}
 	return []partwayCase{
 		{"recv", func(t *testing.T, e *env) partwaySet {
@@ -688,8 +683,7 @@ func partwayCases() []partwayCase {
 			return partwaySet{dir: a.Dir(), a: a, check: outboxSaysItAlone, run: func(ctx context.Context) (any, error) { return a.Send(ctx, b.Address(), "sent") }}
 		}},
 		{"send, its ACL changed, the one its server took admitting no reply", func(t *testing.T, e *env) partwaySet {
-			a, b := e.mailbox(), e.mailbox()
-			serverAllowed(t, a)
+			a, b := serverAllowed(e), e.mailbox()
 			if err := a.SyncACL(t.Context()); err != nil {
 				t.Fatal(err)
 			}
@@ -719,8 +713,7 @@ func partwayCases() []partwayCase {
 			return partwaySet{dir: a.Dir(), a: a, check: outboxSaysItAlone, joined: true, run: func(ctx context.Context) (any, error) { return a.Flush(ctx) }}
 		}},
 		{"outbox flush, its ACL changed, the one its server took admitting no reply", func(t *testing.T, e *env) partwaySet {
-			a, b := e.mailbox(), e.mailbox()
-			serverAllowed(t, a)
+			a, b := serverAllowed(e), e.mailbox()
 			if err := a.SyncACL(t.Context()); err != nil {
 				t.Fatal(err)
 			}
@@ -746,8 +739,7 @@ func partwayCases() []partwayCase {
 			return restored(t, e, a)
 		}},
 		{"peer allow", func(t *testing.T, e *env) partwaySet {
-			a, b := e.mailbox(), e.mailbox()
-			serverAllowed(t, a)
+			a, b := serverAllowed(e), e.mailbox()
 			return partwaySet{dir: a.Dir(), a: a, run: func(ctx context.Context) (any, error) { return a.Allow(ctx, b.Address()) }}
 		}},
 		{"peer block", func(t *testing.T, e *env) partwaySet {
@@ -755,8 +747,7 @@ func partwayCases() []partwayCase {
 			return partwaySet{dir: a.Dir(), a: a, run: func(ctx context.Context) (any, error) { return a.Block(ctx, b.Address()) }}
 		}},
 		{"SyncACL", func(t *testing.T, e *env) partwaySet {
-			a := e.mailbox()
-			serverAllowed(t, a)
+			a := serverAllowed(e)
 			return partwaySet{dir: a.Dir(), a: a, run: func(ctx context.Context) (any, error) { return nil, a.SyncACL(ctx) }}
 		}},
 		{"account join", func(t *testing.T, e *env) partwaySet {

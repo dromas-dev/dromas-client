@@ -241,11 +241,8 @@ func TestTheScriptDatesARetryAfterItsMailboxRead(t *testing.T) {
 	}
 	set(0)
 	srv := fakeserver.New(t, clk.Now)
-	r, err := client.Init(ctx, t.TempDir(), client.Options{Base: srv.URL, Now: clk.Now})
+	r, err := client.Init(ctx, t.TempDir(), client.Options{Base: srv.URL, Now: clk.Now, Policy: landAll})
 	if err != nil {
-		t.Fatal(err)
-	}
-	if err := r.SetPolicy(ctx, client.Policy{Unknown: client.LandInbox, Server: client.AdmitAll}); err != nil {
 		t.Fatal(err)
 	}
 	env := []string{"DR_HOME=" + t.TempDir(), "DR_SERVER_URL=" + srv.URL}

@@ -57,7 +57,7 @@ func TestAMailboxRecordsItsFormatAtItsFirstWrite(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(restored, "state")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("a reading made the state file: %v", err)
 	}
-	if err := x.SetPolicy(t.Context(), client.DefaultPolicy()); err != nil {
+	if _, err := x.ClearFailed(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	if got, ok := x.Record(t, "format"); !ok || string(got) != "1" {
@@ -143,14 +143,14 @@ func TestAnOlderFormatIsBroughtForwardByACommandAndRefusedByAReading(t *testing.
 
 	client.SetFormat(t, b.Dir(), []byte("1"))
 	fail, ran = errors.New("a fault"), 0
-	if err := b.SetPolicy(t.Context(), client.DefaultPolicy()); err == nil || !strings.Contains(err.Error(), "from format 1 to 2") {
+	if _, err := b.ClearFailed(t.Context()); err == nil || !strings.Contains(err.Error(), "from format 1 to 2") {
 		t.Fatalf("a step that fails: %v", err)
 	}
 	if got, _ := b.Record(t, "format"); string(got) != "1" {
 		t.Fatalf("a step that failed left format %q", got)
 	}
 	fail = nil
-	if err := b.SetPolicy(t.Context(), client.DefaultPolicy()); err != nil || ran != 2 {
+	if _, err := b.ClearFailed(t.Context()); err != nil || ran != 2 {
 		t.Fatalf("the command after a step failed: %v, %d steps run", err, ran)
 	}
 	if got, _ := b.Record(t, "format"); string(got) != "2" {
@@ -176,7 +176,7 @@ func TestAMailboxWithNoStateFileIsFormat1(t *testing.T) {
 	if _, err := b.Status(t.Context()); !errors.As(err, &fe) || fe.Format != 1 || fe.Client != 2 {
 		t.Fatalf("status of a mailbox with no state file, at format 2: %v", err)
 	}
-	if err := b.SetPolicy(t.Context(), client.DefaultPolicy()); err != nil || ran != 1 {
+	if _, err := b.ClearFailed(t.Context()); err != nil || ran != 1 {
 		t.Fatalf("its first command: %v, %d steps run", err, ran)
 	}
 	if got, _ := b.Record(t, "format"); string(got) != "2" {
@@ -195,7 +195,7 @@ func TestAFormatRecordNoClientWritesIsRefused(t *testing.T) {
 		if _, err := b.Status(t.Context()); err == nil || !strings.Contains(err.Error(), "no decimal number") {
 			t.Errorf("status of format %q: %v", raw, err)
 		}
-		if err := b.SetPolicy(t.Context(), client.DefaultPolicy()); err == nil || !strings.Contains(err.Error(), "no decimal number") {
+		if _, err := b.ClearFailed(t.Context()); err == nil || !strings.Contains(err.Error(), "no decimal number") {
 			t.Errorf("a command on format %q: %v", raw, err)
 		}
 		if got, _ := b.Record(t, "format"); string(got) != raw {

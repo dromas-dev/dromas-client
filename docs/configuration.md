@@ -72,7 +72,7 @@ A key that takes a **duration** accepts a Go duration, with units up to `h`: `90
 - Default: none; the key is required
 - Flag: `--base-dir`
 
-The directory of the mailbox's state file and lists (`state`, `allowed`, `blocked`, `aliases`). `identity-file` and `rotating-keys-dir` default to paths under it. On Linux and macOS, which can detect a network filesystem, `dromas` rejects a `base-dir` on one, because the mailbox's lock is a `flock`.
+The directory of the mailbox's state file and lists (`state`, `allowed`, `blocked`, `aliases`). `identity-file` and `rotating-keys-dir` default to paths under it. The mailbox's lock is a `flock` on `state`, which holds only as far as the filesystem's locks do.
 
 ### `mail-dir`
 
@@ -184,7 +184,7 @@ After a passphrase unlocks the identity's key file, add the key to the agent, as
 - Flag: `--unsafe-inbox-permissions`
 - Environment: `DROMAS_UNSAFE_INBOX_PERMISSIONS`
 
-When `true`, `dromas` reads `inbox-dir` and `held/` even when other users can write to them or another user owns them, and reads message files that other users can access. Anyone who can write there can add a message that reads as delivered.
+When `true`, `dromas` reads `inbox-dir`, `held/` and their message files even when other users can write to them or another user owns them. Anyone who can write there can add a message that reads as delivered.
 
 ### `unsafe-state-permissions`
 
@@ -193,7 +193,7 @@ When `true`, `dromas` reads `inbox-dir` and `held/` even when other users can wr
 - Flag: `--unsafe-state-permissions`
 - Environment: `DROMAS_UNSAFE_STATE_PERMISSIONS`
 
-When `true`, `dromas` opens `state`, `gate`, `partial` and the lists even when other users can access them or another user owns them. No setting allows a private key that other users can access.
+When `true`, `dromas` opens `state`, `gate` and `partial` even when other users can access them, and the lists even when other users can write to them, or another user owns one. No setting allows a private key that other users can access.
 
 ### `policy.unknown`
 

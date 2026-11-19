@@ -53,11 +53,11 @@ func TestAKeptDirectoryOthersCanWriteIsRefused(t *testing.T) {
 	}
 }
 
-// A message file inbox-dir or held/ keeps that others can reach is refused
+// A message file inbox-dir or held/ keeps that others can write is refused
 // before it is read as a delivered message, naming it, by each command that
-// prints or moves one, an owed loop's handover of it among them, and the line
-// the refusal gives puts it right (#717, #774).
-func TestAKeptMessageOthersCanReachIsRefused(t *testing.T) {
+// prints or moves one, an owed loop's handover of it among them (#717, #774).
+// One others can only read is read.
+func TestAKeptMessageOthersCanWriteIsRefused(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	e := newEnv(t)
@@ -74,6 +74,15 @@ func TestAKeptMessageOthersCanReachIsRefused(t *testing.T) {
 	for _, p := range []string{inPath, heldPath} {
 		openFile(t, p)
 	}
+	if got, err := b.Inbox(ctx); err != nil || len(got) != 1 {
+		t.Fatalf("inbox list with a kept file open to others' reads: %v, %v", got, err)
+	}
+	if got, err := c.HeldMessages(ctx); err != nil || len(got) != 1 {
+		t.Fatalf("held list with a kept file open to others' reads: %v, %v", got, err)
+	}
+	for _, p := range []string{inPath, heldPath} {
+		openFileToWrites(t, p)
+	}
 	for what, run := range map[string]func() error{
 		"inbox list": func() error { _, err := b.Inbox(ctx); return err },
 		"inbox show": func() error { _, err := b.InboxMessage(ctx, in.ID); return err },
@@ -89,22 +98,21 @@ func TestAKeptMessageOthersCanReachIsRefused(t *testing.T) {
 		},
 	} {
 		err := run()
-		if err == nil || !strings.Contains(err.Error(), fixWord) {
-			t.Fatalf("%s with a kept file open to others: %v", what, err)
+		if err == nil || !strings.Contains(err.Error(), "writable by") {
+			t.Fatalf("%s with a kept file open to others' writes: %v", what, err)
 		}
 		if !strings.Contains(err.Error(), inPath) && !strings.Contains(err.Error(), heldPath) {
 			t.Fatalf("%s names neither file: %v", what, err)
 		}
 	}
-	_, err := b.Inbox(ctx)
-	runFix(t, fixLine(t, err))
+	openFile(t, inPath)
 	if got, err := b.Inbox(ctx); err != nil || len(got) != 1 {
 		t.Fatalf("inbox once the file is put right: %v, %v", got, err)
 	}
 }
 
-// Options.UnsafeInboxPermissions reads a kept directory others can write and a
-// kept message others can reach, and Options.UnsafeStatePermissions opens a
+// Options.UnsafeInboxPermissions reads a kept directory and a kept message
+// others can write, and Options.UnsafeStatePermissions opens a
 // state file others can reach. Neither leaves a private key unjudged.
 func TestTheUnsafeOptionsLeaveTheirFilesUnjudged(t *testing.T) {
 	t.Parallel()
@@ -114,7 +122,7 @@ func TestTheUnsafeOptionsLeaveTheirFilesUnjudged(t *testing.T) {
 	send(t, a, b, "kept")
 	in := receive(t, b).Delivered[0]
 	openToWrites(t, b.Path("inbox"))
-	openFile(t, b.Path("inbox", in.ID+".json"))
+	openFileToWrites(t, b.Path("inbox", in.ID+".json"))
 	openFile(t, filepath.Join(b.Dir(), "state"))
 	opt := e.opts()
 	if s, err := client.Open(b.Dir(), opt); err == nil {

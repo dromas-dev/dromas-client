@@ -590,7 +590,6 @@ func TestAnEmptyingDrainDeletesEveryRetiredPrekeyAnHourAfterTheTake(t *testing.T
 			if err != nil {
 				t.Fatal(err)
 			}
-			landAll(t, b)
 			a := e.mailbox()
 			key := func(n uint64) string { return prekeyFile(b, n, ".agekey") }
 			k1 := numberOf(t, b)

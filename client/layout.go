@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
-	"strings"
 	"syscall"
 )
 
@@ -94,6 +93,10 @@ var baseFiles = []string{"identity.doc", "address", "state", "gate", "partial", 
 // identity, is public too. Every other file of baseFiles is judged (judgeFiles).
 var publicFiles = []string{"identity.doc", "address"}
 
+// listFiles are the baseFiles that are the owner's lists, judged as a config
+// file is (judgeFiles).
+var listFiles = []string{"allowed", "blocked", "aliases"}
+
 // keptDirs are the directories, by client/doc.go's names, that keep messages
 // recv passed and that inbox list, inbox show and peer allow print or move as
 // delivered: each is judged at every open (judgeFiles), and each of its files
@@ -108,14 +111,17 @@ func (e *fileRefused) Unwrap() error { return e.error }
 
 // judgeFiles refuses a mailbox with a private file of the base directory that
 // others can reach or another user owns (checkPrivateFile), as a private key is
-// refused: state, which holds the pass, gate, partial and the lists. It refuses
-// inbox-dir and held/ where others can write them or another user owns them
-// (checkKeptDir), since whoever can write there can put in a message that reads
-// as delivered (#717). A file or directory that is not there is not judged. It
-// costs a stat or an access-list read for each, and openState asks it before
-// anything opens the state file or the gate, so a file planted before init and
-// one left open by another system's tool are refused before bbolt or a lock
-// opens them. Options.UnsafeStatePermissions leaves the files unjudged, and
+// refused: state, which holds the pass, gate and partial. It refuses a list
+// that others can write or another user owns, as a config file is refused
+// (CheckConfigFile), since whoever can write one says who may write to the
+// mailbox and by what name. It refuses inbox-dir and held/ where others can
+// write them or another user owns them (checkKeptDir), since whoever can write
+// there can put in a message that reads as delivered (#717). A file or
+// directory that is not there is not judged. It costs a stat or an access-list
+// read for each, and openState asks it before anything opens the state file or
+// the gate, so a file planted before init and one left open by another
+// system's tool are refused before bbolt or a lock opens them.
+// Options.UnsafeStatePermissions leaves the files unjudged, and
 // Options.UnsafeInboxPermissions the directories. A path is judged and then
 // opened, as ssh judges a key, so whoever can write the directory between the
 // two is not stopped. identity.doc, address and identity.pub are public and are
@@ -128,7 +134,11 @@ func (b *Mailbox) judgeFiles() error {
 		if b.unsafeState || slices.Contains(publicFiles, f) {
 			continue
 		}
-		if err := checkPrivateFile(b.path(f)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		check := checkPrivateFile
+		if slices.Contains(listFiles, f) {
+			check = CheckConfigFile
+		}
+		if err := check(b.path(f)); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return &fileRefused{err}
 		}
 	}
@@ -143,16 +153,16 @@ func (b *Mailbox) judgeFiles() error {
 	return nil
 }
 
-// judgeKept refuses a file inbox-dir or held/ keeps that others can reach or
-// another user owns (checkPrivateFile), before it is read as a delivered
-// message: recv makes each its owner's alone, so one that is not was put there
-// or opened since (#717). A file that is not there is left to its read.
-// Options.UnsafeInboxPermissions leaves it unjudged.
+// judgeKept refuses a file inbox-dir or held/ keeps that others can write or
+// another user owns, as a config file is refused (CheckConfigFile), before it
+// is read as a delivered message: whoever can write one can put in a message
+// that reads as delivered (#717). Others may read it. A file that is not there
+// is left to its read. Options.UnsafeInboxPermissions leaves it unjudged.
 func (b *Mailbox) judgeKept(path string) error {
 	if b.unsafeInbox {
 		return nil
 	}
-	if err := checkPrivateFile(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+	if err := CheckConfigFile(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return &fileRefused{err}
 	}
 	return nil
@@ -195,9 +205,8 @@ func (f *LayoutFault) Error() string { return fmt.Sprintf("%s, %s: %v", f.Part, 
 // Unwrap gives the fault.
 func (f *LayoutFault) Unwrap() error { return f.Err }
 
-// CheckLayout refuses a layout whose parts overlap, whose directory is a file
-// or file a directory, or whose base directory is on a network filesystem, as
-// far as the system says. Places are compared where they really are, through
+// CheckLayout refuses a layout whose parts overlap, or whose directory is a
+// file or file a directory. Places are compared where they really are, through
 // symlinks, and by [os.SameFile] once they exist, so neither a link nor a
 // filesystem that ignores case hides an overlap. A fault of the disk is a
 // [LayoutFault], and no refusal.
@@ -233,14 +242,6 @@ func CheckLayout(dir string, l Layout) error {
 				return fmt.Errorf("%s, %s, is inside %s, %s, and it may not be", b.name, b.path, a.name, a.path)
 			}
 		}
-	}
-	return checkBaseLocal(parts[0].path)
-}
-
-// checkBaseLocal refuses a base directory on a network filesystem.
-func checkBaseLocal(dir string) error {
-	if fs := networkFilesystem(dir); fs != "" {
-		return fmt.Errorf("base-dir, %s, is on a network filesystem (%s): the mailbox's lock is a flock there, which is not one to rely on, and mail-dir may be on one where base-dir is not", dir, fs)
 	}
 	return nil
 }
@@ -402,26 +403,8 @@ func (b *Mailbox) KeysInGit() []string {
 	return out
 }
 
-// A keyFile is a file that checkKeyFile judges: what its refusal calls it,
-// and whether ssh would refuse it too.
-type keyFile struct {
-	name string
-	ssh  bool
-}
-
-// The files checkKeyFile judges: the identity's key, the one ssh would refuse
-// too, and a webhook's header and secret files, which are no keys of ssh's.
-var (
-	privateKey        = keyFile{"the private key", true}
-	webhookHeaderFile = keyFile{"the webhook's header file", false}
-	webhookSecretFile = keyFile{"the webhook's secret file", false}
-)
-
-// keyRefusal is the refusal of f, the file at path, that others can reach
-// (why), and how to fix it.
-func keyRefusal(f keyFile, path, why, fix string) error {
-	if f.ssh {
-		return fmt.Errorf("%s %s %s: ssh would refuse it too. %s", f.name, path, why, strings.TrimSpace(fix))
-	}
-	return fmt.Errorf("%s %s %s. %s", f.name, path, why, strings.TrimSpace(fix))
+// keyRefusal is the refusal of the file at path that checkKeyFile judges: why
+// others can reach it, and how to fix it.
+func keyRefusal(path, why, fix string) error {
+	return fmt.Errorf("%s %s: %s", path, why, fix)
 }

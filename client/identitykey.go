@@ -73,7 +73,7 @@ func (b *Mailbox) identityPublicKey() (ssh.PublicKey, error) {
 	if err != nil {
 		return nil, fmt.Errorf("no mailbox here: %w", err)
 	}
-	if err := checkKeyFile(privateKey, file); err != nil {
+	if err := checkKeyFile(file); err != nil {
 		return nil, err
 	}
 	raw, err := ssh.ParseRawPrivateKey(pemBytes)
@@ -127,7 +127,7 @@ func readPublicKey(file string) (ssh.PublicKey, error) {
 // passphrase where it has one, and added to the agent then if asked. It runs
 // under the command's lock, at the signature that needs the key, so a person at
 // the prompt holds the lock, and another command of the mailbox waits for it
-// as it waits for any command (lockPatience).
+// as it waits for any command.
 func (b *Mailbox) unlockIdentity() (ssh.Signer, func(), error) {
 	pub, u := b.id.PublicKey(), b.unlock
 	file := b.path("identity")
@@ -149,7 +149,7 @@ func (b *Mailbox) unlockIdentity() (ssh.Signer, func(), error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	if err := checkKeyFile(privateKey, file); err != nil {
+	if err := checkKeyFile(file); err != nil {
 		return nil, nil, err
 	}
 	raw, err := ssh.ParseRawPrivateKey(pemBytes)

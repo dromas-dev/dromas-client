@@ -567,8 +567,8 @@ func TestAnOwedMessageIsHandedOverFirstInDeliveryOrder(t *testing.T) {
 }
 
 // ErrGaveUp clears the record, the loop goes on to the next message, nothing
-// hands it over again, and Status lists it under attention until its file in
-// inbox/ is deleted.
+// hands it over again, and Status lists it under attention, its file in inbox/
+// deleted or not.
 func TestAMessageWhoseHandlingGaveUpIsListedAndNotTriedAgain(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -607,21 +607,18 @@ func TestAMessageWhoseHandlingGaveUpIsListedAndNotTriedAgain(t *testing.T) {
 	if err := os.Remove(filepath.Join(b.Dir(), "mail", "inbox", gaveUp+".json")); err != nil {
 		t.Fatal(err)
 	}
-	if st, err = b.Status(ctx); err != nil || len(st.GaveUp) != 0 || slices.ContainsFunc(st.Attention, func(s string) bool { return strings.Contains(s, gaveUp) }) {
-		t.Fatalf("its file deleted: %+v, %v", st, err)
-	}
 	if err := b.Follow(ctx, oneDrain(true), nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, kept := b.Record(t, "gave-up/"+gaveUp); kept {
-		t.Fatal("the next owed loop keeps the record of a message inbox/ no longer holds")
+	if st, err = b.Status(ctx); err != nil || !slices.Equal(st.GaveUp, []string{gaveUp}) || !slices.ContainsFunc(st.Attention, func(s string) bool { return strings.Contains(s, gaveUp) }) {
+		t.Fatalf("its file deleted, after an owed loop: %+v, %v", st, err)
 	}
 }
 
-// A message whose handling gave up stays listed while inbox/ keeps its file, a
-// later owed loop included. ClearFailed clears every record in one call, counts
-// those Status listed, drops the record of one inbox/ no longer keeps, and leaves
-// every file in inbox/; a handling that gives up after it is listed again.
+// A message whose handling gave up stays listed, a later owed loop included.
+// ClearFailed clears and counts every record in one call, that of one inbox/
+// no longer keeps among them, and leaves every file in inbox/; a handling that
+// gives up after it is listed again.
 func TestClearFailedClearsEveryHandlingThatGaveUpUntilTheNext(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -657,18 +654,15 @@ func TestClearFailedClearsEveryHandlingThatGaveUpUntilTheNext(t *testing.T) {
 			t.Fatalf("status lists %q, says %v, want %q: %q", got, said, ids, st.Attention)
 		}
 	}
-	listed(slices.Clone(gaveUp))
-	// A file deleted, with no owed loop since, leaves its record in the state.
+	// A file deleted leaves its record listed.
 	gone := gaveUp[2]
 	if err := os.Remove(filepath.Join(b.Dir(), "mail", "inbox", gone+".json")); err != nil {
 		t.Fatal(err)
 	}
-	if _, kept := b.Record(t, "gave-up/"+gone); !kept {
-		t.Fatal("no record left of the message whose file was deleted: the test proves nothing of it")
-	}
+	listed(slices.Clone(gaveUp))
 	n, err := b.ClearFailed(ctx)
-	if err != nil || n != 2 {
-		t.Fatalf("ClearFailed: %d, %v, want the 2 status listed", n, err)
+	if err != nil || n != 3 {
+		t.Fatalf("ClearFailed: %d, %v, want the 3 status listed", n, err)
 	}
 	for _, id := range gaveUp {
 		if _, kept := b.Record(t, "gave-up/"+id); kept {

@@ -27,7 +27,7 @@ import (
 //
 // Its buckets:
 //
-//	mailbox          the mailbox's own records, each by its name: policy, serial, pass, etag, acl, revoked, revoked-certs, renew-failed, not-made, certificate-request (certrequest.go), partial, folders-made, deprecation, sunset, document-read, latest (version.go)
+//	mailbox          the mailbox's own records, each by its name: serial, pass, etag, acl, revoked, revoked-certs, renew-failed, not-made, certificate-request (certrequest.go), partial, folders-made, deprecation, sunset, document-read, latest (version.go)
 //	prekeys      each prekey statement this mailbox signed, by its serial: the statement, its signature, when it was signed and when its server took it, in one value, and that its key is going, once the mailbox has decided to delete it
 //	adopted      each key found in prekeys/ that the state file named nowhere, by its serial, until it is deleted (matchKeys, under its owner's acknowledgement): a retired prekey of the renewal above it (prune, dropRetired)
 //	made         the SHA-256 of every prekey statement this mailbox signed, in hex, never pruned: its serial
@@ -36,7 +36,7 @@ import (
 //	seen         the replay set, by ciphertext hash; seen-sender by sender and msg_id, and seen-time by sent_at, its two indexes
 //	refused      what this client's checks found of each message it refused, by its id: refused/ keeps the message as served
 //	owed         each message [Mailbox.Follow] kept and whose handling has not ended, by a number that rises in delivery order: its id
-//	gave-up      each message whose handling gave up ([ErrGaveUp]), by its id, until [Mailbox.ClearFailed] or a Follow that finds inbox/ no longer keeps it
+//	gave-up      each message whose handling gave up ([ErrGaveUp]), by its id, until [Mailbox.ClearFailed]
 //	webhook-owed and webhook-gave-up    the same of the webhook's handling ([FollowOptions.Webhook])
 //	waits        each outbox entry a refusal left waiting, by its name in outbox/ less ".P": when it is due (waits.go)
 //	meta         the mailbox's format, under "format", and the address it belongs to, under "address" (format.go)

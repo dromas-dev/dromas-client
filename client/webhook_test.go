@@ -13,6 +13,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/dromas-dev/dromas-client/client"
@@ -319,4 +320,67 @@ func TestAWebhookOfTheCallersClientFollowsNoRedirect(t *testing.T) {
 	if !errors.As(err, &we) || we.Status != http.StatusFound || landed.Load() {
 		t.Errorf("Post: %v, the redirect followed %v", err, landed.Load())
 	}
+}
+
+// A webhook's handler that takes the names of senders (Aliases), as recv
+// --webhook's does, while a drain holds the Mailbox's slot past the lock's
+// patience, waits for the drain and has them: the wait for the slot ends with
+// its context alone (#936). In a bubble, the drain is held on fake time.
+func TestAWebhookPostDuringALongDrainCarriesTheAlias(t *testing.T) {
+	client.SetLockPatience(t, time.Minute)
+	synctest.Test(t, func(t *testing.T) {
+		ctx := context.Background()
+		e := newMemEnv(t)
+		a, b := e.mailbox(), e.mailbox()
+		if err := b.SetAlias(ctx, "friend", a.Address()); err != nil {
+			t.Fatal(err)
+		}
+		send(t, a, b, "one")
+		send(t, a, b, "two")
+		e.srv.SetPage(1)
+		// The first list once the webhook's handler has the first message, the
+		// second drain's, is held past the patience.
+		entered, listing := make(chan struct{}), make(chan struct{})
+		hold := sync.OnceFunc(func() { close(listing); time.Sleep(2 * time.Minute) })
+		e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
+			select {
+			case <-entered:
+				if r.Method == http.MethodGet && r.URL.Path == mailboxPath(b)+"/messages" {
+					hold()
+				}
+			default:
+			}
+			next.ServeHTTP(w, r)
+		})
+		first := sync.OnceFunc(func() { close(entered); <-listing })
+		var named []string
+		hook := func(ctx context.Context, ev client.Event) error {
+			if ev.Kind != client.EventDelivery {
+				return nil
+			}
+			first()
+			as, err := b.Aliases(ctx)
+			if err != nil {
+				named = append(named, err.Error())
+			}
+			for _, al := range as {
+				if al.Address == a.Address() {
+					named = append(named, al.Name)
+				}
+			}
+			return nil
+		}
+		loop := func(_ context.Context, ev client.Event) error {
+			if ev.Kind == client.EventDrained {
+				<-entered
+			}
+			return nil
+		}
+		if err := b.Follow(ctx, client.FollowOptions{Until: time.Now().Add(10 * time.Minute), Webhook: hook}, loop); err != nil {
+			t.Fatal(err)
+		}
+		if !slices.Equal(named, []string{"friend", "friend"}) {
+			t.Errorf("the webhook named the sender %q, want friend for each", named)
+		}
+	})
 }

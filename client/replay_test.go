@@ -47,7 +47,6 @@ func TestAReplayIsRefusedAfterTheClockStepsBack(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			landAll(t, r)
 			s := e.mailbox()
 			var kept []byte
 			e.srv.SetMiddle(func(w http.ResponseWriter, q *http.Request, next http.Handler) {
@@ -114,7 +113,6 @@ func TestARefusedDrainPrunesNothing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	landAll(t, r)
 	send(t, e.mailbox(), r, "hello")
 	receive(t, r)
 	before, ok := stateOf(r, "seen")
