@@ -645,7 +645,7 @@ type Remedy struct {
 // shown its own revocation on the way among them, which is its [RevokedError]
 // alone; otherwise the Remedy says what each publish met, and an error beside
 // it is a fault of this mailbox after a server took the revocation or the
-// renewal, or at its keep of a higher one a server showed after a conflict,
+// renewal, or at its read again of what a server holds after a conflict,
 // where nothing is renewed, or the mailbox's own revocation, shown at the
 // renewal.
 //
