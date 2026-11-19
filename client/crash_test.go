@@ -142,7 +142,7 @@ func TestCrashChild(t *testing.T) {
 		fmt.Printf("ended before %s: %v\n", o.Step, err)
 		return
 	}
-	b, err := client.Open(o.Dir, client.Options{Base: o.Base, Now: func() time.Time { return now }})
+	b, err := client.Open(o.Dir, client.Options{Base: o.Base, Now: func() time.Time { return now }, Policy: client.Policy{Unknown: client.LandInbox, Server: client.AdmitAll}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -317,7 +317,6 @@ func TestANewInitKilledOnceItsKeyIsWrittenWritesIdentityPubAgain(t *testing.T) {
 			if !bytes.Equal(key.Marshal(), b.Identity().PublicKey().Marshal()) {
 				t.Fatal("identity.pub is not the identity key's")
 			}
-			landAll(t, b)
 			whole(t, e, b, a)
 		})
 	}
@@ -343,7 +342,6 @@ func TestANewOfflineInitKilledAtEachStepComesBackUnderACertificate(t *testing.T)
 			if err != nil {
 				t.Fatalf("again after %s: %v", step, err)
 			}
-			landAll(t, b)
 			if !certified(t, b) {
 				t.Fatal("not under a certificate")
 			}
@@ -388,7 +386,6 @@ func TestAnOfflineInitKilledAtEachStepComesBackUnderACertificate(t *testing.T) {
 			if err != nil {
 				t.Fatalf("init --offline again after a crash at %s: %v", step, err)
 			}
-			landAll(t, x)
 			if !certified(t, x) {
 				t.Fatalf("after a crash at %s: not under a certificate", step)
 			}
@@ -623,7 +620,6 @@ func TestARestoreKilledBeforeTheRecordOfItsFoldersFinishes(t *testing.T) {
 			if _, err := x.Rekey(ctx); err != nil {
 				t.Fatalf("the renewal after a crash at %s: %v", step, err)
 			}
-			landAll(t, x)
 			whole(t, e, x, a)
 			defer moveAside(t, x.Path("sent"))()
 			if _, err := x.Receive(ctx); err == nil || !strings.Contains(err.Error(), x.Path("sent")) {
@@ -653,7 +649,6 @@ func TestAnAdoptionKilledLeavesTheMailboxWhole(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			landAll(t, x)
 			if got := client.AdoptedKeys(t, x); !slices.Equal(got, []uint64{old}) {
 				t.Fatalf("adopted %v after a crash, want %d", got, old)
 			}
@@ -997,7 +992,7 @@ func TestAnAllowKilledAtEachStepFinishesWhenRunAgain(t *testing.T) {
 			if got, want := slices.Compact(kept), []string{"first", "from another sender", "second"}; !slices.Equal(got, want) {
 				t.Fatalf("after the crash, held/ and inbox/ hold %q, want %q", got, want)
 			}
-			x, err := client.Open(b.Dir(), e.opts())
+			x, err := client.Open(b.Dir(), e.heldOpts())
 			if err != nil {
 				t.Fatal(err)
 			}

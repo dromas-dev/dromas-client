@@ -190,10 +190,7 @@ func TestAMailboxDropsMessagesFromASenderItBlockedWhateverItsServerDoes(t *testi
 func TestAPolicyCanLandEverySendersMessagesInInbox(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
-	a, b := e.heldMailbox(), e.heldMailbox()
-	if err := b.SetPolicy(t.Context(), client.Policy{Unknown: client.LandInbox, Server: client.AdmitAll}); err != nil {
-		t.Fatal(err)
-	}
+	a, b := e.heldMailbox(), e.mailbox()
 	send(t, a, b, "to an open mailbox")
 	if res := receive(t, b); len(res.Delivered) != 1 || len(res.Held) != 0 {
 		t.Fatalf("%+v", res)
@@ -207,10 +204,9 @@ func TestUnderServerAllowedTheServerRefusesTheRest(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	e := newEnv(t)
-	a, b, stranger := e.heldMailbox(), e.heldMailbox(), e.heldMailbox()
-	if err := b.SetPolicy(t.Context(), client.Policy{Unknown: client.LandHeld, Server: client.AdmitAllowed}); err != nil {
-		t.Fatal(err)
-	}
+	opt := e.heldOpts()
+	opt.Policy.Server = client.AdmitAllowed
+	a, b, stranger := e.heldMailbox(), e.made(opt), e.heldMailbox()
 	var calls []string
 	e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
 		if r.Method == http.MethodPut && strings.HasSuffix(r.URL.Path, "/acl") || r.Method == http.MethodPost {
@@ -240,9 +236,7 @@ func TestUnderServerAllowedTheServerRefusesTheRest(t *testing.T) {
 		t.Fatalf("the calls of a send to an allowed address: %v", calls)
 	}
 	// Back to "server all": the server lets everyone in again.
-	if err := b.SetPolicy(t.Context(), client.DefaultPolicy()); err != nil {
-		t.Fatal(err)
-	}
+	b = mustOpen(t, b.Dir(), e.heldOpts())
 	if err := b.SyncACL(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -513,9 +507,9 @@ func TestASendWaitsOnTheACLOnlyWhenTheReplyWouldBeRefused(t *testing.T) {
 		t.Fatalf("a send with the ACL refused and none taken: %+v, %v; posted %d", s, err, e.srv.Count(a.Address()))
 	}
 	e.srv.SetMiddle(nil)
-	if err := b.SetPolicy(t.Context(), client.Policy{Unknown: client.LandHeld, Server: client.AdmitAllowed}); err != nil {
-		t.Fatal(err)
-	}
+	opt := e.heldOpts()
+	opt.Policy.Server = client.AdmitAllowed
+	b = mustOpen(t, b.Dir(), opt)
 	if err := b.SyncACL(ctx); err != nil || !e.srv.ACL(b.Address()).Allow.Has(a.Address()) {
 		t.Fatalf("the ACL under server allowed: %v", err)
 	}

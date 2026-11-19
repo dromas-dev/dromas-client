@@ -80,7 +80,7 @@ func TestAReceiptIsComparedAsBytes(t *testing.T) {
 	need(t, append(scriptTools, "curl")...)
 	ctx := context.Background()
 	srv := fakeserver.New(t, time.Now)
-	to, err := client.Init(ctx, t.TempDir(), client.Options{Base: srv.URL})
+	to, err := client.Init(ctx, t.TempDir(), client.Options{Base: srv.URL, Policy: landAll})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +88,6 @@ func TestAReceiptIsComparedAsBytes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	landAll(t, to)
 	dir := t.TempDir()
 	env := []string{"DR_HOME=" + dir, "DR_SERVER_URL=" + srv.URL}
 	if _, err := bash(t, env, "dr_init"); err != nil {

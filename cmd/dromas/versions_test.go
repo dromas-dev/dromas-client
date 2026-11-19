@@ -32,9 +32,10 @@ func (c *settable) Add(d time.Duration) {
 	c.t = c.t.Add(d)
 }
 
-// versioned is a mailbox of a client at version 1.5.2 and its server, each on
-// a clock of its own, which the dromas command runs as: the environment
-// names the two, so a test of it runs alone.
+// versioned is a mailbox of a client at version 1.5.2 (client.LinkedVersion)
+// and its server, each on a clock of its own, which the dromas command runs
+// as: the environment names the two, and the version is the package's, so a
+// test of it runs alone.
 type versioned struct {
 	t              *testing.T
 	srv            *fakeserver.Server
@@ -50,7 +51,10 @@ func newVersioned(t *testing.T) *versioned {
 	start := time.Now().UTC().Truncate(time.Second)
 	v := &versioned{t: t, server: &settable{t: start}, client: &settable{t: start}}
 	v.srv = fakeserver.New(t, v.server.Now)
-	v.opt = client.Options{Base: v.srv.URL, Now: v.client.Now, Version: ownVersion}
+	linked := client.LinkedVersion
+	client.LinkedVersion = ownVersion
+	t.Cleanup(func() { client.LinkedVersion = linked })
+	v.opt = client.Options{Base: v.srv.URL, Now: v.client.Now}
 	b, err := client.Init(context.Background(), t.TempDir(), v.opt)
 	if err != nil {
 		t.Fatal(err)
@@ -119,6 +123,10 @@ func (v *versioned) documentReads() int {
 // receives, the read of the server's document among them. TestStateTable holds
 // every command of the library to it in every state.
 func TestEveryRequestNamesTheClientsVersion(t *testing.T) {
+	// Control: a test binary names DevelVersion where nothing sets LinkedVersion.
+	if got := client.Version(); got != client.DevelVersion {
+		t.Errorf("a test binary names %q, not %q", got, client.DevelVersion)
+	}
 	v := newVersioned(t)
 	peer, err := client.Init(context.Background(), t.TempDir(), v.opt)
 	if err != nil {
@@ -149,10 +157,6 @@ func TestEveryRequestNamesTheClientsVersion(t *testing.T) {
 	}
 	if !seen["GET "+protocol.DocumentPath] || len(seen) < 8 {
 		t.Errorf("the run made too few kinds of call to hold anything: %v", seen)
-	}
-	// Control: a request names the version the mailbox was made with.
-	if got := client.Version(); got != client.DevelVersion {
-		t.Errorf("a test binary names %q, not %q", got, client.DevelVersion)
 	}
 }
 
@@ -319,7 +323,7 @@ func TestAnUpgradeIsSaidOnceADay(t *testing.T) {
 // in the outbox.
 func TestARetiredVersionIsSaidInTheClientsWords(t *testing.T) {
 	v := newVersioned(t)
-	peer, err := client.Init(context.Background(), t.TempDir(), client.Options{Base: v.srv.URL, Now: v.server.Now, Version: "1.6.0"})
+	peer, err := client.Init(context.Background(), t.TempDir(), client.Options{Base: v.srv.URL, Now: v.server.Now})
 	if err != nil {
 		t.Fatal(err)
 	}

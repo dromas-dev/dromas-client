@@ -22,7 +22,7 @@ var mailCommands = []string{"Receive", "Hold", "Await", "Follow", "Rekey", "Rene
 
 // notMail are the commands of lockingCommands that touch no message, which run
 // on a state that does not match prekeys/.
-var notMail = []string{"Adopt", "Leave", "Resolve", "RevokeEarlier", "RequestCertificate", "Block", "SyncACL", "Ask", "KeepRevocation", "Publish", "SetAlias", "RemoveAlias", "RemoveRefused", "ClearFailed", "SetPolicy", "RebuildAllowed"}
+var notMail = []string{"Adopt", "Leave", "Resolve", "RevokeEarlier", "RequestCertificate", "Block", "SyncACL", "Ask", "KeepRevocation", "Publish", "SetAlias", "RemoveAlias", "RemoveRefused", "ClearFailed", "RebuildAllowed"}
 
 // signals are the states that do not match prekeys/, each made from a mailbox b
 // that has delivered a message from a, with a message of a's that the server
@@ -181,7 +181,6 @@ func TestARestoreFromTheIdentityAloneNeedsNoAcknowledgement(t *testing.T) {
 	if err != nil {
 		t.Fatalf("init from the identity alone: %v", err)
 	}
-	landAll(t, x)
 	if has(x, "seen-floor") || len(client.AdoptedKeys(t, x)) != 0 {
 		t.Fatal("a restore from the identity alone adopted a key or raised a floor")
 	}
@@ -213,7 +212,6 @@ func TestRestoreIsInitsAlone(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		landAll(t, x)
 		if _, err := x.Receive(ctx); !client.NotTheKeys(err) || len(client.AdoptedKeys(t, x)) != 0 {
 			t.Fatalf("Receive on a Mailbox opened with Restore, on a lost state: %v, adopted %v", err, client.AdoptedKeys(t, x))
 		}
@@ -230,7 +228,6 @@ func TestRestoreIsInitsAlone(t *testing.T) {
 		if err != nil || y.Restored() == nil || y.Restored().Acknowledged() {
 			t.Fatalf("init --restore on a state that matches: %+v, %v", y.Restored(), err)
 		}
-		landAll(t, y)
 		key, err := os.ReadFile(prekeyFile(y, numberOf(t, y), ".agekey"))
 		if err != nil {
 			t.Fatal(err)

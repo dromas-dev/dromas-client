@@ -253,7 +253,6 @@ func TestTheShortestLifetimesAtTheClocksFurthestApart(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			landAll(t, b)
 			a, err := client.Init(ctx, t.TempDir(), e.skewed(&fast))
 			if err != nil {
 				t.Fatal(err)
@@ -305,7 +304,6 @@ func TestTheDocumentedCadenceLeavesRoomForAClock(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		landAll(t, b)
 		a, err := client.Init(ctx, t.TempDir(), e.skewed(&fromOff))
 		if err != nil {
 			t.Fatal(err)

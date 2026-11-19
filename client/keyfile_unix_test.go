@@ -118,7 +118,7 @@ func TestAllowingASenderCrossesFilesystems(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(inbox) })
 	e := newEnv(t)
-	opt := e.opts()
+	opt := e.heldOpts()
 	opt.Layout.Inbox = inbox
 	b, err := client.Init(t.Context(), filepath.Join(root, "base"), opt)
 	if err != nil {
