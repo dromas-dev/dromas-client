@@ -777,7 +777,7 @@ A revocation record carries an identity's revocations, and the record proves its
 
 - **`Date`.** Every answer under `/v1/` carries `Date`. The server sets the field by the clock that the server's checks read.
 - **No caching.** Every answer of a route under `/v1/` carries `Cache-Control: no-store` (RFC 9111 §5.2.2.5).
-- **Compression.** A server MAY answer a lookup (Section 11.8) with gzip (RFC 9110 §8.4.1.3), but only when the request's `Accept-Encoding` accepts gzip. A server MUST NOT compress any other answer (Section 15.8).
+- **Compression.** A server MUST NOT compress an answer (Section 15.8).
 - **`HEAD`.** A server answers `HEAD` on every route that answers `GET` (RFC 9110 §9.1, §9.3.2).
   - A `HEAD` changes nothing. A `HEAD` spends no cursor, hands out no cursor, marks no message as fetched, and spends none of the first-fetch budget.
   - Section 11.5 gives what a `HEAD` spends.
@@ -1769,8 +1769,7 @@ Dromas protects a message's content from everyone but the message's recipient. D
   - Removing the signal would need a record of each acked message, which Section 13 rules out.
 - **The lookup before a post tells the server that the mailbox is about to be written to.** The post tells the server the same thing a moment later.
 - **A reader's look-up of a sender's revocations tells the server which senders the reader has just verified.** The reader makes that call during its drain, at most once for each sender, right after that sender's signature verifies (Section 12.3, check 7). So the server can link the sender to the reader at read time, from the reader's own calls. Any call that names the sender tells the server the same, so no choice of route removes this link.
-- **A lookup answered with gzip has a length that depends on the mailbox's own bytes.** So the length can help a network observer narrow down whom a sender is about to write to.
-- **Only a lookup's answer is compressed (Section 11.2).** A list, for example, sets values that senders chose beside the mailbox's own values (BREACH, RFC 7457 §2.6).
+- **A server does not compress an answer (Section 11.2).** A compressed answer has a length that depends on the answer's own bytes. So the length of a compressed lookup could help a network observer narrow down whom a sender is about to write to. A compressed list would set values that senders chose beside the mailbox's own values (BREACH, RFC 7457 §2.6).
 - **Anything that terminates TLS for a server is part of the server.** A TLS terminator sees everything the server sees, and each pass in transit. For the minutes a pass has left, the pass does at that server everything that Section 15.5 lists. A third party in that position would replace the server for every mailbox whose pass the third party sees. That is why Section 11.1 keeps TLS inside the server.
 - **An address in a URL is seen wherever URLs are logged.** Such an address is seen, for example, by the party that terminates TLS, in a chat that unfurls links, and in a transcript. A leaked address is answered by a new mailbox and by revoking the old address.
 
