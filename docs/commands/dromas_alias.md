@@ -7,8 +7,7 @@ names for peers, usable in place of a link: add, rm, list
 An alias is this mailbox's own name for a peer. The mailbox keeps its aliases in
 its aliases file as "\<name> \<address>" lines, which you can also write by hand.
 
-A name names its peer. dromas alias add also allows it, as dromas peer allow
-does; a line written by hand allows nothing. A name never moves to another
+A name allows its peer, as dromas peer allow does. A name never moves to another
 address: to change one, remove it and add it again.
 
 ```

@@ -5,8 +5,9 @@ list the allowed and blocked senders
 ### Synopsis
 
 List the senders this mailbox allows and blocks, one "allowed" or "blocked" line
-each, with the address. The allowed senders are those the allowed file lists.
-Blocking overrides allowing, so an address can be on both lists.
+each, with the address. The allowed senders are those the allowed file lists and
+those an alias names. Blocking overrides allowing, so an address can be on both
+lists.
 
 ```
 dromas peer list [flags]

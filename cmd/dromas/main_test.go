@@ -1526,7 +1526,8 @@ func TestLinesNameAPeerByItsAliasAndInboxListsWhatItKeeps(t *testing.T) {
 	recvd, ls := run("recv")
 	named(ls, "message", from)
 	// The same lines, each byte for byte as recv printed it. Two sent in one
-	// second may be listed in another order than recv's: the list orders
+	// second may be listed in another order than recv's: their files can
+	// share a modification time (Windows' clock), and the list then orders
 	// them by id.
 	shown, ls := run("inbox list")
 	named(ls, "message", from)

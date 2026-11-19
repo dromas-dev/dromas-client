@@ -74,7 +74,7 @@ A setting that only modifies another, such as `recv.exec-timeout` beside `recv.e
 - Default: none; the key is required
 - Flag: `--base-dir`
 
-The directory of the mailbox's state file and lists (`state`, `allowed`, `blocked`, `aliases`). `identity-file` and `rotating-keys-dir` default to paths under it. The mailbox's lock is a `flock` on `state`, which holds only as far as the filesystem's locks do.
+The directory of the mailbox's state file and lists (`state`, `allowed`, `blocked`, `aliases`). `identity-file` and `rotating-keys-dir` default to paths under it. The mailbox's lock is a `flock` on `state`, which holds only as far as the filesystem's locks do. Do not use one mailbox from two machines at once, as SQLite and Dovecot warn of their own files.
 
 ### `mail-dir`
 

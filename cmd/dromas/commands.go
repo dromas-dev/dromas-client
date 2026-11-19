@@ -55,8 +55,7 @@ help describes it.`,
 			`An alias is this mailbox's own name for a peer. The mailbox keeps its aliases in
 its aliases file as "<name> <address>" lines, which you can also write by hand.
 
-A name names its peer. dromas alias add also allows it, as dromas peer allow
-does; a line written by hand allows nothing. A name never moves to another
+A name allows its peer, as dromas peer allow does. A name never moves to another
 address: to change one, remove it and add it again.`,
 			e.aliasAddCmd(), e.aliasRmCmd(), e.aliasListCmd()),
 		e.group("outbox", "messages the server has not accepted yet: flush",
@@ -887,8 +886,9 @@ func (e *cli) peerListCmd() *cobra.Command {
 	var allowed, blocked bool
 	c := command("list [flags]", "list the allowed and blocked senders",
 		`List the senders this mailbox allows and blocks, one "allowed" or "blocked" line
-each, with the address. The allowed senders are those the allowed file lists.
-Blocking overrides allowing, so an address can be on both lists.`,
+each, with the address. The allowed senders are those the allowed file lists and
+those an alias names. Blocking overrides allowing, so an address can be on both
+lists.`,
 		nargs(0, 0), func(cc *cobra.Command, _ []string) error {
 			b, err := e.mailbox()
 			if err != nil {
