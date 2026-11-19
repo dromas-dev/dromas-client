@@ -2659,10 +2659,9 @@ func TestPrekeyLifetime(t *testing.T) {
 	}
 }
 
-// parseTime reads a time as OpenSSH's convtime does in 10.3p1 to 10.6p1
-// (misc.c, convtime_double; #193): each value here is what that code gives,
-// -1 for a time it refuses.
-func TestParseTimeReadsAsOpenSSH(t *testing.T) {
+// parseTime reads a time as sshd_config(5) TIME FORMATS writes one: each value
+// here is the seconds it names, -1 for what is no time.
+func TestParseTimeReadsAsSshdConfig(t *testing.T) {
 	for _, c := range []struct {
 		in   string
 		sshd int64
@@ -2672,22 +2671,22 @@ func TestParseTimeReadsAsOpenSSH(t *testing.T) {
 		{"25h", 90000},
 		{"1d1d", 172800},
 		{"1W1D", 691200},
-		{"90000s1", -1},  // seconds twice: a bare number is seconds
-		{"1d0s3600", -1}, // the same
-		{"90000.5", 90000},
-		{"1.5s", 1},
-		{".5", 0},
-		{"5.", -1},    // a point with no digit after it
-		{"1.2.3", -1}, // what follows the number is no unit
+		{"90000s1", 90001}, // a bare number is seconds
+		{"1d0s3600", 90000},
+		{"90000.5", -1}, // a time is an integer
+		{"1.5s", -1},
+		{".5", -1},
+		{"5.", -1},
+		{"1.2.3", -1},
 		{"0000000090000", 90000},
 		{"00000000001d1h", 90000},
-		{"1.5h", -1}, // a fraction only on seconds
-		{"1e5", -1},  // decimal forms only
+		{"1.5h", -1},
+		{"1e5", -1}, // decimal digits only
 		{"0x10", -1},
 		{"+5", -1},
 		{"", -1},
 		{".", -1},
-		{"0", 0},
+		{"0", 0}, // past the man page, which says positive: every caller refuses a lifetime under its minimum
 		{"2147483647", 2147483647},
 		{"2147483648", -1},
 		{"1h ", -1},
@@ -2698,7 +2697,7 @@ func TestParseTimeReadsAsOpenSSH(t *testing.T) {
 			got = int64(d / time.Second)
 		}
 		if got != c.sshd {
-			t.Errorf("%q: parseTime %d, OpenSSH 10.3p1 to 10.6p1 %d", c.in, got, c.sshd)
+			t.Errorf("%q: parseTime %d, sshd_config(5) %d", c.in, got, c.sshd)
 		}
 	}
 }

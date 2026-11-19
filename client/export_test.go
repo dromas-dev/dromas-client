@@ -287,7 +287,7 @@ func (b *Mailbox) Records() (map[string][]byte, error) {
 			{"serial", "serial"}, {"pass", "pass"}, {"etag", "etag"}, {"seen-floor", "seen-floor"},
 			{"acl", "acl.json"}, {"revoked", "revoked.sig"}, {"revoked-certs", "revoked-certs.json"},
 			{"renew-failed", "renew-failed"}, {"not-made", "not-made"}, {"partial", "partial"},
-			{"deprecation", "deprecation"}, {"sunset", "sunset"}, {"document-read", "document-read"}, {"latest", "latest"},
+			{"deprecation", "deprecation"}, {"sunset", "sunset"}, {"document-read", "document-read"},
 		} {
 			if v := s.get(bucketMailbox, r.key); v != nil {
 				out[r.name] = v

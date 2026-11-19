@@ -57,8 +57,7 @@ dr_api(){ # <METHOD> <PATH> [body file] [curl args…] → the body on stdout, a
   dr_tls "$DR_SERVER_URL" || return 1
   dr_here "$DR_SERVER_URL" localhost && np=(--noproxy '*')      # a server on this machine is called directly, whatever proxy the environment names, as Go's ProxyFromEnvironment never proxies localhost or a loopback address
   rm -f "$DR/error.json" "$DR/error.meta" "$DR/response.body" "$DR/response.meta"
-  curl -q -sS "${np[@]}" --max-time 60 --max-filesize 16777216 --fail-with-body -o "$DR/response.body" -w '%{response_code}\n%header{retry-after}\n%header{date}\n%header{deprecation}\n%header{sunset}\n' -X "$m" -H "Dromas-Version: $DR_VERSION" ${f:+-H "Content-Type: $t" --data-binary "@$f"} "$@" "$DR_SERVER_URL$p" > "$DR/response.meta" 2> "$DR/curl.err"; s=$?
-  dr_met "$DR/response.meta"
+  curl -q -sS "${np[@]}" --max-time 60 --max-filesize 16777216 --fail-with-body -o "$DR/response.body" -w '%{response_code}\n%header{retry-after}\n%header{date}\n' -X "$m" -H "Dromas-Version: $DR_VERSION" ${f:+-H "Content-Type: $t" --data-binary "@$f"} "$@" "$DR_SERVER_URL$p" > "$DR/response.meta" 2> "$DR/curl.err"; s=$?
   [ "$s" = 0 ] && [[ $(sed -n 1p "$DR/response.meta") = 2?? ]] && { cat "$DR/response.body"; return 0; }      # -q first, or curl reads the user's .curlrc, where location, insecure or proxy change what is called. Only a 2xx is an answer: curl, which follows no redirect without -L, exits 0 on a 3xx too. The status and the two headers are the final answer's own, as curl read it: never a 1xx's line or a trailer, which the Go client never reads either
   mv "$DR/response.body" "$DR/error.json" 2> /dev/null; mv "$DR/response.meta" "$DR/error.meta" 2> /dev/null
   s=$(dr_status); c=$(dr_code); w=$(dr_wait); q=; u=; v=
@@ -71,21 +70,6 @@ dr_api(){ # <METHOD> <PATH> [body file] [curl args…] → the body on stdout, a
 DR_TYPE='tag:dromas.dev,2026-10-26:errors/'      # an error's type is this and its code, which names the problem and resolves to nothing (PROTOCOL.md §11.3): a code counts only beside its own
 DR_CODES='{"invalid_request":400,"invalid_address":400,"identity_mismatch":400,"invalid_key":400,"prekey_already_used":400,"invalid_validity_period":400,"certificate_lifetime_too_long":400,"unsupported_key_type":400,"invalid_recipients":400,"invalid_revocation":400,"invalid_pass":401,"pass_expired":401,"certificate_superseded":401,"certificate_revoked":401,"sender_not_registered":403,"sender_revoked":403,"sender_not_allowed":403,"unsupported_sender_key_type":403,"invalid_adopt_key":403,"mailbox_not_found":404,"message_not_found":404,"revocation_not_found":404,"mailbox_already_exists":409,"serial_too_low":409,"concurrent_modification":409,"prekey_superseded":409,"prekey_expired":409,"request_timeout":408,"mailbox_revoked":410,"client_version_unsupported":410,"precondition_failed":412,"content_too_large":413,"rate_limited":429,"fetch_rate_limited":429,"mailbox_full":429,"mailbox_rate_limited":429,"unavailable":503}'      # every code, and its status (PROTOCOL.md §11.3)
 DR_QUOTAS='["polls","pages","calls","sends","renewals","certificates","certificate_revocations","registrations","registrations_range","misses","misses_range","sends_before_pass","sends_before_pass_range","requests","requests_range"]'      # every limit a rate_limited may name in quota_id (PROTOCOL.md §11.5)
-dr_met(){ # <curl meta> → keeps the earliest Deprecation and Sunset an answer of this command carried, as Unix times, in $DR/met.deprecation and $DR/met.sunset, which the command line prints at its end (dr_said): a Deprecation only as a Structured Field Date, @ and an integer of up to 15 digits with an optional - (RFC 9745 §2.1, RFC 9651 §3.3.7), and a Sunset only as an HTTP-date in its preferred form (RFC 8594, RFC 9110 §5.6.7). Any other value is none, and neither is ever printed as it came (PROTOCOL.md §11.17, §11.3)
-  local d n t
-  d=$(sed -n 4p "$1" 2> /dev/null)
-  if [[ $d =~ ^@-?[0-9]{1,15}$ ]]; then n=${d#@}; t=; [[ $n = -* ]] && t=- n=${n#-}; dr_earliest "$DR/met.deprecation" "$t$((10#$n))"; fi
-  d=$(sed -n '5{/^[A-Za-z]\{3\}, [0-9]\{2\} [A-Za-z]\{3\} [0-9]\{4\} [0-9:]\{8\} GMT$/p;}' "$1" 2> /dev/null)
-  [ -n "$d" ] && t=$(jq -nr --arg d "$d" '$d | strptime("%a, %d %b %Y %H:%M:%S GMT") | mktime' 2> /dev/null) && [[ $t =~ ^[0-9]+$ ]] && dr_earliest "$DR/met.sunset" "$t"
-  return 0
-}
-dr_earliest(){ [ -s "$1" ] && [ "$(cat "$1")" -le "$2" ] || printf '%s\n' "$2" > "$1"; }      # <file> <Unix time> → the file holds the earlier of the two
-dr_said(){ # → the lines the Go client prints at a command's end of what its answers said of this client's version (dr_met): a "deprecated" line and a "sunset" line, each with the date, in this script's own words. Neither changes the exit status: this script has no "needs a look" status. It reads no server's document, so it says nothing of an upgrade
-  local t at
-  if t=$(cat "$DR/met.deprecation" 2> /dev/null) && at=$(jq -nr --argjson t "$t" '$t | todate' 2> /dev/null); then dr_out deprecated --arg version "$DR_VERSION" --arg deprecated_at "$at" --arg detail "the server deems this client's version, $DR_VERSION, deprecated from $at, by the Deprecation its last answer carried: it still takes it, and an upgrade of this client is due"; fi
-  if t=$(cat "$DR/met.sunset" 2> /dev/null) && at=$(jq -nr --argjson t "$t" '$t | todate' 2> /dev/null); then dr_out sunset --arg version "$DR_VERSION" --arg sunset_at "$at" --arg detail "the server stops taking this client's version, $DR_VERSION, from $at, by the Sunset its last answer carried: upgrade this client, whose calls it refuses as client_version_unsupported from then on"; fi
-  rm -f "$DR/met.deprecation" "$DR/met.sunset"
-}
 dr_member(){ jq -r --arg m "$1" --argjson known "$2" '.[$m] | strings | select(. as $v | $known | index([$v])) ' "$DR/error.json" 2> /dev/null; }      # <member> <known values, a JSON array> → the last API error's string member, only when it is one of them: a client shows no value it does not know (PROTOCOL.md §11.3)
 dr_status(){ sed -n '1{/^[0-9][0-9][0-9]$/p;}' "$DR/error.meta" 2> /dev/null | grep -vx 000; }      # the status of the last API error. error.meta is what curl's -w read of the final answer, a line each: its status (000 for none), then its Retry-After and its Date, each the first given, trimmed, as Go's Header.Get reads one
 dr_code(){ local s; s=$(dr_status) && [ -n "$s" ] && dr_shape "$DR/error.json" problem && jq -r --argjson codes "$DR_CODES" --argjson s "$s" --arg t "$DR_TYPE" '(.code | strings) as $c | select($codes[$c] == $s and .type == $t + $c) | $c' "$DR/error.json" 2> /dev/null; }   # the code of the last API error: one this client knows, under its own status, beside its own type, from an answer the Go client would read the same. Any other is no code
@@ -838,7 +822,7 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
   case ${1-} in init) dr_cmd=dr_init dr_n=1 dr_max=1 ;; addr | recv) dr_cmd=dr_$1 dr_n=1 ;; send) dr_cmd=dr_send dr_n=1 dr_min=1 dr_max=2 ;; esac
   case "${1-} ${2-}" in 'prekey renew') dr_cmd=dr_rekey dr_n=2 ;; esac
   dr_help=0
-  for a; do case $a in --help) dr_help=1 ;; -h) dr_help=1; echo "Flag shorthand -h has been deprecated, use --help" >&2 ;; esac; done      # anywhere after a command: its help, and nothing runs. -h works too, as in the Go client, and means nothing else
+  for a; do case $a in --help | -h) dr_help=1 ;; esac; done      # anywhere after a command: its help, and nothing runs. -h works too, as in the Go client, and means nothing else
   if [ "${1-}" = help ] || { [ -z "$dr_cmd" ] && [ "${2-}" = help ]; }; then
     dr_help=1; [ "$1" = help ] && shift || set -- "$1"
     [ $# -eq 0 ] || case "${1-} ${2-}" in 'prekey '?*) dr_n=2 ;; ?*) dr_n=1 ;; esac
@@ -864,7 +848,5 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
   esac
   dr_tls "$DR_SERVER_URL" || exit 1      # refused before anything, as the Go client refuses to open a mailbox whose server it would not call
   dr_p256 || exit 1      # refused before anything: a build that cannot verify every type the protocol defines takes part in no exchange
-  rm -f "$DR/met.deprecation" "$DR/met.sunset"
-  "$dr_cmd" "$@"; dr_rc=$?
-  dr_said; exit $dr_rc
+  "$dr_cmd" "$@"
 fi
