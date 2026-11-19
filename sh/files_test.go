@@ -328,10 +328,11 @@ func TestAnInitCrashedBeforeItsIdentityIsSyncedRegisters(t *testing.T) {
 	}
 }
 
-// The script syncs in the order its crash safety rests on, as a sync and an
-// mv that log each call read it (#444 item 2): dr_prekey puts the prekey, its
-// statement, when it was made and its signature on disk in one call, before
-// any upload publishes the statement; dr_forget syncs the new replay set
+// The script syncs in the order its crash safety rests on, as a sync, an mv
+// and a curl that log each call read it (#444 item 2): dr_prekey puts the
+// prekey, its statement, when it was made, its signature and their directory
+// on disk before the upload that publishes the statement, in whatever calls
+// and order (#939 item 50); dr_forget syncs the new replay set
 // before it moves it into place, so a crash leaves the old set or the new
 // one, never an empty one (#240).
 func TestTheScriptSyncsInItsOrder(t *testing.T) {
@@ -345,6 +346,7 @@ func TestTheScriptSyncsInItsOrder(t *testing.T) {
 		b.must("LOG=" + log + `
 sync(){ printf '%s sync %s\n' "${FUNCNAME[1]}" "$*" >> "$LOG"; command sync "$@"; }
 mv(){ printf '%s mv %s\n' "${FUNCNAME[1]}" "$*" >> "$LOG"; command mv "$@"; }
+curl(){ printf '%s curl %s\n' "${FUNCNAME[1]}" "$*" >> "$LOG"; command curl "$@"; }
 ` + commands)
 		data, err := os.ReadFile(log) //nolint:gosec // the test's own log
 		if err != nil {
@@ -361,12 +363,21 @@ mv(){ printf '%s mv %s\n' "${FUNCNAME[1]}" "$*" >> "$LOG"; command mv "$@"; }
 		return got
 	}
 
-	got := calls("dr_prekey", "dr_rekey")
+	got := calls("dr_prekey dr_api", "dr_rekey")
 	n := strconv.FormatUint(b.num(), 10)
-	if want := []string{
-		"sync prekeys/" + n + ".agekey prekeys/" + n + ".txt prekeys/" + n + ".made prekeys/" + n + ".txt.sig prekeys",
-	}; !slices.Equal(got, want) {
-		t.Errorf("dr_prekey's syncs:\n%q\nwant\n%q", got, want)
+	upload := slices.IndexFunc(got, func(c string) bool {
+		return strings.HasPrefix(c, "curl ") && strings.Contains(c, " -X PUT ") && strings.HasSuffix(c, "/prekey")
+	})
+	if upload < 0 {
+		t.Fatalf("dr_rekey uploaded no prekey: %q", got)
+	}
+	for _, path := range []string{"prekeys/" + n + ".agekey", "prekeys/" + n + ".txt", "prekeys/" + n + ".made", "prekeys/" + n + ".txt.sig", "prekeys"} {
+		if !slices.ContainsFunc(got[:upload], func(c string) bool {
+			args, ok := strings.CutPrefix(c, "sync ")
+			return ok && slices.Contains(strings.Fields(args), path)
+		}) {
+			t.Errorf("%s is not synced before the upload of its statement:\n%q", path, got)
+		}
 	}
 
 	now := time.Now().Unix()

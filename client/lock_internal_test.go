@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"errors"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sync"
@@ -197,4 +198,93 @@ func TestAMailboxsOwnGoroutinesTellNoWaitForTheSlot(t *testing.T) {
 			t.Errorf("Waiting was told %d times for this Mailbox's own goroutine", n)
 		}
 	})
+}
+
+// A command that waits for the mailbox's lock goes before a reading that
+// begins after it, while a reading under way holds the state file: a flock
+// gives a waiting writer no preference, so readings that overlap held a
+// Receive back past its patience (#344). The order is the test's own, on no
+// clock (#939 item 49): reading 1 holds the file open, the Receive begins and
+// says it waits (Options.Waiting), and only then reading 2 begins; reading 1
+// lets go once reading 2 waits too. Reading 2 then reads only after the
+// Receive has had the lock, whose calls to the server are made under it.
+// Each reading is had: one refused would leave the Receive alone (#452).
+// Where the system has no gate there is no preference to hold: with gateOf
+// set to noGate, reading 2 reads beside reading 1, ahead of the Receive.
+func TestAWaitingCommandGoesBeforeAReadingThatBeginsAfterIt(t *testing.T) {
+	t.Parallel()
+	if f, _, err := tryGate(t.TempDir()); err != nil {
+		t.Fatal(err)
+	} else if f == nil {
+		t.Skip("this system has no gate (gate_other.go): a waiting writer has no preference here")
+	} else {
+		_ = f.Close()
+	}
+	srv := fakeserver.New(t, time.Now)
+	dir := t.TempDir()
+	if _, err := Init(context.Background(), dir, Options{Base: srv.URL}); err != nil {
+		t.Fatal(err)
+	}
+	open := func(waiting func()) *Mailbox {
+		t.Helper()
+		b, err := Open(dir, Options{Base: srv.URL, Waiting: waiting})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return b
+	}
+	cmdWaits, secondWaits := make(chan struct{}), make(chan struct{})
+	cmd := open(sync.OnceFunc(func() { close(cmdWaits) }))
+	first, second := open(nil), open(sync.OnceFunc(func() { close(secondWaits) }))
+	var asked atomic.Bool // the Receive has called the server, under its lock
+	srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
+		asked.Store(true)
+		next.ServeHTTP(w, r)
+	})
+
+	held, release := make(chan struct{}), make(chan struct{})
+	firstDone := make(chan error, 1)
+	go func() {
+		_, err := reading(context.Background(), first, func() (struct{}, error) {
+			close(held)
+			<-release
+			return struct{}{}, nil
+		})
+		firstDone <- err
+	}()
+	<-held
+	cmdDone := make(chan error, 1)
+	go func() { _, err := cmd.Receive(context.Background()); cmdDone <- err }()
+	select {
+	case <-cmdWaits:
+	case err := <-cmdDone:
+		t.Fatalf("the Receive ran while reading 1 held the state file: %v", err)
+	}
+	var afterCmd bool
+	secondDone := make(chan error, 1)
+	go func() {
+		_, err := reading(context.Background(), second, func() (struct{}, error) {
+			afterCmd = asked.Load()
+			return struct{}{}, nil
+		})
+		secondDone <- err
+	}()
+	select {
+	case <-secondWaits:
+	case err := <-secondDone:
+		t.Errorf("reading 2 read beside reading 1, ahead of the Receive waiting for the lock (%v)", err)
+		secondDone <- err // read again below
+	}
+	close(release)
+	if err := <-firstDone; err != nil {
+		t.Errorf("reading 1: %v", err)
+	}
+	if err := <-cmdDone; err != nil {
+		t.Errorf("the Receive: %v", err)
+	}
+	if err := <-secondDone; err != nil {
+		t.Errorf("reading 2: %v", err)
+	} else if !afterCmd {
+		t.Error("reading 2 read before the Receive had the lock")
+	}
 }

@@ -309,6 +309,25 @@ func TestAPostsAnswerIsReadNoFurtherThanAReceipt(t *testing.T) {
 	}
 }
 
+// Any other answer is read no further than maxResponse: a JSON answer that
+// ends past it is no answer, however well formed its whole would be, and
+// what is past it is never read (#939 test 9).
+func TestAnAnswerPastMaxResponseIsNoAnswer(t *testing.T) {
+	t.Parallel()
+	read := 0
+	b := slowMailbox(t, func(*http.Request) (*http.Response, error) {
+		long := io.MultiReader(strings.NewReader(`{"id":"`), strings.NewReader(strings.Repeat("0", maxResponse)), strings.NewReader(`"}`))
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"application/json"}}, Body: counted{long, &read}}, nil
+	})
+	var out struct {
+		ID string `json:"id"`
+	}
+	_, err := b.exchange(context.Background(), http.MethodGet, "/v1/x", nil, nil, &out)
+	if err == nil || out.ID != "" || read > maxResponse {
+		t.Fatalf("an answer of %d bytes: %v, %d bytes of it read (an answer is at most %d)", maxResponse+9, err, read, maxResponse)
+	}
+}
+
 // A fetch's answer that is not its ciphertext, a problem, is bounded whole
 // from its head: only a ciphertext's bytes hold a call open by moving
 // (#403 item 3).
