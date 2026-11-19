@@ -93,7 +93,7 @@ dr_wait(){ sed -n '2{/^[0-9]\{1,\}$/p;}' "$DR/error.meta" 2> /dev/null | sed 's/
 dr_dated(){ local d; d=$(sed -n '3{/^[A-Za-z0-9 ,:]*$/p;}' "$DR/error.meta" 2> /dev/null) && [ -n "$d" ] && jq -nr --arg d "$d" '$d | strptime("%a, %d %b %Y %H:%M:%S GMT") | mktime | todate' 2> /dev/null; }      # the time the last API error's Date header gives, the server's word
 dr_shape(){ # <answer> <mailbox|list|record|receipt|problem> → 0 only for one JSON object of that kind, each member this script reads of its type, and null as if the member were left out. An integer is from 0 to 2^53 - 1 and jq gives it back as digits, since bash reads it. A byte member is a string, read by dr_bytes. Members it does not read are ignored
   jq -en --arg k "$2" 'def s: . == null or type == "string"; def n: . == null or (type == "number" and . == floor and . >= 0 and . <= 9007199254740991 and (tostring | test("\\A(0|[1-9][0-9]*)\\z")));
-    def record: all(.identity, .revocation_signature, .revoked_certificates, .revoked_certificates_signature; s);
+    def record: (.type | . == null or . == "revocation_record") and all(.identity, .revocation_signature, .revoked_certificates, .revoked_certificates_signature; s);
     [inputs] | length == 1 and (.[0] | type == "object" and
     {mailbox: all(.identity, .prekey, .prekey_signature, .revoked_certificates, .revoked_certificates_signature; s),
      list: ((.next_cursor | . == null or (type == "string" and test("\\A[A-Za-z0-9_-]+\\z"))) and (.messages | . == null or (type == "array" and all(.[]; . == null or (type == "object" and (.id | s) and (.size | n and (. // 0) <= 16777216)))))),
@@ -463,7 +463,7 @@ dr_keepcerts(){ # <address> <identity document> <statement> <signature> → keep
 dr_keep(){ # <address> <its identity document> <signature> → the revocation, kept for good: called only once dr_revcheck took it. A revoked address stays revoked
   if [ "$1" = "$(cat "$DR/address" 2> /dev/null)" ]; then dr_put "$3" "$DR/revoked.sig"; else dr_meet "$1" "$2" && dr_put "$3" "$DR/peers/$1/revoke.sig"; fi
 }
-dr_record(){ # <record> → the address it is a revocation of, only if it verifies; its parts are left in $DR/rev.doc and $DR/rev.sig. A record is one line of JSON, {type, identity, revocation_signature}: its type, which this script does not read, then the identity document and the signature, each base64
+dr_record(){ # <record> → the address it is a revocation of, only if it verifies; its parts are left in $DR/rev.doc and $DR/rev.sig. A record is one line of JSON, {type, identity, revocation_signature}: its type, revocation_record or left out (dr_shape), then the identity document and the signature, each base64
   local A
   dr_isrecord "$1" && dr_bytes "$1" identity "$DR/rev.doc" && dr_bytes "$1" revocation_signature "$DR/rev.sig" || return 1
   A=$(dr_address "$DR/rev.doc") && dr_revcheck "$A" "$DR/rev.doc" "$DR/rev.sig" && printf '%s\n' "$A"

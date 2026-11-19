@@ -36,7 +36,7 @@ func unseen(s string) bool {
 // peer allow delivers nothing of it; neither prints anything of it. Each file
 // is edited from its own line, so held/'s is c's, which peer allow of c
 // reaches (#390).
-func TestOnlyRecvsOwnLineIsShown(t *testing.T) {
+func TestAKeptMessageIsPrintedAsItsLineRebuilt(t *testing.T) {
 	ctx := context.Background()
 	srv := fakeserver.New(t, time.Now)
 	opt := client.Options{Base: srv.URL}
@@ -147,7 +147,7 @@ func TestOnlyRecvsOwnLineIsShown(t *testing.T) {
 // that is no message to this mailbox is an error line and exit 1: never a
 // panic, a line that is not JSON, or two lines. One with a space before it or
 // a line feed after it is printed as recv's one line, rebuilt.
-func TestShowHoldsTheFileToTheLineRecvKept(t *testing.T) {
+func TestShowRefusesAnotherMailboxsMessageAndRebuildsItsOwn(t *testing.T) {
 	ctx := context.Background()
 	srv := fakeserver.New(t, time.Now)
 	opt := client.Options{Base: srv.URL}

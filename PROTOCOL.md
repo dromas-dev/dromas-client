@@ -262,7 +262,7 @@ signature-groups = *16( 4base64-char ) ( 4base64-char / base64-final )
   - a NUL in a string;
   - an integer with an unneeded leading zero byte.
 - **ECDSA's two values of s.** If (r, s) is a P-256 signature, (r, n − s) is also a P-256 signature, where n is the group's order (FIPS 186-5). Each of the two is a signature in the one form. A verifier MUST accept both, and a signer may write either. Anyone who has seen one of the two can write the other (Sections 5.2, 8). An Ed25519 signature has no second form.
-- **A bound on size.** A signature is at most 947 bytes. That bound is the longest signature in the one form that a mailbox of a key type of Section 4.1 can make, with the mailbox's identity or with a working key under a certificate as `ssh-keygen -s` makes one. The longest is a P-256 identity's prekey statement under a certificate, with the identity's r and s on the certificate each in 33 bytes. Every verifier MUST refuse a longer signature before reading the signature. In a message, the bound limits the signature block, from the block's BEGIN line through the LF after the block's END line (Section 9.2).
+- **A bound on size.** A signature is at most 947 bytes. That bound is the longest signature in the one form that a mailbox of a key type of Section 4.1 can make, with the mailbox's identity or with a working key under a certificate as `ssh-keygen -s` makes one. The longest is a P-256 identity's prekey statement under a certificate, with the identity's r and s on the certificate each in 33 bytes. Every verifier MUST refuse a longer signature before reading the signature. In a message, the bound limits the signature block, from the block's BEGIN line through the LF after the block's END line (Section 9.2). A key type added later whose signatures are longer raises the bound with that type (Section 14).
 - **Ed25519's S.** In an SSHSIG and on a certificate, an Ed25519 signature's S is below the group order L (RFC 8032 §5.1.7).
 - **The Ed25519 equation.** The equation is RFC 8032 §5.1.7's without the cofactor, `[S]B = R + [k]A'`, compared as encodings. So a verifier accepts a neutral R, and refuses R with a point of small order added.
 
@@ -739,13 +739,12 @@ A revocation record carries an identity's revocations, and the record proves its
 - **`type`.** The value is `"revocation_record"`.
   - Every writer writes this member. A server writes the member in its answers, and `api/openapi.yaml` requires the member there. A client writes the member in every revocation record it sends.
   - A reader accepts a revocation record without this member.
-  - The Go client refuses a revocation record that names another type. A server refuses one with `400 invalid_request`, and `type` in `param`.
-  - A reader that does not read this member loses nothing, because the namespace of each revocation binds the revocation to what the revocation revokes (Sections 10.1 and 10.2). So any revocation that verifies is one this reader may act on, whatever type the record names.
+  - A reader MUST refuse a revocation record that names another type (a server refuses with `400 invalid_request`, and `type` in `param`).
 - **`identity`.** This member is the identity document. In a record that a server serves, the document MUST hash to the address and meet the document's key checks (Section 4.1).
 - **`revocation_signature`.** If present, this member is the revocation of the address (Section 10.1): the revocation's armoured signature, in base64.
 - **`revoked_certificates` and `revoked_certificates_signature`.** If present, these two members are the revocation of certificates (Section 10.2): the revocation statement's three lines and the armoured signature over those lines, each in base64. The revocation statement MUST have exactly that form, with the address as its line 2.
 - **The members are in any order.** A revocation record that a server serves MUST carry at least one of the two revocations.
-- **A reader acts only on what verifies.** A record that is malformed by these rules shows nothing (Section 12.5). For example, a record with no identity, an identity that does not hash to the address, or neither revocation shows nothing.
+- **A reader acts only on what verifies.** A record that parses but is malformed by these rules shows nothing (Section 12.5): for example, a record with no identity, an identity that does not hash to the address, or neither revocation. A record that a reader cannot parse is no record, for example one that names another type or has a byte member that is not base64; a server's answer that carries one is no answer (Section 12.3, check 7).
 - **A reader ignores an unknown member of a revocation record, a server among them (Section 3.3).**
 - **A revocation record from a file counts the same as one from a server.**
   - A verifier rebuilds the revocation statement of the address from the address.
@@ -1583,7 +1582,7 @@ What version 1 fixes, and how each fixed part can grow inside version 1:
 | A certificate's type, key id, principal and one form, with no critical option or extension; its validity, a window checked at the verifier, whose longest is each server's own (Sections 5.2, 11.18) | a new certificate format under a new key id |
 | The two signer forms, their ranks, and the order `(c, p)` (Section 5) | nothing |
 | The namespaces, `dromas-<purpose>-v1:<address>` | a new purpose |
-| A signature's form and its bound (Section 3.2) | a new key type |
+| A signature's form and its bound (Section 3.2) | a new key type, which raises the bound if its signatures are longer |
 | The plaintext: the envelope, the signature block, the padding (Section 9) | the envelope's optional members; `v` changes only for a breaking change |
 | JSON as Section 3.3 reads it; a byte member's one encoding; a message's ciphertext as a send's body | nothing |
 | The largest ciphertext, 16 MiB (Section 11.10) | a new version of the protocol |

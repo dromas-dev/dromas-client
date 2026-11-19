@@ -1299,6 +1299,10 @@ func (e *cli) remedied(own protocol.Address, r *client.Remedy, err error) error 
 		if err == nil {
 			return e.out(line("no_earlier_certificate", "detail", "no earlier certificate to revoke"))
 		}
+	case r.Prekey == nil && r.NotRenewed == nil && r.Revoked != nil:
+		// The remedy stopped at a fault of this mailbox at its keep of the
+		// revocation, and made no renewal.
+		said = fmt.Errorf("the new prekey is NOT made. Every certificate before %d is revoked, the one this mailbox was using among them, so it sends no messages, and its server takes none for it, until a new prekey is taken: dromas cert revoke-earlier tries again", r.Revoked.Through+1)
 	case r.NotRenewed == nil && r.NotRevoked == nil:
 	case r.NotRenewed == nil:
 		said = fmt.Errorf("the new prekey is published, and the earlier certificates are NOT revoked: %w. dromas cert revoke-earlier revokes them", r.NotRevoked)

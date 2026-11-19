@@ -1,6 +1,7 @@
 package sh_test
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -263,6 +264,46 @@ jq -cn --arg i "$(dr_b64 "$DR/identity.doc")" --arg s "$(dr_b64 "$W/wk.sig")" '{
 	}
 	w.honest()
 	if d := rc.recv(); d.rc != 0 || len(d.messages) != 1 {
+		t.Errorf("the drain once the server answers: %v", d)
+	}
+}
+
+// A sender's record that names another type is no record, as the Go client
+// reads it (TestVectorsAnswer, record-bad-type-another): served as a 200 or
+// inside a 410 mailbox_revoked, it stops the drain with the message on the
+// server, though its revocation verifies (PROTOCOL.md §10.3, §12.3 check 7).
+func TestScriptTakesNoRecordThatNamesAnotherType(t *testing.T) {
+	w := newWorld(t)
+	ra, rb := w.mailbox(), w.mailbox()
+	good := bytes.TrimSpace(rb.revocation("rb"))
+	typed := bytes.Replace(good, []byte(`"type":"revocation_record"`), []byte(`"type":"revocation"`), 1)
+	if bytes.Equal(typed, good) {
+		t.Fatalf("no type in %s", good)
+	}
+	rb.mustSend(ra, "waits for an answer")
+	stopped := func(what string) {
+		t.Helper()
+		if d := ra.recv(); d.rc == 0 || len(d.messages) != 0 || w.srv.Count(ra.addr) != 1 || len(ra.files("refused")) != 0 || ra.has("peers/"+rb.addr.String()+"/revoke.sig") {
+			t.Errorf("%s: %v", what, d)
+		}
+	}
+	serving := func(status int, contentType string, body []byte) {
+		w.srv.SetMiddle(func(rw http.ResponseWriter, r *http.Request, next http.Handler) {
+			if x, ok := forge.RevocationsOf(r); ok && x == rb.addr {
+				rw.Header().Set("Content-Type", contentType)
+				rw.WriteHeader(status)
+				_, _ = rw.Write(body)
+				return
+			}
+			next.ServeHTTP(rw, r)
+		})
+	}
+	serving(http.StatusOK, "application/json", typed)
+	stopped("a 200 with the sender's record naming another type")
+	serving(http.StatusGone, "application/problem+json", []byte(`{"type":"`+protocol.CodeMailboxRevoked.TypeURI()+`","code":"mailbox_revoked","status":410,"record":`+string(typed)+`}`))
+	stopped("a 410 mailbox_revoked whose record names another type")
+	w.honest()
+	if d := ra.recv(); d.rc != 0 || len(d.messages) != 1 {
 		t.Errorf("the drain once the server answers: %v", d)
 	}
 }

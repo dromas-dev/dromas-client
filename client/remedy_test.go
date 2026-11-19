@@ -311,37 +311,25 @@ func TestTheRemedyOfAForgottenMailboxAsksItsRevocationsAgainAfterItsConflict(t *
 // after that, is a revocation taken, as a renewal is (#110): the remedy and
 // RevokeEarlier return it with the fault as the call's error, never as a
 // revocation not taken, and the mailbox's next read of itself keeps what its
-// server holds (#383). The fault is a full disk's from the publish on: at
-// the keep alone, after which the remedy's renewal is taken, or at every
-// write after it, where the renewal is not.
+// server holds (#383). The remedy renews nothing past the fault, as after a
+// conflict (TestAFaultKeepingWhatAConflictShowedRenewsNothing). The fault is a
+// full disk's, once, at the keep.
 func TestAFaultAfterTheRevocationWasTakenLeavesItTaken(t *testing.T) {
 	ctx := context.Background()
 	full := &os.PathError{Op: "write", Path: "state", Err: syscall.ENOSPC}
 	for _, c := range []struct {
 		name string
-		// once is a fault at the keep alone.
-		once bool
 		run  func(t *testing.T, b *client.Mailbox) (*protocol.RevokedCertificates, error)
 	}{
-		{"RevokeEarlier", true, func(t *testing.T, b *client.Mailbox) (*protocol.RevokedCertificates, error) {
+		{"RevokeEarlier", func(t *testing.T, b *client.Mailbox) (*protocol.RevokedCertificates, error) {
 			return b.RevokeEarlier(ctx)
 		}},
-		{"the remedy, its renewal taken", true, func(t *testing.T, b *client.Mailbox) (*protocol.RevokedCertificates, error) {
+		{"the remedy", func(t *testing.T, b *client.Mailbox) (*protocol.RevokedCertificates, error) {
 			r, err := b.RenewAndRevoke(ctx)
 			if r == nil {
 				t.Fatalf("no remedy: %v", err)
 			}
-			if r.NotRevoked != nil || r.Prekey == nil || r.NotRenewed != nil {
-				t.Errorf("the remedy: %+v, %v", r, err)
-			}
-			return r.Revoked, err
-		}},
-		{"the remedy, its renewal not taken", false, func(t *testing.T, b *client.Mailbox) (*protocol.RevokedCertificates, error) {
-			r, err := b.RenewAndRevoke(ctx)
-			if r == nil {
-				t.Fatalf("no remedy: %v", err)
-			}
-			if r.NotRevoked != nil || r.Prekey != nil || !errors.Is(r.NotRenewed, syscall.ENOSPC) {
+			if r.NotRevoked != nil || r.Prekey != nil || r.NotRenewed != nil {
 				t.Errorf("the remedy: %+v, %v", r, err)
 			}
 			return r.Revoked, err
@@ -364,7 +352,7 @@ func TestAFaultAfterTheRevocationWasTakenLeavesItTaken(t *testing.T) {
 			})
 			t.Cleanup(func() { client.SetStep(nil) })
 			client.SetWriteFault(t, func() error {
-				if c.once && armed.CompareAndSwap(true, false) || !c.once && armed.Load() {
+				if armed.CompareAndSwap(true, false) {
 					return full
 				}
 				return nil
@@ -378,5 +366,55 @@ func TestAFaultAfterTheRevocationWasTakenLeavesItTaken(t *testing.T) {
 				t.Errorf("the mailbox's next read of itself: %+v, %v", held, err)
 			}
 		})
+	}
+}
+
+// A conflict whose read again shows a higher revocation of the mailbox's
+// certificates, which verifies, and a fault of the mailbox once, at the keep
+// that read makes: the fault is the remedy's error, and the remedy signs and
+// uploads no renewal, which the server would refuse under the revocation the
+// mailbox did not keep. Its next run keeps that revocation and renews above it.
+func TestAFaultKeepingWhatAConflictShowedRenewsNothing(t *testing.T) {
+	ctx := context.Background()
+	full := &os.PathError{Op: "write", Path: "state", Err: syscall.ENOSPC}
+	e := newWorkEnv(t)
+	a := e.mailbox()
+	T := numberOf(t, a) + 7200
+	publish(t, e, certsRecord(t, a.Dir(), T)) // a higher revocation, the identity's own
+	var reads, uploads atomic.Int32
+	var armed, fired atomic.Bool
+	e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
+		if r.Method == http.MethodGet && r.URL.Path == mailboxPath(a) {
+			if reads.Add(1) == 1 { // hidden at the first read: the publish conflicts
+				e.serve(w, r, next, func(br *protocol.MailboxResponse) { br.RevokedCertificates, br.RevokedCertificatesSignature = nil, nil })
+				return
+			}
+			if reads.Load() == 2 { // shown at the read after the conflict; its keep fails
+				armed.Store(true)
+			}
+		}
+		if r.Method == http.MethodPut && r.URL.Path == mailboxPath(a)+"/prekey" {
+			uploads.Add(1)
+		}
+		next.ServeHTTP(w, r)
+	})
+	client.SetWriteFault(t, func() error {
+		if armed.CompareAndSwap(true, false) {
+			fired.Store(true)
+			return full
+		}
+		return nil
+	})
+	r, err := a.RenewAndRevoke(ctx)
+	e.srv.SetMiddle(nil)
+	if !fired.Load() {
+		t.Fatal("the fault never fired")
+	}
+	if !errors.Is(err, syscall.ENOSPC) || r == nil || r.Revoked != nil || r.Prekey != nil || r.NotRenewed != nil || uploads.Load() != 0 {
+		t.Fatalf("the remedy after a fault at the keep a conflict's read made: %+v, %v; %d renewals uploaded", r, err, uploads.Load())
+	}
+	r, err = a.RenewAndRevoke(ctx)
+	if err != nil || r.Revoked == nil || r.Revoked.Through < T || r.Below <= T || r.Prekey == nil || servedSerial(t, e, a) != r.Below {
+		t.Errorf("the next run: %+v, %v; the server holds through %d and serves %d", r, err, T, servedSerial(t, e, a))
 	}
 }

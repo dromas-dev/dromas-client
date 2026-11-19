@@ -28,7 +28,8 @@ const (
 // r and s each take 33 bytes. A field that carries one counts every byte it
 // holds; in a message it is the block from the BEGIN line through the END
 // line and its line feed. Dearmor refuses a longer one before reading it, so
-// every verifier here does.
+// every verifier here does. A key type added later whose signatures are longer
+// raises it with that type (PROTOCOL.md §14).
 const MaxSignature = 947
 
 // Sign signs message in namespace and returns the signature armored
