@@ -1131,6 +1131,7 @@ The server checks the steps below. Only step 9 stores anything.
   - Where such a list's `If-None-Match` would make the answer `304`, the server waits to answer.
   - When the first page's tag no longer matches the `If-None-Match`, the server answers the page as it answers any list.
   - When the wait has passed, the server answers the `304`.
+  - A server MAY hold a wait past a message's expiry; the answer at the wait's end is the page as it then stands.
   - A server makes a long poll wait at most a time that the server chooses. That time is not part of the protocol.
   - The server MAY answer the `304` sooner. The server answers the `304` at once when it stops serving.
   - The server answers a list at once if the list's `If-None-Match` would not make the answer `304`, or if the list's `wait` is `0`.
