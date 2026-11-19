@@ -1435,7 +1435,8 @@ A client drains every page of its list (Section 11.11) and fetches the message o
 
 ### 12.4. Renewal and key deletion
 
-- **Each renewal brings a new prekey.** Before each renewal, the mailbox looks itself up. The mailbox keeps each revocation of its certificates that the lookup carries and that verifies. A renewal goes ahead only on an answer to that lookup, except in the remedy (Section 12.6).
+- **A client MUST give each renewal a prekey unique among the prekeys that the mailbox has made.**
+- **Before each renewal, the mailbox looks itself up.** The mailbox keeps each revocation of its certificates that the lookup carries and that verifies. A renewal goes ahead only on an answer to that lookup, except in the remedy (Section 12.6).
   - A mailbox whose current statement is signed by its identity renews under that identity, or under a certificate (below).
   - A mailbox whose current statement is under a certificate renews under a certificate, because a prekey statement that the identity signs is earlier than the current statement (Section 5.3). A client that makes a new certificate gives it a certificate serial above the revocation serial of the revocation kept from that lookup (Section 5.2).
 - **A mailbox MUST check its own certificate at its own clock before signing under that certificate.** This check stops a mailbox whose clock has gone back past the certificate's start.
