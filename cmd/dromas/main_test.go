@@ -2400,10 +2400,10 @@ func TestCertRevokeEarlierSaysWhatHappenedToEach(t *testing.T) {
 
 // What cert revoke-earlier says of a revocation its server took that the mailbox
 // did not keep, a fault of the mailbox after the server's answer, which the
-// remedy returns as revoked with the fault as its error and no renewal made
+// remedy returns as revoked with the fault as its error
 // (TestAFaultAfterTheRevocationWasTakenLeavesItTaken, in client): revoked, as
-// for any revocation taken, then the prekey not made, then the fault; never
-// "nothing is revoked" (#383). A fake server makes no fault of the mailbox, so the remedy's result is
+// for any revocation taken, then the fault; never "nothing is revoked"
+// (#383). A fake server makes no fault of the mailbox, so the remedy's result is
 // built here.
 func TestCertRevokeEarlierSaysARevocationTakenAndNotKeptIsRevoked(t *testing.T) {
 	own, err := protocol.ParseAddress("d_" + strings.Repeat("ab", 32))
@@ -2423,7 +2423,6 @@ func TestCertRevokeEarlierSaysARevocationTakenAndNotKeptIsRevoked(t *testing.T) 
 	}{
 		{"its renewal not taken", &client.Remedy{Below: 42, NotRenewed: errors.New("the renewal was refused"), Revoked: certs}, "certificates_revoked"},
 		{"its renewal taken", &client.Remedy{Below: 42, Prekey: p, Revoked: certs}, "prekey certificates_revoked"},
-		{"nothing renewed past the fault", &client.Remedy{Below: 42, Revoked: certs}, "certificates_revoked"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			var out, errs bytes.Buffer
@@ -2438,9 +2437,6 @@ func TestCertRevokeEarlierSaysARevocationTakenAndNotKeptIsRevoked(t *testing.T) 
 			}
 			if c.r.NotRenewed != nil && (!strings.Contains(said, "NOT published: the renewal was refused") || !strings.Contains(said, "sends no messages, and its server takes none")) {
 				t.Errorf("beside a renewal not taken: %s", said)
-			}
-			if c.r.Prekey == nil && c.r.NotRenewed == nil && (!strings.Contains(said, "the new prekey is NOT made. Every certificate before 42 is revoked") || !strings.Contains(said, "dromas cert revoke-earlier tries again")) {
-				t.Errorf("beside no renewal made: %s", said)
 			}
 		})
 	}

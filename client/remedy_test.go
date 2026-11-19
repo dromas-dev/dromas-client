@@ -311,25 +311,37 @@ func TestTheRemedyOfAForgottenMailboxAsksItsRevocationsAgainAfterItsConflict(t *
 // after that, is a revocation taken, as a renewal is (#110): the remedy and
 // RevokeEarlier return it with the fault as the call's error, never as a
 // revocation not taken, and the mailbox's next read of itself keeps what its
-// server holds (#383). The remedy renews nothing past the fault, as after a
-// conflict (TestAFaultKeepingWhatAConflictShowedRenewsNothing). The fault is a
-// full disk's, once, at the keep.
+// server holds (#383). The fault is a full disk's from the publish on: at
+// the keep alone, after which the remedy's renewal is taken, or at every
+// write after it, where the renewal is not.
 func TestAFaultAfterTheRevocationWasTakenLeavesItTaken(t *testing.T) {
 	ctx := context.Background()
 	full := &os.PathError{Op: "write", Path: "state", Err: syscall.ENOSPC}
 	for _, c := range []struct {
 		name string
+		// once is a fault at the keep alone.
+		once bool
 		run  func(t *testing.T, b *client.Mailbox) (*protocol.RevokedCertificates, error)
 	}{
-		{"RevokeEarlier", func(t *testing.T, b *client.Mailbox) (*protocol.RevokedCertificates, error) {
+		{"RevokeEarlier", true, func(t *testing.T, b *client.Mailbox) (*protocol.RevokedCertificates, error) {
 			return b.RevokeEarlier(ctx)
 		}},
-		{"the remedy", func(t *testing.T, b *client.Mailbox) (*protocol.RevokedCertificates, error) {
+		{"the remedy, its renewal taken", true, func(t *testing.T, b *client.Mailbox) (*protocol.RevokedCertificates, error) {
 			r, err := b.RenewAndRevoke(ctx)
 			if r == nil {
 				t.Fatalf("no remedy: %v", err)
 			}
-			if r.NotRevoked != nil || r.Prekey != nil || r.NotRenewed != nil {
+			if r.NotRevoked != nil || r.Prekey == nil || r.NotRenewed != nil {
+				t.Errorf("the remedy: %+v, %v", r, err)
+			}
+			return r.Revoked, err
+		}},
+		{"the remedy, its renewal not taken", false, func(t *testing.T, b *client.Mailbox) (*protocol.RevokedCertificates, error) {
+			r, err := b.RenewAndRevoke(ctx)
+			if r == nil {
+				t.Fatalf("no remedy: %v", err)
+			}
+			if r.NotRevoked != nil || r.Prekey != nil || !errors.Is(r.NotRenewed, syscall.ENOSPC) {
 				t.Errorf("the remedy: %+v, %v", r, err)
 			}
 			return r.Revoked, err
@@ -352,7 +364,7 @@ func TestAFaultAfterTheRevocationWasTakenLeavesItTaken(t *testing.T) {
 			})
 			t.Cleanup(func() { client.SetStep(nil) })
 			client.SetWriteFault(t, func() error {
-				if armed.CompareAndSwap(true, false) {
+				if c.once && armed.CompareAndSwap(true, false) || !c.once && armed.Load() {
 					return full
 				}
 				return nil
