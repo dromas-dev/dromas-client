@@ -262,17 +262,7 @@ signature-groups = *16( 4base64-char ) ( 4base64-char / base64-final )
   - a NUL in a string;
   - an integer with an unneeded leading zero byte.
 - **ECDSA's two values of s.** If (r, s) is a P-256 signature, (r, n − s) is also a P-256 signature, where n is the group's order (FIPS 186-5). Each of the two is a signature in the one form. A verifier MUST accept both, and a signer may write either. Anyone who has seen one of the two can write the other (Sections 5.2, 8). An Ed25519 signature has no second form.
-- **A bound on size, per identity key type.** Each identity key type has a bound. The bound is the longest signature, in the one form, that a mailbox of that type can make with the mailbox's identity, or with a working key under a certificate as `ssh-keygen -s` makes one. Such a certificate has a 32-byte nonce, no extension and an empty reserved field (Section 5.2). In the one form, only the namespace and, for ECDSA, the lengths of r and s change a signature's size.
-
-  | Identity key type | Bound | What reaches the bound |
-  |---|---|---|
-  | `ssh-ed25519` | exactly 850 bytes | a prekey statement under a certificate |
-  | `ecdsa-sha2-nistp256` | 947 bytes | the same, with the identity's r and s on the certificate each in 33 bytes, the most the one form gives them |
-
-  - The signature on everything that a mailbox signs is checked against the bound for the mailbox's identity key type. In a message, the bound limits the signature block, from the block's BEGIN line through the LF after the block's END line (Section 9.2).
-  - Every verifier, a server included, MUST refuse a signature longer than the signing mailbox's bound before verifying the signature.
-  - Every verifier MUST refuse a signature longer than the largest bound of any key type before reading the signature.
-  - A key type added later states its own bound, and leaves the bounds of the other key types unchanged.
+- **A bound on size.** A signature is at most 947 bytes. That bound is the longest signature in the one form that a mailbox of a key type of Section 4.1 can make, with the mailbox's identity or with a working key under a certificate as `ssh-keygen -s` makes one. The longest is a P-256 identity's prekey statement under a certificate, with the identity's r and s on the certificate each in 33 bytes. Every verifier MUST refuse a longer signature before reading the signature. In a message, the bound limits the signature block, from the block's BEGIN line through the LF after the block's END line (Section 9.2). A key type added later whose signatures are longer raises the bound with that type (Section 14).
 - **Ed25519's S.** In an SSHSIG and on a certificate, an Ed25519 signature's S is below the group order L (RFC 8032 §5.1.7).
 - **The Ed25519 equation.** The equation is RFC 8032 §5.1.7's without the cofactor, `[S]B = R + [k]A'`, compared as encodings. So a verifier accepts a neutral R, and refuses R with a point of small order added.
 
@@ -327,7 +317,7 @@ A key of a type this section defines MUST be in that type's one encoding, and MU
 
 - **Every client MUST verify every key type this section defines.**
 - **A key type defined after this version is OPTIONAL (Section 14).** Each client decides whether to verify such a type, and each server decides whether to register such a type (Section 11.7). Only a mailbox whose client verifies an optional type can write to a mailbox of that type, or hear from one (Section 7). This version defines no optional type.
-- **Working key.** The table's Working key column gives the type of every working key that an identity of the row's type certifies (Section 5). A key type defined later states both its own working key type and its own signature bound (Section 3.2).
+- **Working key.** The table's Working key column gives the type of every working key that an identity of the row's type certifies (Section 5). A key type defined later states its own working key type.
 - **The form is the same for every key type, defined here or not.** An identity document has the form `identity-document`. In that form, `key-type` is a key type's name as RFC 4251 §6 writes one. The base64 is of an SSH wire key that begins with that same name.
 
   ```abnf
@@ -443,7 +433,7 @@ A certificate is an OpenSSH user certificate. A verifier MUST check every row of
 
 To verify the signature on a prekey statement, a pass or a message, a verifier MUST apply the following steps. The inputs are the armoured signature, the signed bytes, the namespace, the identity document of the mailbox that signed, and the verifier's clock. If any step fails, the verifier refuses the signature. A verifier MAY check in another order only where each signature gets the same result, and a refused signature the same reason.
 
-1. Check that the signature is no longer than the bound for the identity's key type (Section 3.2).
+1. Check that the signature is no longer than the bound (Section 3.2).
 2. Parse the armour and the blob, and check that the signature is in the one form (Section 3.2).
 3. Read the signing key from the blob. If the signing key is the identity key, byte for byte as on line 2 of the identity document, the signer is the identity. Skip to step 5.
 4. Otherwise the signing key MUST be a certificate, so a bare working key fails. The signer is the certificate. Check the certificate by every rule of Section 5.2, including the identity's signature on the certificate. Of those rules, check `valid after` ≤ now < `valid before` last.
@@ -549,7 +539,7 @@ server-port    = %x31-39 *4DIGIT   ; no leading zero, at most 65535,
   base64-token     = 1*( 4( ALPHA / DIGIT / "+" ) )   ; base64 that is a token
   ```
 
-- **A server MUST refuse a value that is too long with `401 invalid_pass`, before the server hashes, parses or verifies the value.** A value is too long when, whitespace included, the value is longer than the form a client writes with a signature of the largest bound that any identity key type has (Section 3.2).
+- **A server MUST refuse a value that is too long with `401 invalid_pass`, before the server hashes, parses or verifies the value.** A value is too long when, whitespace included, the value is longer than the form a client writes with a signature as long as the bound (Section 3.2).
 - **Lifetime.** A client signs a pass to end at most 10 minutes after signing. A server accepts a pass that has not ended and that ends at most the skew allowance after the time on the server's own clock.
 - **A client MAY keep a pass, and use the kept pass for its calls until the pass is about to end.** A client MUST NOT use a kept pass with more than 10 minutes left, because the client's clock has then gone back since the client signed the pass. A client MUST NOT send a kept pass to a server whose name is not the one the pass was signed for. It keeps that name beside the pass, and signs a new pass for any other server, which could otherwise replay the kept pass at the server it names.
 - **A server MAY remember a pass it has verified, by the pass's values with the signature in the one form (Section 3.2).** So a pass is one pass, however the header wrote it. A P-256 identity's pass is one pass, with s or with n − s (Section 3.2). A server that remembers passes MUST compare a P-256 identity's pass using the lower of the two values as s.
@@ -750,10 +740,11 @@ A revocation record carries an identity's revocations, and the record proves its
   - Every writer writes this member. A server writes the member in its answers, and `api/openapi.yaml` requires the member there. A client writes the member in every revocation record it sends.
   - A reader accepts a revocation record without this member.
   - A reader MUST refuse a revocation record that names another type (a server refuses with `400 invalid_request`, and `type` in `param`).
-- **`identity`.** This member is the identity document, which MUST hash to the address and meet its key checks (Section 4.1).
+- **`identity`.** This member is the identity document. In a record that a server serves, the document MUST hash to the address and meet the document's key checks (Section 4.1).
 - **`revocation_signature`.** If present, this member is the revocation of the address (Section 10.1): the revocation's armoured signature, in base64.
 - **`revoked_certificates` and `revoked_certificates_signature`.** If present, these two members are the revocation of certificates (Section 10.2): the revocation statement's three lines and the armoured signature over those lines, each in base64. The revocation statement MUST have exactly that form, with the address as its line 2.
-- **The members are in any order.** A revocation record carries at least one of the two revocations.
+- **The members are in any order.** A revocation record that a server serves MUST carry at least one of the two revocations.
+- **A reader acts only on what verifies.** A record that parses but is malformed by these rules shows nothing (Section 12.5): for example, a record with no identity, an identity that does not hash to the address, or neither revocation. A record that a reader cannot parse is no record, for example one that names another type or has a byte member that is not base64; a server's answer that carries one is no answer (Section 12.3, check 7).
 - **A reader ignores an unknown member of a revocation record, a server among them (Section 3.3).**
 - **A revocation record from a file counts the same as one from a server.**
   - A verifier rebuilds the revocation statement of the address from the address.
@@ -1407,7 +1398,7 @@ A client drains every page of its list (Section 11.11) and fetches the message o
 
 7. **Check 7, revocation.** The reader follows three steps, in this order:
    1. **What the reader keeps comes first, with no call.** A kept revocation of the sender's address (Section 12.5) refuses the message as `sender_revoked`, now and for every later message from that address (Section 10.1). A kept revocation of the sender's certificates that covers the signer (Section 5.1) refuses the message as `certificate_revoked`.
-   2. **Otherwise the reader looks up the sender's revocations (Section 11.15),** once in a drain for each sender, after that sender's signature has verified. The server serves them whether or not the server holds a mailbox for the sender. The reader accepts three answers: a well-formed `200` with a revocation record that holds the identity and at least one revocation (Section 10.3), whether or not the record's revocations verify; a `404 revocation_not_found`; and a `410 mailbox_revoked` whose revocation record verifies. Anything else is no answer, a `410` whose record does not verify among them, so the drain stops and the message stays on the server.
+   2. **Otherwise the reader looks up the sender's revocations (Section 11.15),** once in a drain for each sender, after that sender's signature has verified. The server serves them whether or not the server holds a mailbox for the sender. The reader accepts three answers: any 2xx answer whose body parses as a revocation record (Section 10.3); a `404 revocation_not_found`; and a `410 mailbox_revoked` whose revocation record verifies. A 2xx answer is the server's answer, so what verifies in the record is shown, and nothing else is. For example, `200 {}` shows nothing revoked, as an unsigned `404` does. Anything else is no answer, a `410` whose record does not verify among them, so the drain stops and the message stays on the server.
    3. **On an answer, the reader keeps each revocation that verifies, and applies step 1 again.** If nothing refuses the message, the message passes this check. A revocation that does not verify counts as nothing shown, as Section 12.5 says. A later message from that sender in the drain makes no second call, and the reader applies step 1 to the later message by what the reader then keeps.
 
 8. **Check 8, replay.** The reader computes the SHA-256 of the ciphertext. That hash is not in the replay set (`message_already_received`).
@@ -1591,7 +1582,7 @@ What version 1 fixes, and how each fixed part can grow inside version 1:
 | A certificate's type, key id, principal and one form, with no critical option or extension; its validity, a window checked at the verifier, whose longest is each server's own (Sections 5.2, 11.18) | a new certificate format under a new key id |
 | The two signer forms, their ranks, and the order `(c, p)` (Section 5) | nothing |
 | The namespaces, `dromas-<purpose>-v1:<address>` | a new purpose |
-| A signature's form, and its bound for each key type (Section 3.2) | a new key type, with a bound of its own |
+| A signature's form and its bound (Section 3.2) | a new key type, which raises the bound if its signatures are longer |
 | The plaintext: the envelope, the signature block, the padding (Section 9) | the envelope's optional members; `v` changes only for a breaking change |
 | JSON as Section 3.3 reads it; a byte member's one encoding; a message's ciphertext as a send's body | nothing |
 | The largest ciphertext, 16 MiB (Section 11.10) | a new version of the protocol |

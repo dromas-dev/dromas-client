@@ -100,9 +100,8 @@ const (
 )
 
 // A defined type: the checks its key must pass beyond being a key of that
-// type in its one encoding, the type of the working keys an identity of that
-// type certifies (WorkingKeyType), and the most bytes a signature by a mailbox
-// of that type may be (SignatureBound): the largest it makes in the one form. Its document's form is the one every
+// type in its one encoding, and the type of the working keys an identity of
+// that type certifies (WorkingKeyType). Its document's form is the one every
 // type shares (identityForm), with the key in its one encoding: the base64 of
 // the wire key as it is written back once parsed (PROTOCOL.md §4.1). Ed25519's
 // is 91 bytes and P-256's 171. A working key's type is itself a type defined
@@ -110,30 +109,22 @@ const (
 var identityTypes = map[string]struct {
 	check func(ssh.PublicKey) error
 	work  string
-	bound int
 	// optional is a type PROTOCOL.md §4.1 does not define: one a mailbox
 	// declares (§7).
 	optional bool
 }{
-	// Its bound is exact: a prekey statement under a certificate, 850 bytes in
-	// the one form.
 	IdentityEd25519: {
 		check: func(k ssh.PublicKey) error {
 			return checkEd25519(k.(ssh.CryptoPublicKey).CryptoPublicKey().(ed25519.PublicKey))
 		},
-		work:  IdentityEd25519,
-		bound: 850,
+		work: IdentityEd25519,
 	},
-	// Its bound is a prekey statement under a certificate whose signature
-	// by the identity has an r and an s of 33 bytes each, the most the one
-	// form gives them: one that has fewer is shorter. Its key has no check of
-	// its own: the library refuses a point off the curve, compressed, at
-	// infinity or with a coordinate not below the field's size, and that is
-	// all OpenSSH from 10.3p1 holds a point to.
+	// Its key has no check of its own: the library refuses a point off the
+	// curve, compressed, at infinity or with a coordinate not below the
+	// field's size, and that is all OpenSSH from 10.3p1 holds a point to.
 	IdentityP256: {
 		check: func(ssh.PublicKey) error { return nil },
 		work:  IdentityEd25519,
-		bound: 947,
 	},
 }
 

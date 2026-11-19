@@ -6,8 +6,8 @@ list the messages in inbox/, one JSON line each
 
 Print a "message" line for each message in inbox/, oldest first by sent_at, as
 recv printed it: the messages recv delivered that nobody has deleted since. A
-file there that is not the line recv keeps is left out, and dromas inbox show
-names it.
+file there that is not a message to this mailbox is left out, and dromas inbox
+show names it.
 
 ```
 dromas inbox list [flags]

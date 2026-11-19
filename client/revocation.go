@@ -437,24 +437,20 @@ func (b *Mailbox) lookupRevocation(ctx context.Context, a protocol.Address, l *l
 // whether or not a mailbox is at a, so a sender whose mailbox the server has
 // forgotten is still shown the revocation of its certificates.
 //
-// Two answers are answers: a 200 with the record, which holds the identity and
-// at least one revocation (recordAnswer), whose parts that do not verify count
-// as nothing shown (take), and 404 revocation_not_found, the server's word that it holds
-// none. A 410 mailbox_revoked whose record verifies is kept (proved, in call). Anything
-// else is no answer, an error, another 2xx, a 404 mailbox_not_found and a 410
-// with nothing that verifies among them.
+// Two answers are answers: a 2xx with a record, whose parts that do not verify
+// count as nothing shown (take), and 404 revocation_not_found, the server's word
+// that it holds none. A 410 mailbox_revoked whose record verifies is kept
+// (proved, in call). Anything else is no answer, an error, a 2xx that is no
+// record, a 404 mailbox_not_found and a 410 with nothing that verifies among
+// them.
 func (b *Mailbox) readRevocations(ctx context.Context, a protocol.Address, l *lookups) (bool, error) {
 	var rec protocol.Revocations
-	path := revocationPath(a)
-	resp, err := b.call(ctx, http.MethodGet, path, nil, nil, &rec)
+	_, err := b.call(ctx, http.MethodGet, revocationPath(a), nil, nil, &rec)
 	var gone *RevokedError
 	switch {
 	case errors.As(err, &gone) && gone.Address == a:
 		return true, nil
 	case err == nil:
-		if err := recordAnswer(path, resp, &rec); err != nil {
-			return false, err
-		}
 		held, err := b.take(a, &rec)
 		if err != nil {
 			return false, err
@@ -470,20 +466,6 @@ func (b *Mailbox) readRevocations(ctx context.Context, a protocol.Address, l *lo
 		return false, nil
 	}
 	return false, err
-}
-
-// recordAnswer is nil for an answer to GET …/revocation that is one: a 200,
-// whose record holds the identity and at least one revocation
-// (protocol.Revocations.Check). Any other 2xx is no answer (PROTOCOL.md §12.3
-// check 7), named by its method and path.
-func recordAnswer(path string, resp *http.Response, rec *protocol.Revocations) error {
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("GET %s: a %d, which is no answer: a server serves a record with a 200", path, resp.StatusCode)
-	}
-	if err := rec.Check(); err != nil {
-		return fmt.Errorf("GET %s: %w", path, err)
-	}
-	return nil
 }
 
 // revokedCerts returns the revocation of a's certificates this mailbox holds, or
@@ -599,7 +581,11 @@ func (b *Mailbox) RevokeEarlier(ctx context.Context) (*protocol.RevokedCertifica
 		if err != nil {
 			return nil, err
 		}
-		return b.revokeBelow(ctx, current)
+		certs, err, fault := b.revokeBelow(ctx, current)
+		if fault != nil {
+			return nil, fault
+		}
+		return certs, err
 	})
 }
 
@@ -659,7 +645,9 @@ type Remedy struct {
 // shown its own revocation on the way among them, which is its [RevokedError]
 // alone; otherwise the Remedy says what each publish met, and an error beside
 // it is a fault of this mailbox after a server took the revocation or the
-// renewal, or the mailbox's own revocation, shown at the renewal.
+// renewal, or at its read again of what a server holds after a conflict,
+// where nothing is renewed, or the mailbox's own revocation, shown at the
+// renewal.
 //
 // A mailbox that has no certificate, by what it keeps once it has read
 // itself (no statement it keeps is under one, and its server serves none),
@@ -713,9 +701,14 @@ func (b *Mailbox) renewAndRevoke(ctx context.Context) (*Remedy, error) {
 	r := &Remedy{Below: below, Unread: st.unread}
 	// A revocation the server took that this mailbox did not keep is taken: the
 	// fault is the call's error, beside whatever the renewal meets, as a
-	// renewal's is (#110, #383).
-	var notKept error
-	if r.Revoked, r.NotRevoked = b.revokeBelow(ctx, below); r.Revoked != nil {
+	// renewal's is (#110, #383). A fault at its keep after a conflict is the
+	// call's error, and nothing is renewed: the server would refuse a renewal
+	// numbered under the higher revocation it showed, which this mailbox did
+	// not keep. The next run keeps it.
+	var notKept, fault error
+	if r.Revoked, r.NotRevoked, fault = b.revokeBelow(ctx, below); fault != nil {
+		return r, fault
+	} else if r.Revoked != nil {
 		notKept, r.NotRevoked = r.NotRevoked, nil
 	}
 	done := func(err error) (*Remedy, error) {
@@ -737,15 +730,11 @@ func (b *Mailbox) renewAndRevoke(ctx context.Context) (*Remedy, error) {
 		r.NotRenewed = refuse("the server holds a revocation of this mailbox's certificates higher than the one it signed, and showed none that verifies: nothing is renewed above it. dromas revocation ask <this mailbox's address> reads it again, and dromas cert revoke-earlier tries again")
 		return done(nil)
 	}
-	// Numbered once the revocation is final: above whatever a server showed
-	// on the way, kept or not (#406 item 1).
+	// Numbered once the revocation is final: above what this mailbox keeps.
 	held, err := b.revokedCerts(own)
 	if err != nil {
 		r.NotRenewed = err
 		return done(nil)
-	}
-	if r.Revoked != nil && (held == nil || held.Through < r.Revoked.Through) {
-		held = r.Revoked
 	}
 	if held != nil && held.Through >= r.Below {
 		if r.NotRenewed = noneAbove(held.Through); r.NotRenewed != nil {
@@ -759,8 +748,7 @@ func (b *Mailbox) renewAndRevoke(ctx context.Context) (*Remedy, error) {
 		return done(nil)
 	}
 	at, err := b.sendRenewal(ctx, req, r.Below)
-	took, err := b.tookRenewal(r.Below, at, err)
-	if !took {
+	if at.IsZero() {
 		r.NotRenewed = err
 		return done(nil)
 	}
@@ -793,27 +781,29 @@ func (b *Mailbox) ownRevokes(n uint64) bool {
 // once it verifies: it is the revocation, with no error, when it covers every
 // certificate below serial, as the mailbox's would have; otherwise the serial_too_low
 // is the error (PROTOCOL.md §12.6). The revocation with an error is one the
-// server took or holds, and a fault of this mailbox at its keep after that.
-func (b *Mailbox) revokeBelow(ctx context.Context, serial uint64) (*protocol.RevokedCertificates, error) {
+// server took, and a fault of this mailbox at its keep after that. The third
+// value is a fault of this mailbox at the read again after a serial_too_low,
+// beside nothing: what a caller renews would be under what the server showed.
+func (b *Mailbox) revokeBelow(ctx context.Context, serial uint64) (*protocol.RevokedCertificates, error, error) {
 	if serial <= 1 {
-		return nil, nil
+		return nil, nil, nil
 	}
 	own := b.id.Address()
 	through := serial - 1
 	held, err := b.revokedCerts(own)
 	if err != nil {
-		return nil, err
+		return nil, err, nil
 	}
 	if held != nil {
 		through = max(through, held.Through)
 	}
 	certs, err := protocol.NewRevokedCertificates(own, through)
 	if err != nil {
-		return nil, err
+		return nil, err, nil
 	}
 	sig, err := b.identity.RevokedCertificates(certs)
 	if err != nil {
-		return nil, err
+		return nil, err, nil
 	}
 	rec := &protocol.Revocations{Identity: b.id.Document(), RevokedCertificates: certs.Statement(), RevokedCertificatesSignature: sig}
 	// Once the server has taken it, it is out, and this mailbox keeps it: the
@@ -822,34 +812,29 @@ func (b *Mailbox) revokeBelow(ctx context.Context, serial uint64) (*protocol.Rev
 	if perr == nil {
 		step("revocation published")
 		if err := b.keepRevokedCerts(own, rec.Identity, rec.RevokedCertificates, rec.RevokedCertificatesSignature); err != nil {
-			return certs, err
+			return certs, err, nil
 		}
 		step("revocation kept")
-		return certs, nil
+		return certs, nil, nil
 	}
 	if code(perr) != protocol.CodeSerialTooLow {
-		return nil, perr
+		return nil, perr, nil
 	}
-	o, err := b.known(ctx)
-	if err != nil {
-		// One the read showed, verified, that covers what this one would
-		// have is the revocation whether or not this mailbox kept it: the fault
-		// comes beside it, as at a keep after the publish (#406 item 1).
-		if o.certs != nil && o.certs.Through >= serial-1 && ownRevoked(err) == nil {
-			return o.certs, err
-		}
-		return nil, err
+	if _, err := b.known(ctx); ownRevoked(err) != nil {
+		return nil, err, nil
+	} else if err != nil {
+		return nil, nil, err
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return nil, err, nil
 	}
 	if held, err = b.revokedCerts(own); err != nil {
-		return nil, err
+		return nil, err, nil
 	}
 	if held != nil && held.Through >= serial-1 {
-		return held, nil
+		return held, nil, nil
 	}
-	return nil, fmt.Errorf("%w; it showed no revocation of this mailbox's certificates that verifies and covers every one below %d", perr, serial)
+	return nil, fmt.Errorf("%w; it showed no revocation of this mailbox's certificates that verifies and covers every one below %d", perr, serial), nil
 }
 
 // unproven is an answer about a revocation whose read for the proof failed:

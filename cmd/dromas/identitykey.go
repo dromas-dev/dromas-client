@@ -422,8 +422,7 @@ passphrase from the askpass program unlocks the key file, agent add fails with
 "identity_locked". Any other ssh-add failure is reported with what ssh-add wrote
 to stderr.
 
-agent add refuses a revoked mailbox, which signs nothing more, before ssh-add
-runs. Before ssh-add runs, an "agent_add" line gives the command it runs. Once
+Before ssh-add runs, an "agent_add" line gives the command it runs. Once
 the agent holds the key, an "agent_added" line gives the mailbox's signer, as
 status names it.
 
@@ -440,13 +439,9 @@ except in a command run with --askpass or at a terminal.`,
 			if err != nil {
 				return err
 			}
-			// A revoked mailbox signs nothing more, so its key goes in no agent.
 			st, err := b.Status(c.Context())
 			if err != nil {
 				return err
-			}
-			if st.Revoked {
-				return &client.RevokedError{Address: b.Address(), Own: true}
 			}
 			file := b.Path("identity")
 			env := []string{"SSH_AUTH_SOCK=" + socket}

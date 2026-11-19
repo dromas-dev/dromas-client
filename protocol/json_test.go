@@ -28,8 +28,7 @@ func TestVectorJSON(t *testing.T) {
 }
 
 // answerTypes is what each kind of answer/ vector is read into, as the Go
-// client reads that answer: by Unmarshal, and then the record's Check, which a
-// reader of a server's revocations holds it to (answerOf).
+// client reads that answer: by Unmarshal.
 var answerTypes = map[string]func() any{
 	"mailbox": func() any { return new(MailboxResponse) },
 	"list":    func() any { return new(MessageList) },
@@ -43,8 +42,8 @@ var answerTypes = map[string]func() any{
 // answer.
 func TestVectorAnswers(t *testing.T) {
 	files := glob(t, "answer/*.json")
-	if len(files) != 64 {
-		t.Fatalf("%d answer/ vectors, want 64", len(files))
+	if len(files) != 61 {
+		t.Fatalf("%d answer/ vectors, want 61", len(files))
 	}
 	for _, f := range files {
 		name := strings.TrimSuffix(filepath.Base(f), ".json")
@@ -53,7 +52,7 @@ func TestVectorAnswers(t *testing.T) {
 		if !ok {
 			t.Fatalf("%s: no kind of answer is %q", name, kind)
 		}
-		err := answerOf(read(t, "answer/"+filepath.Base(f)), v())
+		err := Unmarshal(read(t, "answer/"+filepath.Base(f)), v())
 		switch {
 		case strings.HasPrefix(verdict, "ok-") || verdict == "ok":
 			if err != nil {
@@ -70,20 +69,9 @@ func TestVectorAnswers(t *testing.T) {
 	// A record's names in another case are members the record does not have:
 	// this one shows no revocation of certificates.
 	var rec Revocations
-	if err := answerOf(read(t, "answer/record-ok-names-in-another-case.json"), &rec); err != nil || rec.RevokedCertificates != nil || rec.RevokedCertificatesSignature != nil {
+	if err := Unmarshal(read(t, "answer/record-ok-names-in-another-case.json"), &rec); err != nil || rec.RevokedCertificates != nil || rec.RevokedCertificatesSignature != nil {
 		t.Errorf("a record's names in another case are read as its members: %+v, %v", rec, err)
 	}
-}
-
-// answerOf reads data into v as the Go client reads that kind of answer.
-func answerOf(data []byte, v any) error {
-	if err := Unmarshal(data, v); err != nil {
-		return err
-	}
-	if rec, ok := v.(*Revocations); ok {
-		return rec.Check()
-	}
-	return nil
 }
 
 // A request is read as an answer is, and a member its call does not take is

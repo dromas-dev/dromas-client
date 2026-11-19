@@ -139,8 +139,7 @@ func (b *Mailbox) renewFrom(ctx context.Context, st *ownRead) (*protocol.Prekey,
 		// From here a statement at next exists, signed, whatever the server
 		// makes of it.
 		at, err := b.sendRenewal(ctx, req, next)
-		took, err := b.tookRenewal(next, at, err)
-		if took {
+		if !at.IsZero() {
 			return p, at, err
 		}
 		if attempt > 0 || code(err) != protocol.CodeCertificateLifetimeTooLong {
@@ -173,30 +172,6 @@ func (b *Mailbox) shorter(err error) error {
 	return nil
 }
 
-// tookRenewal decides whether renewal n is taken once sendRenewal has
-// returned at and err for it, from the mailbox's state: n recorded published,
-// which publish writes of an upload its server took and a read of itself
-// writes of a statement its server serves (noteServed), the one place that
-// fact is kept, never the upload's answer. An upload answered otherwise,
-// whose read again served it, is taken with no reading to prune by, and that
-// answer is no error (#402 item 1). The reading at is the server's having
-// taken the upload where a fault of this mailbox kept it from being recorded
-// (#110). The error beside a renewal taken is a fault of this mailbox.
-func (b *Mailbox) tookRenewal(n uint64, at time.Time, err error) (bool, error) {
-	if !at.IsZero() {
-		return true, err
-	}
-	published, perr := b.publishedSerial()
-	if perr != nil || published < n {
-		return false, errors.Join(err, perr)
-	}
-	if code(err) != "" {
-		// The upload's answer, which the read after it showed wrong.
-		return true, nil
-	}
-	return true, err
-}
-
 // renewal is a renewal made and signed, ready to send.
 type renewal struct {
 	req protocol.PrekeyRequest
@@ -214,9 +189,7 @@ type renewal struct {
 // once more (known, whose error, a fault of the mailbox or its own revocation,
 // ends the renewal there), and where that read shows no mailbox, every call
 // answered, the same statement goes as its registration (#386); otherwise it
-// returns the upload's answer, and whether the renewal was taken is the mailbox's
-// state's to say (tookRenewal), which that read wrote if it served the
-// statement (noteServed).
+// returns the upload's answer.
 //
 // A server that holds no mailbox holds no ACL of it, and a mailbox registered anew
 // has none there, so what this mailbox kept of the last one the server took goes

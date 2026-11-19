@@ -736,8 +736,7 @@ func (b *Mailbox) keptAgainst(a protocol.Address, signer *protocol.Signer) (gone
 
 // keptLineOf is the line inbox/ and held/ keep of a delivered envelope, and
 // recv prints: the envelope without its identity document, what nobody sees
-// escaped (escapeUnseen). keptLine takes a kept file only when it is this
-// line, byte for byte.
+// escaped (escapeUnseen). keptLine prints a kept file as this line.
 func keptLineOf(env *protocol.Envelope) ([]byte, error) {
 	shown := *env
 	shown.Identity = nil

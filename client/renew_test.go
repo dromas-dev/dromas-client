@@ -249,71 +249,11 @@ func TestARenewalWhoseUploadIs404RegistersOnlyOnAReadThatShowsNoMailbox(t *testi
 	}
 }
 
-// An upload the server took and answered 404 mailbox_not_found, whose read
-// again serves the very statement it carried, is a renewal taken, by the mailbox's
-// state, which that read wrote (noteServed): Rekey, Receive's renewal and the
-// remedy return the new prekey with no error, the server's answer being no
-// fault of the mailbox, and recv keeps no failed renewal (#402 item 1).
-func TestAnUploadAnswered404WhoseReadAgainServesItIsTaken(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	for _, how := range []string{"prekey renew", "recv", "cert revoke-earlier"} {
-		t.Run(how, func(t *testing.T) {
-			e := newEnv(t)
-			e.working = how == "cert revoke-earlier"
-			b := e.mailbox()
-			first := numberOf(t, b)
-			if how == "recv" {
-				e.clock.Add(25 * time.Hour)
-			} else {
-				e.clock.Add(2 * time.Second)
-			}
-			var lied atomic.Bool
-			e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
-				if r.Method == http.MethodPut && r.URL.Path == mailboxPath(b)+"/prekey" && lied.CompareAndSwap(false, true) {
-					next.ServeHTTP(httptest.NewRecorder(), r) // taken
-					forge.Refuse(w, protocol.CodeMailboxNotFound)
-					return
-				}
-				next.ServeHTTP(w, r)
-			})
-			var p *protocol.Prekey
-			var err error
-			switch how {
-			case "prekey renew":
-				p, err = b.Rekey(ctx)
-			case "recv":
-				res, rerr := b.Receive(ctx)
-				if rerr != nil {
-					t.Fatal(rerr)
-				}
-				p, err = res.Renewed, res.RenewErr
-			case "cert revoke-earlier":
-				r, rerr := b.RenewAndRevoke(ctx)
-				if r == nil {
-					t.Fatalf("no remedy: %v", rerr)
-				}
-				p, err = r.Prekey, errors.Join(r.NotRenewed, rerr)
-			}
-			e.srv.SetMiddle(nil)
-			if !lied.Load() {
-				t.Fatal("no upload was answered 404")
-			}
-			if p == nil || err != nil || numberOf(t, b) == first || numberOf(t, b) != p.Serial || servedSerial(t, e, b) != p.Serial {
-				t.Fatalf("%s: prekey %+v, error %v; the mailbox records published %d (was %d), the server serves %d", how, p, err, numberOf(t, b), first, servedSerial(t, e, b))
-			}
-			if _, held := b.Record(t, "renew-failed"); held {
-				t.Errorf("%s: the mailbox keeps a failed renewal beside the one it recorded taken", how)
-			}
-		})
-	}
-}
-
 // An upload the server took, and a fault of the mailbox at the write that records
 // it, is a renewal taken all the same, by the reading the server took: the
-// mailbox's state could not hold what the fault did not write (tookRenewal;
-// #110). Rekey returns the prekey with the fault, and the mailbox's next read of
-// itself records it, so the next renewal goes above it (#402 item 1).
+// mailbox's state could not hold what the fault did not write (#110). Rekey
+// returns the prekey with the fault, and the mailbox's next read of itself
+// records it, so the next renewal goes above it.
 func TestAFaultRecordingARenewalTheServerTookLeavesItTaken(t *testing.T) {
 	ctx := context.Background()
 	full := &os.PathError{Op: "write", Path: "state", Err: syscall.ENOSPC}
@@ -801,9 +741,7 @@ func TestTheNewestRetiredPrekeyIsKeptWhileTheTakeIsUnknown(t *testing.T) {
 		next.ServeHTTP(w, r)
 	})
 	took := e.clock.Now()
-	if p, err := b.Rekey(ctx); p == nil || err != nil {
-		t.Fatalf("the renewal its read of itself showed taken: %v, %v", p, err)
-	}
+	_, _ = b.Rekey(ctx) // its read of itself records the renewal served (noteServed)
 	e.srv.SetMiddle(nil)
 	k3 := numberOf(t, b)
 	if k3 <= k2 {

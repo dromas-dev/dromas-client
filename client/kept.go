@@ -1,7 +1,6 @@
 package client
 
 import (
-	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -49,7 +48,7 @@ func (b *Mailbox) inboxMessage(id string) (Delivery, error) {
 	}
 	l, _, env, ok := b.keptLine(data)
 	if !ok {
-		return Delivery{}, fmt.Errorf("inbox/%s.json is not the line recv keeps: it was cut short, or written since by something else", id)
+		return Delivery{}, fmt.Errorf("inbox/%s.json is not a message to this mailbox", id)
 	}
 	return Delivery{ID: id, Envelope: env, Line: l}, nil
 }
@@ -57,7 +56,7 @@ func (b *Mailbox) inboxMessage(id string) (Delivery, error) {
 // Inbox returns the messages inbox/ keeps, oldest first by sent_at, then by
 // id, each as
 // [Mailbox.InboxMessage] returns it: what recv delivered and nobody has pruned
-// since. A file that is not the line recv keeps is left out, as
+// since. A file that is not a message to this mailbox is left out, as
 // [Mailbox.InboxMessage] refuses it. It reads only inbox/, once the mailbox's
 // format is this client's, and calls no server.
 func (b *Mailbox) Inbox(ctx context.Context) ([]Delivery, error) {
@@ -77,18 +76,11 @@ func (b *Mailbox) inbox() ([]Delivery, error) {
 	return out, nil
 }
 
-// keptLine reads a file inbox/ or held/ keeps as the line recv wrote: one
-// that reads back as the record of a message to this mailbox
-// ([protocol.OpenEnvelopeRecord], which reads no clock) and is, byte for
-// byte, the line recv writes of that record (keptLineOf). A file cut short,
-// as a recv stopped midway can leave one, with more in it, members recv
-// never writes, or the same members written another way, is none: whoever
-// last wrote the file is not known here, and only recv's own line is
-// printed (#298).
+// keptLine reads a file inbox/ or held/ keeps as the record of a message to
+// this mailbox ([protocol.OpenEnvelopeRecord], which reads no clock), and
+// returns the line recv writes of that record (keptLineOf): whoever last wrote
+// the file is not known here, so what is printed is that line, rebuilt.
 func (b *Mailbox) keptLine(data []byte) (line []byte, from protocol.Address, env *protocol.Envelope, ok bool) {
-	if len(data) == 0 || data[0] != '{' || bytes.ContainsAny(data, "\r\n") {
-		return nil, from, nil, false
-	}
 	var f struct {
 		From string `json:"from"`
 	}
@@ -103,10 +95,11 @@ func (b *Mailbox) keptLine(data []byte) (line []byte, from protocol.Address, env
 	if err != nil {
 		return nil, from, nil, false
 	}
-	if want, err := keptLineOf(env); err != nil || !bytes.Equal(want, data) {
+	line, err = keptLineOf(env)
+	if err != nil {
 		return nil, from, nil, false
 	}
-	return data, from, env, true
+	return line, from, env, true
 }
 
 // keptRefusal is a refused message as refused/<id>.json keeps it: the

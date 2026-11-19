@@ -73,9 +73,6 @@ func VerifySigned(id *Identity, message, signature []byte, namespace string, now
 
 // verifySigned is VerifySigned with a certificate held to check.
 func verifySigned(id *Identity, message, signature []byte, namespace string, check func(ssh.PublicKey) (*Certificate, error)) (*Signer, error) {
-	if err := withinBound(signature, id.Type()); err != nil {
-		return nil, err
-	}
 	blob, err := Dearmor(signature)
 	if err != nil {
 		return nil, err

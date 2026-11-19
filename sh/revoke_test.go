@@ -268,13 +268,11 @@ jq -cn --arg i "$(dr_b64 "$DR/identity.doc")" --arg s "$(dr_b64 "$W/wk.sig")" '{
 	}
 }
 
-// A sender's revocations are an answer only as a 200 whose record holds the
-// identity and at least one revocation and names no other type, as the Go client
-// reads them (TestNoAnswerAboutASenderStopsTheDrain): anything else stops the
-// drain with the message on the server, the sender's own record that verifies
-// among them, as a 201 or naming another type, as a 200 or inside a 410 mailbox_revoked
-// (PROTOCOL.md §10.3, §12.3 check 7).
-func TestScriptTakesARecordOnlyAsA200ThatHoldsOne(t *testing.T) {
+// A sender's record that names another type is no record, as the Go client
+// reads it (TestVectorsAnswer, record-bad-type-another): served as a 200 or
+// inside a 410 mailbox_revoked, it stops the drain with the message on the
+// server, though its revocation verifies (PROTOCOL.md §10.3, §12.3 check 7).
+func TestScriptTakesNoRecordThatNamesAnotherType(t *testing.T) {
 	w := newWorld(t)
 	ra, rb := w.mailbox(), w.mailbox()
 	good := bytes.TrimSpace(rb.revocation("rb"))
@@ -289,10 +287,6 @@ func TestScriptTakesARecordOnlyAsA200ThatHoldsOne(t *testing.T) {
 			t.Errorf("%s: %v", what, d)
 		}
 	}
-	for _, v := range []string{"record-bad-empty-object.json", "record-bad-null-members.json", "record-bad-identity-alone.json", "record-bad-no-identity.json"} {
-		w.showingRevocations(rb, mustRead(t, filepath.Join(vectors, "answer", v)))
-		stopped(v + " as the sender's revocations")
-	}
 	serving := func(status int, contentType string, body []byte) {
 		w.srv.SetMiddle(func(rw http.ResponseWriter, r *http.Request, next http.Handler) {
 			if x, ok := forge.RevocationsOf(r); ok && x == rb.addr {
@@ -304,8 +298,6 @@ func TestScriptTakesARecordOnlyAsA200ThatHoldsOne(t *testing.T) {
 			next.ServeHTTP(rw, r)
 		})
 	}
-	serving(http.StatusCreated, "application/json", good)
-	stopped("a 201 with the sender's record")
 	serving(http.StatusOK, "application/json", typed)
 	stopped("a 200 with the sender's record naming another type")
 	serving(http.StatusGone, "application/problem+json", []byte(`{"type":"`+protocol.CodeMailboxRevoked.TypeURI()+`","code":"mailbox_revoked","status":410,"record":`+string(typed)+`}`))
@@ -450,14 +442,11 @@ dr_api PUT "/v1/$A/prekey" "$W/top.json" -H "Authorization: dromas-pass address=
 		t.Errorf("control: a message the taken key signs, while nothing revokes it: %v", d)
 	}
 	// A revocation the working key signs is none: a working key signs no
-	// revocation, so its signature in that namespace is past its type's bound
-	// and refused before it is read. The identity's, through every certificate
-	// before the new one, is published with no pass. (What the server takes of
-	// either is dromas-server's to test.)
+	// revocation, and a revocation is held to the identity's own key. The
+	// identity's, through every certificate before the new one, is published
+	// with no pass. (What the server takes of either is dromas-server's to
+	// test.)
 	cb.certs("CBw", n1, cb.file(fmt.Sprintf("work/%d-cert.pub", n2)))
-	if r := ca.sh(fmt.Sprintf(`dr_signed %s %s dromas-revoke-certs-v1:%[1]s "$W/CBw.sig" "$W/CBw.certs" > /dev/null`, cb.addr, cb.file("identity.doc"))); r.rc == 0 {
-		t.Errorf("a working key's signature in the revocation namespace is read as a signature: %v", r)
-	}
 	if r := ca.sh(fmt.Sprintf(`dr_certscheck %s %s "$W/CBw.certs" "$W/CBw.sig"`, cb.addr, cb.file("identity.doc"))); r.rc == 0 {
 		t.Errorf("a revocation of certificates the working key signed is taken: %v", r)
 	}

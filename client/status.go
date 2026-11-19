@@ -199,7 +199,7 @@ func (b *Mailbox) status() (*Status, error) {
 	if certified {
 		s.Signer = SignerCertificate
 	}
-	s.IdentityKey, s.Agent = b.identityKey(!s.Revoked), b.unlock.agent
+	s.IdentityKey, s.Agent = b.identityKey(), b.unlock.agent
 	// A locked key is an owner's choice, and identity_key says so. It needs a
 	// look only once a renewal is due, which needs the identity's key: from
 	// then, unless the key is unlocked, senders are refused once the prekey

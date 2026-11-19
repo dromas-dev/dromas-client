@@ -132,12 +132,9 @@ type Pass struct {
 
 // MaxPassAuthorization is the longest an Authorization value carrying a pass
 // can be in the one form a sender writes: its fixed parts, an address, a time,
-// and the standard base64 of a signature of MaxSignature bytes. A pass is
-// signed by the identity or a working key under a certificate the identity
-// signed, so its size is its identity's key type's; and ParsePass refuses a
-// longer value, in any form, before it reads it, so before it knows the mailbox
-// (PROTOCOL.md §8). So the bound is the most any identity key type allows,
-// and whitespace a sender adds counts toward it.
+// and the standard base64 of a signature of MaxSignature bytes. ParsePass
+// refuses a longer value, in any form, before it reads it, so before it knows
+// the mailbox (PROTOCOL.md §8), and whitespace a sender adds counts toward it.
 const MaxPassAuthorization = len(PassScheme+` address="", not_after="", signature=""`) + AddressLen + len(TimeLayout) + (MaxSignature+2)/3*4
 
 // passSignature is the form of a pass's signature value: standard base64,
@@ -428,12 +425,7 @@ func (p *Pass) VerifyUnder(sum [sha256.Size]byte, server string, now time.Time) 
 	if sha256.Sum256(key.Marshal()) != sum {
 		return nil, fmt.Errorf("%w: the pass is not signed by the signer on record", ErrCertificate)
 	}
-	identityType := key.Type()
 	if cert, ok := key.(*ssh.Certificate); ok {
-		if cert.SignatureKey == nil {
-			return nil, fmt.Errorf("%w: the pass is not signed by the signer on record", ErrCertificate)
-		}
-		identityType = cert.SignatureKey.Type()
 		// The pass names a mailbox, and the certificate names the one it is for.
 		if len(cert.ValidPrincipals) != 1 || cert.ValidPrincipals[0] != p.Address.String() {
 			return nil, fmt.Errorf("%w: it is another mailbox's", ErrPass)
@@ -445,11 +437,6 @@ func (p *Pass) VerifyUnder(sum [sha256.Size]byte, server string, now time.Time) 
 		case unix >= cert.ValidBefore:
 			return nil, ErrCertificateEnded
 		}
-	}
-	// The key on record names the identity, and so the bound its mailbox's
-	// signatures are held to.
-	if withinBound(p.signature, identityType) != nil {
-		return nil, fmt.Errorf("%w: its signature is longer than its identity's key type allows", ErrPass)
 	}
 	if err := sshsig.Verify(key, PassStatement(p.Address, server, p.NotAfter), blob, PassNamespace(p.Address)); err != nil {
 		return nil, fmt.Errorf("%w: its signature does not verify", ErrPass)
