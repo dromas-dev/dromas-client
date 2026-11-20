@@ -249,9 +249,14 @@ func TestACallWithNoAnswerSaysWhatKind(t *testing.T) {
 	untrusted := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	t.Cleanup(untrusted.Close)
 	// A server the mailbox trusts that ends the handshake with an alert: it asks
-	// for a client certificate, and the mailbox has none.
+	// for a client certificate, and the mailbox has none. TLS 1.2, where the
+	// client waits for the server's Finished before it writes a request, so the
+	// alert comes inside the handshake: in TLS 1.3 the client writes its request
+	// first, and the server closing with it unread sends a reset, which a stack
+	// may deliver ahead of the alert (RFC 8446 §2, Figure 1: the client's
+	// application data follows its own Finished).
 	alerting := httptest.NewUnstartedServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
-	alerting.TLS = &tls.Config{ClientAuth: tls.RequireAnyClientCert, MinVersion: tls.VersionTLS13}
+	alerting.TLS = &tls.Config{ClientAuth: tls.RequireAnyClientCert, MaxVersion: tls.VersionTLS12}
 	alerting.StartTLS()
 	t.Cleanup(alerting.Close)
 	// A server that answers neither TLS nor HTTP. It reads the whole of the
