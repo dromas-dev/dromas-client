@@ -155,9 +155,8 @@ func TestADrainMendedPartWayDeletesByTheListOfTheDrainAfterIt(t *testing.T) {
 // RecvWithin's cadence leaves the prekey the room for senders' clocks and for
 // the renewal's calls by the mailbox's clock when recv begins, and recv's
 // renewal reads the mailbox's own mailbox before it publishes. At a lifetime of
-// a day, the shortest that leaves an hour for clocks, a mailbox 9m59s slow and
-// a sender 50m fast, the two clocks furthest apart a server takes; at the
-// shortest lifetime, which leaves five minutes, two clocks 4m59s apart. recv
+// a day, the shortest, a mailbox 9m59s slow and
+// a sender 50m fast, the two clocks furthest apart a server takes. recv
 // runs exactly RenewAt after the prekey was made (renewDue renews once it is
 // older), then exactly RecvWithin later. The sender sends every second from 3
 // seconds before the second recv to 3 seconds after it, and once while the
@@ -176,8 +175,6 @@ func TestARenewalAtRecvWithinWhoseReadTakesSeconds(t *testing.T) {
 		{"a day, the read takes 5s", day, slow, fast, 5 * time.Second},
 		{"control: a day, the read takes no time", day, slow, fast, 0},
 		{"control: a day, the read takes 5s, the mailbox right and the sender 30m fast", day, 0, 30 * time.Minute, 5 * time.Second},
-		{"the shortest lifetime, the read takes 5s", client.MinPrekeyLifetime, -2 * time.Minute, 2*time.Minute + 59*time.Second, 5 * time.Second},
-		{"control: the shortest lifetime, the read takes 5s, the mailbox right and the sender 2m fast", client.MinPrekeyLifetime, 0, 2 * time.Minute, 5 * time.Second},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			e := newEnv(t)

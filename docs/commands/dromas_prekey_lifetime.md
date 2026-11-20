@@ -5,7 +5,7 @@ print how long each new prekey is valid
 ### Synopsis
 
 Print how long each new prekey of this mailbox is valid, which the config file's
-prekey-lifetime sets: from 6h to 8d, the default. A time is written as sshd
+prekey-lifetime sets: from 1d to 8d, the default. A time is written as sshd
 writes one: numbers, each with a unit, s, m, h, d or w, added together, as in
 2d2h or 90m. A number without a unit is seconds.
 

@@ -128,7 +128,7 @@ A PEM file of certificates. When set, `dromas` trusts only these certificates fo
 
 ### `prekey-lifetime`
 
-- Type: time, from `6h` to `8d`
+- Type: time, from `1d` to `8d`
 - Default: `8d`
 - Flag: `--prekey-lifetime`
 

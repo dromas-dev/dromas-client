@@ -180,10 +180,10 @@ dr_identity(){ # → identity.pub, identity.doc and address, the identity as the
 }
 
 # recipe: keys and registration
-dr_lifetime(){ # → the seconds each new prekey of this mailbox is valid for: what its prekey-lifetime file names, a number of seconds alone on its line from 21600 (6 hours) to 691200 (8 days), or 691200 when it has none. A file that names anything else is a refusal, never the default: no prekey is signed until it is put right (PROTOCOL.md §12.4)
+dr_lifetime(){ # → the seconds each new prekey of this mailbox is valid for: what its prekey-lifetime file names, a number of seconds alone on its line from 86400 (a day) to 691200 (8 days), or 691200 when it has none. A file that names anything else is a refusal, never the default: no prekey is signed until it is put right (PROTOCOL.md §12.4)
   local l; [ -e "$DR/prekey-lifetime" ] || { echo 691200; return 0; }
-  l=$(cat "$DR/prekey-lifetime" 2> /dev/null) && [[ $l =~ ^[1-9][0-9]{0,9}$ ]] && { printf '%s\n' "$l" | cmp -s - "$DR/prekey-lifetime" || printf '%s' "$l" | cmp -s - "$DR/prekey-lifetime"; } && [ "$l" -ge 21600 ] && [ "$l" -le 691200 ] && echo "$l" ||      # compared with itself rebuilt: $(…) drops line feeds and NULs
-    dr_refuse "this mailbox's prekey-lifetime file names no lifetime: one is a number of seconds, alone on its line, from 21600 (6 hours) to 691200 (8 days)"
+  l=$(cat "$DR/prekey-lifetime" 2> /dev/null) && [[ $l =~ ^[1-9][0-9]{0,9}$ ]] && { printf '%s\n' "$l" | cmp -s - "$DR/prekey-lifetime" || printf '%s' "$l" | cmp -s - "$DR/prekey-lifetime"; } && [ "$l" -ge 86400 ] && [ "$l" -le 691200 ] && echo "$l" ||      # compared with itself rebuilt: $(…) drops line feeds and NULs
+    dr_refuse "this mailbox's prekey-lifetime file names no lifetime: one is a number of seconds, alone on its line, from 86400 (a day) to 691200 (8 days)"
 }
 dr_prekey(){ # <serial> → prekeys/<serial>.agekey and its statement, signed by this mailbox's identity: a NEW key, valid for the mailbox's prekey lifetime (dr_lifetime), and prekeys/<serial>.made, when it was signed: a statement an earlier attempt left is sent again only while it was made for no longer than the mailbox's lifetime (dr_renew). A re-run reuses the key a failed attempt left, unless it is empty
   local A p="$DR/prekeys/$1" l t k; A=$(cat "$DR/address") || return 1

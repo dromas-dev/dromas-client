@@ -384,7 +384,7 @@ func TestFollowDrainsAsOftenAsAShortLifetimeNeeds(t *testing.T) {
 		client.Bounded(b)
 		start := time.Now()
 		var at []time.Duration
-		err = b.Follow(context.Background(), client.FollowOptions{Until: start.Add(7 * time.Hour)}, func(_ context.Context, ev client.Event) error {
+		err = b.Follow(context.Background(), client.FollowOptions{Until: start.Add(life)}, func(_ context.Context, ev client.Event) error {
 			if ev.Kind == client.EventRenewed {
 				at = append(at, time.Since(start))
 			}
@@ -793,7 +793,7 @@ func TestAHoldItsServerHoldsNoMailboxForIsChanged(t *testing.T) {
 // A drain answered mailbox_not_found whose registration again fails in a way a
 // wait may mend (a 503 or a 429) is an EventRetry, not Fatal: in the loop that
 // met it, and in a loop started again while the renewal is held back
-// (renewRetry). Once the hour has passed, a drain registers the mailbox again
+// (renewTime). Once the hour has passed, a drain registers the mailbox again
 // (#773).
 func TestANoSuchMailboxWhoseRegistrationFailsForNowIsARetry(t *testing.T) {
 	t.Parallel()
@@ -1014,7 +1014,7 @@ func TestACertificateRevokedWhileItsListIsHeldIsRenewedByTheLoop(t *testing.T) {
 // A drain refused because its server shows the certificate in use revoked,
 // whose renewal under a new certificate fails in a way a wait may mend, is an
 // EventRetry, not Fatal: in the loop that met it, and in a loop started again
-// while the renewal is held back (renewRetry). Once the hour has passed, a
+// while the renewal is held back (renewTime). Once the hour has passed, a
 // drain renews (#800).
 func TestACertificateRevokedWhoseRenewalFailsForNowIsARetry(t *testing.T) {
 	t.Parallel()
