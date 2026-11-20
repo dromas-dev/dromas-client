@@ -153,7 +153,10 @@ jobs:
         os: ${{ fromJSON(github.event_name == 'schedule' && '[{"name":"freebsd","version":"15.1","install":"sudo pkg install -y go bash jq"},{"name":"openbsd","version":"8.0","install":"sudo pkg_add go jq"},{"name":"netbsd","version":"11.0","install":"sudo pkgin -y install go jq bash openssh"},{"name":"dragonflybsd","version":"6.4.2","install":"sudo pkg install -y go bash jq"}]' || '[{"name":"freebsd","version":"15.1","install":"sudo pkg install -y go bash jq"},{"name":"openbsd","version":"8.0","install":"sudo pkg_add go jq"}]') }}
     name: test (${{ matrix.os.name }})
     runs-on: ubuntu-26.04
-    timeout-minutes: 40
+    # Twice the slowest VM's usual run, DragonFly's in the daily run, whose cold
+    # build of the tests is most of it: a hang is caught sooner by
+    # scripts/check.sh's timeout for one package.
+    timeout-minutes: 80
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
