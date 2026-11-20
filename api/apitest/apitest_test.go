@@ -63,6 +63,8 @@ func TestAHeaderTheDescriptionDoesNotNameFails(t *testing.T) {
 		{"Vary", "Cookie"},
 		{"Vary", "Accept-Encoding"},
 		{"Content-Encoding", "gzip"},
+		{"Cross-Origin-Resource-Policy", "same-origin"},
+		{"Cross-Origin-Opener-Policy", "same-origin"},
 		{"X-Request-Id", "1"},
 		{"Set-Cookie", "a=b"},
 	} {
