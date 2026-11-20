@@ -121,55 +121,36 @@ func (b *Mailbox) renewAs(ctx context.Context, asked, certify bool) (*protocol.P
 }
 
 // renewFrom is renew from what the mailbox knows of itself at its server, st.
-// A statement whose certificate the server answers is longer than it takes
-// (certificate_lifetime_too_long) is spent, and one under a certificate of the
-// maximum that answer names is made and sent, once (shorter). A renewal under
-// a certificate the identity holder gave (st.under) takes nothing an earlier
-// attempt left, so it is signed under that certificate.
+// A renewal under a certificate the identity holder gave (st.under) takes
+// nothing an earlier attempt left, so it is signed under that certificate. A
+// certificate runs for the maximum the server's document names, read once a
+// command: a server that lowered it since answers certificate_lifetime_too_long,
+// and the next command reads the new maximum, here before anything is signed or
+// sent again, and spends the statement made under the longer certificate
+// (signedPrekey).
 func (b *Mailbox) renewFrom(ctx context.Context, st *ownRead) (*protocol.Prekey, time.Time, error) {
-	for attempt := 0; ; attempt++ {
-		next, signed, err := b.nextNumber(st, st.under != 0)
-		if err != nil {
-			return nil, time.Time{}, err
-		}
-		p, req, err := b.makeRenewal(ctx, st, next, signed)
-		if err != nil {
-			return nil, time.Time{}, err
-		}
-		// From here a statement at next exists, signed, whatever the server
-		// makes of it.
-		at, err := b.sendRenewal(ctx, req, next)
-		if !at.IsZero() {
-			return p, at, err
-		}
-		if attempt > 0 || code(err) != protocol.CodeCertificateLifetimeTooLong {
-			return nil, time.Time{}, err
-		}
-		if err := b.shorter(err); err != nil {
+	// The maximum first, so a statement an earlier command left under a
+	// longer certificate is spent, not sent again (signedPrekey).
+	if st.certify && st.under == 0 {
+		if _, err := b.certificateLifetime(ctx); err != nil {
 			return nil, time.Time{}, err
 		}
 	}
-}
-
-// shorter takes the maximum a certificate_lifetime_too_long names, err, as the
-// lifetime of the certificates this command makes, where it is shorter than
-// the one it made and leaves room to sign messages (certificateLifetime); a
-// waiting statement under a longer one is then spent (signedPrekey). It
-// returns err otherwise, or noRoom's refusal.
-func (b *Mailbox) shorter(err error) error {
-	var e *APIError
-	if !errors.As(err, &e) || e.Problem.MaxCertificateLifetime == nil || *e.Problem.MaxCertificateLifetime > protocol.MaxInteger {
-		return err
+	next, signed, err := b.nextNumber(st, st.under != 0)
+	if err != nil {
+		return nil, time.Time{}, err
 	}
-	life := time.Duration(*e.Problem.MaxCertificateLifetime) * time.Second //nolint:gosec // bounded above
-	switch {
-	case life <= protocol.TTL+protocol.MaxSkew:
-		return noRoom(life)
-	case b.lifetime > 0 && life >= b.lifetime:
-		return err
+	p, req, err := b.makeRenewal(ctx, st, next, signed)
+	if err != nil {
+		return nil, time.Time{}, err
 	}
-	b.lifetime = life
-	return nil
+	// From here a statement at next exists, signed, whatever the server makes
+	// of it.
+	at, err := b.sendRenewal(ctx, req, next)
+	if !at.IsZero() {
+		return p, at, err
+	}
+	return nil, time.Time{}, err
 }
 
 // renewal is a renewal made and signed, ready to send.
@@ -508,7 +489,8 @@ func (b *Mailbox) signedPrekey(serial uint64, certify bool) (p *protocol.Prekey,
 		} else if nm.showsTaken(c.Serial()) {
 			return nil, true, nil // under a certificate whose working key another holds
 		}
-		// Longer than its server takes, by the maximum this command read.
+		// Longer than its server takes, by the maximum this command read
+		// (renewFrom reads it first).
 		if b.lifetime > 0 && c.Lifetime() > b.lifetime {
 			return nil, true, nil
 		}
@@ -595,56 +577,34 @@ func decimal(v []byte, name string) (uint64, error) {
 // (renewAt): a day, so a busy mailbox renews at most daily.
 const renewAfter = 24 * time.Hour
 
-// shortRoom is the room a renewal leaves for a prekey lifetime under a day,
-// for senders' clocks (margin) and for its own calls (renewTime) each: five
-// minutes, the room a short-lived thing leaves (PROTOCOL.md §3.4, §12.4;
-// PRECEDENTS.md § 3a).
-const shortRoom = 5 * time.Minute
-
-// margin is the room a renewal leaves for senders' clocks, for a prekey of
-// the given lifetime (PROTOCOL.md §3.4, §12.4): protocol.MaxSkew, the hour a
-// sender's clock may read ahead of the mailbox's, for a lifetime of a day or
-// more, and shortRoom for a shorter one.
-func margin(lifetime time.Duration) time.Duration {
-	if lifetime >= 24*time.Hour {
-		return protocol.MaxSkew
-	}
-	return shortRoom
-}
-
-// renewTime is the room a renewal leaves for its own calls, beside margin:
-// from the start of the Receive that renews to the server taking the new
-// prekey, the read of the mailbox's own mailbox and the upload. An hour for
-// a prekey lifetime of a day or more, and shortRoom for a shorter one.
-func renewTime(lifetime time.Duration) time.Duration {
-	if lifetime >= 24*time.Hour {
-		return time.Hour
-	}
-	return shortRoom
-}
+// renewTime is the room a renewal leaves for its own calls, beside
+// protocol.MaxSkew for senders' clocks (PROTOCOL.md §3.4, §12.4): from the start
+// of the Receive that renews to the server taking the new prekey, the read of the
+// mailbox's own mailbox and the upload. It is also how long Receive waits to try
+// a failed renewal again, so a refused one (a rate limit, a server that is down)
+// is not tried every poll.
+const renewTime = time.Hour
 
 // renewAt is how old a prekey of the given lifetime gets before Receive
 // renews it: renewAfter, or sooner where the lifetime leaves less, with
-// margin left for senders' clocks, renewTime for the renewal's own calls and
-// renewTime again for when recv runs. So 8 days renews at a day, 25 hours at
-// 22 hours, and 6 hours at 5 hours and 45 minutes.
+// protocol.MaxSkew left for senders' clocks, renewTime for the renewal's own
+// calls and renewTime again for when recv runs. So 8 days renews at a day, and a
+// day at 21 hours.
 func renewAt(lifetime time.Duration) time.Duration {
-	return min(renewAfter, lifetime-margin(lifetime)-2*renewTime(lifetime))
+	return min(renewAfter, lifetime-protocol.MaxSkew-2*renewTime)
 }
 
-// MinPrekeyLifetime is the shortest a mailbox's prekeys may be valid for: 6
-// hours, at which Receive renews one every 5 hours and 45 minutes (renewAt),
-// about four times a day.
-const MinPrekeyLifetime = 6 * time.Hour
+// MinPrekeyLifetime is the shortest a mailbox's prekeys may be valid for: a day,
+// at which Receive renews one at 21 hours (renewAt), and recv must run every hour.
+const MinPrekeyLifetime = 24 * time.Hour
 
 // RecvWithin is how often a mailbox must run Receive for a prekey of the given
 // lifetime to be renewed while every sender whose clock a server takes still
 // takes it: Receive renews one once it is renewAt old, and the prekey then has
-// renewTime and margin left (PROTOCOL.md §3.4). So 8 days needs a Receive
-// every 6 days and 22 hours, 25 hours every hour, and 6 hours every 5
-// minutes.
+// renewTime and protocol.MaxSkew left (PROTOCOL.md §3.4). So 8 days needs a
+// Receive every 6 days and 22 hours, and a day every hour.
 func RecvWithin(lifetime time.Duration) time.Duration {
-	return lifetime - margin(lifetime) - renewTime(lifetime) - renewAt(lifetime)
+	return lifetime - protocol.MaxSkew - renewTime - renewAt(lifetime)
 }
 
 // PrekeyLifetime is how long each new prekey of this mailbox is valid for
@@ -663,7 +623,7 @@ func (b *Mailbox) prekeyLifetime() (time.Duration, error) {
 }
 
 // lifetimeRule is what a prekey lifetime is, as a mailbox's owner is told it.
-var lifetimeRule = fmt.Sprintf("one is a whole number of seconds from %d (%d hours) to %d (%d days)", int64(MinPrekeyLifetime/time.Second), int64(MinPrekeyLifetime/time.Hour), int64(protocol.PrekeyLifetime/time.Second), int64(protocol.PrekeyLifetime/(24*time.Hour)))
+var lifetimeRule = fmt.Sprintf("one is a whole number of seconds from %d (a day) to %d (%d days)", int64(MinPrekeyLifetime/time.Second), int64(protocol.PrekeyLifetime/time.Second), int64(protocol.PrekeyLifetime/(24*time.Hour)))
 
 // retiredGrace is how long after the server took a renewal the list of a
 // drain must be answered before the drain may delete retired prekeys
@@ -672,17 +632,6 @@ var lifetimeRule = fmt.Sprintf("one is a whole number of seconds from %d (%d hou
 // server answered; a clock that jumps between them can delete a retired key
 // early, a cost of a clock already wrong (§15.7).
 const retiredGrace = time.Hour
-
-// renewRetry is how long Receive waits to try a failed renewal again, so a
-// refused one (a rate limit, a server that is down) is not tried every poll:
-// renewTime for the lifetime of the prekey in use, since a prekey under a day
-// has less left at renewAt than an hour.
-func (b *Mailbox) renewRetry() time.Duration {
-	if own, ok := b.ownLifetime(); ok {
-		return renewTime(own)
-	}
-	return time.Hour
-}
 
 // drainBound is how long one Receive drains: the mailbox's bound, or
 // RecvWithin for the lifetime of the prekey in use where that is shorter, so a
@@ -759,7 +708,7 @@ type renewFailure struct {
 }
 
 // renewalHeld is a renewal renewNow did not try, because the last one failed
-// less than renewRetry ago: [Transient] where that failure was.
+// less than renewTime ago: [Transient] where that failure was.
 type renewalHeld struct {
 	words     string
 	transient bool
@@ -769,7 +718,7 @@ func (e *renewalHeld) Error() string { return e.words }
 
 // renewIfDue publishes a new prekey, of the current type, when renewDue
 // says so. The caller holds the lock. A failure is kept, and tried again only
-// renewRetry after it, by whichever process runs then (#10), but for one the
+// renewTime after it, by whichever process runs then (#10), but for one the
 // identity's key was locked for, which the next Receive tries; until then each
 // Receive says why the last one failed, so recv says the mailbox needs a look
 // until a renewal is taken. A failure dated after the clock's reading holds
@@ -793,7 +742,7 @@ func (b *Mailbox) renewNow(ctx context.Context) (*protocol.Prekey, error) {
 		return nil, fmt.Errorf("the mailbox's state file keeps a failed renewal it cannot read: %w", err)
 	}
 	if at, err := protocol.ParseTime(last.At); err == nil {
-		retry := b.renewRetry()
+		retry := renewTime
 		if since := b.now().Sub(at); since >= 0 && since < retry {
 			return nil, &renewalHeld{fmt.Sprintf("the renewal at %s did not go through, and recv tries it again from %s: %s", last.At, at.Add(retry).Format(protocol.TimeLayout), last.Error), last.Transient}
 		}
@@ -816,7 +765,7 @@ func (b *Mailbox) renewNow(ctx context.Context) (*protocol.Prekey, error) {
 }
 
 // holdRenewal keeps why a renewal did not go through, and whether a wait may
-// mend it, so renewNow tries the next one only renewRetry after it.
+// mend it, so renewNow tries the next one only renewTime after it.
 func (b *Mailbox) holdRenewal(why error) error {
 	failed, err := json.Marshal(renewFailure{At: b.now().UTC().Format(protocol.TimeLayout), Error: why.Error(), Transient: Transient(why)})
 	if err != nil {

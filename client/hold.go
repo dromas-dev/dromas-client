@@ -273,7 +273,7 @@ func timedOut(err error) bool {
 // Transient reports whether err is a call that failed and that making it
 // again may get past: no answer, a server error, a rate limit or a request
 // timeout. So is a lock another command held for as long as a command waits for
-// it, a renewal held back until renewRetry after one that failed so, a drain
+// it, a renewal held back until renewTime after one that failed so, a drain
 // refused for what a renewal mends whose renewal failed so ([Mailbox.Receive]),
 // and an answer about a revocation whose read for the proof failed so. A
 // refusal no wait mends is not: [Fatal] names those, a folder of the mailbox

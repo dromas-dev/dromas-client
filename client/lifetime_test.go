@@ -67,8 +67,8 @@ func TestAPrekeyIsMadeForTheMailboxsLifetime(t *testing.T) {
 }
 
 // Receive renews a prekey once it is RenewAt old, and not before: a day at
-// the default lifetime, 22 hours at 25 hours, 5 hours and 45 minutes at the
-// shortest. Then RecvWithin is what is left of it, less the room for the
+// the default lifetime, 22 hours at 25 hours, 21 hours at the shortest, a day.
+// Then RecvWithin is what is left of it, less the room for the
 // renewal's calls and senders' clocks.
 func TestRenewAtAndRecvWithin(t *testing.T) {
 	t.Parallel()
@@ -76,14 +76,13 @@ func TestRenewAtAndRecvWithin(t *testing.T) {
 	for _, c := range []struct{ life, at, within time.Duration }{
 		{protocol.PrekeyLifetime, 24 * h, 6*24*h + 22*h},
 		{25 * h, 22 * h, h},
-		{24 * h, 21 * h, h},
-		{client.MinPrekeyLifetime, 5*h + 45*time.Minute, 5 * time.Minute},
+		{client.MinPrekeyLifetime, 21 * h, h},
 	} {
 		if at, within := client.RenewAt(c.life), client.RecvWithin(c.life); at != c.at || within != c.within {
 			t.Errorf("a lifetime of %v: renewed at %v, received within %v; want %v and %v", c.life, at, within, c.at, c.within)
 		}
 	}
-	if client.MinPrekeyLifetime != 6*h {
+	if client.MinPrekeyLifetime != 24*h {
 		t.Errorf("the shortest lifetime is %v", client.MinPrekeyLifetime)
 	}
 }
@@ -234,17 +233,15 @@ func TestALifetimeOutOfRangeIsRefused(t *testing.T) {
 	}
 }
 
-// At the shortest lifetime that leaves an hour for clocks, a day, the two
-// clocks furthest apart that a server takes, a mailbox 9 minutes slow and a
-// sender 49 fast (PROTOCOL.md §15.7), still meet: the mailbox renews once its
-// prekey is RenewAt old, which leaves that sender two hours of it. At the
-// shortest lifetime, which leaves five minutes, clocks that far apart meet.
+// At the shortest lifetime, a day, the two clocks furthest apart that a server
+// takes, a mailbox 9 minutes slow and a sender 49 fast (PROTOCOL.md §15.7),
+// still meet: the mailbox renews once its prekey is RenewAt old, which leaves
+// that sender two hours of it.
 func TestTheShortestLifetimesAtTheClocksFurthestApart(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	for _, c := range []struct{ life, slow, fast time.Duration }{
-		{24 * time.Hour, -9 * time.Minute, 49 * time.Minute},
-		{client.MinPrekeyLifetime, -2 * time.Minute, 2*time.Minute + 59*time.Second},
+		{client.MinPrekeyLifetime, -9 * time.Minute, 49 * time.Minute},
 	} {
 		t.Run(c.life.String(), func(t *testing.T) {
 			e := newEnv(t)
@@ -279,8 +276,7 @@ func TestTheShortestLifetimesAtTheClocksFurthestApart(t *testing.T) {
 // the room for the renewal's calls and for senders' clocks left of the prekey
 // by the mailbox's clock, so a sender fast of it by up to that room for
 // clocks, which a server takes (§15.7), is never refused: at the shortest
-// lifetime, at the shortest that leaves an hour for clocks, at one a little
-// longer and at the default, with recv a minute short of RenewAt the first
+// lifetime, a day, at one a little longer and at the default, with recv a minute short of RenewAt the first
 // time. Sixty sends span the room left at the second recv.
 func TestTheDocumentedCadenceLeavesRoomForAClock(t *testing.T) {
 	t.Parallel()
@@ -292,9 +288,7 @@ func TestTheDocumentedCadenceLeavesRoomForAClock(t *testing.T) {
 		life          time.Duration
 		mailbox, from time.Duration // the mailbox's clock and the sender's, from the server's
 	}{
-		{client.MinPrekeyLifetime, 0, 2 * time.Minute},
-		{client.MinPrekeyLifetime, -2 * time.Minute, 2*time.Minute + 59*time.Second},
-		{24 * time.Hour, -9 * time.Minute, 49 * time.Minute},
+		{client.MinPrekeyLifetime, -9 * time.Minute, 49 * time.Minute},
 		{3*24*time.Hour + time.Hour, 0, 30 * time.Minute},
 		{protocol.PrekeyLifetime, -9 * time.Minute, 49 * time.Minute},
 	} {
@@ -382,8 +376,13 @@ func TestALowerLifetimeHoldsOverAWaitingRenewal(t *testing.T) {
 func TestADrainOfAShortPrekeyLeavesTimeToRenew(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
-	b := e.mailbox()
-	if got := client.DrainBound(b); got != client.DefaultDrainTime {
+	opt := e.opts()
+	opt.DrainTime = 2 * time.Hour
+	b, err := client.Init(context.Background(), t.TempDir(), opt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := client.DrainBound(b); got != opt.DrainTime {
 		t.Fatalf("at the default lifetime: %v", got)
 	}
 	lifetimeOf(t, b, client.MinPrekeyLifetime)

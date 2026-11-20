@@ -125,6 +125,7 @@ var accessLists = []struct {
 }{
 	{"the three alone", "", true, true},
 	{"a deny for another", "(D;;FA;;;WD)", true, true},
+	{"all for TrustedInstaller", "(A;;FA;;;S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464)", true, true},
 	{"read for the users", "(A;;FR;;;BU)", false, true},
 	{"read and run for the users", "(A;;0x1200a9;;;BU)", false, true},
 	{"read-data alone", "(A;;0x1;;;BU)", false, true},

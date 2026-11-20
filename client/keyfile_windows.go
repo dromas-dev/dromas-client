@@ -31,8 +31,9 @@ const (
 )
 
 // fileAccess is who a file's owner and access list let in besides the user running
-// the client, SYSTEM and the local Administrators, as OpenSSH for Windows reads a
-// key file's (contrib/win32/win32compat/w32-sshfileperm.c), entry by entry.
+// the client, SYSTEM, the local Administrators and TrustedInstaller, as OpenSSH for
+// Windows reads a key file's (contrib/win32/win32compat/w32-sshfileperm.c), entry
+// by entry.
 type fileAccess struct {
 	// foreignOwner is an owner who is none of the three, and can change the list
 	// whatever it says, named by owner.
@@ -63,12 +64,17 @@ func (e accessEntry) trustee() string {
 	return accountName(e.sid)
 }
 
+// trustedInstaller is the SID of NT SERVICE\TrustedInstaller, a service SID
+// derived from the service's name, the same on every machine: OpenSSH for Windows
+// takes it beside the three (w32-sshfileperm.c).
+const trustedInstaller = "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464"
+
 func trusted(sid *windows.SID) (bool, error) {
 	self, err := processUser()
 	if err != nil {
 		return false, err
 	}
-	return sid.Equals(self) || sid.IsWellKnown(windows.WinLocalSystemSid) || sid.IsWellKnown(windows.WinBuiltinAdministratorsSid), nil
+	return sid.Equals(self) || sid.IsWellKnown(windows.WinLocalSystemSid) || sid.IsWellKnown(windows.WinBuiltinAdministratorsSid) || sid.String() == trustedInstaller, nil
 }
 
 // accountName is a trustee for a person to read.

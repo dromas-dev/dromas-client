@@ -270,7 +270,7 @@ On Windows 11 24H2 and later, and on Windows Server 2025, the task opens no cons
 
 Run `dromas recv` more often than once a week, at least every 6 days and 22 hours. A `recv` that runs as a service does this. A message waits on the server for just under 7 days. A prekey is valid for 8 days, and each `recv` renews the prekey once it is a day old.
 
-If `recv` runs often, you can shorten the prekey lifetime, down to `6h`, with [`prekey-lifetime`](configuration.md#prekey-lifetime). The lifetime is how long a stolen prekey stays usable, and how long an old prekey stays usable when a server serves it to a sender new to the mailbox. `dromas prekey lifetime --help` says how often `recv` must then run.
+If `recv` runs often, you can shorten the prekey lifetime, down to `1d`, with [`prekey-lifetime`](configuration.md#prekey-lifetime). The lifetime is how long a stolen prekey stays usable, and how long an old prekey stays usable when a server serves it to a sender new to the mailbox. `dromas prekey lifetime --help` says how often `recv` must then run.
 
 ## Choose who can write to you
 
@@ -337,7 +337,7 @@ An `inbox-dir` that is itself a mount point stays as an empty directory when the
 
 `dromas` creates each directory accessible only to you, and leaves a directory that exists as it is. `dromas` rejects:
 
-- A private key file that other users can access, as ssh does. A Kubernetes or Docker Compose secret needs mode `0400`. No setting turns this off.
+- A private key file of yours that other users can access, as ssh does. A key file that another user owns, such as a Kubernetes secret owned by root and readable by the pod's group, is read as it is. No setting turns this off.
 - `state`, `gate` or `partial` when other users can access the file or another user owns it. The error gives the command that fixes the file.
 - `allowed`, `blocked` or `aliases` when other users can write to the file or another user owns it, as ssh does a config file.
 - `inbox-dir` or `held/`, or a message file in either, when other users can write to it or another user owns it. Anyone who can write there can add a message that reads as delivered.

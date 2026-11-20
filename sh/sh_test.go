@@ -2482,7 +2482,7 @@ func TestTheScriptHoldsALowerLifetimeOverAWaitingRenewal(t *testing.T) {
 	if _, err := bash(t, env, "sleep 1; dr_rekey"); err == nil {
 		t.Fatal("the renewal went through")
 	}
-	if err := os.WriteFile(filepath.Join(dir, "prekey-lifetime"), []byte("21600\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "prekey-lifetime"), []byte("86400\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	srv.SetMiddle(nil)
@@ -2509,7 +2509,7 @@ func TestTheScriptHoldsALowerLifetimeOverAWaitingRenewal(t *testing.T) {
 		t.Fatal(err)
 	}
 	made, err := protocol.ParseTime(strings.TrimSpace(string(rawMade)))
-	if err != nil || p.NotAfter.Sub(made) > 6*time.Hour {
-		t.Errorf("the script published a prekey made for %v after the lifetime was set to 6h: %v", p.NotAfter.Sub(made), err)
+	if err != nil || p.NotAfter.Sub(made) > 24*time.Hour {
+		t.Errorf("the script published a prekey made for %v after the lifetime was set to a day: %v", p.NotAfter.Sub(made), err)
 	}
 }

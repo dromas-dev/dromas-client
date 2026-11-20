@@ -294,7 +294,7 @@ Every check of a time is exact at the clock of the party that makes the check. T
 - a prekey statement's ceiling, at a server (Section 6);
 - a pass's lifetime (Section 8);
 - a reader's limit on `sent_at` (Section 12.3, check 6);
-- when a client renews a prekey whose prekey lifetime is a day or more (Section 12.4);
+- when a client renews a prekey (Section 12.4);
 - how long a server keeps a message (Section 13).
 
 ## 4. Identity and address
@@ -1661,8 +1661,7 @@ Dromas protects a message's content from everyone but the message's recipient. D
   - A message cannot be recovered from the mailbox's keys once every prekey that the message could be encrypted to is deleted. For a retired prekey, that time comes, at the latest, at the first answered call (Section 12.4) at or past the `not_after` of the prekey statement that the message is sealed to, plus the TTL. That is at most 15 days after the prekey statement was made (Section 6), by the mailbox's clock. A server that refuses every pass, or refuses the mailbox's renewals, keeps the prekeys on the mailbox's disk for as long as the server refuses.
   - Suppose a client deletes every retired prekey after a drain that empties its mailbox. For that client, that time comes at the first such drain whose list is answered more than an hour after the server accepted the mailbox's next renewal, both by the mailbox's clock. For example, that time comes this long after the message arrives:
     - about a day, for a mailbox that renews daily and polls between renewals;
-    - about two days, for a mailbox whose only drain is a daily one and which renews at the start of that drain;
-    - about six hours, for a mailbox that renews every six hours and polls.
+    - about two days, for a mailbox whose only drain is a daily one and which renews at the start of that drain.
   - The hour is for sends in flight. A server accepts a send only to the current prekey statement (Section 11.10, step 7). So once the server accepts a renewal, the server refuses a send to the prekey that the renewal replaced. A send that the server accepted before the renewal is stored and listed within that hour, or is not stored (Section 13).
   - The bound keeps no state per peer, because the mailbox renews, drains and deletes on its own. The bound needs a server that accepts the mailbox's passes. A client that deletes by this hour relies on the promise of Section 13 on a send in flight, so that no message arrives sealed to a deleted prekey.
 - **A message waiting on the server is exposed until the mailbox fetches it.** A mailbox that stops renewing keeps its ended prekey as the current prekey. The mailbox's last messages stay exposed until the mailbox renews.

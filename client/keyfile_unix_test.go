@@ -24,7 +24,7 @@ func TestAPrivateKeyOthersCanReachIsRefused(t *testing.T) {
 		if err := os.Chmod(filepath.Join(b.Dir(), "identity"), mode); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := client.Open(b.Dir(), e.opts()); err == nil || !strings.Contains(err.Error(), "accessible by others") || !strings.Contains(err.Error(), "0400") {
+		if _, err := client.Open(b.Dir(), e.opts()); err == nil || !strings.Contains(err.Error(), "accessible by others") || !strings.Contains(err.Error(), "chmod 600") {
 			t.Errorf("identity at %04o: %v", mode, err)
 		}
 	}
@@ -47,6 +47,30 @@ func TestAPrivateKeyOthersCanReachIsRefused(t *testing.T) {
 	}
 	if _, err := b.Receive(t.Context()); err == nil || !strings.Contains(err.Error(), "accessible by others") {
 		t.Errorf("a prekey at 0644: %v", err)
+	}
+}
+
+// A key file another user owns is that user's to guard, as ssh(1) leaves it
+// (sshkey_perm_ok): a root-owned 0440 secret, mounted for a non-root pod's group
+// (fsGroup), is read. The user's own at 0440 is refused.
+func TestAKeyFileAnotherUserOwnsIsTheirsToGuard(t *testing.T) {
+	t.Parallel()
+	file := filepath.Join(t.TempDir(), "identity")
+	if err := os.WriteFile(file, nil, 0o440); err != nil {
+		t.Fatal(err)
+	}
+	me := os.Getuid()
+	if me == 0 { // a file owned by neither root nor the user the test says it is
+		if err := os.Chown(file, 1, 1); err != nil {
+			t.Fatal(err)
+		}
+		me = 1
+	}
+	if err := client.CheckKeyFileAs(file, me); err == nil || !strings.Contains(err.Error(), "accessible by others") {
+		t.Errorf("its own user's at 0440: %v", err)
+	}
+	if err := client.CheckKeyFileAs(file, me+1); err != nil {
+		t.Errorf("another user's at 0440: %v", err)
 	}
 }
 

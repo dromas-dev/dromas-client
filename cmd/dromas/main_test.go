@@ -2593,7 +2593,7 @@ func TestHeldAndPeerCommands(t *testing.T) {
 }
 
 // prekey lifetime prints the mailbox's prekey lifetime, which --prekey-lifetime
-// or the config file sets: a time as sshd writes one, from 6h to 8d, with a
+// or the config file sets: a time as sshd writes one, from 1d to 8d, with a
 // warning under 2d2h that says how often recv must then run. A time out of form
 // or out of range is a config error, and nothing runs.
 func TestPrekeyLifetime(t *testing.T) {
@@ -2621,12 +2621,10 @@ func TestPrekeyLifetime(t *testing.T) {
 		t.Fatalf("the default: %v", l)
 	}
 	for _, c := range []struct{ arg, seconds, shown, every string }{
-		{"6h", "21600", "6h", "5m"},
-		{"360m", "21600", "6h", "5m"},
-		{"21600", "21600", "6h", "5m"},
-		{"6H", "21600", "6h", "5m"},
-		{"23h", "82800", "23h", "5m"},
 		{"1d", "86400", "1d", "1h"},
+		{"1440m", "86400", "1d", "1h"},
+		{"86400", "86400", "1d", "1h"},
+		{"24H", "86400", "1d", "1h"},
 		{"25h", "90000", "1d1h", "1h"},
 		{"3h30m24h", "99000", "1d3h30m", "1h30m"},
 		{"2d", "172800", "2d", "22h"},
@@ -2645,7 +2643,7 @@ func TestPrekeyLifetime(t *testing.T) {
 		}
 	}
 	for arg, why := range map[string]string{
-		"1h": "is from", "5h59m59s": "is from", "21599": "is from", "8d1s": "is from", "9d": "is from", "2851200": "is from", "10000000000s": "longer than any", "9999999999w": "longer than any",
+		"1h": "is from", "23h": "is from", "23h59m59s": "is from", "86399": "is from", "8d1s": "is from", "9d": "is from", "2851200": "is from", "10000000000s": "longer than any", "9999999999w": "longer than any",
 		"0": "is from", "0s": "is from", "-1h": "no time", "+1h": "no time", "1.5h": "no time", "1x": "no time", "90000x": "no time", "2d1hx": "no time",
 		"h": "no time", "1h ": "no time", " 1h": "no time", "1dd": "no time",
 	} {
@@ -2655,7 +2653,7 @@ func TestPrekeyLifetime(t *testing.T) {
 		}
 	}
 	var wrong *usageError
-	if err := do(ctx, "prekey lifetime", []string{"6h"}, strings.NewReader(""), io.Discard, io.Discard); !errors.As(err, &wrong) {
+	if err := do(ctx, "prekey lifetime", []string{"1d"}, strings.NewReader(""), io.Discard, io.Discard); !errors.As(err, &wrong) {
 		t.Errorf("prekey lifetime sets nothing, and took an argument: %v", err)
 	}
 }
