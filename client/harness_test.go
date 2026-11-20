@@ -117,7 +117,10 @@ func (e *env) made(opt client.Options) *client.Mailbox {
 	e.t.Helper()
 	b, err := client.Init(context.Background(), e.t.TempDir(), opt)
 	if err != nil {
-		e.t.Fatalf("init: %v", err)
+		// The cause too: a call with no answer says only its kind (transportError),
+		// and which errno a connect failed with is what tells the runner's fault from
+		// the client's.
+		e.t.Fatalf("init: %v (from %v)", err, errors.Unwrap(err))
 	}
 	if e.http != nil {
 		client.Bounded(b)
