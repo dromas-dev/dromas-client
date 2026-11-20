@@ -258,7 +258,7 @@ func makeMailbox(t *testing.T, e *env, dir string, peer *client.Mailbox, unregis
 	}
 	a, err := client.Init(context.Background(), dir, e.opts())
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("init: %v (from %v)", err, errors.Unwrap(err))
 	}
 	send(t, peer, a, "waiting")
 }
