@@ -1708,7 +1708,7 @@ components:
         Not a request this call takes: `invalid_request` (naming what is wrong in
         `param`, where it is a member or a query parameter) · `invalid_address` ·
         `identity_mismatch` · `unsupported_key_type` (with the server's
-        `key_types`) · `invalid_key` · `prekey_already_used` · `invalid_validity_period` ·
+        `key_types`) · `invalid_key` · `invalid_validity_period` ·
         `certificate_lifetime_too_long` (with the server's `max_certificate_lifetime_seconds`) ·
         `invalid_recipients` · `invalid_revocation`. `PROTOCOL.md` §11.3 has what
         each means.
@@ -1740,7 +1740,7 @@ components:
                   status:
                     const: 400
                   code:
-                    enum: [invalid_request, invalid_address, identity_mismatch, unsupported_key_type, invalid_key, prekey_already_used, invalid_validity_period, certificate_lifetime_too_long, invalid_recipients, invalid_revocation]
+                    enum: [invalid_request, invalid_address, identity_mismatch, unsupported_key_type, invalid_key, invalid_validity_period, certificate_lifetime_too_long, invalid_recipients, invalid_revocation]
     Unauthorized:
       description: |
         The pass is refused: `invalid_pass` · `pass_expired` ·
