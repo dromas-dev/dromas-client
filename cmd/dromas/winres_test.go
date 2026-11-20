@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -52,25 +53,26 @@ func TestTheWindowsResourcesAreTheManifests(t *testing.T) {
 	}
 }
 
-// dromas built for Windows carries the manifest in its resource section, on each
-// architecture a release builds.
+// dromas built for Windows carries the manifest, on each architecture a release
+// builds: the go command adds to the build for that system and architecture the
+// one resource file of it (SysoFiles, go help list), and that file is an object
+// of that machine whose resource section holds the manifest. Nothing is
+// compiled.
 func TestTheWindowsBuildCarriesTheManifest(t *testing.T) {
-	if testing.Short() {
-		t.Skip("builds dromas for Windows twice")
-	}
 	t.Parallel()
 	want, err := os.ReadFile(manifest)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for arch, machine := range winArchs {
-		exe := filepath.Join(t.TempDir(), "dromas.exe")
-		build := exec.Command("go", "build", "-trimpath", "-o", exe, ".")
-		build.Env = append(os.Environ(), "GOOS=windows", "GOARCH="+arch, "CGO_ENABLED=0")
-		if out, err := build.CombinedOutput(); err != nil {
-			t.Fatalf("go build for windows/%s: %v: %s", arch, err, out)
+		list := exec.Command("go", "list", "-f", "{{join .SysoFiles \" \"}}", ".")
+		list.Env = append(os.Environ(), "GOOS=windows", "GOARCH="+arch)
+		out, err := list.Output()
+		file := "rsrc_windows_" + arch + ".syso"
+		if err != nil || strings.TrimSpace(string(out)) != file {
+			t.Fatalf("go list for windows/%s: the build adds %q (%v), want %s alone", arch, out, err, file)
 		}
-		f, err := pe.Open(exe)
+		f, err := pe.Open(file)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -84,9 +86,9 @@ func TestTheWindowsBuildCarriesTheManifest(t *testing.T) {
 		case err != nil:
 			t.Fatal(err)
 		case f.Machine != machine:
-			t.Errorf("windows/%s: the build's machine is %#x, want %#x", arch, f.Machine, machine)
+			t.Errorf("%s: its machine is %#x, want %#x", file, f.Machine, machine)
 		case !bytes.Contains(data, want):
-			t.Errorf("windows/%s: the build's resource section does not hold %s", arch, manifest)
+			t.Errorf("%s: its resource section does not hold %s", file, manifest)
 		}
 	}
 }
