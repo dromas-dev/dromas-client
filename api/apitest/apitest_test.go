@@ -1,9 +1,6 @@
 package apitest_test
 
 import (
-	"bytes"
-	"compress/gzip"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -32,49 +29,6 @@ func (r *reported) Errorf(format string, args ...any) {
 	r.errs = append(r.errs, fmt.Sprintf(format, args...))
 }
 
-// An answer in gzip is one to a request that takes gzip, in gzip in fact,
-// and on an answer the description lets a server compress: a mailbox's 404 is
-// none of those.
-func TestAnAnswerInGzipIsHeldToTheRequestAndTheDescription(t *testing.T) {
-	c := protocol.CodeMailboxNotFound
-	body, err := json.Marshal(protocol.Problem{Type: c.TypeURI(), Title: c.Title(), Status: 404, Detail: "no such mailbox", Code: c, Hint: "check the address"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var gz bytes.Buffer
-	zw := gzip.NewWriter(&gz)
-	_, _ = zw.Write(body)
-	_ = zw.Close()
-	for _, k := range []struct {
-		accept string
-		answer []byte
-		want   string
-	}{
-		{"", gz.Bytes(), "which the request did not take"},
-		{"br", gz.Bytes(), "which the request did not take"},
-		{"gzip", body, "not gzip"},
-		{"gzip", gz.Bytes(), "Content-Encoding"},
-	} {
-		r := &reported{TB: t}
-		h := apitest.Handler(r, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			w.Header().Set("Content-Type", protocol.ProblemContentType)
-			w.Header().Set("Date", time.Now().UTC().Format(http.TimeFormat))
-			w.Header().Set("Cache-Control", "no-store")
-			w.Header().Set("Content-Encoding", "gzip")
-			w.WriteHeader(http.StatusNotFound)
-			_, _ = w.Write(k.answer)
-		}))
-		req := httptest.NewRequest(http.MethodGet, "/v1/"+"d_"+strings.Repeat("ab", 32), nil)
-		if k.accept != "" {
-			req.Header.Set("Accept-Encoding", k.accept)
-		}
-		h.ServeHTTP(httptest.NewRecorder(), req)
-		if !strings.Contains(strings.Join(r.errs, "\n"), k.want) {
-			t.Errorf("Accept-Encoding %q, %d bytes: reported %q, want %q", k.accept, len(k.answer), r.errs, k.want)
-		}
-	}
-}
-
 // read is a mailbox's read as a server answers it, with one header set.
 func read(t *testing.T, name, value string) []string {
 	const body = `{"identity":"c3NoLWVkMjU1MTk=","prekey":"cHJla2V5","prekey_signature":"c2ln","sender_key_types":["ssh-ed25519"]}` + "\n"
@@ -100,9 +54,6 @@ func TestAHeaderTheDescriptionDoesNotNameFails(t *testing.T) {
 	if errs := read(t, "", ""); len(errs) > 0 {
 		t.Fatalf("a mailbox's read as a server answers it: %q", errs)
 	}
-	if errs := read(t, "Vary", "Accept-Encoding"); len(errs) > 0 {
-		t.Fatalf("a mailbox's read that says Vary: Accept-Encoding: %q", errs)
-	}
 	for _, h := range [][2]string{
 		{"X-Other", "1"},
 		{"ETag", `"x"`},
@@ -110,6 +61,10 @@ func TestAHeaderTheDescriptionDoesNotNameFails(t *testing.T) {
 		{"Expires", "Sun, 18 Oct 2026 00:00:00 GMT"},
 		{"Pragma", "no-cache"},
 		{"Vary", "Cookie"},
+		{"Vary", "Accept-Encoding"},
+		{"Content-Encoding", "gzip"},
+		{"Cross-Origin-Resource-Policy", "same-origin"},
+		{"Cross-Origin-Opener-Policy", "same-origin"},
 		{"X-Request-Id", "1"},
 		{"Set-Cookie", "a=b"},
 	} {

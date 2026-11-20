@@ -114,8 +114,6 @@ func (e *APIError) words() string {
 		return "the server finds that the identity document does not hash to the address, or is not in its one form"
 	case protocol.CodeInvalidKey:
 		return "the server refused a key, certificate or prekey statement this mailbox sent, as malformed or not verifying: dromas prekey renew signs a new statement, and a mailbox that cannot register needs a new identity (dromas init)"
-	case protocol.CodePrekeyAlreadyUsed:
-		return "the server has seen that prekey before, and every prekey is a new key: dromas prekey renew makes one"
 	case protocol.CodeInvalidValidityPeriod:
 		return "the server finds the prekey statement, or the certificate it is under, not valid at its clock: not begun, or ended"
 	case protocol.CodeCertificateLifetimeTooLong:

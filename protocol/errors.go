@@ -26,7 +26,6 @@ const (
 	CodeInvalidAddress             Code = "invalid_address"               // not "d_" and 64 characters of base64url
 	CodeIdentityMismatch           Code = "identity_mismatch"             // the identity does not hash to the address, or breaks its grammar
 	CodeInvalidKey                 Code = "invalid_key"                   // an identity key, certificate or prekey statement that is malformed or does not verify
-	CodePrekeyAlreadyUsed          Code = "prekey_already_used"           // the prekey was published before: every prekey is a new key
 	CodeInvalidValidityPeriod      Code = "invalid_validity_period"       // the statement or its certificate is not valid at the server's clock: not begun, or ended
 	CodeCertificateLifetimeTooLong Code = "certificate_lifetime_too_long" // the certificate runs longer than the server's maximum: max_certificate_lifetime_seconds
 	CodeUnsupportedKeyType         Code = "unsupported_key_type"          // an identity of a key type this server does not register
@@ -89,7 +88,6 @@ var codes = map[Code]struct {
 	CodeInvalidAddress:             {http.StatusBadRequest, "Invalid address"},
 	CodeIdentityMismatch:           {http.StatusBadRequest, "Identity mismatch"},
 	CodeInvalidKey:                 {http.StatusBadRequest, "Invalid key"},
-	CodePrekeyAlreadyUsed:          {http.StatusBadRequest, "Prekey already used"},
 	CodeInvalidValidityPeriod:      {http.StatusBadRequest, "Invalid validity period"},
 	CodeCertificateLifetimeTooLong: {http.StatusBadRequest, "Certificate lifetime too long"},
 	CodeUnsupportedKeyType:         {http.StatusBadRequest, "Unsupported key type"},

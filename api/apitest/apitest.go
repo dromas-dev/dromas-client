@@ -16,9 +16,7 @@
 //   - a path that is not in its clean form gets those checks, or a redirect
 //     to a path in its clean form, ahead of every check (PROTOCOL.md §11.2);
 //   - every error's code counts (protocol.Problem.CodeAt): one the
-//     description knows, under its own status, beside its own type;
-//   - an answer in gzip is one to a request that takes gzip, and is checked
-//     as the JSON beneath; the description says which answers may be.
+//     description knows, under its own status, beside its own type.
 //
 // The server and the Go client share protocol's structs, so a member that
 // drifts from PROTOCOL.md passes every test the two run together. This is
@@ -27,7 +25,6 @@ package apitest
 
 import (
 	"bytes"
-	"compress/gzip"
 	"encoding/json/jsontext"
 	"fmt"
 	"io"
@@ -210,10 +207,7 @@ func check(t testing.TB, v validator.Validator, r *http.Request, body *tee, rec 
 	if n := notInteger(body.buf.Bytes()); jsonBody && n != "" && rec.status < 400 && read {
 		t.Errorf("apitest: %s: a request that writes %s, no integer (PROTOCOL.md §3.3), is answered as taken", where, n)
 	}
-	answer, ok := decoded(t, where, r, rec)
-	if !ok {
-		return
-	}
+	answer := rec.body.Bytes()
 	if n := notInteger(answer); isJSON(rec.header) && n != "" {
 		t.Errorf("apitest: %s: the answer writes %s, no integer (PROTOCOL.md §3.3)\n%s", where, n, answer)
 	}
@@ -240,34 +234,6 @@ func check(t testing.TB, v validator.Validator, r *http.Request, body *tee, rec 
 			t.Errorf("apitest: %s: the error's code does not count: one of this status, beside its own type\n%s", where, answer)
 		}
 	}
-}
-
-// decoded is the body of an answer as its Content-Encoding has it: gzip, to
-// a request whose Accept-Encoding names gzip or "*", or none. That is a
-// looser reading than RFC 9110 §12.5.3's, weights and all, which a server's
-// own tests hold it to. Whether a coding may be on that answer at all is the
-// description's to say.
-func decoded(t testing.TB, where string, r *http.Request, rec *recorder) ([]byte, bool) {
-	ce := rec.header.Get("Content-Encoding")
-	if ce == "" || rec.body.Len() == 0 {
-		return rec.body.Bytes(), true
-	}
-	ae := protocol.LowerASCII(strings.Join(r.Header.Values("Accept-Encoding"), ","))
-	if ce != "gzip" || !strings.Contains(ae, "gzip") && !strings.Contains(ae, "*") {
-		t.Errorf("apitest: %s: an answer in %q, which the request did not take (Accept-Encoding %q)", where, ce, r.Header.Values("Accept-Encoding"))
-		return nil, false
-	}
-	zr, err := gzip.NewReader(bytes.NewReader(rec.body.Bytes()))
-	if err != nil {
-		t.Errorf("apitest: %s: an answer in gzip that is not gzip: %v", where, err)
-		return nil, false
-	}
-	b, err := io.ReadAll(zr)
-	if err != nil {
-		t.Errorf("apitest: %s: an answer in gzip that is not gzip: %v", where, err)
-		return nil, false
-	}
-	return b, true
 }
 
 func missing(errs []*errors.ValidationError) bool {

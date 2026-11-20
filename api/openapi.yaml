@@ -69,10 +69,6 @@ paths:
               $ref: '#/components/headers/X-Content-Type-Options'
             Referrer-Policy:
               $ref: '#/components/headers/Referrer-Policy'
-            Cross-Origin-Resource-Policy:
-              $ref: '#/components/headers/Cross-Origin-Resource-Policy'
-            Cross-Origin-Opener-Policy:
-              $ref: '#/components/headers/Cross-Origin-Opener-Policy'
           content:
             application/json:
               schema:
@@ -105,10 +101,6 @@ paths:
               $ref: '#/components/headers/X-Content-Type-Options'
             Referrer-Policy:
               $ref: '#/components/headers/Referrer-Policy'
-            Cross-Origin-Resource-Policy:
-              $ref: '#/components/headers/Cross-Origin-Resource-Policy'
-            Cross-Origin-Opener-Policy:
-              $ref: '#/components/headers/Cross-Origin-Opener-Policy'
         '429':
           $ref: '#/components/responses/HeadTooManyRequests'
         '503':
@@ -149,14 +141,6 @@ paths:
               $ref: '#/components/headers/X-Content-Type-Options'
             Referrer-Policy:
               $ref: '#/components/headers/Referrer-Policy'
-            Cross-Origin-Resource-Policy:
-              $ref: '#/components/headers/Cross-Origin-Resource-Policy'
-            Cross-Origin-Opener-Policy:
-              $ref: '#/components/headers/Cross-Origin-Opener-Policy'
-            Content-Encoding:
-              $ref: '#/components/headers/Content-Encoding'
-            Vary:
-              $ref: '#/components/headers/Vary'
           content:
             application/json:
               schema:
@@ -174,8 +158,6 @@ paths:
               $ref: '#/components/headers/Cache-Control'
             ETag:
               $ref: '#/components/headers/LookupETag'
-            Vary:
-              $ref: '#/components/headers/Vary'
         '400':
           $ref: '#/components/responses/BadRequest'
         '404':
@@ -197,10 +179,6 @@ paths:
               $ref: '#/components/headers/X-Content-Type-Options'
             Referrer-Policy:
               $ref: '#/components/headers/Referrer-Policy'
-            Cross-Origin-Resource-Policy:
-              $ref: '#/components/headers/Cross-Origin-Resource-Policy'
-            Cross-Origin-Opener-Policy:
-              $ref: '#/components/headers/Cross-Origin-Opener-Policy'
           content:
             application/problem+json:
               schema:
@@ -255,14 +233,6 @@ paths:
               $ref: '#/components/headers/X-Content-Type-Options'
             Referrer-Policy:
               $ref: '#/components/headers/Referrer-Policy'
-            Cross-Origin-Resource-Policy:
-              $ref: '#/components/headers/Cross-Origin-Resource-Policy'
-            Cross-Origin-Opener-Policy:
-              $ref: '#/components/headers/Cross-Origin-Opener-Policy'
-            Content-Encoding:
-              $ref: '#/components/headers/Content-Encoding'
-            Vary:
-              $ref: '#/components/headers/Vary'
         '304':
           description: As the `GET`'s `304`.
           headers:
@@ -276,8 +246,6 @@ paths:
               $ref: '#/components/headers/Cache-Control'
             ETag:
               $ref: '#/components/headers/LookupETag'
-            Vary:
-              $ref: '#/components/headers/Vary'
         '400':
           $ref: '#/components/responses/HeadRefused'
         '404':
@@ -409,10 +377,6 @@ paths:
               $ref: '#/components/headers/X-Content-Type-Options'
             Referrer-Policy:
               $ref: '#/components/headers/Referrer-Policy'
-            Cross-Origin-Resource-Policy:
-              $ref: '#/components/headers/Cross-Origin-Resource-Policy'
-            Cross-Origin-Opener-Policy:
-              $ref: '#/components/headers/Cross-Origin-Opener-Policy'
           content:
             application/json:
               schema:
@@ -467,10 +431,6 @@ paths:
               $ref: '#/components/headers/X-Content-Type-Options'
             Referrer-Policy:
               $ref: '#/components/headers/Referrer-Policy'
-            Cross-Origin-Resource-Policy:
-              $ref: '#/components/headers/Cross-Origin-Resource-Policy'
-            Cross-Origin-Opener-Policy:
-              $ref: '#/components/headers/Cross-Origin-Opener-Policy'
         '304':
           description: As the `GET`'s `304`.
           headers:
@@ -674,10 +634,6 @@ paths:
               $ref: '#/components/headers/X-Content-Type-Options'
             Referrer-Policy:
               $ref: '#/components/headers/Referrer-Policy'
-            Cross-Origin-Resource-Policy:
-              $ref: '#/components/headers/Cross-Origin-Resource-Policy'
-            Cross-Origin-Opener-Policy:
-              $ref: '#/components/headers/Cross-Origin-Opener-Policy'
             ETag:
               $ref: '#/components/headers/ACLETag'
         '304':
@@ -744,10 +700,6 @@ paths:
               $ref: '#/components/headers/X-Content-Type-Options'
             Referrer-Policy:
               $ref: '#/components/headers/Referrer-Policy'
-            Cross-Origin-Resource-Policy:
-              $ref: '#/components/headers/Cross-Origin-Resource-Policy'
-            Cross-Origin-Opener-Policy:
-              $ref: '#/components/headers/Cross-Origin-Opener-Policy'
           content:
             application/json:
               schema:
@@ -845,10 +797,6 @@ paths:
               $ref: '#/components/headers/X-Content-Type-Options'
             Referrer-Policy:
               $ref: '#/components/headers/Referrer-Policy'
-            Cross-Origin-Resource-Policy:
-              $ref: '#/components/headers/Cross-Origin-Resource-Policy'
-            Cross-Origin-Opener-Policy:
-              $ref: '#/components/headers/Cross-Origin-Opener-Policy'
           content:
             application/json:
               schema:
@@ -870,10 +818,6 @@ paths:
               $ref: '#/components/headers/X-Content-Type-Options'
             Referrer-Policy:
               $ref: '#/components/headers/Referrer-Policy'
-            Cross-Origin-Resource-Policy:
-              $ref: '#/components/headers/Cross-Origin-Resource-Policy'
-            Cross-Origin-Opener-Policy:
-              $ref: '#/components/headers/Cross-Origin-Opener-Policy'
             Location:
               $ref: '#/components/headers/Location'
           content:
@@ -952,10 +896,6 @@ paths:
               $ref: '#/components/headers/X-Content-Type-Options'
             Referrer-Policy:
               $ref: '#/components/headers/Referrer-Policy'
-            Cross-Origin-Resource-Policy:
-              $ref: '#/components/headers/Cross-Origin-Resource-Policy'
-            Cross-Origin-Opener-Policy:
-              $ref: '#/components/headers/Cross-Origin-Opener-Policy'
             Retry-After:
               $ref: '#/components/headers/PollInterval'
             ETag:
@@ -1047,10 +987,6 @@ paths:
               $ref: '#/components/headers/X-Content-Type-Options'
             Referrer-Policy:
               $ref: '#/components/headers/Referrer-Policy'
-            Cross-Origin-Resource-Policy:
-              $ref: '#/components/headers/Cross-Origin-Resource-Policy'
-            Cross-Origin-Opener-Policy:
-              $ref: '#/components/headers/Cross-Origin-Opener-Policy'
             Retry-After:
               $ref: '#/components/headers/PollInterval'
             ETag:
@@ -1132,10 +1068,6 @@ paths:
               $ref: '#/components/headers/X-Content-Type-Options'
             Referrer-Policy:
               $ref: '#/components/headers/Referrer-Policy'
-            Cross-Origin-Resource-Policy:
-              $ref: '#/components/headers/Cross-Origin-Resource-Policy'
-            Cross-Origin-Opener-Policy:
-              $ref: '#/components/headers/Cross-Origin-Opener-Policy'
           content:
             application/vnd.age: {}
         '206':
@@ -1155,10 +1087,6 @@ paths:
               $ref: '#/components/headers/X-Content-Type-Options'
             Referrer-Policy:
               $ref: '#/components/headers/Referrer-Policy'
-            Cross-Origin-Resource-Policy:
-              $ref: '#/components/headers/Cross-Origin-Resource-Policy'
-            Cross-Origin-Opener-Policy:
-              $ref: '#/components/headers/Cross-Origin-Opener-Policy'
             Content-Range:
               description: '`bytes N-<last>/<length>`: the first byte asked, the age file''s last, and its length, the `size` the list gave, each in digits with no leading zero (RFC 9110 §14.4). One of any other form breaks the answer''s form.'
               required: true
@@ -1234,10 +1162,6 @@ paths:
               $ref: '#/components/headers/X-Content-Type-Options'
             Referrer-Policy:
               $ref: '#/components/headers/Referrer-Policy'
-            Cross-Origin-Resource-Policy:
-              $ref: '#/components/headers/Cross-Origin-Resource-Policy'
-            Cross-Origin-Opener-Policy:
-              $ref: '#/components/headers/Cross-Origin-Opener-Policy'
         '304':
           description: As the `GET`'s `304`.
           headers:
@@ -1542,26 +1466,6 @@ components:
       required: false
       schema:
         const: no-referrer
-    Cross-Origin-Resource-Policy:
-      description: For a browser, on every answer under `/v1/` but a `304` - no other origin loads it. A client ignores it.
-      required: false
-      schema:
-        const: same-origin
-    Cross-Origin-Opener-Policy:
-      description: For a browser, on every answer under `/v1/` but a `304` - nothing of another origin opens it. A client ignores it.
-      required: false
-      schema:
-        const: same-origin
-    Content-Encoding:
-      description: '`gzip`, only to a request whose `Accept-Encoding` takes it (RFC 9110 §8.4.1.3, §12.5.3; `PROTOCOL.md` §11.2). The answer is the JSON beneath.'
-      required: false
-      schema:
-        const: gzip
-    Vary:
-      description: '`Accept-Encoding`, on an answer a server may compress, gzip or not (RFC 9110 §12.5.5).'
-      required: false
-      schema:
-        const: Accept-Encoding
     Retry-After:
       description: How many seconds to wait before trying again, in digits alone (RFC 9110 §10.2.3's delay-seconds; never an HTTP-date, `PROTOCOL.md` §11.3).
       required: true
@@ -1580,7 +1484,7 @@ components:
       schema:
         type: string
     LookupETag:
-      description: A weak entity tag of the read of a mailbox (RFC 9110 §8.8.1, §8.8.3), opaque, the same whether the answer is gzipped or not; a `304` carries the tag it matched (`PROTOCOL.md` §11.8).
+      description: A weak entity tag of the read of a mailbox (RFC 9110 §8.8.1, §8.8.3), opaque; a `304` carries the tag it matched (`PROTOCOL.md` §11.8).
       required: true
       schema:
         type: string
@@ -1622,10 +1526,6 @@ components:
           $ref: '#/components/headers/X-Content-Type-Options'
         Referrer-Policy:
           $ref: '#/components/headers/Referrer-Policy'
-        Cross-Origin-Resource-Policy:
-          $ref: '#/components/headers/Cross-Origin-Resource-Policy'
-        Cross-Origin-Opener-Policy:
-          $ref: '#/components/headers/Cross-Origin-Opener-Policy'
       content:
         application/json:
           schema:
@@ -1647,10 +1547,6 @@ components:
           $ref: '#/components/headers/X-Content-Type-Options'
         Referrer-Policy:
           $ref: '#/components/headers/Referrer-Policy'
-        Cross-Origin-Resource-Policy:
-          $ref: '#/components/headers/Cross-Origin-Resource-Policy'
-        Cross-Origin-Opener-Policy:
-          $ref: '#/components/headers/Cross-Origin-Opener-Policy'
     ACL:
       description: The ACL as held, `*` first, then each address once, in ascending order of its 48 bytes, with its tag.
       headers:
@@ -1668,10 +1564,6 @@ components:
           $ref: '#/components/headers/X-Content-Type-Options'
         Referrer-Policy:
           $ref: '#/components/headers/Referrer-Policy'
-        Cross-Origin-Resource-Policy:
-          $ref: '#/components/headers/Cross-Origin-Resource-Policy'
-        Cross-Origin-Opener-Policy:
-          $ref: '#/components/headers/Cross-Origin-Opener-Policy'
         ETag:
           $ref: '#/components/headers/ACLETag'
       content:
@@ -1695,10 +1587,6 @@ components:
           $ref: '#/components/headers/X-Content-Type-Options'
         Referrer-Policy:
           $ref: '#/components/headers/Referrer-Policy'
-        Cross-Origin-Resource-Policy:
-          $ref: '#/components/headers/Cross-Origin-Resource-Policy'
-        Cross-Origin-Opener-Policy:
-          $ref: '#/components/headers/Cross-Origin-Opener-Policy'
       content:
         application/json:
           schema:
@@ -1708,7 +1596,7 @@ components:
         Not a request this call takes: `invalid_request` (naming what is wrong in
         `param`, where it is a member or a query parameter) · `invalid_address` ·
         `identity_mismatch` · `unsupported_key_type` (with the server's
-        `key_types`) · `invalid_key` · `prekey_already_used` · `invalid_validity_period` ·
+        `key_types`) · `invalid_key` · `invalid_validity_period` ·
         `certificate_lifetime_too_long` (with the server's `max_certificate_lifetime_seconds`) ·
         `invalid_recipients` · `invalid_revocation`. `PROTOCOL.md` §11.3 has what
         each means.
@@ -1727,10 +1615,6 @@ components:
           $ref: '#/components/headers/X-Content-Type-Options'
         Referrer-Policy:
           $ref: '#/components/headers/Referrer-Policy'
-        Cross-Origin-Resource-Policy:
-          $ref: '#/components/headers/Cross-Origin-Resource-Policy'
-        Cross-Origin-Opener-Policy:
-          $ref: '#/components/headers/Cross-Origin-Opener-Policy'
       content:
         application/problem+json:
           schema:
@@ -1740,7 +1624,7 @@ components:
                   status:
                     const: 400
                   code:
-                    enum: [invalid_request, invalid_address, identity_mismatch, unsupported_key_type, invalid_key, prekey_already_used, invalid_validity_period, certificate_lifetime_too_long, invalid_recipients, invalid_revocation]
+                    enum: [invalid_request, invalid_address, identity_mismatch, unsupported_key_type, invalid_key, invalid_validity_period, certificate_lifetime_too_long, invalid_recipients, invalid_revocation]
     Unauthorized:
       description: |
         The pass is refused: `invalid_pass` · `pass_expired` ·
@@ -1762,10 +1646,6 @@ components:
           $ref: '#/components/headers/X-Content-Type-Options'
         Referrer-Policy:
           $ref: '#/components/headers/Referrer-Policy'
-        Cross-Origin-Resource-Policy:
-          $ref: '#/components/headers/Cross-Origin-Resource-Policy'
-        Cross-Origin-Opener-Policy:
-          $ref: '#/components/headers/Cross-Origin-Opener-Policy'
         WWW-Authenticate:
           $ref: '#/components/headers/WWW-Authenticate'
       content:
@@ -1798,10 +1678,6 @@ components:
           $ref: '#/components/headers/X-Content-Type-Options'
         Referrer-Policy:
           $ref: '#/components/headers/Referrer-Policy'
-        Cross-Origin-Resource-Policy:
-          $ref: '#/components/headers/Cross-Origin-Resource-Policy'
-        Cross-Origin-Opener-Policy:
-          $ref: '#/components/headers/Cross-Origin-Opener-Policy'
       content:
         application/problem+json:
           schema:
@@ -1832,10 +1708,6 @@ components:
           $ref: '#/components/headers/X-Content-Type-Options'
         Referrer-Policy:
           $ref: '#/components/headers/Referrer-Policy'
-        Cross-Origin-Resource-Policy:
-          $ref: '#/components/headers/Cross-Origin-Resource-Policy'
-        Cross-Origin-Opener-Policy:
-          $ref: '#/components/headers/Cross-Origin-Opener-Policy'
       content:
         application/problem+json:
           schema:
@@ -1867,10 +1739,6 @@ components:
           $ref: '#/components/headers/X-Content-Type-Options'
         Referrer-Policy:
           $ref: '#/components/headers/Referrer-Policy'
-        Cross-Origin-Resource-Policy:
-          $ref: '#/components/headers/Cross-Origin-Resource-Policy'
-        Cross-Origin-Opener-Policy:
-          $ref: '#/components/headers/Cross-Origin-Opener-Policy'
       content:
         application/problem+json:
           schema:
@@ -1902,10 +1770,6 @@ components:
           $ref: '#/components/headers/X-Content-Type-Options'
         Referrer-Policy:
           $ref: '#/components/headers/Referrer-Policy'
-        Cross-Origin-Resource-Policy:
-          $ref: '#/components/headers/Cross-Origin-Resource-Policy'
-        Cross-Origin-Opener-Policy:
-          $ref: '#/components/headers/Cross-Origin-Opener-Policy'
       content:
         application/problem+json:
           schema:
@@ -1935,10 +1799,6 @@ components:
           $ref: '#/components/headers/X-Content-Type-Options'
         Referrer-Policy:
           $ref: '#/components/headers/Referrer-Policy'
-        Cross-Origin-Resource-Policy:
-          $ref: '#/components/headers/Cross-Origin-Resource-Policy'
-        Cross-Origin-Opener-Policy:
-          $ref: '#/components/headers/Cross-Origin-Opener-Policy'
       content:
         application/problem+json:
           schema:
@@ -1966,10 +1826,6 @@ components:
           $ref: '#/components/headers/X-Content-Type-Options'
         Referrer-Policy:
           $ref: '#/components/headers/Referrer-Policy'
-        Cross-Origin-Resource-Policy:
-          $ref: '#/components/headers/Cross-Origin-Resource-Policy'
-        Cross-Origin-Opener-Policy:
-          $ref: '#/components/headers/Cross-Origin-Opener-Policy'
       content:
         application/problem+json:
           schema:
@@ -1997,10 +1853,6 @@ components:
           $ref: '#/components/headers/X-Content-Type-Options'
         Referrer-Policy:
           $ref: '#/components/headers/Referrer-Policy'
-        Cross-Origin-Resource-Policy:
-          $ref: '#/components/headers/Cross-Origin-Resource-Policy'
-        Cross-Origin-Opener-Policy:
-          $ref: '#/components/headers/Cross-Origin-Opener-Policy'
       content:
         application/problem+json:
           schema:
@@ -2028,10 +1880,6 @@ components:
           $ref: '#/components/headers/X-Content-Type-Options'
         Referrer-Policy:
           $ref: '#/components/headers/Referrer-Policy'
-        Cross-Origin-Resource-Policy:
-          $ref: '#/components/headers/Cross-Origin-Resource-Policy'
-        Cross-Origin-Opener-Policy:
-          $ref: '#/components/headers/Cross-Origin-Opener-Policy'
       content:
         application/problem+json:
           schema:
@@ -2064,10 +1912,6 @@ components:
           $ref: '#/components/headers/X-Content-Type-Options'
         Referrer-Policy:
           $ref: '#/components/headers/Referrer-Policy'
-        Cross-Origin-Resource-Policy:
-          $ref: '#/components/headers/Cross-Origin-Resource-Policy'
-        Cross-Origin-Opener-Policy:
-          $ref: '#/components/headers/Cross-Origin-Opener-Policy'
         Retry-After:
           $ref: '#/components/headers/Retry-After'
       content:
@@ -2097,10 +1941,6 @@ components:
           $ref: '#/components/headers/X-Content-Type-Options'
         Referrer-Policy:
           $ref: '#/components/headers/Referrer-Policy'
-        Cross-Origin-Resource-Policy:
-          $ref: '#/components/headers/Cross-Origin-Resource-Policy'
-        Cross-Origin-Opener-Policy:
-          $ref: '#/components/headers/Cross-Origin-Opener-Policy'
         Retry-After:
           $ref: '#/components/headers/Retry-After'
       content:
@@ -2131,10 +1971,6 @@ components:
           $ref: '#/components/headers/X-Content-Type-Options'
         Referrer-Policy:
           $ref: '#/components/headers/Referrer-Policy'
-        Cross-Origin-Resource-Policy:
-          $ref: '#/components/headers/Cross-Origin-Resource-Policy'
-        Cross-Origin-Opener-Policy:
-          $ref: '#/components/headers/Cross-Origin-Opener-Policy'
     HeadUnauthorized:
       description: 'The pass is refused, as on the `GET` beside it, without content.'
       headers:
@@ -2152,10 +1988,6 @@ components:
           $ref: '#/components/headers/X-Content-Type-Options'
         Referrer-Policy:
           $ref: '#/components/headers/Referrer-Policy'
-        Cross-Origin-Resource-Policy:
-          $ref: '#/components/headers/Cross-Origin-Resource-Policy'
-        Cross-Origin-Opener-Policy:
-          $ref: '#/components/headers/Cross-Origin-Opener-Policy'
         WWW-Authenticate:
           $ref: '#/components/headers/WWW-Authenticate'
     HeadTooManyRequests:
@@ -2175,10 +2007,6 @@ components:
           $ref: '#/components/headers/X-Content-Type-Options'
         Referrer-Policy:
           $ref: '#/components/headers/Referrer-Policy'
-        Cross-Origin-Resource-Policy:
-          $ref: '#/components/headers/Cross-Origin-Resource-Policy'
-        Cross-Origin-Opener-Policy:
-          $ref: '#/components/headers/Cross-Origin-Opener-Policy'
         Retry-After:
           $ref: '#/components/headers/Retry-After'
     HeadUnavailable:
@@ -2198,10 +2026,6 @@ components:
           $ref: '#/components/headers/X-Content-Type-Options'
         Referrer-Policy:
           $ref: '#/components/headers/Referrer-Policy'
-        Cross-Origin-Resource-Policy:
-          $ref: '#/components/headers/Cross-Origin-Resource-Policy'
-        Cross-Origin-Opener-Policy:
-          $ref: '#/components/headers/Cross-Origin-Opener-Policy'
         Retry-After:
           $ref: '#/components/headers/Retry-After'
 

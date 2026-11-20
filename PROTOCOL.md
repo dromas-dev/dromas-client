@@ -821,7 +821,6 @@ This table gives each code's meaning, and how a client acts on the code:
 | 400 | `identity_mismatch` | an identity document that does not hash to the address, or that does not have the form Section 4.1 gives |
 | 400 | `unsupported_key_type` | an identity key type that this protocol does not define, or that this server does not register; `key_types` lists the types the server registers |
 | 400 | `invalid_key` | an identity key that fails its type's key checks; a prekey statement or certificate that is malformed or badly signed |
-| 400 | `prekey_already_used` | a prekey equal to the current prekey, or to a retired prekey the server keeps (Section 11.9) |
 | 400 | `invalid_validity_period` | at the server's clock, a certificate that has not yet begun or has ended, or a prekey statement that has ended or ends more than 8 days and an hour ahead. The cause is nearly always the client's clock |
 | 400 | `certificate_lifetime_too_long` | a certificate that runs longer than the server's maximum (Section 11.7, step 6); `max_certificate_lifetime_seconds` gives the maximum |
 | 400 | `invalid_recipients` | a send's age file that does not have exactly one native stanza of the current prekey's type, or that has anything beside that stanza and the grease stanzas that the server ignores (Section 11.10, step 7) |
@@ -1016,7 +1015,7 @@ A lookup, `GET /v1/<A>`, accepts no pass (Section 8). The lookup answers with th
 - **An unknown address.** The server answers `404 mailbox_not_found`, whatever certificates the address's identity has revoked. Looking up revocations serves those revocations (Section 11.15).
 - **A revoked address.** The server answers `410 mailbox_revoked`, with the revocation record in `record`.
 - **A lookup is public.** A client sends no pass on a lookup. The server counts a lookup as Section 11.5 says.
-- **The `ETag`.** A `200` carries a weak `ETag` (RFC 9110 §8.8.1, §8.8.3). The tag is the same whether or not the server compresses the answer, and the tag changes whenever the answer's content changes. A lookup whose `If-None-Match` names the tag is answered `304`, with the tag and no content (Section 11.2). A `304` spends what a lookup spends (Section 11.5). A server answers a lookup that would be `404` or `410` as without the condition.
+- **The `ETag`.** A `200` carries a weak `ETag` (RFC 9110 §8.8.1, §8.8.3). The tag changes whenever the answer's content changes. A lookup whose `If-None-Match` names the tag is answered `304`, with the tag and no content (Section 11.2). A `304` spends what a lookup spends (Section 11.5). A server answers a lookup that would be `404` or `410` as without the condition.
 
 ### 11.9. Renew the prekey
 
@@ -1033,7 +1032,6 @@ The server accepts a renewal because the renewal's prekey statement is later tha
   | by a signer of lower rank, or by another certificate with the current certificate's serial | `401 certificate_superseded`; where the new prekey statement must be above a certificate, `certificate_serial` names that certificate's certificate serial |
   | under a certificate the identity revoked | `401 certificate_revoked` |
 
-- **A prekey that is not new.** The server answers `400 prekey_already_used` to a renewal whose prekey equals the current prekey or a retired prekey that the server keeps. For this check alone, a server keeps the newest of a mailbox's retired prekeys, and the server chooses how many. The server keeps each of those retired prekeys until the `not_after` of the retired prekey's statement.
 - **On success:**
   - The new prekey becomes the current prekey, and the new prekey statement's signer becomes the current signer. So the server no longer accepts a pass by a certificate that the renewal replaced (Section 8).
   - The renewal's declaration (Section 7) is the mailbox's declaration from then on.
@@ -1533,7 +1531,6 @@ A server chooses how it stores things. A server promises a client the following:
   - the current statement and the statement's signature, as they were sent;
   - the current signer and, where the signer is a certificate, the certificate serial;
   - the sender key types that the mailbox declared;
-  - for each of the newest retired prekeys, the prekey's type and `not_after`, and a hash of the key (Section 11.9);
   - when the mailbox was registered;
   - the mailbox's account, if the mailbox has one;
   - the mailbox's ACL.

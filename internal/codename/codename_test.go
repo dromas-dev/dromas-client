@@ -9,7 +9,7 @@ func TestCheck(t *testing.T) {
 			t.Errorf("%q passes", bad)
 		}
 	}
-	for _, good := range []string{"invalid_request", "mailbox_already_exists", "serial_too_low", "message_not_yet_valid", "restore_required", "decrypt_error", "client_version_unsupported", "mailbox_full", "request_timeout", "prekey_already_used"} {
+	for _, good := range []string{"invalid_request", "mailbox_already_exists", "serial_too_low", "message_not_yet_valid", "restore_required", "decrypt_error", "client_version_unsupported", "mailbox_full", "request_timeout", "prekey_superseded"} {
 		if err := Check(good); err != nil {
 			t.Error(err)
 		}
