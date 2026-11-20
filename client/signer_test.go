@@ -177,8 +177,9 @@ func TestADocumentIsReadForItsMaximumAlone(t *testing.T) {
 
 // A certificate runs for the longest its server's document names. A server
 // whose maximum is shorter than that, its document read before it changed,
-// answers certificate_lifetime_too_long with its maximum, and the mailbox makes the
-// statement again under a certificate of that one, once.
+// answers certificate_lifetime_too_long with its maximum, and the next command,
+// which reads the document again, makes the statement under a certificate of
+// that one.
 func TestACertificateTooLongIsMadeAgainAtTheServersMaximum(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -194,8 +195,16 @@ func TestACertificateTooLongIsMadeAgainAtTheServersMaximum(t *testing.T) {
 		}
 		next.ServeHTTP(w, r)
 	})
-	if _, err := a.Rekey(ctx); err != nil {
-		t.Fatalf("a renewal answered certificate_lifetime_too_long: %v", err)
+	if _, err := a.Rekey(ctx); client.Code(err) != protocol.CodeCertificateLifetimeTooLong {
+		t.Fatalf("a renewal under a certificate longer than the server's new maximum: %v", err)
+	}
+	e.srv.SetMiddle(nil)
+	again, err := client.Open(a.Dir(), e.opts())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := again.Rekey(ctx); err != nil {
+		t.Fatalf("the next command's renewal: %v", err)
 	}
 	st, sig := e.srv.Prekey(a.Address())
 	_, by, err := protocol.VerifyPrekey(a.Identity(), st, sig, e.clock.Now())

@@ -121,55 +121,36 @@ func (b *Mailbox) renewAs(ctx context.Context, asked, certify bool) (*protocol.P
 }
 
 // renewFrom is renew from what the mailbox knows of itself at its server, st.
-// A statement whose certificate the server answers is longer than it takes
-// (certificate_lifetime_too_long) is spent, and one under a certificate of the
-// maximum that answer names is made and sent, once (shorter). A renewal under
-// a certificate the identity holder gave (st.under) takes nothing an earlier
-// attempt left, so it is signed under that certificate.
+// A renewal under a certificate the identity holder gave (st.under) takes
+// nothing an earlier attempt left, so it is signed under that certificate. A
+// certificate runs for the maximum the server's document names, read once a
+// command: a server that lowered it since answers certificate_lifetime_too_long,
+// and the next command reads the new maximum, here before anything is signed or
+// sent again, and spends the statement made under the longer certificate
+// (signedPrekey).
 func (b *Mailbox) renewFrom(ctx context.Context, st *ownRead) (*protocol.Prekey, time.Time, error) {
-	for attempt := 0; ; attempt++ {
-		next, signed, err := b.nextNumber(st, st.under != 0)
-		if err != nil {
-			return nil, time.Time{}, err
-		}
-		p, req, err := b.makeRenewal(ctx, st, next, signed)
-		if err != nil {
-			return nil, time.Time{}, err
-		}
-		// From here a statement at next exists, signed, whatever the server
-		// makes of it.
-		at, err := b.sendRenewal(ctx, req, next)
-		if !at.IsZero() {
-			return p, at, err
-		}
-		if attempt > 0 || code(err) != protocol.CodeCertificateLifetimeTooLong {
-			return nil, time.Time{}, err
-		}
-		if err := b.shorter(err); err != nil {
+	// The maximum first, so a statement an earlier command left under a
+	// longer certificate is spent, not sent again (signedPrekey).
+	if st.certify && st.under == 0 {
+		if _, err := b.certificateLifetime(ctx); err != nil {
 			return nil, time.Time{}, err
 		}
 	}
-}
-
-// shorter takes the maximum a certificate_lifetime_too_long names, err, as the
-// lifetime of the certificates this command makes, where it is shorter than
-// the one it made and leaves room to sign messages (certificateLifetime); a
-// waiting statement under a longer one is then spent (signedPrekey). It
-// returns err otherwise, or noRoom's refusal.
-func (b *Mailbox) shorter(err error) error {
-	var e *APIError
-	if !errors.As(err, &e) || e.Problem.MaxCertificateLifetime == nil || *e.Problem.MaxCertificateLifetime > protocol.MaxInteger {
-		return err
+	next, signed, err := b.nextNumber(st, st.under != 0)
+	if err != nil {
+		return nil, time.Time{}, err
 	}
-	life := time.Duration(*e.Problem.MaxCertificateLifetime) * time.Second //nolint:gosec // bounded above
-	switch {
-	case life <= protocol.TTL+protocol.MaxSkew:
-		return noRoom(life)
-	case b.lifetime > 0 && life >= b.lifetime:
-		return err
+	p, req, err := b.makeRenewal(ctx, st, next, signed)
+	if err != nil {
+		return nil, time.Time{}, err
 	}
-	b.lifetime = life
-	return nil
+	// From here a statement at next exists, signed, whatever the server makes
+	// of it.
+	at, err := b.sendRenewal(ctx, req, next)
+	if !at.IsZero() {
+		return p, at, err
+	}
+	return nil, time.Time{}, err
 }
 
 // renewal is a renewal made and signed, ready to send.
@@ -508,7 +489,8 @@ func (b *Mailbox) signedPrekey(serial uint64, certify bool) (p *protocol.Prekey,
 		} else if nm.showsTaken(c.Serial()) {
 			return nil, true, nil // under a certificate whose working key another holds
 		}
-		// Longer than its server takes, by the maximum this command read.
+		// Longer than its server takes, by the maximum this command read
+		// (renewFrom reads it first).
 		if b.lifetime > 0 && c.Lifetime() > b.lifetime {
 			return nil, true, nil
 		}
