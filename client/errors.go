@@ -198,7 +198,7 @@ func (e *APIError) words() string {
 	case protocol.CodeRateLimited:
 		return rateLimited(p)
 	case protocol.CodeFetchRateLimited:
-		return "the server paces the messages the mailbox fetches, new ones and ones fetched before: the rest wait on the server"
+		return "the server paces the messages the mailbox fetches: the rest wait on the server"
 	case protocol.CodeMailboxFull:
 		return "the recipient's mailbox is full"
 	case protocol.CodeMailboxRateLimited:

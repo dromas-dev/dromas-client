@@ -162,8 +162,8 @@ Where this document uses a term below as a defined term, the term has the sense 
 - **Poll:** a list without a cursor, or a list that carries a cursor but is not a continuation (Section 11.11).
 - **Continuation:** a list that meets the three conditions of Section 11.11.
 - **Long poll:** a list of the first page whose answer the server delays (Section 11.11).
-- **Fetch:** `GET /v1/<B>/messages/<id>` (Section 11.12). A **refetch** is a fetch of a message that the mailbox has fetched before.
-- **First-fetch budget:** the budget that a mailbox's first fetches of messages spend (Section 11.12).
+- **Fetch:** `GET /v1/<B>/messages/<id>` (Section 11.12).
+- **Fetch budget:** the budget that a mailbox's fetches of messages spend (Section 11.12).
 - **Intake budget:** the number of messages that a mailbox accepts from all senders together (Section 11.10, step 8).
 - **Ack:** `DELETE /v1/<B>/messages/<id>` (Section 11.13).
 - **Set the ACL**, **get the ACL:** `PUT` and `GET /v1/<B>/acl` (Section 11.14).
@@ -779,7 +779,7 @@ A revocation record carries an identity's revocations, and the record proves its
 - **No caching.** Every answer of a route under `/v1/` carries `Cache-Control: no-store` (RFC 9111 §5.2.2.5).
 - **Compression.** A server MUST NOT compress an answer (Section 15.8).
 - **`HEAD`.** A server answers `HEAD` on every route that answers `GET` (RFC 9110 §9.1, §9.3.2).
-  - A `HEAD` changes nothing. A `HEAD` spends no cursor, hands out no cursor, marks no message as fetched, and spends none of the first-fetch budget.
+  - A `HEAD` changes nothing. A `HEAD` spends no cursor, hands out no cursor, and spends none of the fetch budget.
   - Section 11.5 gives what a `HEAD` spends.
 - **Preconditions.** Preconditions are those of RFC 9110 §13. A server evaluates `If-Match` and `If-None-Match` on every call but a read of the server's document (§13.1.1, §13.1.2), at the point §13.2.1 gives, in the order §13.2.2 gives. Dromas narrows the preconditions in these ways:
   - **Normal request checks.** A call's normal request checks (§13.2.1) are the match of the call's route and method, the call's pass where the call accepts one, and the read of the call's target. A registration's pass and a renewal's pass are by the signer of the prekey statement that the call brings, or by the identity (Sections 8; 11.7, step 7; 11.9). Therefore every check of that prekey statement is one of the call's normal request checks.
@@ -845,7 +845,7 @@ This table gives each code's meaning, and how a client acts on the code:
 | 412 | `precondition_failed` | a precondition was false (Section 11.2) |
 | 413 | `content_too_large` | a body or ciphertext over its cap, or an ACL with more entries than the server accepts; `limit` gives the cap |
 | 429 | `rate_limited` | the call is past a limit (Section 11.5); the answer carries `subject` and `quota_id`, and `quota_value` for a number a day |
-| 429 | `fetch_rate_limited` | the server paces the mailbox's fetches, of new messages or of messages fetched before (Section 11.12) |
+| 429 | `fetch_rate_limited` | the server paces the mailbox's fetches (Section 11.12) |
 | 429 | `mailbox_full` | the mailbox stores as many messages as it may. The refusal says nothing of how many messages the mailbox stores |
 | 429 | `mailbox_rate_limited` | the mailbox has spent its intake budget for now |
 | 503 | `unavailable` | the server is not ready to answer |
@@ -1150,12 +1150,7 @@ The server checks the steps below. Only step 9 stores anything.
   ```
 
 - **A fetch carries no validator.** So an `If-Range` is false (§13.1.5), and the server ignores the `Range` that comes with the `If-Range`. The bytes under a message id never change, because the message id is the ciphertext's SHA-256.
-- **Counting.** The server counts a ranged fetch as it counts any fetch.
-
-  | Fetch | Spends | Past the limit |
-  |---|---|---|
-  | a message's first fetch | the mailbox's first-fetch budget | `429 fetch_rate_limited` |
-  | a refetch | a refetch allowance that the server sets for the mailbox, separate from the mailbox's polls | `429 fetch_rate_limited` |
+- **Counting.** Every fetch spends the mailbox's fetch budget, a ranged fetch and a fetch of a message fetched before among them. Past it → `429 fetch_rate_limited`.
 
 - **The API serves bodies itself, never through a redirect.**
 
