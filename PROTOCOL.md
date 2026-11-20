@@ -1015,7 +1015,7 @@ A lookup, `GET /v1/<A>`, accepts no pass (Section 8). The lookup answers with th
 - **An unknown address.** The server answers `404 mailbox_not_found`, whatever certificates the address's identity has revoked. Looking up revocations serves those revocations (Section 11.15).
 - **A revoked address.** The server answers `410 mailbox_revoked`, with the revocation record in `record`.
 - **A lookup is public.** A client sends no pass on a lookup. The server counts a lookup as Section 11.5 says.
-- **The `ETag`.** A `200` carries a weak `ETag` (RFC 9110 §8.8.1, §8.8.3). The tag is the same whether or not the server compresses the answer, and the tag changes whenever the answer's content changes. A lookup whose `If-None-Match` names the tag is answered `304`, with the tag and no content (Section 11.2). A `304` spends what a lookup spends (Section 11.5). A server answers a lookup that would be `404` or `410` as without the condition.
+- **The `ETag`.** A `200` carries a weak `ETag` (RFC 9110 §8.8.1, §8.8.3). The tag changes whenever the answer's content changes. A lookup whose `If-None-Match` names the tag is answered `304`, with the tag and no content (Section 11.2). A `304` spends what a lookup spends (Section 11.5). A server answers a lookup that would be `404` or `410` as without the condition.
 
 ### 11.9. Renew the prekey
 
