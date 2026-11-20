@@ -51,6 +51,9 @@ paths:
       summary: The server's version policy and capabilities
       description: The server's document (`PROTOCOL.md` §11.18), the same to every caller. It takes every version.
       security: []
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/IfNoneMatch'
       responses:
         '200':
           description: The server's document.
@@ -73,6 +76,19 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ServerDocument'
+        '304':
+          description: The document exists for every caller and carries no `ETag`, so `If-None-Match` is false only as `*`, and the answer has no content (RFC 9110 §15.4.5).
+          headers:
+            Date:
+              $ref: '#/components/headers/Date'
+            Deprecation:
+              $ref: '#/components/headers/Deprecation'
+            Sunset:
+              $ref: '#/components/headers/Sunset'
+            Cache-Control:
+              $ref: '#/components/headers/Cache-Control'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '503':
@@ -83,6 +99,9 @@ paths:
       summary: The server's document, without content
       description: 'The `GET` beside it, answered without content (RFC 9110 §9.3.2; `PROTOCOL.md` §11.2).'
       security: []
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/IfNoneMatch'
       responses:
         '200':
           description: The server's document, without content.
@@ -101,6 +120,19 @@ paths:
               $ref: '#/components/headers/X-Content-Type-Options'
             Referrer-Policy:
               $ref: '#/components/headers/Referrer-Policy'
+        '304':
+          description: As the `GET`'s `304`.
+          headers:
+            Date:
+              $ref: '#/components/headers/Date'
+            Deprecation:
+              $ref: '#/components/headers/Deprecation'
+            Sunset:
+              $ref: '#/components/headers/Sunset'
+            Cache-Control:
+              $ref: '#/components/headers/Cache-Control'
+        '412':
+          $ref: '#/components/responses/HeadRefused'
         '429':
           $ref: '#/components/responses/HeadTooManyRequests'
         '503':
