@@ -145,8 +145,8 @@ jobs:
     # leaves ./sh out there (its header says why). NetBSD and DragonFly in the
     # daily run alone, never a release's, as the Intel Mac: their VMs build
     # the tests at a third and a quarter of the others' speed. The race test in
-    # the daily run alone too: with no Go cache in the VM, its build takes FreeBSD
-    # minutes, for seconds of tests.
+    # the daily run alone too: its build takes FreeBSD minutes, for seconds of
+    # tests.
     strategy:
       fail-fast: false
       matrix:
@@ -164,6 +164,18 @@ jobs:
         run: |
           toolchain=$(curl -fsS 'https://go.dev/dl/?mode=json' | jq -r '.[0].version')
           echo "GOTOOLCHAIN=$toolchain" >> "$GITHUB_ENV"
+      - name: the build cache
+        # Go's build cache, in the workspace, which the action syncs into the VM
+        # and back around each of its steps (cpa.sh): restored before the VM
+        # starts, saved after its last step by a run on main, whose caches every
+        # pull request may restore (GitHub's cache access rules). Keyed as
+        # setup-go keys its own, by the system, the toolchain and go.sum.
+        id: gocache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .gocache
+          key: go-build-${{ matrix.os.name }}-${{ matrix.os.version }}-${{ env.GOTOOLCHAIN }}-${{ hashFiles('go.sum') }}
+          restore-keys: go-build-${{ matrix.os.name }}-${{ matrix.os.version }}-${{ env.GOTOOLCHAIN }}-
       - uses: cross-platform-actions/action@82668f1fbd89d9c99487604f822cbf6716f124d3 # v1.7.0
         with:
           operating_system: ${{ matrix.os.name }}
@@ -190,6 +202,7 @@ jobs:
         shell: cpa.sh {0}
         run: |
           for d in /usr/pkg/bin /usr/pkg/go1*/bin; do if [ -d "$d" ]; then PATH=$d:$PATH; fi; done
+          export GOCACHE=$PWD/.gocache
           scripts/check.sh ${{ github.event_name == 'schedule' && 'full' || 'norace' }}
       - name: the rc.d script runs recv as its user
         shell: cpa.sh {0}
@@ -200,6 +213,7 @@ jobs:
         # passed, and the output where the script sends it.
         run: |
           for d in /usr/pkg/bin /usr/pkg/go1*/bin; do if [ -d "$d" ]; then PATH=$d:$PATH; fi; done
+          export GOCACHE=$PWD/.gocache
           go build -o dromas ./cmd/dromas
           sudo install -d /usr/local/bin
           sudo install -m 0755 dromas /usr/local/bin/dromas
@@ -232,6 +246,12 @@ jobs:
           for _ in $(seq 30); do sudo grep -F "$want" "$log" && exit 0; sleep 1; done
           sudo tail -20 "$log"
           exit 1
+      - name: the build cache, saved
+        if: github.ref == 'refs/heads/main' && steps.gocache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .gocache
+          key: ${{ steps.gocache.outputs.cache-primary-key }}
 
   lint:
     runs-on: ubuntu-26.04
