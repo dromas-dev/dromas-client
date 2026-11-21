@@ -8,7 +8,8 @@ This guide covers what to do after you [install](install/README.md) `dromas` and
 
 - `base-dir`: the state file and the lists of senders
 - `mail-dir`: the messages, in `inbox/`, `held/`, `refused/`, and `sent/`
-- `identity-file`: the identity's private key, which is the mailbox's address
+- `inbox-dir`: `inbox/` alone, by default `<mail-dir>/inbox`
+- `identity-file`: the identity's private key. The identity determines the mailbox's address.
 - `rotating-keys-dir`: the prekeys, the working key, and the TLS session ticket
 
 `dromas config` prints each setting and where it came from: a flag, the environment, the config file, or the default. `dromas status` reports what the mailbox holds. The top of [`client/doc.go`](../client/doc.go) describes each file.
@@ -24,7 +25,7 @@ echo hello | dromas send <link>
 dromas send --file report.txt <link>
 ```
 
-To send one message to a group, name every other member. To reply to every member of a group message that you received, give its ID:
+To send one message to a group, name every other member. To reply to every member of a group message that you received, give the message's `id`, as `recv` printed it:
 
 ```sh
 echo "the plan" | dromas send <link> <link> <alias>
@@ -33,7 +34,7 @@ echo "agreed" | dromas send --reply-all <id>
 
 Each member gets its own copy of the message. Every copy has the same `msg_id`, and its envelope's `group` lists the whole group. The members define the group, so if you add or leave out a member, you make a different group.
 
-A group message uses one of your mailbox's sends for each other member, so keep groups small. For a group of more than 5 other members, `send` prints a `warning` line and still sends the message. If a group needs more sends than your budget allows, the members get the message at different times. `dromas recv --follow` sends to each remaining member after the server's `Retry-After` time passes. A member that's still waiting when the message's time to live (TTL) of 7 days ends never gets the message, and its entry moves to `outbox/failed/`.
+A group message uses one of your mailbox's sends for each other member, so keep groups small. For a group of more than 5 other members, `send` prints a `warning` line and still sends the message. If a group needs more sends than the server's [rate limits](#rate-limits) allow your mailbox, the members get the message at different times. `dromas recv --follow` sends to each remaining member after the server's `Retry-After` time passes. A member that's still waiting when the message's time to live (TTL) of 7 days ends never gets the message, and its entry moves to `outbox/failed/`.
 
 `send` prints a `sent` line with the server's `id` for the message and the message's `msg_id`. To name a peer, run `dromas alias add bob <link>`, and then `dromas send bob`. To reply to a message, run `dromas send --in-reply-to <msg_id> <from>`.
 
@@ -61,13 +62,13 @@ Each message that you receive goes to one of three directories:
 | `held/` | Messages from unknown senders that passed every check, kept until you run `dromas peer allow` or `dromas peer block`. |
 | `refused/` | Messages that failed a check. They're never delivered, and they're kept as evidence. The sender isn't told. |
 
-The mailbox keeps each message in plaintext, one file for each message, and keeps each message that you send in `sent/`. `dromas` never deletes these files, so managing them is up to you. `dromas refused list` shows why `dromas` refused each message, and `dromas refused rm` empties `refused/`. The files in `refused/` keep what the server sent.
+The mailbox keeps each message in plaintext, one file for each message, and keeps each message that you send in `sent/`. `dromas peer allow` moves a sender's messages from `held/` to `inbox/`. `dromas` deletes a message file only when you run `dromas peer block`, which deletes that sender's messages in `held/`, or `dromas refused rm`, and when `recv` delivers a message that it refused earlier, which deletes that message's file in `refused/`. Managing the files is otherwise up to you. `dromas refused list` shows why `dromas` refused each message, and `dromas refused rm` empties `refused/`. The files in `refused/` keep what the server sent.
 
 Any process that runs as your user can put a file in `inbox/` or `held/` that looks like a delivered message, and no file mode prevents that. Give an agent's file tools read access to `inbox-dir`, but not write access.
 
 ### Run a program for each message
 
-`dromas recv --exec` runs a program for each message that it delivers to `inbox/`, with the message's `message` line on stdin. To set the program in the config file, use [`recv.exec`](configuration.md#recvexec):
+`dromas recv --exec` runs a program for each message that it delivers to `inbox/`, with the message's `message` line on stdin. `recv` runs the program only when it waits: with `--wait`, with [`recv.wait`](configuration.md#recvwait) in the config file, or with `--follow`. To set the program in the config file, use [`recv.exec`](configuration.md#recvexec):
 
 ```toml
 [recv]
@@ -76,13 +77,13 @@ exec = ["/usr/local/bin/bot", "--quiet"]
 
 The program runs at least once for each message, and a crash can make it run twice. In the same step that keeps a message, `recv` records that the program still needs to run for that message. When `recv` starts again, it first runs the program for every message that still needs it.
 
-If the program fails, `recv` tries it at most 3 times in total. When `recv` gives up on a message's program, `dromas status` reports the message under `attention` until you run `dromas inbox clear-failed`, which clears every message that `recv` gave up on. `inbox clear-failed` doesn't clear a message that still has tries left. Nothing runs the program for that message again. To pass the message to a program yourself, run `dromas inbox show <id> | <program>`.
+If the program fails, `recv` tries it at most 3 times in total. When `recv` gives up on a message's program, `dromas status` reports the message under `attention` until you run `dromas inbox clear-failed`, which clears every message that `recv` gave up on, but not a message that still has tries left. Nothing runs the program again for a message that `recv` gave up on. To pass the message to a program yourself, run `dromas inbox show <id> | <program>`.
 
 `recv` doesn't run the program for a held message, or for a message that another `recv` received. Run one `recv` for each mailbox.
 
 ### Send each message to a webhook
 
-`dromas recv --webhook <url>` posts each message that it delivers to `inbox/` to an HTTP endpoint, such as an n8n Webhook node. You can use it alone or together with the `--exec` program. The body is the message's `message` line, as JSON. To set the webhook in the config file, use [`recv.webhook`](configuration.md#recvwebhook):
+`dromas recv --webhook <url>` posts each message that it delivers to `inbox/` to an HTTP endpoint, such as an n8n Webhook node. You can use it alone or together with the `--exec` program. As with `--exec`, `recv` posts only when it waits: with `--wait`, with `recv.wait` in the config file, or with `--follow`. The body is the message's `message` line, as JSON. To set the webhook in the config file, use [`recv.webhook`](configuration.md#recvwebhook):
 
 ```toml
 [recv]
@@ -97,7 +98,7 @@ The webhook runs independently of the program. A failure of either one never sto
 
 A `2xx` response means success. Any other response, including a redirect, or no response within 30 seconds, is a failed try. `recv` doesn't follow redirects. `recv` tries a post at most 3 times in total: immediately, then 5 seconds after the first try, then 5 minutes after the second try. A response's `Retry-After` can make a wait longer, up to 5 minutes. When all 3 tries for a message fail, `dromas status` reports the message under `attention` until `dromas inbox clear-failed` clears it. Nothing posts that message again. To post it yourself, run `dromas inbox show <id> | curl --data-binary @- <url>`, which posts the same `message` line.
 
-If `recv` stops or crashes before it finishes the tries for a message, `recv --webhook` posts that message the next time it starts, so an endpoint can get a message twice. To recognize a message that you already have, use `webhook-id` or the line's `id`.
+If `recv` stops or crashes before it finishes the tries for a message, `recv --webhook` posts that message the next time it starts, so an endpoint can get a message twice. To recognize a message that you already have, use the line's `id`. If you set the secret file, the `webhook-id` header carries the same value.
 
 An `http` URL to another machine sends each decrypted message across the network unencrypted. Use `https`, or a URL on this machine.
 
@@ -109,16 +110,14 @@ To receive messages as they arrive, run `dromas recv --follow --headers` under y
 
 The `.deb` and `.rpm` packages install a systemd user unit, `dromas@.service`, but don't enable it. The instance name is the profile, so `dromas@default` runs the default mailbox.
 
-1. If you installed a prebuilt binary, extract the unit from the archive. Run these commands in the directory that contains the archive:
+1. If you installed a prebuilt binary, extract the unit from the archive and install it. The unit runs `/usr/bin/dromas`, and [Install a prebuilt binary](install/binaries.md) puts `dromas` at `/usr/local/bin/dromas`, so the `sed` command changes the path. If you installed `dromas` somewhere else, replace `/usr/local/bin/dromas` in the `sed` command with that path. Run these commands in the directory that contains the archive:
 
    ```sh
    tar -xzf dromas_*_linux_*.tar.gz packaging/systemd/dromas@.service
    mkdir -p ~/.config/systemd/user
-   cp packaging/systemd/dromas@.service ~/.config/systemd/user/
+   sed 's|/usr/bin/dromas|/usr/local/bin/dromas|' packaging/systemd/dromas@.service > ~/.config/systemd/user/dromas@.service
    systemctl --user daemon-reload
    ```
-
-   The unit runs `/usr/bin/dromas`. If you installed `dromas` somewhere else, edit `ExecStart` in the copy.
 
 2. Enable the service so that it starts now and at each login. For another profile, use `dromas@<profile>`:
 
@@ -134,7 +133,7 @@ The `.deb` and `.rpm` packages install a systemd user unit, `dromas@.service`, b
 
 To check the service, run `systemctl --user status dromas@default`. To read its log, run `journalctl --user -u dromas@default`.
 
-The unit restarts `recv` 30 seconds after `recv` exits because of a signal or with an exit status other than 0 and 3. The unit doesn't restart `recv` after exit status 2 or 4, because a restart would hit the same error. Fix the cause, then run `systemctl --user restart dromas@default`.
+The unit restarts `recv` 30 seconds after `recv` exits with an exit status other than 0 and 3, or because of a signal other than `SIGHUP`, `SIGINT`, `SIGTERM`, and `SIGPIPE`, which systemd treats as a clean exit. The unit doesn't restart `recv` after exit status 2 or 4, because a restart would hit the same error. Fix the cause, then run `systemctl --user restart dromas@default`.
 
 ### Alpine Linux
 
@@ -163,7 +162,7 @@ The `.apk` package installs an OpenRC user service, `/etc/user/init.d/dromas`, b
    rc-service -U dromas start
    ```
 
-To check the service, run `rc-service -U dromas status`. The service sends `recv`'s output to syslog with the tag `dromas`, which goes to `/var/log/messages` by default.
+To check the service, run `rc-service -U dromas status`. The service sends `recv`'s output to syslog with the service's name as its tag, `dromas` or `dromas.<profile>`, which goes to `/var/log/messages` by default.
 
 The service restarts `recv` 30 seconds after `recv` exits, regardless of the exit status. After 5 starts within 30 minutes, the service stops and stays stopped. Fix the cause, then run `rc-service -U dromas restart`.
 
@@ -195,7 +194,7 @@ For each mailbox, use either the agent or `brew services`, not both, because eac
 
 ### FreeBSD and DragonFly BSD
 
-The FreeBSD and DragonFly BSD archives include an rc.d script, `packaging/rc.d/freebsd/dromas`. The script runs `/usr/local/bin/dromas recv` as the mailbox's owner under daemon(8). [Install a prebuilt binary](install/binaries.md) puts `dromas` at that path. Run these commands as root in the directory that contains the archive, and replace `<user>` with the owner:
+The FreeBSD and DragonFly BSD archives include an rc.d script, `packaging/rc.d/freebsd/dromas`. The script runs `/usr/local/bin/dromas recv` as the mailbox's owner under daemon(8). [Install a prebuilt binary](install/binaries.md) puts `dromas` at that path. For a mailbox other than the default, also set `dromas_flags="--profile <profile>"` before you run `service dromas start`, with `sysrc` or in `/etc/rc.conf`. Run these commands as root in the directory that contains the archive, and replace `<user>` with the owner:
 
 ```sh
 tar -xzf dromas_*_freebsd_*.tar.gz packaging/rc.d/freebsd/dromas   # dragonfly on DragonFly BSD
@@ -206,13 +205,13 @@ service dromas start
 
 DragonFly BSD has no `sysrc`. Instead, add `dromas_enable="YES"` and `dromas_user="<user>"` to `/etc/rc.conf`.
 
-For a mailbox other than the default, also set `dromas_flags="--profile <profile>"` before you run `service dromas start`, with `sysrc` or in `/etc/rc.conf`. To run several mailboxes, list them in `dromas_profiles` and give each one its own settings, as the script's comments show. To check the service, run `service dromas status`. The script sends `recv`'s output to syslog with the tag `dromas`, which goes to `/var/log/messages` by default.
+To run several mailboxes, list them in `dromas_profiles` and give each one its own settings, as the script's comments show. To check the service, run `service dromas status`. The script sends `recv`'s output to syslog with the tag `dromas`, or `dromas/<profile>` for each profile in `dromas_profiles`, which goes to `/var/log/messages` by default.
 
 daemon(8) restarts `recv` 30 seconds after every exit, regardless of the exit status, with no limit on restarts. Fix the cause, then run `service dromas restart`.
 
 ### NetBSD
 
-The NetBSD archive includes an rc.d script, `packaging/rc.d/netbsd/dromas`. The script runs `/usr/local/bin/dromas recv` as the mailbox's owner. [Install a prebuilt binary](install/binaries.md) puts `dromas` at that path. Run these commands as root in the directory that contains the archive, and replace `<user>` with the owner:
+The NetBSD archive includes an rc.d script, `packaging/rc.d/netbsd/dromas`. The script runs `/usr/local/bin/dromas recv` as the mailbox's owner. [Install a prebuilt binary](install/binaries.md) puts `dromas` at that path. For a mailbox other than the default, also add `dromas_flags="--profile <profile>"` to `/etc/rc.conf` before you run `/etc/rc.d/dromas start`. Run these commands as root in the directory that contains the archive, and replace `<user>` with the owner:
 
 ```sh
 tar -xzf dromas_*_netbsd_*.tar.gz packaging/rc.d/netbsd/dromas
@@ -222,13 +221,13 @@ echo 'dromas_user=<user>' >> /etc/rc.conf
 /etc/rc.d/dromas start
 ```
 
-For a mailbox other than the default, also add `dromas_flags="--profile <profile>"` to `/etc/rc.conf` before you run `/etc/rc.d/dromas start`. The script runs at most one mailbox on each host. The script creates `/var/log/dromas.log`, owned by the mailbox's owner, and writes `recv`'s output there.
+The script runs at most one mailbox on each host. The script creates `/var/log/dromas.log`, owned by the mailbox's owner, and writes `recv`'s output there.
 
 Nothing in NetBSD's base system restarts `recv` after it exits. To start it again, run `/etc/rc.d/dromas start`. To check whether `recv` is running, run `/etc/rc.d/dromas status`.
 
 ### OpenBSD
 
-The OpenBSD archive includes an rc.d script, `packaging/rc.d/openbsd/dromas`. The script runs `/usr/local/bin/dromas recv` as the mailbox's owner. [Install a prebuilt binary](install/binaries.md) puts `dromas` at that path. Run these commands as root in the directory that contains the archive, and replace `<user>` with the owner:
+The OpenBSD archive includes an rc.d script, `packaging/rc.d/openbsd/dromas`. The script runs `/usr/local/bin/dromas recv` as the mailbox's owner. [Install a prebuilt binary](install/binaries.md) puts `dromas` at that path. For a mailbox other than the default, also run `rcctl set dromas flags --profile <profile>` before you run `rcctl start dromas`. Run these commands as root in the directory that contains the archive, and replace `<user>` with the owner:
 
 ```sh
 tar -xzf dromas_*_openbsd_*.tar.gz packaging/rc.d/openbsd/dromas
@@ -238,7 +237,7 @@ rcctl set dromas user <user>
 rcctl start dromas
 ```
 
-For a mailbox other than the default, also run `rcctl set dromas flags --profile <profile>` before you run `rcctl start dromas`. For a second mailbox, link the script under another name, then enable that name and set its user and flags, as the script's comments show. rcctl sets a service's user and flags only after you enable the service. The script sends `recv`'s output to syslog's `daemon` facility, which goes to `/var/log/daemon` by default.
+For a second mailbox, link the script under another name, then enable that name and set its user and flags, as the script's comments show. rcctl sets a service's user and flags only after you enable the service. The script sends `recv`'s output to syslog's `daemon` facility, which goes to `/var/log/daemon` by default.
 
 Nothing restarts `recv` after it exits. To start it again, run `rcctl start dromas`. `rcctl check dromas` shows whether `recv` is running, and `rcctl ls failed` lists the service after `recv` exits.
 
@@ -259,7 +258,7 @@ Register-ScheduledTask -TaskName "dromas $p" `
 Start-ScheduledTask -TaskName "dromas $p"
 ```
 
-The task has no time limit, runs on battery power, and runs at most one `recv`. Task Scheduler doesn't restart `recv` after it exits, regardless of the exit status. The task then stays stopped until you next log on, or until you run `Start-ScheduledTask -TaskName "dromas default"`.
+The task has no time limit, runs on battery power, and runs at most one `recv`. Task Scheduler doesn't restart `recv` after it exits, regardless of the exit status, and `-RestartCount` and `-RestartInterval` don't change that. The task then stays stopped until you next log on, or until you run `Start-ScheduledTask -TaskName "dromas default"`.
 
 On Windows 11 24H2 and later, and on Windows Server 2025, the task doesn't open a console window, because `dromas.exe` asks Windows not to allocate one. On earlier versions of Windows, a console window opens when you log on, and closing the window ends `recv`.
 
@@ -272,11 +271,11 @@ On Windows 11 24H2 and later, and on Windows Server 2025, the task doesn't open 
 
 Run `dromas recv` more often than once a week, and at least every 6 days and 22 hours. A `recv` that runs as a service does this. A message waits on the server for just under 7 days. A prekey is valid for 8 days, and each `recv` renews the prekey once it's a day old.
 
-If `recv` runs often, you can shorten the prekey lifetime to as little as `1d` with [`prekey-lifetime`](configuration.md#prekey-lifetime). The lifetime is how long a stolen prekey stays usable. It's also how long an old prekey stays usable when a server serves it to a sender that's new to the mailbox. `dromas prekey lifetime --help` shows how often `recv` must run at a shorter lifetime.
+If `recv` runs often, you can shorten the prekey lifetime to as little as `1d` with [`prekey-lifetime`](configuration.md#prekey-lifetime). The lifetime is how long a stolen prekey stays usable. It's also how long an old prekey stays usable when a server serves it to a sender that's new to the mailbox. At a lifetime under `2d2h`, `dromas prekey lifetime` prints how often `recv` must run.
 
 ## Choose who can write to you
 
-The mailbox puts a message from a sender that you haven't allowed in `held/`, and `recv` doesn't print it. You allow a sender when you write to them, name them with `dromas alias add`, or run `dromas peer allow`.
+The mailbox puts a message from a sender that you haven't allowed in `held/`, and `recv` prints a `held` line for it in place of its `message` line. You allow a sender when you write to them, name them with `dromas alias add`, or run `dromas peer allow`.
 
 `dromas peer block` drops a sender's messages. The server then rejects that sender's messages, so the server learns whom you blocked.
 
@@ -294,14 +293,14 @@ Back up these files:
 
 To restore a mailbox:
 
-1. Put `identity` at the path that `identity-file` names. If you kept the lists, put them in `base-dir`.
-2. Run `dromas prekey renew`. If you also kept `prekeys/`, run `dromas init --restore` instead.
+1. Put your config file back, and put `identity` at the path that `identity-file` names. If you kept the lists, put them in `base-dir`.
+2. If you also kept `prekeys/`, run `dromas init --restore`. Otherwise, run `dromas prekey renew`.
 
 Without `allowed` and `blocked`, the first renewal that `recv` makes replaces the server's access control list (ACL) with an open one. A sender that you blocked then reaches `held/` again until you restore the lists.
 
 ### Restore required
 
-The mailbox stops with `restore_required` when `state` doesn't match `prekeys/`. This happens when `state` is lost, or when you restore `state` from an older copy and keep `prekeys/`. Until you run `dromas init --restore`, the mailbox doesn't receive, send, deliver, or renew anything. `dromas init --restore` adopts the prekeys in `prekeys/` and then renews.
+The mailbox stops with `restore_required` when `state` doesn't match `prekeys/`. This happens when `state` is lost, or when you restore `state` from a copy older than the last prekey renewal and keep `prekeys/`. Until you run `dromas init --restore`, the mailbox doesn't receive, send, deliver, or renew anything. `dromas init --restore` adopts the prekeys in `prekeys/` and then renews.
 
 When `state` is lost, its replay set is lost with it, so the mailbox might deliver a message again that it already accepted (`PROTOCOL.md` §15.9). If your agent's work must not happen twice, key the work by `from` and `msg_id`.
 
@@ -331,7 +330,7 @@ While the key is locked, a mailbox whose identity signs doesn't send or receive.
 
 ### Missing directories
 
-If a directory under `mail-dir`, `inbox-dir`, or `rotating-keys-dir` is missing, every command that writes to the mailbox stops and acknowledges nothing. So an unmounted volume hides no messages. If you remove one of these directories on purpose, create it again yourself.
+If `inbox-dir`, `held/`, `refused/`, `sent/`, `prekeys/`, or `work/` is missing, every command that writes to the mailbox or reads its messages stops and acknowledges nothing. So an unmounted volume hides no messages. If you remove one of these directories on purpose, create it again yourself.
 
 If `inbox-dir` is itself a mount point, it remains as an empty directory while the volume isn't mounted, and `dromas` can't tell the difference. Instead, point `inbox-dir` at a folder inside the volume.
 
@@ -356,7 +355,7 @@ If someone steals your identity's key, revoke the address:
 dromas revocation publish <address>
 ```
 
-Revocation is permanent, and nothing can undo it. To confirm, you type the address in full. After that, the mailbox signs nothing more, whatever a server answers.
+Revocation is permanent, and nothing can undo it. The `<address>` argument is the confirmation, so type the address in full. Once the server accepts the revocation, the mailbox keeps it and signs nothing more. If the server doesn't accept it, the command fails. Run the command again.
 
 To be able to revoke the address without the mailbox or the key, make a revocation record now, and keep it somewhere other than the mailbox:
 
@@ -386,7 +385,7 @@ If someone steals the working key (`work/`) but not the identity, run `dromas ce
 
 A mailbox under a certificate needs its identity's key only to certify each new working key. You can keep the key on another machine, called the identity's holder, so that a copy of the mailbox contains no identity. The mailbox then renews under its current certificate, and the holder certifies each next working key with stock `ssh-keygen` (`PROTOCOL.md` §12.7).
 
-The files that you move between the two machines are public: `identity.doc`, `request.pub`, `request-cert.pub`, and a revocation of certificates. Copy them by any means you trust. Only the identity key file is secret.
+The files that you move between the two machines are public: `identity.doc`, `request.pub`, `request-cert.pub`, and a revocation of certificates. Copy them by any means you trust. The identity key file is secret, and so is the revocation record that you make in step 2 of [Move the identity](#move-the-identity).
 
 ### Move the identity
 
@@ -402,7 +401,7 @@ The mailbox signs messages under its certificate until `certificate_signs_messag
 2. On the holder, save `working_key` as `request.pub` in the directory of the identity key file, and run `command` there. `command` calls the key file `identity`. If the file has a different name, use that name instead. For an identity in the holder's ssh-agent, put `-U` before `-s`, and give the identity's public key file instead of `identity`. `ssh-keygen` writes `request-cert.pub`.
 3. On the mailbox, run `dromas cert install request-cert.pub`. The mailbox checks the certificate and renews under it.
 
-`command` makes a certificate with the longest lifetime that the server accepts, and backdates its start by an hour, so that `cert install` accepts it immediately. A later request replaces the earlier one. `cert install` rejects a certificate in these cases:
+`command` makes a certificate with the lifetime that [`certificate-lifetime`](configuration.md#certificate-lifetime) sets, which is never longer than the server accepts, and backdates its start by an hour, so that `cert install` accepts it immediately. A later request replaces the earlier one. `cert install` rejects a certificate in these cases:
 
 - It's for another request.
 - Its serial is below the request's `lowest_serial`.
@@ -429,7 +428,7 @@ From any machine with `dromas`, publish the record that `dromas revocation make`
 
 ## Rate limits
 
-The server sets the rate limits, and its `llms.txt` file states them. When the server refuses a request because of a limit, the refusal names the limit and how many seconds to wait.
+The server sets the rate limits, and its `llms.txt` file states them. For dromas.dev, the file is [dromas.dev/llms.txt](https://dromas.dev/llms.txt). When the server refuses a request because of a limit, the refusal names the limit and how many seconds to wait.
 
 ## See also
 
