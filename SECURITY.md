@@ -1,21 +1,21 @@
 # Security
 
-Dromas is designed so that nobody has to trust its server. Everything that protects a message runs in a client, in this repo, and tests that act as a forging server check most of these protections. The table in [Checking the claims yourself](#checking-the-claims-yourself) says where no test does. This page explains how to check that for yourself, and how to report a case where it fails.
+Dromas is designed so that nobody has to trust its server. Everything that protects a message runs in a client, in this repository, and tests that act as a forging server check most of these protections. The table in [Checking the claims yourself](#checking-the-claims-yourself) says where no test does. This page explains how to check that for yourself, and how to report a case where it fails.
 
 ## Supported versions
 
-**Dromas is pre-v1. Only the latest release and the latest commit on `main` are supported.** A fix is a commit on `main`, released as the next patch. The protocol can still change until it's frozen; the README's status line gives the planned date. Before the freeze, every open issue in this repo and in [dromas-server](https://github.com/dromas-dev/dromas-server/issues) must be settled.
+**Dromas is pre-v1. Only the latest release and the latest commit on `main` are supported.** A fix is a commit on `main`, released as the next patch. The protocol can still change until it's frozen; the README's status line gives the planned date. Before the freeze, every open issue in this repository and in [dromas-server](https://github.com/dromas-dev/dromas-server/issues) must be settled.
 
 ## Reporting a vulnerability
 
-**Report vulnerabilities privately, using GitHub's private vulnerability reporting.** Click **Report a vulnerability** on this repo's **Security** tab, or run the following command from a terminal:
+**Report vulnerabilities privately, using GitHub's private vulnerability reporting.** On this repository's **Security** tab, click **Report a vulnerability**, or run the following command from a terminal:
 
 ```sh
 gh api repos/dromas-dev/dromas-client/security-advisories/reports \
   -f summary='…' -f description='…'
 ```
 
-- **Report here for** the protocol and its specification (`PROTOCOL.md`), both clients (the Go client and the shell client, `sh/dromas.sh`), and the test vectors. **For the server, and for dromas.dev as it's operated,** report to [dromas-server](https://github.com/dromas-dev/dromas-server/security) the same way. If you aren't sure which repo applies, use either one.
+- **Report here for** the protocol and its specification (`PROTOCOL.md`), both clients (the Go client and the shell client, `sh/dromas.sh`), and the test vectors. **For the server, and for dromas.dev as it's operated,** report to [dromas-server](https://github.com/dromas-dev/dromas-server/security) the same way. If you aren't sure which repository applies, use either one.
 - **Include what's needed to reproduce the problem:** what you did, what happened, what should have happened, the commit you ran, and the impact. GitHub's form asks for a summary, details, a proof of concept, and the impact.
 - **AI-assisted reports are welcome.** The form has a place to say so.
 - 🛑 **Never include a real mailbox's identity key, a pass (the statement that a mailbox signs to prove itself to its server), or a message in a report,** whether the report is private or public.
@@ -25,7 +25,7 @@ gh api repos/dromas-dev/dromas-client/security-advisories/reports \
 - A question that's already decided. See [Decided questions](#decided-questions).
 - A weakness that's already public: an open issue, or an entry in dromas-server's `LIMITS.md` § Known weaknesses.
 
-**What happens next.** Reports go to the maintainer, who handles them with Custos, his AI assistant. The fix lands in this repo together with the published advisory, which credits the reporter unless the reporter asks otherwise. Answers to reports are best effort, and a fix ships as the next patch.
+**What happens next.** Reports go to the maintainer, who handles them with Custos, his AI assistant. The fix lands in this repository together with the published advisory, which credits the reporter unless the reporter asks otherwise. Answers to reports are best effort, and a fix ships as the next patch.
 
 ## Checking the claims yourself
 
@@ -50,19 +50,19 @@ Each row of the following table gives a claim in one sentence, the section of `P
 | **Output safety:** the client never prints what a sender or a server wrote as its own words, and outputs a message body only inside its envelope, in a line with control and invisible characters escaped | §11.3, §11.17; the rest is the client's own | `client/errors.go`, `client/recv.go` (`escapeUnseen`), `cmd/dromas/output.go`; `client/hostile_test.go`: `TestARefusalNeverQuotesTheMessage`, `TestAnAPIErrorPrintsNoneOfTheServersWords`; `client/escape_internal_test.go`: `TestNoControlCharacterReachesALineRaw`; `cmd/dromas/lines_test.go`: `TestNoLineCarriesAnEnvelopeMemberBesideTheEnvelope`; `cmd/dromas/transport_test.go`: `TestTheServersWordsReachNoStdoutLine`; `cmd/dromas/versions_test.go`: `TestTheVersionHeadersPrintNoneOfTheServersWords`; `cmd/dromas/exec_test.go`: `TestExecGetsTheLineAndItsArgumentsAsGiven` (`recv --exec` gets the line on stdin, through no shell); `cmd/dromas/webhook_test.go`: `TestNoWebhookLineCarriesItsSecrets`, `TestTheWebhookPostsTheLineWithTheHeaderAndTheSignature` (`recv --webhook` posts the line, and no line or error of `recv`'s, and no `dromas status` output, quotes its URL, header or secret; `dromas config` shows the URL, as it shows every setting) |
 | **Transport:** a pass, and the address that a lookup asks about, never cross a network unencrypted, because both clients use HTTPS, or HTTP only to a loopback IP address, and never follow a redirect | §11.1 | `client/mailbox.go` (`checkServerURL`, `followNone`), `sh/dromas.sh` (`dr_api`); `client/transport_test.go`: `TestARedirectIsNeverFollowed`, `TestNoCallOfAMailboxFollowsARedirect`, `TestAServerIsCalledOverHTTPSOrOnThisMachine`; `client/transport_internal_test.go`: `TestEveryRequestIsHeldToTheServerRule`; `sh/sh_test.go`: `TestBothClientsCallTheSameServers`, `TestNoCallOfTheScriptFollowsARedirect`, `TestTheScriptReadsNoCurlrc` |
 | **Private files:** the client creates every file owner-only, rejects a user's own private key that others can access, and by default rejects such a state file, and a list or kept message others can write | the client's own | `client/private_*.go`, `client/keyfile_*.go`, `client/layout.go` (`judgeFiles`, `judgeKept`); `client/private_test.go`: `TestEveryFileOfAMailboxIsItsOwnersAlone`; `client/keyfile_unix_test.go`: `TestAPrivateKeyOthersCanReachIsRefused`, `TestAKeyFileAnotherUserOwnsIsTheirsToGuard`, `TestAWorkingKeyOthersCanReachIsRefused`; `client/judged_test.go`: `TestEveryPrivateFileIsJudgedBeforeEveryOpen`; `client/kept_judged_test.go`: `TestAKeptMessageOthersCanWriteIsRefused`, `TestTheUnsafeOptionsLeaveTheirFilesUnjudged` (the key is refused under both options); `sh/files_test.go`: `TestTheScriptRefusesAMailboxOthersCanReach`; `sh/messages_test.go`: `TestScriptInit`; on Windows, CI's `windows-accounts` job (a Guest account is not tested) |
-| **Release provenance:** this repo's workflow builds each release from a tag that the maintainer signed, after the tests pass, attests every file, and signs the checksums ([Verify a release](docs/install/verify.md)) | — | `.github/workflows/release.yml`; `gh` and `cosign`, which check the attestations and the signature; the tag ruleset and immutable releases, settings of the repo that no test reads |
+| **Release provenance:** this repository's workflow builds each release from a tag that the maintainer signed, after the tests pass, attests every file, and signs the checksums ([Verify a release](docs/install/verify.md)) | — | `.github/workflows/release.yml`; `gh` and `cosign`, which check the attestations and the signature; the tag ruleset and immutable releases, settings of the repository that no test reads |
 
 
 **To run the tests,** see `README.md` § Tests, which gives the commands, what the shell client's tests need, and what an `ok` result for them doesn't tell you.
 
 **What isn't tested:**
-- That a release rebuilds byte for byte anywhere other than in this repo's own workflow. The workflow's `rebuild` job does this for each release from v0.1.1 on.
+- That a release rebuilds byte for byte anywhere other than in this repository's own workflow. The workflow's `rebuild` job does this for each release from v0.1.1 on.
 - `age-plugin-pq` against the server's check of the stanzas in a sent message.
 - A restore whose clock reads behind what an older record on the server hides, and two machines that make a certificate in the same second (`PROTOCOL.md` §5.2).
 - OpenSSH releases other than 9.6p1 and 10.2p1, the two releases that CI's Ubuntu jobs run the script and the cross-tests on.
 - age 1.3.0 and 1.3.1.
 - The shell client on macOS and on BusyBox.
-- What the processes that a callback starts do after `--exec-timeout` kills the callback. Only the callback's own process is killed.
+- What the processes that the `recv --exec` program starts do after `--exec-timeout` kills the program. Only the program's own process is killed.
 - A forgery by a party that has the recipient's prekey.
 - That a theft after a prekey is deleted exposes none of the messages encrypted to that prekey.
 - The padding of a group send and of `dromas outbox flush`.
@@ -106,8 +106,8 @@ Each entry is a security question that's already decided. Under the entry, where
 - If a mailbox loses its state, or restores an older copy of its state, a server can deliver a message again that the mailbox already accepted (§15.9; #784).
   - A replay works only within the message's TTL, and keying work by `from` and `msg_id` makes a repeat harmless.
 - A client never sets its clock from a server, so a clock that steps or jumps is the mailbox's own fault, and the design accepts the cost (§15.7; #831).
-  - If a mailbox's clock is off by more than the skew allowance, the server rejects its pass before the mailbox fetches, prunes, or deletes anything.
-- A reader acknowledges a message that it rejects on a time check, so a message is lost if, by the reader's clock, its certificate hasn't started or its `sent_at` is more than an hour ahead (§15.7; #44).
+  - If a mailbox's clock is off by more than the hour of clock skew that `PROTOCOL.md` §3.4 allows, the server rejects its pass before the mailbox fetches, prunes, or deletes anything.
+- A reader acknowledges a message that it rejects on a time check, so a message is refused and never delivered if, by the reader's clock, its certificate hasn't started or its `sent_at` is more than an hour ahead (§15.7; #44).
   - Whoever makes a certificate dates it an hour back, so only a clock that's already wrong produces such a message. The reader keeps the rejected message in `refused/`, together with the clock reading that the reader used to judge it.
 
 **Senders**
