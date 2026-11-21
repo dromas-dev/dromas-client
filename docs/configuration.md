@@ -8,7 +8,7 @@
 
 ```toml
 # dromas profile "default". Commented lines show the default: uncomment to change.
-# `dromas config` prints every value as resolved.
+# `dromas config` prints the settings in effect.
 base-dir = "~/.local/share/dromas/default"
 mail-dir = "~/.local/share/dromas/default/mail"
 identity-file = "~/.local/share/dromas/default/identity"
@@ -28,7 +28,7 @@ rotating-keys-dir = "~/.local/state/dromas/default/keys"
 # headers = false
 ```
 
-`dromas init` writes the file only if no file exists, so you can make the file read-only. `dromas init` always writes the four path keys `base-dir`, `mail-dir`, `identity-file`, and `rotating-keys-dir`: each is the path that you pass to `dromas init`, or else a path under `~/.local/share` or, for `rotating-keys-dir`, under `~/.local/state`. The values in the file take the place of the defaults that this page gives for those keys, such as `<base-dir>/keys` for `rotating-keys-dir`. `dromas init` also writes the values that you pass to its `--inbox-dir`, `--server`, `--ca-file`, `--prekey-lifetime`, and `--certificate-lifetime` flags. When `XDG_DATA_HOME` or `XDG_STATE_HOME` is set to an absolute path, `dromas init` writes paths under that directory instead of under `~/.local/share` or `~/.local/state`. On Windows, if those variables aren't set, `dromas init` puts the mailbox in `%LocalAppData%\dromas\<profile>` and its keys in the mailbox's `keys` directory. Neither the file nor the mailbox is in `%AppData%`, because a roaming profile copies `%AppData%` to every machine that the user signs in to, and a mailbox runs on one machine only.
+`dromas init` writes the file only if no file exists, so you can make the file read-only. `dromas init` always writes the four path keys `base-dir`, `mail-dir`, `identity-file`, and `rotating-keys-dir`: each is the path that you pass to `dromas init`, or else a path that `dromas init` chooses. That path is under `~/.local/share` for `base-dir`, under `base-dir` for `mail-dir` and `identity-file`, and under `~/.local/state` for `rotating-keys-dir`. The values in the file take the place of the defaults that this page gives for those keys, such as `<base-dir>/keys` for `rotating-keys-dir`. `dromas init` also writes the values that you pass to its `--inbox-dir`, `--server`, `--ca-file`, `--prekey-lifetime`, and `--certificate-lifetime` flags. When `XDG_DATA_HOME` or `XDG_STATE_HOME` is set to an absolute path, `dromas init` writes paths under that directory instead of under `~/.local/share` or `~/.local/state`. On Windows, if those variables aren't set, `dromas init` puts the mailbox in `%LocalAppData%\dromas\<profile>` and its keys in the mailbox's `keys` directory. Neither the file nor the mailbox is in `%AppData%`, because a roaming profile copies `%AppData%` to every machine that the user signs in to, and a mailbox runs on one machine only.
 
 ### Location
 
@@ -37,9 +37,9 @@ The config file for the default profile is `~/.config/dromas/default.toml`, or `
 - `--profile <name>` or `DROMAS_PROFILE` selects `<name>.toml` in the same directory. A profile name can contain only letters, digits, `-`, and `_`.
 - `--config <file>` or `DROMAS_CONFIG` selects the file at that path.
 
-A flag takes precedence over an environment variable. It's an error for two flags, or two environment variables, to name both a profile and a file. `dromas` never reads a config file from the working directory.
+A flag takes precedence over an environment variable. It's an error for two flags, or two environment variables, to name both a profile and a file. `dromas` never looks for a config file in the working directory.
 
-`dromas` rejects a config file in any of these cases: other users can write to the file, another user owns the file, the file isn't valid TOML, or the file contains a key that this page doesn't list. An invalid config file stops every command with exit status 2 and a `config_error` line.
+`dromas` rejects a config file in any of these cases: other users can write to the file, a user other than you or root owns the file, the file isn't valid TOML, or the file contains a key that this page doesn't list. An invalid config file stops every command with exit status 2 and a `config_error` line.
 
 ### Precedence
 
@@ -50,7 +50,7 @@ Each setting takes its value from the first of these sources that sets it:
 3. The config file
 4. The default
 
-`dromas config` prints the value of each setting and where the value came from.
+`dromas config` prints the value of each setting in effect and where the value came from. It leaves out a setting that nothing sets: `ca-file`, `askpass`, `certificate-lifetime`, and each key of the `[policy]`, `[recv]`, and `[inbox.*]` tables appear only when a source sets them.
 
 ### Paths
 
@@ -98,7 +98,7 @@ The identity's private key, as an OpenSSH key file. The identity is the mailbox'
 - Default: `<base-dir>/keys`
 - Flag: `--rotating-keys-dir`
 
-The directory that holds `prekeys/`, `work/`, and `tls-ticket`. This directory doesn't need a backup, because a restored mailbox makes new keys. A backup that contains `prekeys/` can still decrypt messages after the mailbox deletes its keys.
+The directory that holds `prekeys/`, `work/`, and `tls-ticket`. This directory doesn't need a backup, because a restored mailbox makes new keys. Forward secrecy depends on the deletion of retired prekeys: a copy of `prekeys/` in a backup still decrypts the messages sealed to its keys after the mailbox deletes them (`PROTOCOL.md` §15.3).
 
 ### `inbox-dir`
 
@@ -225,7 +225,7 @@ The default value of `recv --wait`: how long `recv` waits for a message.
 - Default: `15m`
 - Flag: `dromas recv --drain-time`
 
-How long one drain of the server runs before it stops and leaves the rest for the next `recv`.
+How long one drain of the server runs before it stops and leaves the rest for the next `recv`. A drain is one pass in which `recv`, holding the mailbox's lock, lists the messages that wait on the server and fetches each one.
 
 ### `recv.headers`
 
@@ -264,7 +264,7 @@ A URL that `recv` posts the `message` line of each message to, whether or not `r
 - Default: none
 - Flag: `dromas recv --webhook-header-file`
 
-A file that contains exactly one line, `Name: Value`. A trailing line ending is optional. Each webhook post carries this header, for example `Authorization: Bearer <token>`. If other users can access the file, `recv` rejects the file and runs nothing, as `ssh` rejects a private key. `recv` also rejects a header that each post sets itself, in any letter case: `Content-Type`, `Content-Length`, `Host`, `Transfer-Encoding`, and any `webhook-*` header.
+A file that contains exactly one line, `Name: Value`. A trailing line ending is optional. Each webhook post carries this header, for example `Authorization: Bearer <token>`. If other users can access the file, `recv` rejects the file and runs nothing, as `ssh` rejects a private key. `recv` also rejects a header that each post sets itself, in any letter case: `Content-Type`, `Content-Length`, `Host`, `Transfer-Encoding`, and any `webhook-*` header. Each post also sets `User-Agent` to `dromas/<version>`; a header file that sets `User-Agent` replaces that value.
 
 ### `recv.webhook-secret-file`
 
@@ -311,3 +311,4 @@ In addition to the variables listed with each key in the preceding sections, `dr
 | `XDG_DATA_HOME` | The parent of the paths that `dromas init` writes for `base-dir`, `mail-dir`, and `identity-file`, when set to an absolute path |
 | `XDG_STATE_HOME` | The parent of the path that `dromas init` writes for `rotating-keys-dir`, when set to an absolute path |
 | `XDG_RUNTIME_DIR` | The parent of the default `agent` socket |
+| `LOCALAPPDATA` | On Windows, the parent of the config directory when `XDG_CONFIG_HOME` isn't set, and of the default `base-dir` when `XDG_DATA_HOME` isn't set, when set to an absolute path |

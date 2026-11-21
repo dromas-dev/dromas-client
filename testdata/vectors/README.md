@@ -1,10 +1,10 @@
 # Dromas v1 test vectors
 
-This directory holds files that any Dromas implementation can check itself against. Stock tools make most of the files: `generate.sh` uses `bash`, `od`, `base64`, `fold`, `sha256sum`, `ssh-keygen`, `openssl`, and `age` and `age-keygen` 1.3 or later. On every run, `age-keygen` checks the recipient of the prekey of B and C, and `age` decrypts the three ciphertexts. `age` encrypts a ciphertext only when its file is missing. A Go test makes the few files that no stock tool can write, from the same published keys (`DROMAS_WRITE_VECTORS=1 go test ./protocol`, in `protocol/vectors_test.go`).
+This directory holds files that any Dromas implementation can check itself against. Stock tools make most of the files: `generate.sh` uses `bash`, `od`, `base64`, `fold`, `sha256sum`, `ssh-keygen`, `openssl`, and `age` and `age-keygen` 1.3 or later. It needs the GNU coreutils: it runs `head -c -1`, which BSD `head` refuses, and it writes the output of `wc -c` into vectors, which BSD `wc` pads with spaces. On every run, `age-keygen` checks the recipient of the prekey of B and C, and `age` decrypts the three ciphertexts. `age` encrypts a ciphertext only when its file is missing. A Go test makes the few files that no stock tool can write, from the same published keys (`DROMAS_WRITE_VECTORS=1 go test ./protocol`, in `protocol/vectors_test.go`).
 
 Judge every vector at the time in `now`, with the revocations of certificates that a reader holds (PROTOCOL.md §5):
 
-- **For mailbox A, the reader holds `a/revoked-certs.txt`.** This file revokes A's certificates through serial 1791590399, one less than 1791590400, the certificate serial that A's clock gives at `now`: `now` in seconds since 1970-01-01T00:00:00Z (PROTOCOL.md §5.2). A's certificates are numbered higher than that serial, starting from 1791590400.
+- **For mailbox A, the reader holds `a/revoked-certs.txt`.** This file revokes A's certificates through serial 1791590399, one less than 1791590400, the certificate serial that A's clock gives at `now`: `now` in seconds since 1970-01-01T00:00:00Z (PROTOCOL.md §5.2). A's certificates are numbered higher than that serial, starting from 1791590400, except `cert/bad-revoked` (serial 1791590399) and `cert/bad-serial-zero` (serial 0).
 - **For mailboxes B and C, the reader holds no revocation.**
 
 A reader accepts each identity's own signature on a statement, a pass, or a message. A reader accepts a certificate's signature if the certificate is numbered higher than the revocation that the reader holds, and accepts every certificate if the reader holds no revocation. A signs its statements, its pass, and its messages under its certificate, except where a vector's name says otherwise, as in `prekey/signed-by-the-identity` and `plain/accept-signed-by-the-identity`, which A's identity signs. B and C sign theirs with the identity. B's and C's certificates sign the vectors that show that a reader accepts those certificates.
@@ -17,7 +17,7 @@ A reader accepts each identity's own signature on a statement, a pass, or a mess
   - From RFC 8032 §7.1: mailbox A's identity is TEST 1, and mailbox B's identity is TEST 2. A's working key is TEST 3, and B's working key is TEST 1024. A second working key of A's is TEST SHA(abc).
   - From RFC 8032 §7.2: mailbox C's working key is the key of the first Ed25519ctx test.
 - **Mailbox C's identity** is of type `ecdsa-sha2-nistp256`. It's the test key of RFC 6979 §A.2.5. The `input/c.p256` file holds the private scalar, and then the public point as x and y, in hex.
-- **The prekey of B and C** is the published test identity of the C2SP age testkit (CCTV `age/internal/testkit`). `input/b-1.pq.key` is its `TestHybridIdentity`, so each message here decrypts with any age implementation.
+- **The prekey of B and C** is the published test identity of the C2SP age testkit (CCTV `age/internal/testkit`). `input/b-1.pq.key` is its `TestHybridIdentity`, so each message here decrypts with any age implementation that supports post-quantum keys, such as `age` 1.3 or later.
 - **The other age recipients in `input/`** are public keys whose secret keys were discarded.
 
 ## Vectors
@@ -145,7 +145,7 @@ What mailbox B decrypts.
 - `invalid_signature`: `refuse-whitespace-in-the-signature`, which has a space, a CR, and a tab in its base64. That isn't the signature's one valid form.
 - `malformed_message`: `refuse-end-line-followed-by-a-nul` and `refuse-end-line-followed-by-a-byte-and-a-later-one`. The second has a byte after the END line, and then an END line and its line feed in the padding; the block ends at the first END line.
 - `malformed_message`: `refuse-begin-line-followed-by-a-nul`, `refuse-begin-line-holding-a-nul`, and `refuse-begin-line-preceded-by-a-nul`, because there is no BEGIN line.
-- `invalid_identity`: `refuse-no-identity`, `refuse-identity-not-base64`, `refuse-identity-of-small-order`, `refuse-identity-off-curve`, `refuse-identity-ending-in-a-line-feed`, and `refuse-identity-ending-in-a-nul` (each a JSON escape).
+- `invalid_identity`: `refuse-no-identity`, `refuse-identity-not-base64`, `refuse-identity-of-small-order`, `refuse-identity-off-curve`, `refuse-identity-with-its-length-written-33`, `refuse-identity-ending-in-a-line-feed`, and `refuse-identity-ending-in-a-nul` (each a JSON escape).
 - `invalid_signature`: `refuse-signed-for-another-mailbox`, `refuse-signed-by-a-bare-working-key`, `refuse-certificate-ended`, `refuse-line-changed-after-signing`, `refuse-another-mailbox-s-identity-document`, and `refuse-identity-s-signature-re-wrapped`. The last is A's identity's signature with `cert/bad-certifies-the-identity.pub` in the place of its key.
 - `certificate_revoked`: `refuse-certificate-revoked`, signed under `cert/bad-revoked.pub`. A's revocation of certificates refuses it, at PROTOCOL.md §12.3 check 7.
 - `sender_mismatch`: `refuse-from-is-not-the-identity`, `refuse-from-is-not-the-identity-of-an-unknown-type`, and `refuse-from-null`. A null member is the same as a member that is left out.
@@ -195,13 +195,13 @@ Statements whose rank line (PROTOCOL.md §6) isn't the rank of the signer that s
 
 A valid statement of A's, signed under the certificate beside it (`.cert.pub`). That certificate is a later one of A's, serial 1791590401, which ends five days after `now`.
 
-**Expected result:** valid. A statement can outlive the certificate that it's signed under. By `(c, p)`, this statement ranks higher than `a/prekey-2.txt`.
+**Expected result:** valid. A statement can outlive the certificate that it's signed under. By `(c, p)` (PROTOCOL.md §5.3), this statement ranks higher than `a/prekey-2.txt`.
 
 ### `prekey/signed-by-the-identity`
 
 A's statement at serial 1, naming rank 0, signed by A's identity itself.
 
-**Expected result:** valid when the reader holds A's revocation of certificates, because that revocation covers only certificates. By `(c, p)`, this statement ranks lower than every statement of A's under a certificate, so a sender that holds one of those statements refuses it.
+**Expected result:** valid when the reader holds A's revocation of certificates, because that revocation covers only certificates. By `(c, p)` (PROTOCOL.md §5.3), this statement ranks lower than every statement of A's under a certificate, so a sender that holds one of those statements refuses it.
 
 ### `prekey/b-signed-under-its-certificate`, `prekey/c-signed-under-its-certificate`
 

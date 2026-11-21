@@ -719,7 +719,7 @@ func templateFor(profile string, g *globals) string {
 	keys := first(g.rotatingKeysDir, keysDir)
 	var b strings.Builder
 	fmt.Fprintf(&b, "# dromas profile %q. Commented lines show the default: uncomment to change.\n", profile)
-	b.WriteString("# `dromas config` prints every value as resolved.\n")
+	b.WriteString("# `dromas config` prints the settings in effect.\n")
 	fmt.Fprintf(&b, "base-dir = %s\nmail-dir = %s\nidentity-file = %s\nrotating-keys-dir = %s\n\n", tomlString(base), tomlString(mail), tomlString(identity), tomlString(keys))
 	setting := func(key, given, def string) {
 		if given != "" {

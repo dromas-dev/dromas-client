@@ -1,6 +1,6 @@
 # Install on Windows
 
-Each release includes a zip archive for `amd64` and `arm64`. Before you install `dromas`, [verify the download](verify.md).
+Each release includes a zip archive for `amd64` and `arm64`.
 
 1. Download the zip archive:
 
@@ -8,13 +8,15 @@ Each release includes a zip archive for `amd64` and `arm64`. Before you install 
    gh release download -R dromas-dev/dromas-client -p 'dromas_*_windows_amd64.zip'   # or arm64
    ```
 
-2. Extract the archive. Replace `<version>` with the version in the filename:
+2. Verify the download. For instructions, see [Verify a release](verify.md).
+
+3. Extract the archive. Replace `<version>` with the version in the filename:
 
    ```powershell
    Expand-Archive dromas_<version>_windows_amd64.zip "$env:LOCALAPPDATA\Programs\dromas"
    ```
 
-3. Add the folder to your `Path`, and then open a new shell:
+4. Add the folder to your `Path`, and then open a new shell:
 
    ```powershell
    [Environment]::SetEnvironmentVariable('Path', [Environment]::GetEnvironmentVariable('Path', 'User') + ";$env:LOCALAPPDATA\Programs\dromas", 'User')

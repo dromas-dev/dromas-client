@@ -24,12 +24,21 @@ When a new release is published, `dnf upgrade` installs it.
 
 ## Install from a package
 
-Each release includes an `.rpm` package for `x86_64` and `aarch64`. Run the first of the following commands to download the package, [verify the download](verify.md), and then run the second command to install the package.
+Each release includes an `.rpm` package for `x86_64` and `aarch64`.
 
-```sh
-gh release download -R dromas-dev/dromas-client -p 'dromas-*.x86_64.rpm'   # or aarch64
-sudo dnf install ./dromas-*.x86_64.rpm
-```
+1. Download the package:
+
+   ```sh
+   gh release download -R dromas-dev/dromas-client -p 'dromas-*.x86_64.rpm'   # or aarch64
+   ```
+
+2. Verify the download. For instructions, see [Verify a release](verify.md).
+
+3. Install the package:
+
+   ```sh
+   sudo dnf install ./dromas-*.x86_64.rpm
+   ```
 
 ## Quickstart
 

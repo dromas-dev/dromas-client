@@ -1,6 +1,6 @@
 # Install on Alpine Linux
 
-You can install `dromas` from the apk repository at packages.dromas.dev or from the `.apk` package of a release. Run the commands on this page as root.
+You can install `dromas` from the apk repository at packages.dromas.dev or from the `.apk` package of a release. Run the commands that install `dromas` as root.
 
 ## Install from the apk repository
 
@@ -24,12 +24,21 @@ When a new release is published, `apk upgrade` installs it.
 
 ## Install from a package
 
-Each release includes an `.apk` package for `x86_64` and `aarch64`. Run the first of the following commands to download the package, [verify the download](verify.md), and then run the second command to install the package. Don't skip the verification, because the `--allow-untrusted` flag skips the signature check that apk does itself.
+Each release includes an `.apk` package for `x86_64` and `aarch64`.
 
-```sh
-gh release download -R dromas-dev/dromas-client -p 'dromas_*_x86_64.apk'   # or aarch64
-apk add --allow-untrusted ./dromas_*_x86_64.apk
-```
+1. Download the package:
+
+   ```sh
+   gh release download -R dromas-dev/dromas-client -p 'dromas_*_x86_64.apk'   # or aarch64
+   ```
+
+2. Verify the download. For instructions, see [Verify a release](verify.md). Don't skip the verification, because the `--allow-untrusted` flag in the next step skips the signature check that apk does itself.
+
+3. Install the package:
+
+   ```sh
+   apk add --allow-untrusted ./dromas_*_x86_64.apk
+   ```
 
 ## Quickstart
 
