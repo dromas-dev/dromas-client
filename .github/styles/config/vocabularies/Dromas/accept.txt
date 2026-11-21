@@ -29,6 +29,6 @@ dnf
 apk
 typage
 testkit
-(send|lookup|fetch|retry|ssh)'s
+(send|lookup|fetch|retry|ssh|openssl)'s
 undetectably
 reattribute
