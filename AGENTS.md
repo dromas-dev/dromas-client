@@ -29,7 +29,7 @@ Each commit carries your human's sign-off, made with `git commit -s` (the Develo
   - The status line never lists the operator as a limit. Who terminates TLS for dromas.dev is said in the README's § No server trust and in `SECURITY.md`, each marked as the operator's statement.
   - Four tests hold command lines. `TestHelpAndREADMENameTheEchoMailbox` here holds the README's command for the echo mailbox. A test in dromas-server holds the command its link page gives. Tests kept with dromas.dev's site hold every command in its `llms.txt` and in its front page's install terminal. Each command those tests hold must be a line of the README or a line of a page in `docs/`. Change a command line in each place that gives it.
 - **`docs/` is the manual, and dromas.dev/docs/ shows it as it stands at the commit of this repo that the site is built from.** `docs/install/` holds a page for each install method and a page on verifying a release. `docs/` also holds the user guide, the command reference, the configuration reference and the output format. The README is the quickstart, and points into `docs/` for the rest.
-  - **A page of `docs/` follows the [Google developer documentation style guide](https://developers.google.com/style), and § How a page is written below:** titles and headings in sentence case; a task's title starts with its verb ("Verify a release"), and a reference's title is a noun phrase ("Output format"); the page speaks to the reader as "you"; and a thing is called by the name most other projects' docs use for it ("prebuilt binary", "build from source", "package repository"). dromas.dev's menu labels follow the same rules.
+  - **A page of `docs/` follows the [Google developer documentation style guide](https://developers.google.com/style):** titles and headings in sentence case; a task's title starts with its verb ("Verify a release"), and a reference's title is a noun phrase ("Output format"); the page speaks to the reader as "you"; and a thing is called by the name most other projects' docs use for it ("prebuilt binary", "build from source", "package repository"). dromas.dev's menu labels follow the same rules.
   - **Each page of `docs/install/`, except `README.md` and `verify.md`, ends with a quickstart and then next steps.** The quickstart gives the reader the commands to check the install, create a mailbox, send to the echo mailbox, and run `recv` as a service on that page's system. The next steps link the user guide. `TestEachInstallPageEndsWithTheQuickstart` holds each quickstart's echo command to the address the code carries.
   - **`docs/configuration.md` has an entry for every key a config file may hold, and names every environment variable that `cmd/dromas` or `client/` reads by name.** A new key or variable gets its entry in the same commit. `TestTheConfigurationReferenceNamesEveryKey` fails when an entry is missing, when an entry names no key or variable, and when the page's example differs from the file `dromas init` writes.
   - `docs/commands/` is cobra's Markdown of the command tree, a page for each command. `TestTheCommandPagesAreTheHelp` fails when a page differs from the help, and running `go test ./cmd/dromas -run TestTheCommandPagesAreTheHelp -update` writes the pages again.
@@ -42,33 +42,13 @@ Each commit carries your human's sign-off, made with `git commit -s` (the Develo
 
 ### How a page is written
 
-These rules apply to every page and every comment. They come before "The README says as little as it can" and "each rule once": the goal is one reading, not fewer words. `TestThePagesReadPlainly` holds the pages it lists to the rules a test can measure, and a page joins that list once it is rewritten by them.
+Each page follows the published standard for its kind. A rule of this file says what the project does, never how its prose reads.
 
-- **Write for a reader who knows TLS, SSH, age and the RFCs, and has never seen this project.**
-  - Use the word that reader already knows: accept, reject, valid, malformed, permanently, request, response, decrypt.
-  - A word of this project's own is only for a concept with no standard name. Define it once, in `PROTOCOL.md` §2.3, and use it only in that sense.
-  - A common verb never doubles as a defined term. A reader who meets "take" as both *accept* and a date has two readings of every sentence that uses it.
-- **One sentence states one fact or one rule.** Aim for 25 words or fewer. Split any sentence over 40 words.
-- **The party that acts is the subject of the sentence:** the sender, the reader, the server, the client or the mailbox. Prefer the active voice.
-- **Repeat the noun rather than write "it" or "its".** A pronoun is fine only when its noun is the subject of the same sentence and nothing else could be meant.
-  - Comparable specs have 3 to 10 "it", "its" or "itself" per 1,000 words: C2SP age, RFC 8555, RFC 9180, Signal's X3DH and NIP-44, measured 2026-11-02. `TestThePagesReadPlainly` allows a listed page 15.
-- **Name things instead of pointing at them.**
-  - "The party that terminates TLS", not "whatever terminates TLS".
-  - "The server's record of the mailbox", not "what the server holds of it".
-  - "Whatever" and "whoever" are fine only where they mean "any".
-- **Say what happens.** Use a negative only for a prohibition, or where the absence is itself the fact. "The reader acks a refused message and does not deliver it" reads once. "A refused message is never delivered, and is acked" needs a second read.
-- **A colon introduces a list, a definition or an example, and a sentence has one colon at most.**
-  - A reason starts with "because".
-  - A consequence starts with "so".
-  - An example starts with "for example".
-- **Write subject, verb, object.** Don't front the object ("What it verified, it keeps for good"). Don't stack "of" ("the date of the pass of the upload").
-- **Bold a short label or a whole sentence.** Never bold the first half of a sentence that plain text finishes.
-- **A ban on a word is narrow.**
-  - "Never 'mail' or 'box'" bans those two words.
-  - "No 'was', 'since' or 'once' of this project's past" bans telling history. "Once" meaning "after" is fine.
-  - Don't coin a substitute to avoid a banned word. Use the plain word the rule still allows.
-- **A rule is still exact.** Plain words keep every condition: "only", "at most", "before" and "whenever" stay where they are. A shorter sentence that drops a condition is a change to the protocol.
-- **Read a changed rule as a stranger before it merges.** Give the changed rules, and nothing else, to a fresh session with no project context, and have it restate each rule. Any difference from the intended meaning marks a sentence that reads two ways. A page rewritten whole is read whole.
+- **Pages for people follow the [Google developer documentation style guide](https://developers.google.com/style):** the README, `SECURITY.md`, `CONTRIBUTING.md`, `docs/` and the command help. Write for a person who knows the field and has never seen this project.
+- **`PROTOCOL.md` follows RFC conventions:** the [RFC Style Guide](https://www.rfc-editor.org/rfc/rfc7322) for its layout, and BCP 14 ([RFC 2119](https://www.rfc-editor.org/rfc/rfc2119), [RFC 8174](https://www.rfc-editor.org/rfc/rfc8174)) for its requirement keywords.
+- **Doc comments follow [Go Doc Comments](https://go.dev/doc/comment).**
+- **[Vale](https://vale.sh) checks the pages for people and `PROTOCOL.md` against the Google guide** (`.vale.ini`). CI's `vale` job fails on an error; a warning or a suggestion is advice. Run `vale sync` once, then `vale .`. A term of this project that Vale does not know goes in `.github/styles/config/vocabularies/Dromas/accept.txt`.
+- **A change to a rule of `PROTOCOL.md` that must keep its meaning is read by a stranger before it merges:** a fresh session with no project context restates each changed rule, and any difference from the intended meaning marks a sentence that reads two ways.
 
 ### How a design is chosen
 

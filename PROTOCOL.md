@@ -1796,6 +1796,7 @@ Dromas protects a message's content from everyone but the message's recipient. D
 
 `testdata/vectors/` has the conformance vectors: scenarios, each one file or the files that share one name, and the fixtures that scenarios share, such as mailboxes A, B and C. `testdata/vectors/README.md` gives each scenario's expected outcome, describes the vectors' format, and says how each vector is checked. A conforming client meets every vector of the parts it implements. The crypto and container vectors are checked by `age`, `head`, `sed`, `ssh-keygen` and `openssl`, which are tools written outside this project. The keys of the crypto and container vectors are published test keys.
 
+<!-- vale off -->
 ## 17. References
 
 ### 17.1. Normative References
@@ -1848,6 +1849,7 @@ Dromas protects a message's content from everyone but the message's recipient. D
 - **[RFC 9449]** Fett, D., Campbell, B., Bradley, J., Lodderstedt, T., Jones, M., and D. Waite, "OAuth 2.0 Demonstrating Proof of Possession (DPoP)", RFC 9449, DOI 10.17487/RFC9449, September 2023, <https://www.rfc-editor.org/info/rfc9449/>.
 - **[X-Wing]** Barbosa, M., Connolly, D., Duarte, J. D., Kaiser, A., Schwabe, P., Varner, K., and B. Westerbaan, "X-Wing: The Hybrid KEM You've Been Looking For", IACR Communications in Cryptology 1(1), 2024, DOI 10.62056/a3qj89n4e, <https://doi.org/10.62056/a3qj89n4e>.
 
+<!-- vale on -->
 ## Appendix A. Where `ssh-keygen` differs (informative)
 
 `ssh-keygen -Y verify` checks a signature, but does not define one. So a client built on the tool checks a signature against Section 3.2 itself. The tool accepts these forms, which Section 3.2 refuses:
