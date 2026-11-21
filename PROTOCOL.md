@@ -64,7 +64,9 @@ A reviewer of the cryptography needs Sections 2.2, 3 to 6, 8 to 10, 12.1, 12.3, 
 
 ### 2.1. Requirements language
 
+<!-- vale off -->
 The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD", "SHOULD NOT", "RECOMMENDED", "NOT RECOMMENDED", "MAY", and "OPTIONAL" in this document are to be interpreted as described in BCP 14 [RFC 2119] [RFC 8174] when, and only when, they appear in all capitals, as shown here.
+<!-- vale on -->
 
 ### 2.2. Notation
 
@@ -1466,7 +1468,7 @@ A client drains every page of its list (Section 11.11) and fetches the message o
 - **A client MUST NOT accept "revoked" without a revocation that verifies.** A `410 mailbox_revoked`, a `403 sender_revoked` or a `401 certificate_revoked` is a server's word. A revocation record that verifies is final. A client MAY look up the mailbox that such an answer is about, to read its revocation record (Section 11.8). Without a revocation record that verifies, the call has failed, and the client changes no state. Anything a server shows that does not verify counts as nothing shown.
 - **On `401 certificate_revoked`, a client looks up its own mailbox before the client tries again.** A revocation in that lookup that verifies and covers the certificate the client signs under is final. The client then signs no second pass, and the mailbox renews under a new certificate. Otherwise the client signs one more pass, as for any `401` (Section 8).
 - **A mailbox checks for revocations, and publishes its own revocations, only at its own server** (Section 12.2, and Section 12.3, check 7). A mailbox whose server keeps no mailbox for it looks up its own revocations with `GET …/revocation`.
-- **A mailbox permanently keeps what it has verified about an address, from any source and at any time.** The mailbox checks every send and every read against what it keeps, with no call to anyone. The mailbox checks and keeps a revocation record handed over in the same way as a served one. A mailbox never keeps "no revocation shown".
+- **A mailbox permanently keeps what it has verified about an address, from any source and at any time.** The mailbox checks every send and every read against what it keeps, with no call to anyone. The mailbox checks and keeps a revocation record handed over in the same way as a served one. A mailbox never keeps "no revocation shown."
 - **A mailbox that keeps a revocation of its own address is finished, regardless of any server's answer.**
   - The mailbox signs nothing more as that address: no pass, no message, no certificate.
   - The mailbox still checks for, keeps and publishes revocations, which carry no pass.
