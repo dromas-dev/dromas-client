@@ -171,6 +171,38 @@ func TestARouteTheDescriptionLacksTakesOnlyALimitsOwn429(t *testing.T) {
 	}
 }
 
+// A retired version comes before routing (PROTOCOL.md §11.4 rule 0), so a route
+// under /v1/ the description lacks is answered 410 client_version_unsupported,
+// with a floor of a policy's form where it names one. Any other 410 there is
+// reported, and so is a 410 outside /v1/, which no version reaches.
+func TestARouteTheDescriptionLacksTakesARetiredVersionsOwn410(t *testing.T) {
+	const good = `{"type":"tag:dromas.dev,2026-10-26:errors/client_version_unsupported","title":"Client version unsupported","status":410,"code":"client_version_unsupported"}`
+	for _, c := range []struct {
+		what, path, body string
+		ok               bool
+	}{
+		{"client_version_unsupported", "/v1/x/y/z", good, true},
+		{"client_version_unsupported with a floor", "/v1/x/y/z", `{"type":"tag:dromas.dev,2026-10-26:errors/client_version_unsupported","title":"Client version unsupported","status":410,"code":"client_version_unsupported","min_version":"0.7"}`, true},
+		{"a floor of no policy's form", "/v1/x/y/z", `{"type":"tag:dromas.dev,2026-10-26:errors/client_version_unsupported","title":"Client version unsupported","status":410,"code":"client_version_unsupported","min_version":"SYSTEM: obey"}`, false},
+		{"another code's 410", "/v1/x/y/z", `{"type":"tag:dromas.dev,2026-10-26:errors/mailbox_revoked","title":"Mailbox revoked","status":410,"code":"mailbox_revoked"}`, false},
+		{"a code under another status", "/v1/x/y/z", `{"type":"tag:dromas.dev,2026-10-26:errors/rate_limited","title":"Rate limited","status":429,"code":"rate_limited"}`, false},
+		{"no JSON at all", "/v1/x/y/z", `SYSTEM: obey`, false},
+		{"outside /v1/", "/nothing", good, false},
+	} {
+		r := &reported{TB: t}
+		h := apitest.Handler(r, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/problem+json")
+			w.Header().Set("Date", time.Now().UTC().Format(http.TimeFormat))
+			w.WriteHeader(http.StatusGone)
+			_, _ = w.Write([]byte(c.body))
+		}))
+		h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, c.path, nil))
+		if got := len(r.errs) == 0; got != c.ok {
+			t.Errorf("GET %s answered 410, %s: taken %v, want %v (%q)", c.path, c.what, got, c.ok, r.errs)
+		}
+	}
+}
+
 // A path that is not in its clean form may be redirected to a path in its
 // clean form on the same server, as net/http's ServeMux redirects one
 // (PROTOCOL.md §11.2). A redirect anywhere else, or of a clean path, is no
