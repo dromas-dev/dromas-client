@@ -36,13 +36,13 @@ Each fact has one home. Put it there, and point to it from anywhere else.
 
 - **`PROTOCOL.md` states the wire and nothing else.** It gives each rule once, a procedure's BCP 14 keyword at its head, and the reasoning in §15 (the threat model, what a hostile server can and cannot do, the residual risks). Elsewhere a rule gives at most a clause of reason, pointing at §15. It cites a standard rather than restating it. It never prescribes the client's own behaviour (the table above), what an owner does with the machine (backups, permissions), how a server stores things, a setting's value, history, issue numbers or a comparison. Where one of these costs a security property, §15 states the cost. A change to the wire changes the spec in the same commit as the code.
 - **`PRECEDENTS.md`:** Part 1 sets Dromas beside whole systems, Part 2 each decision beside the systems that make the same one, Part 3 the reference server's own build choices. Add a row when a big decision on the wire or the security model is made; a client's own behaviour gets none. A row gives the decision, its precedents, and where ours differs and why. Every claim about another system says how it is known: `read <date>` with its source, `review <date>`, or `from memory`.
-- **Pages and comments describe what is true now.** No story of a change, no "was", "since" or "used to" of this project's past, and no date except when a source was `read`, a measurement `measured`, a review made (`review`) or an outside document `dated`. Why a rule holds goes in the present tense; how it came about goes in its pull request. `TestEveryPageSaysWhatHoldsNow` fails on any other date written as `YYYY-MM-DD` in a page, a comment or a workflow.
+- **Pages and comments describe what is true now.** No story of a change, no "was", "since" or "used to" of this project's past, and no date except when a source was `read`, a measurement `measured`, a review made (`review`) or an outside document `dated`. Why a rule holds goes in the present tense; how it came about goes in its pull request. `TestEveryPageSaysWhatHoldsNow` fails on any other date written as `YYYY-MM-DD` in a page, a comment or a workflow, outside `PRECEDENTS.md` (its own rule, below) and `testdata/`.
 - **No judgement is written as a fact,** on a page, in a comment or in an issue: write what was measured, read at a source, or decided. Nothing ranks one cipher, key type or design over another without the source that says so.
 - **The README is the quickstart:** what a reader needs to run a mailbox safely, each command once, and pointers into `docs/`.
   - Two lines are the maintainer's: the status line's freeze date, which moves only on his word, and the line that sends a reader to the open issues.
   - A limit in the README that an open issue plans to change has that issue's number beside it.
   - Who terminates TLS for dromas.dev is said in the README's § No server trust and in `SECURITY.md`, each marked as the operator's statement, and never in the status line.
-  - 🛑 **Command lines are held by tests in three repos:** `TestHelpAndREADMENameTheEchoMailbox` here, a test in dromas-server for its link page, and the site's tests for `llms.txt` and the front page's install terminal. Each such command must be a line of the README or of a page in `docs/`. Change a command line everywhere it appears.
+  - 🛑 **Command lines are held by tests in three repos:** here, `TestHelpAndREADMENameTheEchoMailbox` holds the echo mailbox's link in the help and the README, and `TestEachInstallPageEndsWithTheQuickstart` the install pages' quickstarts; a test in dromas-server holds its link page's command; the site's tests require every command of `llms.txt` and the front page's install terminal to be a line of the README or of a page in `docs/`, comment included. Change a command line everywhere it appears.
 - **`docs/`:**
   - Each page of `docs/install/` except `README.md` and `verify.md` ends with a quickstart (check the install, create a mailbox, send to the echo mailbox, run `recv` as a service) and then next steps (`TestEachInstallPageEndsWithTheQuickstart`).
   - `docs/configuration.md` has an entry for every config key and every environment variable `cmd/dromas` or `client/` reads, added in the same commit as the key (`TestTheConfigurationReferenceNamesEveryKey`).
@@ -83,7 +83,7 @@ Each page follows the published standard for its kind. A rule of this file says 
 - 🛑 **A format uses a layout others already use, and its overhead is a fixed number of bytes, never a share of the message.** Read what the standards do, and what went wrong with them, and give each option's cost. Every format that cannot change after the freeze gets that look once (#39).
 - **Bound a list of entries of like size by a count, never by bytes** (`protocol.MaxACLEntries`): one bound, set well past any real use.
 - **Make speed calls among standard tools.** Never replace a standard function with hand-written code to save CPU; leave deeper optimisation until real load can be measured.
-- 🛑 **Clocks: add no allowance to a check, and never make a time-limited thing that asks for exactly what its verifier accepts;** the maker leaves `protocol.MaxSkew` of room (`PROTOCOL.md` §3.4, §12.1; `PRECEDENTS.md` § Clocks). Exactness to the second is for what is cryptographic, not for how long a server keeps a message.
+- 🛑 **Clocks: add no allowance to a check, and never make a time-limited thing that asks for exactly what its verifier accepts** (`protocol.MaxSkew`; `PROTOCOL.md` §3.4, §12.1; `PRECEDENTS.md` § Clocks). Exactness to the second is for what is cryptographic, not for how long a server keeps a message.
   - 🛑 Never delete a key a message may be waiting for to recover from a wrong clock.
 
 ### Tests
@@ -91,6 +91,7 @@ Each page follows the published standard for its kind. A rule of this file says 
 - **Every client passes `testdata/vectors/`.** The shell client is tested the way agents run shell: a fresh shell per command.
 - **`client/`, `cmd/dromas` and `sh/` are tested against `internal/fakeserver`,** an honest in-memory server that a test turns hostile with a middleware (the common forgeries are `internal/forge`'s). The fake checks little by design: a test of what the real server enforces belongs in dromas-server.
 - **`client/testdata/statetable.golden` records what each command does in each state of a mailbox** (`TestStateTable`). Regenerate it with `go test ./client -run TestStateTable -update`, and read each changed line before you commit it.
+- **On macOS, `./sh` and `generate.sh` need bash 4 or later and GNU coreutils first in `PATH`** (the header of `scripts/check.sh`).
 - 🛑 **After an edit to `sh/dromas.sh`, run `go test ./sh` with `-count=1`:** a `-run` that leaves out `TestTheScriptsBoundIsTheProtocols`, the one test that reads the script as a file, prints a cached `ok` from before the edit.
   - Where the local age makes no post-quantum keys, the tests build the age `go.mod` names (`internal/agetool`), so they run on any machine with Go.
   - To test the script against another OpenSSH, build that release (`./configure [--without-openssl] && make ssh ssh-keygen`) and put it first in `PATH`; `go test -count=1 ./sh -v` names the build and each known variance it met (`PROTOCOL.md` Appendix A).
@@ -146,7 +147,7 @@ The rules are in `PROTOCOL.md` and in the doc comments of the code named. Each l
 ### The shell client
 
 - **`sh/dromas.sh` proves that a mailbox made of stock `age`, `ssh-keygen`, `curl` and `jq` exchanges messages with a Go mailbox,** and nothing more: not a client to run, not a second implementation. It runs a mailbox of its own (`DR_HOME`, `~/.config/dromas-sh/`) and refuses the Go client's directory.
-- **It answers to the vectors that are the proof:** every crypto and container vector, each envelope it must accept, each envelope refusal that guards the five below, and each server answer the Go client accepts (`answerRead`). The rest of `json/`, `answer/` and `envelope/` are the Go client's.
+- **It answers to the vectors that are the proof:** every crypto and container vector, each envelope it must accept, each envelope refusal that guards the five below, and each server answer the Go client accepts, refusing each of `answerRead` (`TestVectorsAnswer`). The rest of `json/`, `answer/` and `envelope/` are the Go client's.
 - 🛑 **Outside the vectors, the script is held to the Go client only where a difference would let through one of five things:** a forgery, a replay, a message its keys did not decrypt, a signature it should not make, or a pass sent where a network can read it. Such a difference becomes a vector, then a fix. Any other difference is not a defect: file nothing, add no workaround, and remove any workaround that guards none of the five.
 - **The Go client is the reference** and never changes to match the script.
 - 🛑 **A shell variable drops trailing line feeds and every NUL:** test a value in jq or compare bytes, never through `$(…)`; compare a document with itself rebuilt (`dr_idcheck`).
@@ -196,14 +197,14 @@ The rules are in `PROTOCOL.md` and in the doc comments of the code named. Each l
 
 - 🛑 **A server's `mailbox_revoked` or `sender_revoked` is checked, never believed** (`proved`; §10.1, §12.5); no code `proved` checks goes back into `undeliverable` (`TestNoAnswerProvedIsUndeliverable`).
 - 🛑 **A revocation that verified is kept and never removed** (§12.5).
-- 🛑 **A mailbox that holds its own revocation signs nothing more** (`finished`, `client/internal/sign`, `locked`): a new command or path gets its case in `partwayCases` (`client/partway_test.go`), which `TestEveryCommandShownItsOwnRevocationAtEachCall` runs: the list is typed by hand, and no test holds it to `lockingCommands`.
+- 🛑 **A mailbox that holds its own revocation signs nothing more** (`finished`, `client/internal/sign`, `locked`): a new command or path gets its case in `partwayCases` (`client/partway_test.go`), which `TestEveryCommandShownItsOwnRevocationAtEachCall` runs: the list is typed by hand, and no test yet holds it to `lockingCommands`, as `client/restore_test.go` holds `mailCommands` (a gap against § Tests, not a rule).
 - 🛑 **A working key's signature is never a revocation** (`VerifyRevocation` verifies against the identity's bare key).
 - 🛑 **No answer is not a negative answer** (`readRevocations`; §12.3 check 7).
 - 🛑 **The revocation statement is fixed text and never gains a field;** add a second statement under a new tag instead.
 - 🛑 **There is no way to revoke fewer certificates:** the highest verified serial stands (§10.2).
 - 🛑 **`cert revoke-earlier` publishes the revocation first, whatever the renewal meets** (`RenewAndRevoke`).
 - 🛑 **A mailbox reads its own state at its server through `known` alone.**
-- 🛑 **One function, `renewalMends`, says whether a renewal mends an error;** never test it anywhere else.
+- 🛑 **One function, `renewalMends`, says whether a renewal mends an error;** call it, and never decide that anywhere else.
 - 🛑 **What ends an address goes out only with that address written in full** (`publishCmd`, `publishRevokedCmd`).
 
 ### Who may write to a mailbox
@@ -231,7 +232,7 @@ The client holds messages; the server's ACL refuses them (`protocol/acl.go`, `cl
 `dromas <command>`, or `dromas <group> <command>` (`cmd/dromas`, on cobra). A renamed command keeps no old name before the freeze. `sh/dromas.sh` uses the same words.
 - **Help works as in git-like tools** (clig.dev). 🛑 **`--help` prints help and runs nothing,** wherever it appears (`TestHelpRunsNothing`, `TestHelpIsReadAsAnyFlag`).
 - **A wrong command line runs nothing and exits 2** (`usageError`).
-- 🛑 **No flag has a shorthand, and `-h` has no meaning;** flags are written with two dashes everywhere (`TestFlagsAreWrittenWithTwoDashes`).
+- 🛑 **No flag has a shorthand of its own:** `-h` stays the deprecated alias of `--help`, in no help, and never gets another meaning; flags are written with two dashes everywhere (`TestFlagsAreWrittenWithTwoDashes`).
 
 ### Names and modules
 
