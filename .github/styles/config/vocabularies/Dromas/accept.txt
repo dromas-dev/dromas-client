@@ -29,6 +29,18 @@ dnf
 apk
 typage
 testkit
-(send|lookup|fetch|retry|ssh|openssl)'s
+(send|lookup|fetch|retry|ssh|openssl|OpenSSL)'s
 undetectably
 reattribute
+Debian
+Ubuntu
+Alpine
+Arch
+Homebrew
+Nix
+FreeBSD
+NetBSD
+OpenBSD
+DragonFly
+BSD
+GitHub CLI
