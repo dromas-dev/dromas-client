@@ -34,8 +34,8 @@ func goneKeys(keys []string) []string {
 
 // The script's side: dr_renew prunes by dr_now read after the server took
 // the renewal. Here the clock jumps 70 days once the PUT …/prekey is
-// answered. Keys are deleted by the reading the server took (AGENTS.md,
-// #200, #209): the two messages waiting for the retired key are read once
+// answered. Keys are deleted by the reading the server took (PROTOCOL.md
+// §12.4; #200, #209): the two messages waiting for the retired key are read once
 // the clock is right.
 func TestScriptAClockThatJumpsDuringARenewalDeletesNoKey(t *testing.T) {
 	t.Parallel()

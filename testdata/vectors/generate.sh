@@ -9,7 +9,7 @@
 # TEST SHA(abc); §7.2: C's working key is the first Ed25519ctx test's key), C's P-256 identity
 # is the PUBLISHED test key of RFC 6979 §A.2.5. B's and C's prekey is the PUBLISHED test identity of the
 # C2SP age testkit (CCTV age/internal/testkit: TestHybridIdentity), in input/b-1.pq.key, so the two messages
-# decrypt with any age; the other age recipients' secret keys were discarded. Every vector is judged at the
+# decrypt with any age that reads post-quantum keys; the other age recipients' secret keys were discarded. Every vector is judged at the
 # time in ./now, with the revocations of certificates a reader holds: A's, through THROUGH, its certificates
 # numbered above it, and none of B's or C's. A signs under its certificate; B and C sign by the identity, and each
 # has a certificate whose signatures a reader takes too.

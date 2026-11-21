@@ -64,7 +64,9 @@ A reviewer of the cryptography needs Sections 2.2, 3 to 6, 8 to 10, 12.1, 12.3, 
 
 ### 2.1. Requirements language
 
+<!-- vale off -->
 The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD", "SHOULD NOT", "RECOMMENDED", "NOT RECOMMENDED", "MAY", and "OPTIONAL" in this document are to be interpreted as described in BCP 14 [RFC 2119] [RFC 8174] when, and only when, they appear in all capitals, as shown here.
+<!-- vale on -->
 
 ### 2.2. Notation
 
@@ -1466,7 +1468,7 @@ A client drains every page of its list (Section 11.11) and fetches the message o
 - **A client MUST NOT accept "revoked" without a revocation that verifies.** A `410 mailbox_revoked`, a `403 sender_revoked` or a `401 certificate_revoked` is a server's word. A revocation record that verifies is final. A client MAY look up the mailbox that such an answer is about, to read its revocation record (Section 11.8). Without a revocation record that verifies, the call has failed, and the client changes no state. Anything a server shows that does not verify counts as nothing shown.
 - **On `401 certificate_revoked`, a client looks up its own mailbox before the client tries again.** A revocation in that lookup that verifies and covers the certificate the client signs under is final. The client then signs no second pass, and the mailbox renews under a new certificate. Otherwise the client signs one more pass, as for any `401` (Section 8).
 - **A mailbox checks for revocations, and publishes its own revocations, only at its own server** (Section 12.2, and Section 12.3, check 7). A mailbox whose server keeps no mailbox for it looks up its own revocations with `GET …/revocation`.
-- **A mailbox permanently keeps what it has verified about an address, from any source and at any time.** The mailbox checks every send and every read against what it keeps, with no call to anyone. The mailbox checks and keeps a revocation record handed over in the same way as a served one. A mailbox never keeps "no revocation shown".
+- **A mailbox permanently keeps what it has verified about an address, from any source and at any time.** The mailbox checks every send and every read against what it keeps, with no call to anyone. The mailbox checks and keeps a revocation record handed over in the same way as a served one. A mailbox never keeps "no revocation shown."
 - **A mailbox that keeps a revocation of its own address is finished, regardless of any server's answer.**
   - The mailbox signs nothing more as that address: no pass, no message, no certificate.
   - The mailbox still checks for, keeps and publishes revocations, which carry no pass.
@@ -1796,6 +1798,7 @@ Dromas protects a message's content from everyone but the message's recipient. D
 
 `testdata/vectors/` has the conformance vectors: scenarios, each one file or the files that share one name, and the fixtures that scenarios share, such as mailboxes A, B and C. `testdata/vectors/README.md` gives each scenario's expected outcome, describes the vectors' format, and says how each vector is checked. A conforming client meets every vector of the parts it implements. The crypto and container vectors are checked by `age`, `head`, `sed`, `ssh-keygen` and `openssl`, which are tools written outside this project. The keys of the crypto and container vectors are published test keys.
 
+<!-- vale off -->
 ## 17. References
 
 ### 17.1. Normative References
@@ -1848,6 +1851,7 @@ Dromas protects a message's content from everyone but the message's recipient. D
 - **[RFC 9449]** Fett, D., Campbell, B., Bradley, J., Lodderstedt, T., Jones, M., and D. Waite, "OAuth 2.0 Demonstrating Proof of Possession (DPoP)", RFC 9449, DOI 10.17487/RFC9449, September 2023, <https://www.rfc-editor.org/info/rfc9449/>.
 - **[X-Wing]** Barbosa, M., Connolly, D., Duarte, J. D., Kaiser, A., Schwabe, P., Varner, K., and B. Westerbaan, "X-Wing: The Hybrid KEM You've Been Looking For", IACR Communications in Cryptology 1(1), 2024, DOI 10.62056/a3qj89n4e, <https://doi.org/10.62056/a3qj89n4e>.
 
+<!-- vale on -->
 ## Appendix A. Where `ssh-keygen` differs (informative)
 
 `ssh-keygen -Y verify` checks a signature, but does not define one. So a client built on the tool checks a signature against Section 3.2 itself. The tool accepts these forms, which Section 3.2 refuses:

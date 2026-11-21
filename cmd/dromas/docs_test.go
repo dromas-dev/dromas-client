@@ -277,6 +277,9 @@ func TestTheDocsLinksResolve(t *testing.T) {
 	}
 }
 
+// inlineCode is a Markdown code span.
+var inlineCode = regexp.MustCompile("`[^`\n]*`")
+
 // mdLink is a Markdown link, its text first.
 var mdLink = regexp.MustCompile(`\[([^\]]*)\]\([^)]*\)`)
 

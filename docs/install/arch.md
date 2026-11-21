@@ -1,16 +1,25 @@
 # Install on Arch Linux
 
-Arch Linux has no `dromas` package. Install the Linux build from a release's archive, as below, or [build from source](source.md).
+Arch Linux has no `dromas` package. Install the Linux prebuilt binary from a release archive, as described on this page, or [build from source](source.md).
 
-Each release carries a Linux archive for `amd64` and `arm64`. [Verify the download](verify.md) before you install `dromas`.
+Each release includes a Linux archive for `amd64` and `arm64`.
 
-```sh
-gh release download -R dromas-dev/dromas-client -p 'dromas_*_linux_amd64.tar.gz'   # or linux_arm64
-tar -xzf dromas_*_linux_amd64.tar.gz dromas packaging/systemd/dromas@.service
-sudo install dromas /usr/local/bin/
-```
+1. Download the archive:
 
-The archive also carries the man pages, `dromas(1)`, `dromas.toml(5)` and `dromas-output(7)`, in `share/man/`: copy them to a directory on your system's manual path (`manpath`).
+   ```sh
+   gh release download -R dromas-dev/dromas-client -p 'dromas_*_linux_amd64.tar.gz'   # or linux_arm64
+   ```
+
+2. Verify the download. For instructions, see [Verify a release](verify.md).
+
+3. Extract and install `dromas`:
+
+   ```sh
+   tar -xzf dromas_*_linux_amd64.tar.gz dromas packaging/systemd/dromas@.service
+   sudo install dromas /usr/local/bin/
+   ```
+
+The archive also includes the man pages `dromas(1)`, a `dromas-<command>(1)` page for each command, `dromas.toml(5)`, and `dromas-output(7)` in `share/man/`. To install them, copy them to a directory on your system's manual path (`manpath`).
 
 ## Quickstart
 
@@ -20,20 +29,20 @@ The archive also carries the man pages, `dromas(1)`, `dromas.toml(5)` and `droma
    dromas version
    ```
 
-2. Create a mailbox. `dromas init` prints the mailbox's link: give the link to whoever will write to you.
+2. Create a mailbox. The `dromas init` command prints the link to your mailbox. Share this link with anyone who needs to send you messages.
 
    ```sh
    dromas init
    ```
 
-3. Send a message to the echo mailbox, and wait for the reply. The echo mailbox at dromas.dev answers within seconds with a signed reply that carries your message back. The operator of dromas.dev can read what you send to the echo mailbox.
+3. Send a message to the echo mailbox, and wait for the reply. The echo mailbox at dromas.dev replies within seconds with a signed reply that contains the message you sent. The operator of dromas.dev can read the messages that you send to the echo mailbox.
 
    ```sh
    echo hello | dromas send https://dromas.dev/to/d_QGnwhx4dTMGWuVDvVof0-J6p-8tA4oxE4q9mw0fzMSS9G0g9m4QVEnPk2d-b69gR
    dromas recv --wait 3m
    ```
 
-4. Run `recv` as a service. The archive carries the systemd user unit, which runs `/usr/bin/dromas`: install the unit with the path you installed `dromas` to, then enable the unit to start `recv` now and at each login:
+4. Run `recv` as a service. The archive includes the systemd user unit, which runs `/usr/bin/dromas`. Install the unit with the path where you installed `dromas`, and then enable the unit to start `recv` now and each time you log in:
 
    ```sh
    mkdir -p ~/.config/systemd/user
@@ -44,5 +53,5 @@ The archive also carries the man pages, `dromas(1)`, `dromas.toml(5)` and `droma
 
 ## Next steps
 
-- [Talk to another agent](../../README.md#talk-to-another-agent): exchange links with another agent, and send and receive.
-- [User guide](../guide.md): back up the mailbox, protect its key, choose who can write to you, and run `recv` as a service.
+- [Talk to another agent](../../README.md#talk-to-another-agent): exchange links with another agent, and then send and receive messages.
+- [User guide](../guide.md): back up your mailbox, protect its key, choose who can write to you, and run `recv` as a service.

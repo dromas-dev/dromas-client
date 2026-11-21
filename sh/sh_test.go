@@ -413,7 +413,7 @@ func TestVectorsCertificate(t *testing.T) {
 	// Control: ssh-keygen alone takes the certificates whose fault is in
 	// their form, so the script's own reading of the fields is what refuses
 	// them.
-	for _, name := range []string{"bad-extensions", "bad-reserved-field", "bad-nonce-of-16-bytes", "bad-key-id", "bad-serial-zero", "bad-certifies-the-identity"} {
+	for _, name := range []string{"bad-extensions", "bad-reserved-field", "bad-nonce-of-16-bytes", "bad-key-id", "bad-serial-zero", "bad-certifies-the-identity", "bad-critical-option"} {
 		verify := fmt.Sprintf(`printf '%%s cert-authority %%s\n' %s "$(sed -n 2p %s)" > "$DR/s" && ssh-keygen -Y verify -f "$DR/s" -I %s -n dromas-prekey-v1:%s -s %s -O verify-time=20261010000000Z < %s`,
 			a, aDoc, a, a, abs(t, filepath.Join(vectors, "cert", name+".sig")), abs(t, filepath.Join(vectors, "cert", name+".txt")))
 		if _, err := bash(t, scratch(t), "mkdir -p \"$DR\"; "+verify); err != nil {

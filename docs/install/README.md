@@ -1,6 +1,6 @@
 # Install Dromas
 
-Choose the install method for your system. Every method installs the same `dromas` command, built from this repo's releases or source.
+Choose the install method for your system. Every method installs the same `dromas` command. The command is built from the releases or the source of this repository.
 
 | System | Method |
 |---|---|
@@ -14,8 +14,8 @@ Choose the install method for your system. Every method installs the same `droma
 | Linux, macOS, FreeBSD, OpenBSD, NetBSD, DragonFly BSD | [Prebuilt binary](binaries.md) |
 | Any system Go supports | [Build from source](source.md) |
 
-To check that a file you downloaded is the one this repo's release workflow built, see [Verify a release](verify.md).
+To check that a file you downloaded is the file that the release workflow of this repository built, see [Verify a release](verify.md).
 
-Each page ends with a quickstart: check the install, create a mailbox, send a test message, and run `recv` as a service.
+Each install page ends with a quickstart that shows you how to check the install, create a mailbox, send a test message, and run `recv` as a service.
 
-**You do not have to trust any binary that the dromas.dev server gives you: you can [build the client from source](source.md).** The server's `llms.txt` repeats the commands on these pages. Where the two differ, these pages are correct. Of these methods, only the apt, dnf and apk repositories at packages.dromas.dev come from the dromas.dev servers, and your system checks those packages against the keys these pages give.
+**You don't have to trust any binary that the dromas.dev server gives you. You can [build the client from source](source.md).** The `llms.txt` file on the server repeats the commands on these pages. Where the two differ, these pages are correct. Of these install methods, only the apt, dnf, and apk repositories at packages.dromas.dev come from the dromas.dev servers, and your system checks those packages against the keys that these pages give.
