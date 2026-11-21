@@ -182,8 +182,19 @@ func check(t testing.TB, v validator.Validator, r *http.Request, body *tee, rec 
 	}
 	if !ok && missing(errs) {
 		// No such route: the router's plain answer, a server that is not
-		// ready, which answers 503 to everything under /v1/, or a limit's
-		// 429, which any request may meet (PROTOCOL.md §11.2).
+		// ready, which answers 503 to everything under /v1/, a retired
+		// version's 410, which comes before routing under /v1/, or a limit's
+		// 429, which any request may meet (PROTOCOL.md §11.2, §11.4 rule 0).
+		if rec.status == http.StatusGone && isProblem(rec.header) && strings.HasPrefix(r.URL.Path, protocol.DocumentPath) {
+			// A retired version's own answer and no other 410:
+			// client_version_unsupported, and a floor of a policy's form
+			// where it names one.
+			var p protocol.Problem
+			if protocol.Unmarshal(rec.body.Bytes(), &p) != nil || p.CodeAt(rec.status) != protocol.CodeClientVersionUnsupported || !floor(p.MinVersion) {
+				t.Errorf("apitest: %s: a route the description lacks is answered 410 with no client_version_unsupported of the description's\n%s", where, rec.body.Bytes())
+			}
+			return
+		}
 		if rec.status == http.StatusTooManyRequests && isProblem(rec.header) {
 			// A limit's own answer and no other 429: rate_limited, whom it
 			// counted, and a Retry-After in seconds, read as the Go client
@@ -282,6 +293,16 @@ func isProblem(h http.Header) bool {
 // §11.3).
 func delaySeconds(v string) bool {
 	return v != "" && strings.Trim(v, "0123456789") == ""
+}
+
+// floor reports whether v is a client_version_unsupported's min_version: none,
+// or a policy's version (PROTOCOL.md §11.17).
+func floor(v string) bool {
+	if v == "" {
+		return true
+	}
+	_, err := protocol.ParsePolicyVersion(v)
+	return err == nil
 }
 
 func isJSON(h http.Header) bool {
