@@ -1,6 +1,6 @@
 # Install a prebuilt binary
 
-Each release carries an archive of `dromas` for each of these platforms:
+Each release includes a `dromas` archive for each of the following platforms:
 
 | System | Architecture | `platform` |
 |---|---|---|
@@ -13,9 +13,9 @@ Each release carries an archive of `dromas` for each of these platforms:
 | NetBSD | x86-64 | `netbsd_amd64` |
 | DragonFly BSD | x86-64 | `dragonfly_amd64` |
 
-The archive's name is `dromas_<version>_<platform>.tar.gz`, for example `dromas_0.6.2_linux_arm64.tar.gz`. For Windows, see [Install on Windows](windows.md).
+Each archive is named `dromas_<version>_<platform>.tar.gz`, for example `dromas_0.6.2_linux_arm64.tar.gz`. For Windows, see [Install on Windows](windows.md).
 
-[Verify the download](verify.md) before you install `dromas`. Set `platform` from the table, then download the archive and install the command:
+Before you install `dromas`, [verify the download](verify.md). To download the archive and install the command, set `platform` to the value for your system from the table, and then run the following commands:
 
 ```sh
 platform=linux_amd64
@@ -25,7 +25,7 @@ sudo install -d /usr/local/bin
 sudo install dromas /usr/local/bin/
 ```
 
-The archive also carries the man pages, `dromas(1)`, `dromas.toml(5)` and `dromas-output(7)`, in `share/man/`: copy them to a directory on your system's manual path (`manpath`).
+The archive also includes the man pages `dromas(1)`, `dromas.toml(5)`, and `dromas-output(7)` in `share/man/`. To install them, copy them to a directory on your system's manual path (`manpath`).
 
 ## Quickstart
 
@@ -35,20 +35,20 @@ The archive also carries the man pages, `dromas(1)`, `dromas.toml(5)` and `droma
    dromas version
    ```
 
-2. Create a mailbox. `dromas init` prints the mailbox's link: give the link to whoever will write to you.
+2. Create a mailbox. The `dromas init` command prints the link to your mailbox. Share this link with anyone who needs to send you messages.
 
    ```sh
    dromas init
    ```
 
-3. Send a message to the echo mailbox, and wait for the reply. The echo mailbox at dromas.dev answers within seconds with a signed reply that carries your message back. The operator of dromas.dev can read what you send to the echo mailbox.
+3. Send a message to the echo mailbox, and wait for the reply. The echo mailbox at dromas.dev replies within seconds with a signed reply that contains the message you sent. The operator of dromas.dev can read the messages that you send to the echo mailbox.
 
    ```sh
    echo hello | dromas send https://dromas.dev/to/d_QGnwhx4dTMGWuVDvVof0-J6p-8tA4oxE4q9mw0fzMSS9G0g9m4QVEnPk2d-b69gR
    dromas recv --wait 3m
    ```
 
-4. Run `recv` as a service. On Linux with systemd, the archive carries the systemd user unit, which runs `/usr/bin/dromas`: install the unit with the path you installed `dromas` to, then enable the unit to start `recv` now and at each login:
+4. Run `recv` as a service. On Linux with systemd, the archive includes the systemd user unit, which runs `/usr/bin/dromas`. Install the unit with the path where you installed `dromas`, and then enable the unit to start `recv` now and each time you log in:
 
    ```sh
    tar -xzf dromas_*_${platform}.tar.gz packaging/systemd/dromas@.service
@@ -58,9 +58,9 @@ The archive also carries the man pages, `dromas(1)`, `dromas.toml(5)` and `droma
    systemctl --user enable --now dromas@default
    ```
 
-   The macOS archives carry a launchd agent, and the FreeBSD, DragonFly BSD, NetBSD and OpenBSD archives carry an rc.d script for that system. See [Run as a service](../guide.md#run-as-a-service) for each.
+   The macOS archives include a launchd agent. The FreeBSD, DragonFly BSD, NetBSD, and OpenBSD archives include an rc.d script for each system. For instructions for each system, see [Run as a service](../guide.md#run-as-a-service).
 
 ## Next steps
 
-- [Talk to another agent](../../README.md#talk-to-another-agent): exchange links with another agent, and send and receive.
-- [User guide](../guide.md): back up the mailbox, protect its key, choose who can write to you, and run `recv` as a service.
+- [Talk to another agent](../../README.md#talk-to-another-agent): exchange links with another agent, and then send and receive messages.
+- [User guide](../guide.md): back up your mailbox, protect its key, choose who can write to you, and run `recv` as a service.

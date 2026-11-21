@@ -1,16 +1,16 @@
 # Verify a release
 
-This repo's release workflow builds each release from the release's signed tag, after the tests pass on that commit. The workflow publishes, with each release:
+The release workflow of this repository builds each release from the release's signed tag, after the tests pass on that commit. With each release, the workflow publishes the following:
 
-- an attestation of the build for every file, which names the tag, the commit and the workflow
-- an SBOM of each archive
-- `checksums.txt`, signed with cosign by the workflow, as GoReleaser documents
+- A build attestation for every file. The attestation names the tag, the commit, and the workflow.
+- A software bill of materials (SBOM) for each archive.
+- `checksums.txt`, which the workflow signs with cosign, as the GoReleaser documentation describes.
 
-From v0.1.1 on, a release is immutable, and its tag cannot move. A `go install` build needs none of this, because Go's checksum database verifies the module instead.
+Starting with v0.1.1, each release is immutable, and its tag can't move. If you build with `go install`, you don't need any of these checks, because the Go checksum database verifies the module instead.
 
 ## Verify with the GitHub CLI
 
-With gh 2.102.0 or later, check a file against the release, and check that this repo's workflow built the file from the release's tag on a GitHub-hosted runner. Replace `<tag>` with the release's tag, such as `v0.6.2`. Keep `--source-ref`: without it, an attestation that this repo's workflow made on any branch passes.
+You need `gh` 2.102.0 or later. The following commands check a file against the release, and check that the workflow of this repository built the file from the release's tag on a GitHub-hosted runner. Replace `<tag>` with the release's tag, such as `v0.6.2`. Keep the `--source-ref` flag: without it, an attestation that the workflow of this repository made on any branch passes the check.
 
 ```sh
 gh release verify-asset <tag> dromas_*_linux_amd64.tar.gz -R dromas-dev/dromas-client
@@ -19,7 +19,7 @@ gh attestation verify dromas_*_linux_amd64.tar.gz -R dromas-dev/dromas-client --
 
 ## Verify with cosign
 
-Without the GitHub CLI's attestations, check the signed checksums with cosign, then check the file against the checksums:
+To verify without the attestations, check the signed checksums with cosign, and then check the file against the checksums:
 
 ```sh
 gh release download -R dromas-dev/dromas-client -p checksums.txt -p checksums.txt.sigstore.json

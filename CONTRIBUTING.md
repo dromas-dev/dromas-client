@@ -2,13 +2,13 @@
 
 ## Sign off every commit
 
-This project uses the [Developer Certificate of Origin](https://developercertificate.org/) (DCO), version 1.1. Every commit carries a `Signed-off-by:` line with the name and email of the person submitting it:
+This project uses the [Developer Certificate of Origin](https://developercertificate.org/) (DCO), version 1.1. Every commit must have a `Signed-off-by:` line with the name and email address of the person who submits the commit. To add the line, commit with the `-s` flag:
 
 ```sh
 git commit -s
 ```
 
-By adding that line you certify the statement below for that commit. A pull request whose commits lack it fails the DCO check and is not merged. To add it to commits already made:
+When you add that line, you certify the statement in [The certificate](#the-certificate) for that commit. If a commit in a pull request doesn't have the line, the pull request fails the DCO check and isn't merged. To add the line to commits that you already made, run the following commands:
 
 ```sh
 git commit --amend -s --no-edit     # the last commit
@@ -16,21 +16,21 @@ git rebase --signoff main           # every commit on your branch
 git push --force-with-lease         # then update the pull request
 ```
 
-**If an AI agent wrote the change, the sign-off is still yours.** You certify the change and answer for it, however it was written. An agent may run `git commit -s` for you once you have told it to: that writes the line from your git identity. It never signs as itself, and never writes the line by hand. Name the tool in a `Co-Authored-By:` or `Assisted-by:` trailer. The maintainer's own commits name Custos, the maintainer's AI assistant, that way, and carry the maintainer's sign-off.
+**If an AI agent wrote the change, you still sign it off.** You certify the change and you're responsible for it, however it was written. An agent can run `git commit -s` for you only after you tell it to. The command writes the line from your Git identity. An agent never signs off as itself, and never writes the line by hand. Name the tool in a `Co-Authored-By:` or `Assisted-by:` trailer. The maintainer's own commits name Custos, the maintainer's AI assistant, in this way, and have the maintainer's sign-off.
 
-## Licence of contributions
+## License of contributions
 
-A contribution to this repo is made under this repo's licence, Apache-2.0 (`LICENSE`). There is no contributor licence agreement.
+You make each contribution to this repository under the license of this repository, Apache-2.0 (`LICENSE`). There is no contributor license agreement.
 
-The server, [dromas-server](https://github.com/dromas-dev/dromas-server), is Apache-2.0 too.
+The server, [dromas-server](https://github.com/dromas-dev/dromas-server), is also licensed under Apache-2.0.
 
 ## Where a change goes
 
-- **The wire, or a check or a refusal of what the wire carries:** the specification, `PROTOCOL.md`, in the same commit as the code that implements it, with a test vector or a test that plays a hostile server.
-- **A client's own behaviour (what a command prints, its retries, its files, its defaults, and a refusal of its owner's own input):** the code, its doc comment or the command's help, with a test. The specification does not restate it.
-- **How the server does it:** the server's repo.
-- **A question about the protocol:** an issue here, where the open ones are.
-- **A vulnerability:** privately, never in an issue: `SECURITY.md`.
+- **A change to the wire protocol, or to a check or refusal of what the wire carries:** change the specification, `PROTOCOL.md`, in the same commit as the code that implements the change, and include in that commit a test vector or a test that simulates a hostile server.
+- **A change to a client's own behavior (what a command prints, its retries, its files, its defaults, and how it refuses its owner's own input):** change the code, and its doc comment or the command's help, and include a test. The specification doesn't restate a client's own behavior.
+- **A change to how the server does something:** make the change in the server's repository.
+- **A question about the protocol:** open an issue in this repository, where the open questions are.
+- **A vulnerability:** report it privately, never in an issue, as `SECURITY.md` describes.
 
 ## The certificate
 
