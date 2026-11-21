@@ -6,11 +6,11 @@ This guide covers what to do after you [install](install/README.md) `dromas` and
 
 `dromas init` creates a mailbox and writes its config file to `~/.config/dromas/default.toml`, or to `%LocalAppData%\dromas\default.toml` on Windows. The config file names the mailbox's directories:
 
-- `base-dir`: the state file and the lists of senders
+- `base-dir`: the state file, the lists of senders, and `outbox/`
 - `mail-dir`: the messages, in `inbox/`, `held/`, `refused/`, and `sent/`
 - `inbox-dir`: `inbox/` alone, by default `<mail-dir>/inbox`
 - `identity-file`: the identity's private key. The identity determines the mailbox's address.
-- `rotating-keys-dir`: the prekeys, the working key, and the TLS session ticket
+- `rotating-keys-dir`: the prekeys, the working key, and the TLS session ticket. Senders encrypt each message to one of the mailbox's prekeys. The working key signs for a mailbox that [signs under a certificate](#sign-under-a-certificate).
 
 `dromas config` prints each setting and where it came from: a flag, the environment, the config file, or the default. `dromas status` reports what the mailbox holds. The top of [`client/doc.go`](../client/doc.go) describes each file.
 
@@ -40,7 +40,7 @@ A group message uses one of your mailbox's sends for each other member, so keep 
 
 When you send to a mailbox, that mailbox can write to you, the same as if you ran `dromas peer allow`. See [Choose who can write to you](#choose-who-can-write-to-you).
 
-Don't send a message a second time. If the server doesn't accept a message, the message waits in `outbox/`. `dromas outbox flush` posts it again, signed and encrypted afresh, the same way `dromas send` does. `sent/` keeps each message that the server accepted, together with the server's receipt.
+If the server doesn't accept a message, the message waits in `outbox/`. To post it again, run `dromas outbox flush`, not `dromas send`, because `send` makes a new message with a new `msg_id`. `outbox flush` signs and encrypts the message afresh, the same way `send` does. `sent/` keeps each message that the server accepted, together with the server's receipt.
 
 ## Receive messages
 
@@ -58,17 +58,17 @@ Each message that you receive goes to one of three directories:
 
 | Directory | What it contains |
 |---|---|
-| `inbox/` | Delivered messages from senders that you allowed |
+| `inbox/` | Delivered messages from senders that you allowed. |
 | `held/` | Messages from unknown senders that passed every check, kept until you run `dromas peer allow` or `dromas peer block`. |
-| `refused/` | Messages that failed a check. They're never delivered, and they're kept as evidence. The sender isn't told. |
+| `refused/` | Messages that failed a check, kept as evidence. The sender isn't told. If the server serves a refused message again and it passes every check, `recv` delivers it. |
 
-The mailbox keeps each message in plaintext, one file for each message, and keeps each message that you send in `sent/`. `dromas peer allow` moves a sender's messages from `held/` to `inbox/`. `dromas` deletes a message file only when you run `dromas peer block`, which deletes that sender's messages in `held/`, or `dromas refused rm`, and when `recv` delivers a message that it refused earlier, which deletes that message's file in `refused/`. Managing the files is otherwise up to you. `dromas refused list` shows why `dromas` refused each message, and `dromas refused rm` empties `refused/`. The files in `refused/` keep what the server sent.
+The mailbox keeps each message in plaintext, one file for each message, and keeps each message that you send in `sent/`. `dromas peer allow` moves a sender's messages from `held/` to `inbox/`. `dromas` deletes a message file only when you run `dromas peer block`, which deletes that sender's messages in `held/`, or `dromas refused rm`, and when `recv` delivers a message that it refused earlier, which deletes that message's file in `refused/`. Managing the files is otherwise up to you. `dromas refused list` shows why `dromas` refused each message. `dromas refused rm <id>` deletes that message from `refused/`, and `dromas refused rm --all` empties `refused/`. The files in `refused/` keep what the server sent.
 
 Any process that runs as your user can put a file in `inbox/` or `held/` that looks like a delivered message, and no file mode prevents that. Give an agent's file tools read access to `inbox-dir`, but not write access.
 
 ### Run a program for each message
 
-`dromas recv --exec` runs a program for each message that it delivers to `inbox/`, with the message's `message` line on stdin. `recv` runs the program only when it waits: with `--wait`, with [`recv.wait`](configuration.md#recvwait) in the config file, or with `--follow`. To set the program in the config file, use [`recv.exec`](configuration.md#recvexec):
+`dromas recv --exec` runs a program for each message that it delivers to `inbox/`, with the message's `message` line on stdin. The `--exec` flag requires `--wait` or `--follow` on the same command line. With [`recv.wait`](configuration.md#recvwait) in the config file and neither flag, `recv --exec` fails with a usage error. To set the program in the config file, use [`recv.exec`](configuration.md#recvexec). `recv` runs that program only when it waits: with `--wait`, with `recv.wait` in the config file, or with `--follow`.
 
 ```toml
 [recv]
@@ -77,13 +77,13 @@ exec = ["/usr/local/bin/bot", "--quiet"]
 
 The program runs at least once for each message, and a crash can make it run twice. In the same step that keeps a message, `recv` records that the program still needs to run for that message. When `recv` starts again, it first runs the program for every message that still needs it.
 
-If the program fails, `recv` tries it at most 3 times in total. When `recv` gives up on a message's program, `dromas status` reports the message under `attention` until you run `dromas inbox clear-failed`, which clears every message that `recv` gave up on, but not a message that still has tries left. Nothing runs the program again for a message that `recv` gave up on. To pass the message to a program yourself, run `dromas inbox show <id> | <program>`.
+If the program fails, `recv` tries it at most 3 times in total. When `recv` gives up on a message's program, `dromas status` reports the message under `attention` until you run `dromas inbox clear-failed`. That command clears the record of every message whose program `recv` gave up on, but not the record of a message that still has tries left. The messages stay in `inbox/`. Nothing runs the program again for a message that `recv` gave up on. To pass the message to a program yourself, run `dromas inbox show <id> | <program>`.
 
 `recv` doesn't run the program for a held message, or for a message that another `recv` received. Run one `recv` for each mailbox.
 
 ### Send each message to a webhook
 
-`dromas recv --webhook <url>` posts each message that it delivers to `inbox/` to an HTTP endpoint, such as an n8n Webhook node. You can use it alone or together with the `--exec` program. As with `--exec`, `recv` posts only when it waits: with `--wait`, with `recv.wait` in the config file, or with `--follow`. The body is the message's `message` line, as JSON. To set the webhook in the config file, use [`recv.webhook`](configuration.md#recvwebhook):
+`dromas recv --webhook <url>` posts each message that it delivers to `inbox/` to an HTTP endpoint, such as an n8n Webhook node. You can use it alone or together with the `--exec` program. The body is the message's `message` line, as JSON. As with `--exec`, the `--webhook` flag requires `--wait` or `--follow` on the same command line, and with only `recv.wait` in the config file, `recv --webhook` fails with a usage error. To set the webhook in the config file, use [`recv.webhook`](configuration.md#recvwebhook). `recv` posts to that webhook only when it waits: with `--wait`, with `recv.wait` in the config file, or with `--follow`.
 
 ```toml
 [recv]
@@ -92,7 +92,7 @@ webhook-header-file = "~/.config/dromas/webhook-header"
 webhook-secret-file = "~/.config/dromas/webhook-secret"
 ```
 
-The header file contains one line, such as `Authorization: Bearer <token>`. If you set the secret file, `recv` signs each post with the [Standard Webhooks](https://www.standardwebhooks.com/) scheme, and the `webhook-id` header is the message's `id`. Make each file accessible only to you: use `chmod 600`, or on Windows, an access list of only you, SYSTEM, and the Administrators. Otherwise, `recv` rejects the file when it starts. `dromas config` shows the URL, and a URL that you give with `--webhook` appears in the system's list of processes, so put a URL that contains a token in the config file.
+The header file contains one line, such as `Authorization: Bearer <token>`. If you set the secret file, `recv` signs each post with the [Standard Webhooks](https://www.standardwebhooks.com/) scheme, and the `webhook-id` header is the message's `id`. Make each file accessible only to you: use `chmod 600`, or on Windows, an access list of only you, SYSTEM, and the Administrators. Otherwise, `recv` rejects the file when it starts. `dromas config` shows the URL. A URL that you give with `--webhook` appears in the system's list of processes, so put a URL that contains a token in the config file.
 
 The webhook runs independently of the program. A failure of either one never stops, delays, or fails the other. `recv` sends posts one at a time, so the tries for one message hold back the post of the next message. With `--wait`, `recv` exits after the webhook finishes its tries for the messages that `recv` delivered.
 
@@ -133,7 +133,7 @@ The `.deb` and `.rpm` packages install a systemd user unit, `dromas@.service`, b
 
 To check the service, run `systemctl --user status dromas@default`. To read its log, run `journalctl --user -u dromas@default`.
 
-The unit restarts `recv` 30 seconds after `recv` exits with an exit status other than 0 and 3, or because of a signal other than `SIGHUP`, `SIGINT`, `SIGTERM`, and `SIGPIPE`, which systemd treats as a clean exit. The unit doesn't restart `recv` after exit status 2 or 4, because a restart would hit the same error. Fix the cause, then run `systemctl --user restart dromas@default`.
+systemd treats exit status 0 or 3, or an exit because of `SIGHUP`, `SIGINT`, `SIGTERM`, or `SIGPIPE`, as a clean exit, and the unit doesn't restart `recv` after a clean exit. After any other exit, the unit restarts `recv` 30 seconds later, except after exit status 2 or 4, because a restart would hit the same error. Fix the cause, then run `systemctl --user restart dromas@default`.
 
 ### Alpine Linux
 
@@ -194,7 +194,11 @@ For each mailbox, use either the agent or `brew services`, not both, because eac
 
 ### FreeBSD and DragonFly BSD
 
-The FreeBSD and DragonFly BSD archives include an rc.d script, `packaging/rc.d/freebsd/dromas`. The script runs `/usr/local/bin/dromas recv` as the mailbox's owner under daemon(8). [Install a prebuilt binary](install/binaries.md) puts `dromas` at that path. For a mailbox other than the default, also set `dromas_flags="--profile <profile>"` before you run `service dromas start`, with `sysrc` or in `/etc/rc.conf`. Run these commands as root in the directory that contains the archive, and replace `<user>` with the owner:
+The FreeBSD and DragonFly BSD archives include an rc.d script, `packaging/rc.d/freebsd/dromas`. The script runs `/usr/local/bin/dromas recv` as the mailbox's owner under daemon(8). [Install a prebuilt binary](install/binaries.md) puts `dromas` at that path. For a mailbox other than the default, also set `dromas_flags="--profile <profile>"` before you run `service dromas start`, with `sysrc` or in `/etc/rc.conf`.
+
+On DragonFly BSD, the archive's name contains `dragonfly` in place of `freebsd`, but the script's path in the archive stays `packaging/rc.d/freebsd/dromas`. DragonFly BSD has no `sysrc`, so in place of the `sysrc` command, add `dromas_enable="YES"` and `dromas_user="<user>"` to `/etc/rc.conf`.
+
+Run these commands as root in the directory that contains the archive, and replace `<user>` with the owner:
 
 ```sh
 tar -xzf dromas_*_freebsd_*.tar.gz packaging/rc.d/freebsd/dromas   # dragonfly on DragonFly BSD
@@ -202,8 +206,6 @@ install -m 0755 packaging/rc.d/freebsd/dromas /usr/local/etc/rc.d/dromas
 sysrc dromas_enable=YES dromas_user=<user>
 service dromas start
 ```
-
-DragonFly BSD has no `sysrc`. Instead, add `dromas_enable="YES"` and `dromas_user="<user>"` to `/etc/rc.conf`.
 
 To run several mailboxes, list them in `dromas_profiles` and give each one its own settings, as the script's comments show. To check the service, run `service dromas status`. The script sends `recv`'s output to syslog with the tag `dromas`, or `dromas/<profile>` for each profile in `dromas_profiles`, which goes to `/var/log/messages` by default.
 
@@ -300,7 +302,7 @@ Without `allowed` and `blocked`, the first renewal that `recv` makes replaces th
 
 ### Restore required
 
-The mailbox stops with `restore_required` when `state` doesn't match `prekeys/`. This happens when `state` is lost, or when you restore `state` from a copy older than the last prekey renewal and keep `prekeys/`. Until you run `dromas init --restore`, the mailbox doesn't receive, send, deliver, or renew anything. `dromas init --restore` adopts the prekeys in `prekeys/` and then renews.
+The mailbox stops with `restore_required` when `prekeys/` holds a prekey that `state` doesn't name. This happens when `state` is lost and `prekeys/` isn't, or when you restore `state` from a copy older than the last prekey renewal and keep `prekeys/`. Until you run `dromas init --restore`, the mailbox doesn't receive, send, deliver, or renew anything. `dromas init --restore` adopts the prekeys in `prekeys/` and then renews.
 
 When `state` is lost, its replay set is lost with it, so the mailbox might deliver a message again that it already accepted (`PROTOCOL.md` §15.9). If your agent's work must not happen twice, key the work by `from` and `msg_id`.
 
@@ -310,7 +312,7 @@ An identity is an Ed25519 key. To make a P-256 identity instead, run `dromas ini
 
 By default, the identity's key file has no passphrase. To add one, run `ssh-keygen -p -f <identity-file>`, without `-m PEM`, so that the file stays in the OpenSSH format. A command then needs the key to be unlocked in one of these ways:
 
-- **The mailbox's own ssh-agent.** `dromas agent start` runs stock `ssh-agent` at the socket that [`agent`](configuration.md#agent) names. This agent is separate from your shell's agent, which ssh forwards. `dromas agent add` then loads the key with stock `ssh-add`. Each command prints the command that it runs.
+- **The mailbox's own ssh-agent.** `dromas agent start` runs stock `ssh-agent` in the foreground, until you stop it, at the socket that [`agent`](configuration.md#agent) names. This agent is separate from your shell's agent, which ssh forwards. `dromas agent add` then loads the key with stock `ssh-add`. Each command prints the command that it runs.
 - **An askpass program.** [`askpass`](configuration.md#askpass) names a program that prints the passphrase, as `SSH_ASKPASS` does for ssh.
 - **A terminal prompt.** When stdin is a terminal and [`no-prompt`](configuration.md#no-prompt) isn't set, `dromas` asks for the passphrase.
 
@@ -338,7 +340,7 @@ If `inbox-dir` is itself a mount point, it remains as an empty directory while t
 
 `dromas` creates each directory so that only you can access it, and leaves an existing directory unchanged. `dromas` rejects the following:
 
-- A private key file of yours that other users can access, as ssh does. `dromas` accepts a key file that another user owns, such as a Kubernetes secret that root owns and the pod's group can read. No setting turns off the check of a key file.
+- A private key file of yours that other users can access, as ssh does. For the identity key file and the webhook's header and secret files, `dromas` accepts a file that another user owns, such as a Kubernetes secret that root owns and the pod's group can read. It rejects a prekey, a working key, or `tls-ticket` if other users can access it or a user other than root owns it. No setting turns off the check of a key file.
 - `state`, `gate`, or `partial`, if other users can access the file or another user owns it. The error gives the command that fixes the file.
 - `allowed`, `blocked`, or `aliases`, if other users can write to the file or another user owns it, as ssh does for a config file.
 - `inbox-dir` or `held/`, or a message file in either one, if other users can write to it or another user owns it. Anyone who can write there can add a message that looks delivered.
