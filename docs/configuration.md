@@ -28,7 +28,7 @@ rotating-keys-dir = "~/.local/state/dromas/default/keys"
 # headers = false
 ```
 
-`dromas init` writes the file only if no file exists, so you can make the file read-only. `dromas init` writes into the file the paths that you pass to it, and the values that you pass to its `--server`, `--ca-file`, `--prekey-lifetime`, and `--certificate-lifetime` flags. When `XDG_DATA_HOME` or `XDG_STATE_HOME` is set to an absolute path, `dromas init` writes paths under that directory instead of under `~/.local/share` or `~/.local/state`. On Windows, if those variables aren't set, `dromas init` puts the mailbox in `%LocalAppData%\dromas\<profile>` and its keys in the mailbox's `keys` directory. Neither the file nor the mailbox is in `%AppData%`, because a roaming profile copies `%AppData%` to every machine that the user signs in to, and a mailbox runs on one machine only.
+`dromas init` writes the file only if no file exists, so you can make the file read-only. `dromas init` always writes the four path keys `base-dir`, `mail-dir`, `identity-file`, and `rotating-keys-dir`: each is the path that you pass to `dromas init`, or else a path under `~/.local/share` or, for `rotating-keys-dir`, under `~/.local/state`. The values in the file take the place of the defaults that this page gives for those keys, such as `<base-dir>/keys` for `rotating-keys-dir`. `dromas init` also writes the values that you pass to its `--inbox-dir`, `--server`, `--ca-file`, `--prekey-lifetime`, and `--certificate-lifetime` flags. When `XDG_DATA_HOME` or `XDG_STATE_HOME` is set to an absolute path, `dromas init` writes paths under that directory instead of under `~/.local/share` or `~/.local/state`. On Windows, if those variables aren't set, `dromas init` puts the mailbox in `%LocalAppData%\dromas\<profile>` and its keys in the mailbox's `keys` directory. Neither the file nor the mailbox is in `%AppData%`, because a roaming profile copies `%AppData%` to every machine that the user signs in to, and a mailbox runs on one machine only.
 
 ### Location
 
@@ -74,7 +74,7 @@ A setting that only modifies another setting has no effect when the other settin
 - Default: none; the key is required
 - Flag: `--base-dir`
 
-The directory that holds the mailbox's state file and lists (`state`, `allowed`, `blocked`, `aliases`). The defaults of `identity-file` and `rotating-keys-dir` are paths in this directory. The mailbox's lock is a `flock` on `state`, so the lock is only as reliable as the file system's locks. Don't open one base directory from two machines at the same time; SQLite and Dovecot give the same warning about their own files.
+The directory that holds the mailbox's state file and lists (`state`, `allowed`, `blocked`, `aliases`), and two other files of the mailbox: `partial`, the ciphertext of the message that a fetch was reading, so that a cut fetch can resume; and, on Windows only, `gate`, an empty file that the mailbox locks so that reads don't hold back a waiting writer. The defaults of `identity-file` and `rotating-keys-dir` are paths in this directory. The mailbox's lock is a `flock` on `state`, so the lock is only as reliable as the file system's locks. Don't open one base directory from two machines at the same time; SQLite and Dovecot give the same warning about their own files.
 
 ### `mail-dir`
 
@@ -115,7 +115,7 @@ The directory for delivered messages. To give an agent the inbox without `held/`
 - Flag: `--server`
 - Environment: `DROMAS_SERVER_URL`
 
-The server that the mailbox uses. The URL must use `https`, or `http` with an IP address of this machine (`127.0.0.0/8` or `::1`).
+The server that the mailbox uses. The URL must use `https`, or `http` with a loopback IP address (`127.0.0.0/8` or `::1`), never a name such as `localhost`.
 
 ### `ca-file`
 
@@ -240,7 +240,7 @@ When `true`, `recv` prints the checked fields and the body size of each message,
 - Type: array of strings
 - Default: none
 
-The program to run for each message, followed by its arguments, for example `exec = ["/usr/local/bin/bot", "--quiet"]`. The program receives the message's `message` line on stdin. No shell runs, and `dromas` doesn't split or expand the arguments. On Windows, `cmd.exe` runs a `.bat` or `.cmd` program, and `cmd.exe` does split and expand its arguments. `recv` runs the program only with `--wait` or `--follow`, and only when the command line has no `--exec` flag, which replaces the program. See [Run a program for each message](guide.md#run-a-program-for-each-message).
+The program to run for each message, followed by its arguments, for example `exec = ["/usr/local/bin/bot", "--quiet"]`. The program receives the message's `message` line on stdin. No shell runs, and `dromas` doesn't split or expand the arguments. On Windows, `cmd.exe` runs a `.bat` or `.cmd` program, and `cmd.exe` does split and expand its arguments. `recv` runs the program only when it waits: with `--wait` or `recv.wait`, or with `--follow`. It also runs the program only when the command line has no `--exec` flag, which replaces the program. See [Run a program for each message](guide.md#run-a-program-for-each-message).
 
 ### `recv.exec-timeout`
 
@@ -256,7 +256,7 @@ How long one run of the `recv.exec` program can take before `recv` kills the run
 - Default: none
 - Flag: `dromas recv --webhook`
 
-A URL that `recv` posts the `message` line of each message to, whether or not `recv.exec` is set. `recv` uses this key only with `--wait` or `--follow`, and a `--webhook` flag on the command line replaces it. A URL that contains a user name or a password is an error; put a token in `recv.webhook-header-file` instead. See [Send each message to a webhook](guide.md#send-each-message-to-a-webhook).
+A URL that `recv` posts the `message` line of each message to, whether or not `recv.exec` is set. `recv` uses this key only when it waits: with `--wait` or `recv.wait`, or with `--follow`. A `--webhook` flag on the command line replaces it. A URL that contains a user name or a password is an error; put a token in `recv.webhook-header-file` instead. See [Send each message to a webhook](guide.md#send-each-message-to-a-webhook).
 
 ### `recv.webhook-header-file`
 
@@ -280,7 +280,7 @@ A file that contains a [Standard Webhooks](https://www.standardwebhooks.com/) se
 - Default: none
 - Flag: `dromas recv --log-file`
 
-A file that `recv` appends its lines to: the lines that it would otherwise print on stdout and stderr. Use this key when the service manager doesn't keep a log of its own, such as Windows Task Scheduler. If the file doesn't exist, `recv` creates it, readable only by you. If the file exists, `recv` leaves it as it is. Nothing rotates the file. See [Run as a service](guide.md#run-as-a-service).
+A file that `recv` appends its lines to: the lines that it would otherwise print on stdout and stderr. Use this key when the service manager doesn't keep a log of its own, such as Windows Task Scheduler. If the file doesn't exist, `recv` creates it, readable only by you. If the file exists, `recv` keeps its permissions and appends to it. Nothing rotates the file. See [Run as a service](guide.md#run-as-a-service).
 
 ### `inbox.list.headers`
 

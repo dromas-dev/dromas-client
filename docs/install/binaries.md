@@ -15,7 +15,7 @@ Each release includes a `dromas` archive for each of the following platforms:
 
 Each archive is named `dromas_<version>_<platform>.tar.gz`, for example `dromas_0.6.2_linux_arm64.tar.gz`. For Windows, see [Install on Windows](windows.md).
 
-Before you install `dromas`, [verify the download](verify.md). To download the archive and install the command, set `platform` to the value for your system from the table, and then run the following commands:
+To install the command, set `platform` to the value for your system from the table. Run the first two of the following commands to download the archive, [verify the download](verify.md), and then run the other commands to extract and install `dromas`:
 
 ```sh
 platform=linux_amd64
@@ -25,7 +25,7 @@ sudo install -d /usr/local/bin
 sudo install dromas /usr/local/bin/
 ```
 
-The archive also includes the man pages `dromas(1)`, `dromas.toml(5)`, and `dromas-output(7)` in `share/man/`. To install them, copy them to a directory on your system's manual path (`manpath`).
+The archive also includes the man pages `dromas(1)`, a `dromas-<command>(1)` page for each command, `dromas.toml(5)`, and `dromas-output(7)` in `share/man/`. To install them, copy them to a directory on your system's manual path (`manpath`).
 
 ## Quickstart
 

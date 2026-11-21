@@ -30,7 +30,7 @@ When a new release is published, `apt upgrade` installs it.
 
 ## Install from a package
 
-Each release includes a `.deb` package for `amd64` and `arm64`. Before you install the package, [verify the download](verify.md).
+Each release includes a `.deb` package for `amd64` and `arm64`. Run the first of the following commands to download the package, [verify the download](verify.md), and then run the second command to install the package.
 
 ```sh
 gh release download -R dromas-dev/dromas-client -p 'dromas_*_amd64.deb'   # or arm64

@@ -24,7 +24,7 @@ When a new release is published, `apk upgrade` installs it.
 
 ## Install from a package
 
-Each release includes an `.apk` package for `x86_64` and `aarch64`. Before you install the package, [verify the download](verify.md), because the `--allow-untrusted` flag skips the signature check that apk does itself.
+Each release includes an `.apk` package for `x86_64` and `aarch64`. Run the first of the following commands to download the package, [verify the download](verify.md), and then run the second command to install the package. Don't skip the verification, because the `--allow-untrusted` flag skips the signature check that apk does itself.
 
 ```sh
 gh release download -R dromas-dev/dromas-client -p 'dromas_*_x86_64.apk'   # or aarch64

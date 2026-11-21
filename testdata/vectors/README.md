@@ -1,13 +1,13 @@
 # Dromas v1 test vectors
 
-This directory holds files that any Dromas implementation can check itself against. Stock tools make most of the files: `generate.sh` uses `bash`, `od`, `base64`, `sha256sum`, `ssh-keygen`, `openssl`, and, for the three ciphertexts only, `age` 1.3 or later. A Go test makes the few files that no stock tool can write, from the same published keys (`DROMAS_WRITE_VECTORS=1 go test ./protocol`, in `protocol/vectors_test.go`).
+This directory holds files that any Dromas implementation can check itself against. Stock tools make most of the files: `generate.sh` uses `bash`, `od`, `base64`, `fold`, `sha256sum`, `ssh-keygen`, `openssl`, and `age` and `age-keygen` 1.3 or later. On every run, `age-keygen` checks the recipient of the prekey of B and C, and `age` decrypts the three ciphertexts. `age` encrypts a ciphertext only when its file is missing. A Go test makes the few files that no stock tool can write, from the same published keys (`DROMAS_WRITE_VECTORS=1 go test ./protocol`, in `protocol/vectors_test.go`).
 
 Judge every vector at the time in `now`, with the revocations of certificates that a reader holds (PROTOCOL.md §5):
 
-- **For mailbox A, the reader holds `a/revoked-certs.txt`.** This file revokes A's certificates through serial 1791590399, which is A's clock at `now` minus one. A's certificates are numbered higher than that serial, starting from 1791590400.
+- **For mailbox A, the reader holds `a/revoked-certs.txt`.** This file revokes A's certificates through serial 1791590399, one less than 1791590400, the certificate serial that A's clock gives at `now`: `now` in seconds since 1970-01-01T00:00:00Z (PROTOCOL.md §5.2). A's certificates are numbered higher than that serial, starting from 1791590400.
 - **For mailboxes B and C, the reader holds no revocation.**
 
-A reader accepts each identity's own signature on a statement, a pass, or a message. A reader accepts a certificate's signature if the certificate is numbered higher than the revocation that the reader holds, and accepts every certificate if the reader holds no revocation. A signs its statements, its pass, and its messages under its certificate. B and C sign theirs with the identity. B's and C's certificates sign the vectors that show that a reader accepts those certificates.
+A reader accepts each identity's own signature on a statement, a pass, or a message. A reader accepts a certificate's signature if the certificate is numbered higher than the revocation that the reader holds, and accepts every certificate if the reader holds no revocation. A signs its statements, its pass, and its messages under its certificate, except where a vector's name says otherwise, as in `prekey/signed-by-the-identity` and `plain/accept-signed-by-the-identity`, which A's identity signs. B and C sign theirs with the identity. B's and C's certificates sign the vectors that show that a reader accepts those certificates.
 
 ## Keys
 
@@ -32,7 +32,7 @@ Mailbox A:
 - `revoked-certs.txt` and `revoked-certs.sig`: A's revocation of its certificates, signed by the identity itself.
 - `work-cert.pub`: the certificate that A's identity issued for A's working key, serial 1791590400. It's valid for 45 days and one hour, starting one hour before `now`.
 - The prekey statements `prekey-<serial>.txt`, each with its `.sig`, signed by the working key under that certificate. Each statement therefore names that certificate's serial as the rank of its signer (PROTOCOL.md §6).
-- `revoke.txt` and `revoke.sig`: A's revocation, signed by the identity itself.
+- `revoke.txt` and `revoke.sig`: A's revocation of its address, signed by the identity itself.
 - `pass.txt`, `pass.sig`, and `pass.authorization`: a pass under A's certificate, for a server that A calls `dromas.example`.
 
 **Expected result:** all are valid when the reader holds A's revocation of certificates. What the identity signs itself is never ranked, and the certificate is numbered higher than the revocation. The pass expires ten minutes after `now`.
@@ -45,7 +45,7 @@ Mailboxes B and C. C's identity is a P-256 key, and C's `identity.doc` is 171 by
 - `prekey-1.txt` with its `.sig`, naming rank 0, signed by the identity itself.
 - `pass.txt`, `pass.sig`, and `pass.authorization`: a pass for `dromas.example`, signed by the identity itself.
 - `work-cert.pub`: a certificate that the mailbox's identity issued, serial 1791590400, valid under every rule for a certificate. `prekey/b-signed-under-its-certificate`, `prekey/c-signed-under-its-certificate`, and `plain/accept-p256-sender-under-a-certificate` are signed under these certificates.
-- In `c/` only, `revoke.txt` and `revoke.sig`: C's revocation.
+- In `c/` only, `revoke.txt` and `revoke.sig`: C's revocation of its address.
 
 C's signatures are made once and kept.
 
@@ -59,12 +59,12 @@ Each vector has three files:
 - `.txt`: a statement of A's that names that certificate's serial as the rank of its signer, so the rank is never the reason for the refusal.
 - `.sig`: a signature over that statement, made under the certificate, in A's prekey namespace.
 
-**Expected result:** every vector is refused for mailbox A. Each signature is valid under the certificate that it carries, so the certificate is what fails, except in `bad-revoked`, where A's revocation of certificates is what fails.
+**Expected result:** every vector is refused for mailbox A. Each signature is valid under the certificate that it carries, so the certificate is what fails. The exception is `bad-revoked`: its certificate is valid, but A's revocation of certificates covers it.
 
 - `bad-revoked` is valid under every rule for a certificate, but its serial is 1791590399, which A's revocation of certificates covers. A reader refuses it with `certificate_revoked`, and accepts it if the reader holds no revocation.
 - `bad-certifies-the-identity` is the re-wrap. It's A's identity's own signature over the statement beside it, with a certificate of the identity's own key put in the place of the signature's key. The certificate is numbered higher than A's revocation of certificates. SSHSIG doesn't sign the signing key, so the signature verifies under the certificate, and the statement names that certificate's serial. The only reason to refuse it is that the certified key is the identity's own key.
 - `bad-ends-after-the-last-date` is valid for one hour and ends one second after 9999-12-31T23:59:59Z. `bad-begins-after-the-last-date` begins one second after that moment. `bad-forever` never ends (`-V …:forever`). A reader refuses each of these for its form, never as not yet begun.
-- `bad-runs-longer-than-the-maximum` is valid for one second longer than 45 days and one hour, which is the longest that any verifier accepts (PROTOCOL.md §5.2). `bad-ended` is valid for exactly 45 days and one hour, and ends at `now`.
+- The longest validity that any verifier accepts is 45 days and one hour (PROTOCOL.md §5.2). `bad-runs-longer-than-the-maximum` is valid for one second longer than that. `bad-ended` is valid for exactly 45 days and one hour, and ends at `now`.
 - `bad-serial-above-2-53` has serial 2^53, one higher than the highest serial.
 - A certificate has one valid form: the form that `ssh-keygen -s … -O clear` writes. `bad-extensions` has the five extensions that `ssh-keygen` adds without `-O clear`. `bad-reserved-field` has bytes in its reserved field. `bad-nonce-of-16-bytes` has a nonce of 16 bytes instead of 32. The `TestVectorsCertificateForm` test in `protocol` makes the last two, because `ssh-keygen` writes neither. `bad-extensions` makes a signature longer than the bound (PROTOCOL.md §3.2), so a reader refuses the signature before it reads the certificate.
 - Used alone, `ssh-keygen -Y verify` accepts those three vectors, and also `bad-critical-option`, `bad-key-id`, and `bad-serial-zero`.
@@ -147,7 +147,7 @@ What mailbox B decrypts.
 - `malformed_message`: `refuse-begin-line-followed-by-a-nul`, `refuse-begin-line-holding-a-nul`, and `refuse-begin-line-preceded-by-a-nul`, because there is no BEGIN line.
 - `invalid_identity`: `refuse-no-identity`, `refuse-identity-not-base64`, `refuse-identity-of-small-order`, `refuse-identity-off-curve`, `refuse-identity-ending-in-a-line-feed`, and `refuse-identity-ending-in-a-nul` (each a JSON escape).
 - `invalid_signature`: `refuse-signed-for-another-mailbox`, `refuse-signed-by-a-bare-working-key`, `refuse-certificate-ended`, `refuse-line-changed-after-signing`, `refuse-another-mailbox-s-identity-document`, and `refuse-identity-s-signature-re-wrapped`. The last is A's identity's signature with `cert/bad-certifies-the-identity.pub` in the place of its key.
-- `certificate_revoked`: `refuse-certificate-revoked`, signed under `cert/bad-revoked.pub`. A's revocation of certificates refuses it, at check 7.
+- `certificate_revoked`: `refuse-certificate-revoked`, signed under `cert/bad-revoked.pub`. A's revocation of certificates refuses it, at PROTOCOL.md §12.3 check 7.
 - `sender_mismatch`: `refuse-from-is-not-the-identity`, `refuse-from-is-not-the-identity-of-an-unknown-type`, and `refuse-from-null`. A null member is the same as a member that is left out.
 - `recipient_mismatch`: `refuse-to-another-mailbox`.
 - `unsupported_key_type`: `refuse-unsupported-key-type`.
@@ -156,7 +156,7 @@ Notes on some of these vectors:
 
 - `accept-signed-by-the-identity` is A's message, signed by A's identity itself at rank 0, which A's revocation of certificates doesn't cover.
 - `accept-p256-sender` is from mailbox C, signed by C's identity, and is made once and kept. `accept-p256-sender-under-a-certificate` is the same message under C's certificate. A client that verifies `ecdsa-sha2-nistp256` delivers each one. A client that doesn't verify that type refuses each one with `unsupported_key_type`.
-- `refuse-certificate-revoked` passes checks 1 to 6. Only the revocation of certificates refuses it.
+- `refuse-certificate-revoked` passes PROTOCOL.md §12.3 checks 1 to 6. Only the revocation of certificates refuses it.
 - In `accept-anything-after-the-signature`, a second envelope, signed by B, follows the first END line, and the reader never reads it.
 - `refuse-another-mailbox-s-identity-document` is the forgery that an identity member invites: A's document beside a certificate that B's identity signed.
 
@@ -185,17 +185,17 @@ Statements whose rank line (PROTOCOL.md §6) isn't the rank of the signer that s
 
 - `bad-rank-too-high`, `bad-rank-too-low`, and `bad-rank-0-under-a-certificate`: signed under A's certificate.
 - `bad-rank-a-certificate-s-by-the-identity`: signed by A's identity, and names the serial of A's certificate.
-- `bad-rank-under-another-certificate`: `a/prekey-1.txt`, with its signature shown under `bad-rank-under-another-certificate.cert.pub`, a later certificate of the same working key.
+- `bad-rank-under-another-certificate`: `a/prekey-1.txt` and its signature, with `bad-rank-under-another-certificate.cert.pub`, a later certificate of the same working key, put in the place of the signature's key.
 - `bad-rank-missing` has no rank line.
 - `bad-rank-leading-zero` and `bad-rank-0-written-twice` give their signer's rank in another form.
 
-**Expected result:** every one is rejected. `bad-rank-under-another-certificate` is the substitution: SSHSIG doesn't sign the signing key, so `ssh-keygen -Y verify` accepts it, and its order ranks it higher than `a/prekey-2`. Only the rank that it names refuses it.
+**Expected result:** every one is rejected. `bad-rank-under-another-certificate` is the substitution: SSHSIG doesn't sign the signing key, so `ssh-keygen -Y verify` accepts it, and its order ranks it higher than `a/prekey-2.txt`. Only the rank that it names refuses it.
 
 ### `prekey/outlives-its-certificate`
 
 A valid statement of A's, signed under the certificate beside it (`.cert.pub`). That certificate is a later one of A's, serial 1791590401, which ends five days after `now`.
 
-**Expected result:** valid. A statement can outlive the certificate that it's signed under. By `(c, p)`, this statement ranks higher than A's `prekey-2`.
+**Expected result:** valid. A statement can outlive the certificate that it's signed under. By `(c, p)`, this statement ranks higher than `a/prekey-2.txt`.
 
 ### `prekey/signed-by-the-identity`
 

@@ -1,6 +1,6 @@
 # Documentation
 
-These pages describe the `dromas` command and the protocol behind it. The dromas.dev/docs/ site shows each page as it is at the commit of this repository that the site names, and links to the page's source. Where dromas.dev and this repository differ, this repository is correct.
+These pages describe the `dromas` command and the protocol behind it. The dromas.dev/docs/ site shows each page as it is at the commit of this repository that the site names, and links to the page's source. If a page on dromas.dev differs from its source in this repository, the source is correct.
 
 - [Quickstart](../README.md): what Dromas is, a test with the echo mailbox, and two agents that talk to each other
 - [Install](install/README.md): a page for each install method, and how to verify a release

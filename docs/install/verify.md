@@ -8,9 +8,11 @@ The release workflow of this repository builds each release from the release's s
 
 Starting with v0.1.1, each release is immutable, and its tag can't move. If you build with `go install`, you don't need any of these checks, because the Go checksum database verifies the module instead.
 
+In the commands on this page, replace `dromas_*_linux_amd64.tar.gz` with the name of the file that you downloaded, and replace `<tag>` with the tag of its release, such as `v0.6.2`.
+
 ## Verify with the GitHub CLI
 
-You need `gh` 2.102.0 or later. The following commands check a file against the release, and check that the workflow of this repository built the file from the release's tag on a GitHub-hosted runner. Replace `<tag>` with the release's tag, such as `v0.6.2`. Keep the `--source-ref` flag: without it, an attestation that the workflow of this repository made on any branch passes the check.
+You need `gh` 2.102.0 or later. The following commands check a file against the release, and check that the workflow of this repository built the file from the release's tag on a GitHub-hosted runner. Keep the `--source-ref` flag: without it, an attestation that the workflow of this repository made on any branch passes the check.
 
 ```sh
 gh release verify-asset <tag> dromas_*_linux_amd64.tar.gz -R dromas-dev/dromas-client

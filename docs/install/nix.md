@@ -37,7 +37,7 @@ With Nix versions earlier than 2.30, use `nix profile install` instead.
    dromas recv --wait 3m
    ```
 
-4. Run `recv` as a service. The package installs only the `dromas` command, so run `dromas recv --follow --headers` under your service manager. For details, see [Run as a service](../guide.md#run-as-a-service).
+4. Run `recv` as a service. The package installs no service file, so run `dromas recv --follow --headers` under your service manager. For details, see [Run as a service](../guide.md#run-as-a-service).
 
 ## Next steps
 

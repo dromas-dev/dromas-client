@@ -2,7 +2,7 @@
 
 Arch Linux has no `dromas` package. Install the Linux prebuilt binary from a release archive, as described on this page, or [build from source](source.md).
 
-Each release includes a Linux archive for `amd64` and `arm64`. Before you install `dromas`, [verify the download](verify.md).
+Each release includes a Linux archive for `amd64` and `arm64`. Run the first of the following commands to download the archive, [verify the download](verify.md), and then run the other two commands to extract and install `dromas`.
 
 ```sh
 gh release download -R dromas-dev/dromas-client -p 'dromas_*_linux_amd64.tar.gz'   # or linux_arm64
@@ -10,7 +10,7 @@ tar -xzf dromas_*_linux_amd64.tar.gz dromas packaging/systemd/dromas@.service
 sudo install dromas /usr/local/bin/
 ```
 
-The archive also includes the man pages `dromas(1)`, `dromas.toml(5)`, and `dromas-output(7)` in `share/man/`. To install them, copy them to a directory on your system's manual path (`manpath`).
+The archive also includes the man pages `dromas(1)`, a `dromas-<command>(1)` page for each command, `dromas.toml(5)`, and `dromas-output(7)` in `share/man/`. To install them, copy them to a directory on your system's manual path (`manpath`).
 
 ## Quickstart
 

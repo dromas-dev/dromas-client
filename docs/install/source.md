@@ -7,7 +7,7 @@ go install github.com/dromas-dev/dromas-client/cmd/dromas@latest
 go version -m "$(command -v dromas)"
 ```
 
-`@latest` builds the newest release. To build a specific commit, use `@<commit>` instead. `go version -m` prints the module and commit that the binary was built from.
+`@latest` builds the newest release. To build a specific commit, use `@<commit>` instead. `go version -m` prints the version of the module that the binary was built from, and the module's checksum. For a commit, the version is a pseudo-version, which ends with the first 12 characters of the commit hash.
 
 ## Quickstart
 
