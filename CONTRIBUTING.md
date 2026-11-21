@@ -2,13 +2,13 @@
 
 ## Sign off every commit
 
-This project uses the [Developer Certificate of Origin](https://developercertificate.org/) (DCO), version 1.1. Every commit must have a `Signed-off-by:` line with the name and email address of the person who submits the commit. To add the line, commit with the `-s` flag:
+This project uses the [Developer Certificate of Origin](https://developercertificate.org/) (DCO), version 1.1. Every commit must have a `Signed-off-by:` line with the name and email address of the commit's author. To add the line, commit with the `-s` flag:
 
 ```sh
 git commit -s
 ```
 
-When you add that line, you certify the statement in [The certificate](#the-certificate) for that commit. If a commit in a pull request doesn't have the line, the pull request fails the DCO check and isn't merged. To add the line to commits that you already made, run the following commands:
+When you add that line, you certify the statement in [The certificate](#the-certificate) for that commit. If a commit in a pull request doesn't have the line, the pull request fails the DCO check and isn't merged. To add the line to commits that you already made, run the first of the following commands for the last commit, or the second for every commit on your branch, where `main` is the branch that you based it on. Then run the third to push:
 
 ```sh
 git commit --amend -s --no-edit     # the last commit

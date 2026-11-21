@@ -1,10 +1,10 @@
 # Security
 
-Dromas is designed so that nobody has to trust its server. Everything that protects a message runs in a client, in this repo, and tests that act as a forging server check each of these protections. This page explains how to check that for yourself, and how to report a case where it fails.
+Dromas is designed so that nobody has to trust its server. Everything that protects a message runs in a client, in this repo, and tests that act as a forging server check most of these protections. The table in [Checking the claims yourself](#checking-the-claims-yourself) says where no test does. This page explains how to check that for yourself, and how to report a case where it fails.
 
 ## Supported versions
 
-**Dromas is pre-v1. Only the latest release and the latest commit on `main` are supported.** A fix is a commit on `main`, released as the next patch. The protocol can still change until it's frozen, which the project expects by November 30, 2026. Before the freeze, every open issue on both trackers must be settled.
+**Dromas is pre-v1. Only the latest release and the latest commit on `main` are supported.** A fix is a commit on `main`, released as the next patch. The protocol can still change until it's frozen, which the project expects by November 30, 2026. Before the freeze, every open issue in this repo and in [dromas-server](https://github.com/dromas-dev/dromas-server/issues) must be settled.
 
 ## Reporting a vulnerability
 
@@ -15,10 +15,10 @@ gh api repos/dromas-dev/dromas-client/security-advisories/reports \
   -f summary='…' -f description='…'
 ```
 
-- **Report here for** the protocol and its specification (`PROTOCOL.md`), both clients, and the test vectors. **For the server, and for dromas.dev as it's operated,** report to [dromas-server](https://github.com/dromas-dev/dromas-server/security) the same way. If you aren't sure which repo applies, use either one.
+- **Report here for** the protocol and its specification (`PROTOCOL.md`), both clients (the Go client and the shell client, `sh/dromas.sh`), and the test vectors. **For the server, and for dromas.dev as it's operated,** report to [dromas-server](https://github.com/dromas-dev/dromas-server/security) the same way. If you aren't sure which repo applies, use either one.
 - **Include what's needed to reproduce the problem:** what you did, what happened, what should have happened, the commit you ran, and the impact. GitHub's form asks for a summary, details, a proof of concept, and the impact.
 - **AI-assisted reports are welcome.** The form has a place to say so.
-- 🛑 **Never include a real mailbox's identity key, a pass, or a message in a report,** whether the report is private or public.
+- 🛑 **Never include a real mailbox's identity key, a pass (the statement that a mailbox signs to prove itself to its server), or a message in a report,** whether the report is private or public.
 - If private reporting is unavailable, open an issue that asks for a security contact, and include no details.
 
 **The following aren't vulnerabilities, but you're welcome to propose a better design in an issue:**
@@ -29,13 +29,13 @@ gh api repos/dromas-dev/dromas-client/security-advisories/reports \
 
 ## Checking the claims yourself
 
-Each row of the following table gives a claim in one sentence, the section of `PROTOCOL.md` that states the whole rule, and, in the **Held by** column, the code that enforces the claim and then the tests that try to break it, grouped by file. If no test covers a claim, or part of a claim, the row says so. For a claim that isn't part of the protocol, the doc comments of the code that enforces it give the whole rule. For what the claims leave open, see [Decided questions](#decided-questions).
+Each row of the following table gives a claim in one sentence, the section of `PROTOCOL.md` that states the whole rule, and, in the **Held by** column, the code that enforces the claim and then the tests that try to break it, grouped by file. If no test covers a claim, or part of a claim, the row says so. For a claim that isn't part of the protocol, the doc comments of the code that enforces it give the whole rule. For what the claims leave open, see [Decided questions](#decided-questions). The claims use the terms of [`PROTOCOL.md` §2.3](PROTOCOL.md#23-terms), such as *working key*, *statement*, and *drain*, and an *emptying drain* is a drain that leaves the mailbox empty.
 
 
 | Claim | `PROTOCOL.md` | Held by |
 |---|---|---|
 | **Standard cryptography:** encryption uses age with ML-KEM-768 and X25519, signatures use Ed25519 or ECDSA P-256 in SSHSIG format, SHA-384 names each mailbox, and the stock `age`, `ssh-keygen`, and `openssl` tools check the crypto vectors | §3.1, §16 | `protocol/`, `sshsig/`, `testdata/vectors/`; `protocol/stocktools_test.go`: `TestVectorsByToolsNotOurs`; `protocol/vectors_test.go`: `TestVectorMessage`, `TestVectorSignatures`, `TestVectorEnvelopes`; `sshsig/sshsig_test.go`: `TestSSHKeygen`; `protocol/certificate_test.go`: `TestCertificateAgainstSSHKeygen`; `sh/sh_test.go`: `TestWithGoClient` (the stock-tools script and a Go mailbox), `TestVectorsMessage` |
-| **Self-certifying addresses:** an address is the SHA-384 hash of its identity document, so a sender that has the correct address doesn't trust any server for the mailbox's keys | §4, §15.1 | `protocol/identity.go`; `protocol/protocol_test.go`: `TestParseAddress`; `protocol/stocktools_test.go`: `TestVectorsByToolsNotOurs` (openssl's SHA-384 of each document); `client/forgery_test.go`: `TestForgeries` (an identity that does not hash to the address); `sh/messages_test.go`: `TestScriptChecksTheMailboxItIsServed` |
+| **Self-certifying addresses:** an address is `d_` and the base64url SHA-384 hash of its identity document, so a sender that has the correct address doesn't trust any server for the mailbox's keys | §4, §15.1 | `protocol/identity.go`; `protocol/protocol_test.go`: `TestParseAddress`; `protocol/stocktools_test.go`: `TestVectorsByToolsNotOurs` (openssl's SHA-384 of each document); `client/forgery_test.go`: `TestForgeries` (an identity that does not hash to the address); `sh/messages_test.go`: `TestScriptChecksTheMailboxItIsServed` |
 | **Confidentiality:** only the recipient can decrypt a message, because the sender's machine encrypts it to the recipient's prekey, and the server never has the plaintext or a private key | §9.4, §15 | `protocol/signed.go`, `client/send.go`, `sh/dromas.sh` (`dr_seal`); `protocol/vectors_test.go`: `TestVectorMessage` (the sealed layout); `client/revokedcerts_test.go`: `TestASendNamesItsStatement` (the body is an age file); `client/forgery_test.go`: `TestForgeries` (sealed to the recipient alone); `sh/messages_test.go`: `TestScriptSendsAndReads` (the script posts no envelope) |
 | **Post-quantum confidentiality:** a message stays confidential against a quantum computer built later, because every prekey uses ML-KEM-768 with X25519, while signatures remain Ed25519 or P-256 | §9.4, §15.10 | `protocol/prekey.go`, `testdata/vectors/message/`; `protocol/vectors_test.go`: `TestVectorMessage` (one `mlkem768x25519` stanza), `TestAPrekeyOfATypeThisClientLacks`; `protocol/stocktools_test.go`: `TestVectorsByToolsNotOurs` (stock age decrypts with the hybrid key) |
 | **No substituted prekey:** a sender encrypts only to a prekey signed by the recipient's identity, or by a working key that the identity certified, so a server can't substitute a prekey of its own | §6, §12.2, §15 | `client/send.go`, `client/signer.go`, `sh/dromas.sh`; `client/forgery_test.go`: `TestForgeries` (a swapped prekey, an earlier prekey, a stolen working key); `client/ask_test.go`: `TestASenderAsksBeforeItSends`, `TestNoAnswerAboutARecipientPostsNothing`; `client/signer_test.go`: `TestAnIdentityStatementAfterACertificatesIsRefused`; `sh/revoke_test.go`: `TestScriptAsksBeforeItPosts`, `TestScriptAfterAWorkingKeyIsTaken` |
@@ -43,7 +43,7 @@ Each row of the following table gives a claim in one sentence, the section of `P
 | **Recipient binding:** the signature covers the recipient, so a recipient that passes a message on to a third mailbox can't present it as one that the sender wrote to that mailbox | §9.2, §12.3 check 6, §15 | `protocol/envelope.go`; `protocol/vectors_test.go`: `TestVectorEnvelopes` (`refuse-to-another-mailbox`); `sh/sh_test.go`: `TestVectorsEnvelope` |
 | **Key-compromise impersonation resistance:** anyone who steals a mailbox's prekey can decrypt the messages encrypted to that prekey, but can't forge a message to that mailbox, because the sender signs with a different key | §15 | `protocol/signed.go`; `client/forgery_test.go`: `TestForgeries` (a message in another mailbox's name) |
 | **Forward secrecy:** the Go client deletes a retired prekey at the first emptying drain an hour after the server accepts its replacement, and the shell client deletes it 7 days after the prekey's `not_after` | §12.1, §12.4, §15.3 | `client/rekey.go`, `sh/dromas.sh` (`dr_prune`); `client/renew_test.go`: `TestAnEmptyingDrainDeletesEveryRetiredPrekeyAnHourAfterTheTake`, `TestTheOlderRetiredPrekeysGoByTheNewestRetiredOnesTake`, `TestAMailboxReceivedAtItsCadenceDeletesAtTheRenewingCheckIn`; `client/clock_test.go`: `TestADrainDeletesARetiredKeyPastItsDeletionTime`, `TestAPrekeyPastItsDeletionTimeWithNoServerConfirmingItIsSaid` (kept until a server answers); `sh/renew_test.go`: `TestScriptDeletesARetiredPrekey` |
-| **Replay protection:** while its state file is intact, a reader never accepts a message twice, so a replay or retry within 14 days and an hour of its `sent_at` is acknowledged, not delivered | §12.2, §12.3 check 8, §15.9 | `client/recv.go` (`seenMsgID`), `sh/dromas.sh`; `client/failure_test.go`: `TestDuplicateRetryIsAckedNotDelivered`; `client/replay_retry_test.go`: `TestARetryAfterAStepOfTheHour`, `TestAStretchedRetryAtClocksAnHonestServerTakes`; `client/replay_test.go`: `TestAReplayIsRefusedAfterTheClockStepsBack`; `client/dating_test.go`: `TestARetryDatedAfreshIsDeliveredOnce`, `TestAPostIsDatedAtThePost`; `sh/clock_test.go`: `TestScriptKeepsItsReplaySetByItsClock` |
+| **Replay protection:** while its state file is intact, a reader never accepts a message twice, so a replay or retry within 14 days and an hour of its `sent_at` is acknowledged, not delivered | §12.2, §12.3 checks 8 and 9, §15.9 | `client/recv.go` (`seenMsgID`), `sh/dromas.sh`; `client/failure_test.go`: `TestDuplicateRetryIsAckedNotDelivered`; `client/replay_retry_test.go`: `TestARetryAfterAStepOfTheHour`, `TestAStretchedRetryAtClocksAnHonestServerTakes`; `client/replay_test.go`: `TestAReplayIsRefusedAfterTheClockStepsBack`; `client/dating_test.go`: `TestARetryDatedAfreshIsDeliveredOnce`, `TestAPostIsDatedAtThePost`; `sh/clock_test.go`: `TestScriptKeepsItsReplaySetByItsClock` |
 | **Revocation:** a client treats an address or a certificate as revoked only on the identity's own signature, and then permanently rejects every message, statement, and pass that the revocation covers | §10, §12.5, §15.5, §15.6 | `client/revocation.go`, `protocol/revokedcerts.go`, `sh/dromas.sh`; `client/revocation_test.go`: `TestAServersWordRevokesNothing`, `TestWhatIsNotARevocationRevokesNothing`, `TestAMessageFromARevokedSenderIsRefused` (after the server hides it), `TestAKeptRevocationRefusesAMessageWithNoLookup`; `client/revokedcerts_test.go`: `TestRevokeEarlierEndsWhatAnOldWorkingKeySigns`; `client/signer_test.go`: `TestARevocationOfCertificatesLeavesTheIdentity`; `client/ownrevocation_test.go`: `TestAMailboxThatKeepsItsOwnRevocationSignsNothingMore`; `sh/revoke_test.go`: `TestScriptTakesARevocationOnItsProofAlone`, `TestScriptUnderItsOwnRevocations` |
 | **Size hiding:** the client pads every message that it sends, so the server learns a message's size only to within a padding block, and the block size grows with the message size | §9.3 | `protocol/pad.go`, `client/send.go` (`seal`), `sh/dromas.sh` (`dr_padding`); `client/pad_test.go`: `TestSendPadsEveryMessage`; `sh/sh_test.go`: `TestPaddingIsTheGoClients` |
 | **Bounded cost:** whatever a hostile server sends, it can cost a mailbox only a bounded amount in each drain, measured in messages, list pages, bytes, and time | §11.10–§11.12, §12.3; the bounds are the client's own | `client/recv.go`, `client/api.go`; `client/hostile_test.go`: `TestADrainIsBounded` (messages, pages, bytes), `TestAFetchIsTheSizeItsListGives`; `client/resume_test.go`: `TestNoSizeAServerGivesIsTakenPastTheLargestCiphertext`, `TestAFetchIsCutWhenItStallsAndNotWhileItMoves`; `client/draintime_test.go`: `TestADrainHoldsTheLockForItsTimeAndTheNextGoesOnFromIt`; `client/stall_internal_test.go`: `TestAnyOtherCallIsBoundedWhole` |
@@ -53,7 +53,7 @@ Each row of the following table gives a claim in one sentence, the section of `P
 | **Release provenance:** this repo's workflow builds each release from a tag that the maintainer signed, after the tests pass, attests every file, and signs the checksums ([Verify a release](docs/install/verify.md)) | — | `.github/workflows/release.yml`; `gh` and `cosign`, which check the attestations and the signature; the tag ruleset and immutable releases, settings of the repo that no test reads |
 
 
-**To run the tests,** see `README.md` § Tests, which explains what each test needs and what an `ok` result doesn't tell you.
+**To run the tests,** see `README.md` § Tests, which gives the commands, what the shell client's tests need, and what an `ok` result for them doesn't tell you.
 
 **What isn't tested:**
 - That a release rebuilds byte for byte anywhere other than in this repo's own workflow. The workflow's `rebuild` job does this for each release from v0.1.1 on.
@@ -61,11 +61,11 @@ Each row of the following table gives a claim in one sentence, the section of `P
 - A restore whose clock reads behind what an older record on the server hides, and two machines that make a certificate in the same second (`PROTOCOL.md` §5.2).
 - OpenSSH releases other than 9.6p1 and 10.2p1, the two releases that CI's Ubuntu jobs run the script and the cross-tests on.
 - age 1.3.0 and 1.3.1.
-- macOS and BusyBox.
+- The shell client on macOS and on BusyBox.
 - What the processes that a callback starts do after `--exec-timeout` kills the callback. Only the callback's own process is killed.
 - A forgery by a party that has the recipient's prekey.
 - That a theft after a prekey is deleted exposes none of the messages encrypted to that prekey.
-- The padding of a group send and of a flush.
+- The padding of a group send and of `dromas outbox flush`.
 
 ## Decided questions
 
@@ -92,7 +92,7 @@ Each entry is a security question that's already decided. Under the entry, where
   - Revoking the address is the only remedy, and it's permanent. The owner can keep the identity key in the mailbox's agent, behind a passphrase, or on another machine that certifies each working key (`docs/guide.md`; #459).
 
 **Forward secrecy and signatures**
-- Forward secrecy is per prekey, as in X3DH without a one-time prekey, and limited by how often a mailbox checks in (§15.3; #575).
+- Forward secrecy is per prekey, as in X3DH without a one-time prekey, and limited by how often a mailbox checks in with its server (§15.3; #575).
   - A mailbox that renews daily and polls deletes a message's prekey about a day after the message arrives. A prekey lifetime under 27 hours makes the mailbox renew sooner, which shortens that time. Per-prekey forward secrecy keeps no per-peer state, so each mailbox renews and deletes independently.
 - A server can serve a stale prekey to a sender that hasn't seen a later prekey statement, until that prekey's `not_after` (§15.2).
   - The server can serve only a prekey that the mailbox's signer signed, and a sender rejects a prekey statement that's earlier than one that the sender has seen.
