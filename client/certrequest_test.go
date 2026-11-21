@@ -431,8 +431,8 @@ func TestARenewalAbandonedAtTheCertificatesSerialLeavesTheCertificate(t *testing
 }
 
 // A renewal under a held certificate that its server refused is sent again as
-// it was signed, at its own serial, once the server takes it (AGENTS.md, a
-// prekey serial is signed once): its working key is found by its
+// it was signed, at its own serial, once the server takes it (PROTOCOL.md
+// §12.4, a prekey serial is signed once): its working key is found by its
 // certificate's serial.
 func TestARenewalUnderAHeldCertificateIsSentAgainAsSigned(t *testing.T) {
 	t.Parallel()

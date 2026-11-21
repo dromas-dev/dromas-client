@@ -279,7 +279,7 @@ func (b *Mailbox) mendable(err error) bool {
 // server shows the certificate this mailbox uses revoked (proved), which a
 // renewal under a new certificate mends. A read about another address that
 // failed is not one, whatever its code (aboutOther). It is the one test of
-// that: Hold and mendable both ask it.
+// that: Hold, mendable and receive all ask it.
 func renewalMends(err error) bool {
 	var ao *aboutOther
 	var rf *RefusedError

@@ -196,6 +196,10 @@ type senders struct {
 	allowed, blocked protocol.ACLList
 }
 
+// readSenders reads the mailbox's say over its senders: its policy, and its
+// allowed and blocked lists. A list that cannot be read is an error, never read
+// as empty: a drain stops on it before anything is acked (drainPages), and a
+// send keeps its message in the outbox (replyWaits).
 func (b *Mailbox) readSenders() (*senders, error) {
 	allowed, err := b.allowed()
 	if err != nil {

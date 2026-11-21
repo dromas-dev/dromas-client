@@ -940,7 +940,9 @@ func newKey(t string) (crypto.Signer, error) {
 
 // newIdentityKey makes a new identity key, written as ssh-keygen writes one
 // with no passphrase and no comment: Ed25519, unless the mailbox was told another
-// type this client can make.
+// type this client can make. It is the one writer of the identity's key file,
+// and Init calls it only to make a new identity, where neither the key file nor
+// identity.pub is there.
 func (b *Mailbox) newIdentityKey() error {
 	t := b.identityType
 	if t == "" {
@@ -1099,7 +1101,8 @@ func (b *Mailbox) prekeys() (ns []uint64, err error) {
 // that no statement names was never sent, and a key an earlier attempt made
 // and never signed is used, but never a working key, whose certificate began
 // when that attempt ran (#197). A statement never outlives the certificate
-// it is signed under.
+// it is signed under. The key, its working key and its statement are each
+// synced to disk before makePrekey returns, so before any upload names them.
 func (b *Mailbox) makePrekey(ctx context.Context, serial uint64, st *ownRead) (*protocol.Prekey, error) {
 	if rec, err := b.prekeyOf(serial); err != nil || rec != nil {
 		if err != nil {

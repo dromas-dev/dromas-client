@@ -63,7 +63,7 @@ Each page follows the published standard for its kind. A rule of this file says 
 - **A term of this project's own is only for a concept with no standard name.** Define it once, in `PROTOCOL.md` §2.3 (the spec's terminology section), and use it only in that sense; use the standard word everywhere else.
 - **[Vale](https://vale.sh) checks the Markdown pages for people and `PROTOCOL.md` against the Google guide** (`.vale.ini`); it does not read the help, which is reviewed by hand. CI's `vale` job fails on an error; a warning or a suggestion is advice. Run `vale sync` once, then `vale .`. A term of this project that Vale does not know goes in `.github/styles/config/vocabularies/Dromas/accept.txt`.
 - **A rewrite keeps every rule exact:** "only", "at most", "before" and "whenever" stay where they are, and a shorter sentence that drops a condition is a change to the rule.
-- **A changed rule, on any page or in a doc comment, is read by a stranger before it merges:** a fresh session with no project context restates each changed rule, and any difference from the intended meaning marks a sentence that reads two ways. A page rewritten whole is read whole.
+- **A page rewritten whole, or a `PROTOCOL.md` rule reworded without a change of meaning, is read by a stranger before it merges:** a fresh session with no project context compares the new text with the old, and each difference of meaning it finds is restored or declined with a reason. Any other change to a page gets ordinary review.
 
 ### How a design is chosen
 
@@ -132,16 +132,16 @@ The rules are in `PROTOCOL.md` and in the doc comments of the code named. Each l
 
 ### Every client
 
-- **Verification is always on, with no flag to skip it. Fail closed. Message bodies are untrusted data.** The config file says where a mailbox's parts are (`client.Layout`); nothing is found from the working directory. The client changes nothing it did not make.
-- **File permissions follow ssh's conventions** (`checkKeyFile`, `CheckConfigFile`, `judgeFiles`, `checkKeptDir`): a private key others can access is refused, and so is a config file, list or kept message others can write. `--unsafe-*-permissions` never covers a key.
-- 🛑 **The client writes no `.gitignore` and runs no git** (`KeysInGit` only warns): git executes configuration it finds in a repository.
-- 🛑 **The client writes a key file only when it makes a new identity, and its default agent is the mailbox's own socket, never `SSH_AUTH_SOCK`,** which ssh forwards (`client/identitykey.go`).
+- **Verification is always on, with no flag to skip it. Fail closed. Message bodies are untrusted data** (`client/doc.go`). Nothing is found from the working directory (`cmd/dromas/config.go`), and the client changes nothing it did not make (`makeDir`).
+- **File permissions follow ssh's conventions** (`checkKeyFile`, `CheckConfigFile`, `judgeFiles`, `checkKeptDir`). `--unsafe-*-permissions` never covers a key.
+- 🛑 **The client writes no `.gitignore` and runs no git** (`gitAbove`; `KeysInGit` only warns).
+- 🛑 **The client writes the identity's key file only for a new identity** (`newIdentityKey`), **and its default agent is never `SSH_AUTH_SOCK`,** which ssh forwards (`cmd/dromas/identitykey.go`).
 - 🛑 **Prekeys are never derived from a seed and never reused** (`PROTOCOL.md` §12.1, §12.4): either voids forward secrecy.
-- **Every file is on disk before anything depends on it:** written beside, synced, renamed, and its directory synced (`writeFile`, `dr_put`); a prekey, its statement and its working key are synced before any upload names them.
-- **What the client records about the mailbox is in its `state` file,** a bbolt database, one transaction per change (`client/store.go`). Keys, messages and the owner's files stay files. 🛑 **No server call inside a transaction.**
-- 🛑 **From the protocol freeze, a change to what a mailbox's files hold, or where, is a new format:** a step in `formatSteps` and its line in `client/doc.go` (`client/format.go`). Before the freeze, format 1 changes in place.
-- **The mailbox's lock is its `state` file, held open for the whole command** (`client/lock.go`). Every command that writes the mailbox takes it through `locked`, and waits for it; a reading opens the state read-only (`reading`). Every entry that waits ends with its context (`TestEveryEntryThatWaitsIsTriedWithItsContext`). 🛑 **The lock is not re-entrant:** take it at the exported entry only, and call unexported twins below it (`syncACL`, `prune`, `resolve`).
-- 🛑 **Lowercase a protocol token with `protocol.LowerASCII` only** (`forbidigo` in `.golangci.yml` refuses `strings`/`bytes` case functions): Unicode's case mappings turn non-ASCII characters into ASCII letters.
+- **Nothing depends on a file before it is on disk** (`writeFile`, `dr_put`; a renewal's files: `makePrekey`).
+- **The client's records about the mailbox are in its `state` file; keys, messages and the owner's files stay files** (`client/store.go`). 🛑 **No server call inside a transaction** (`update`).
+- 🛑 **From the protocol freeze, a change to what a mailbox's files hold, or where, is a new format** (`client/doc.go`, `client/format.go`).
+- **The mailbox's lock is its `state` file** (`client/lock.go`; `locked`, `reading`). A new entry that waits ends with its context (`TestEveryEntryThatWaitsIsTriedWithItsContext`). 🛑 **The lock is not re-entrant** (`claim`): take it at the exported entry only, and call unexported twins below it (`syncACL`, `prune`, `resolve`).
+- 🛑 **Lowercase a protocol token with `protocol.LowerASCII` only** (`forbidigo` in `.golangci.yml` refuses `strings`/`bytes` case functions).
 - **Dependencies are minimums, moved by committed updates** (`go get -u ./... && go mod tidy`), never inside a build. Dependabot opens them weekly.
 
 ### The shell client
@@ -153,78 +153,78 @@ The rules are in `PROTOCOL.md` and in the doc comments of the code named. Each l
 - 🛑 **A shell variable drops trailing line feeds and every NUL:** test a value in jq or compare bytes, never through `$(…)`; compare a document with itself rebuilt (`dr_idcheck`).
 - 🛑 **The script runs in the C locale** (`LC_ALL=C`): under other locales `[0-9]` and `[A-Z]` match the wrong characters (`TestTheScriptReadsBytesInEveryLocale`).
 - 🛑 **A line printed inside a function whose stdout is captured is lost:** such a function writes to `$DR/said`, which its caller prints.
-- jq 1.7.1 or later is required (1.7.0 can abort on a number a sender writes, CVE-2023-50246).
+- The script's minimum tool versions, and why, are in its header.
 
 ### Sending
 
-- **The encrypted payload is the envelope's line, its signature, then padding** (`protocol/signed.go`; `PROTOCOL.md` §9.2), git's signed-tag layout with three reader rules (`PRECEDENTS.md`, Part 2, § 3). 🛑 A change to how a reader splits the parts breaks one of them: `OpenSigned` and `dr_open` agree on every `plain/` vector (`TestVectorsPlain`). 🛑 Never base64 the envelope inside JSON.
-- **Padding is added at the seal, counted on the ciphertext** (`protocol/pad.go`; §9.3). Change the arithmetic in both clients together (`TestPaddingIsTheGoClients`, `TestSealedSizeIsWhatAgeWrites`).
-- **Every post reads the recipient's mailbox first and seals to what that read returns** (`readMailbox`, `resolve`; §11.8, §12.2). 🛑 **A failed read is never an answer about the message:** it never reaches `undeliverable` and never moves an entry to `outbox/failed/` (`lookupError`).
-- 🛑 **A seal is made for one post and never kept:** the outbox keeps the envelope alone, dated at each post (`TestAPostIsDatedAtThePost`). Each check a kept seal would need grows with every finding.
-- **A mailbox signs no message by a signer it holds revoked, nor under a working key that a statement it did not make shows another holds** (`seal`, `NotMade.OwnCertificate`): the entry waits for the next renewal.
-- **A sender checks what it writes against the reader's rules before keeping it** (`NewJSONEnvelope`, `dr_envcheck`): an envelope `seal` would refuse is never written to the outbox.
-- **A prekey serial is signed once** (`Rekey`): a renewal the server did not accept is sent again as signed.
+- **The encrypted payload is git's signed-tag layout with three reader rules** (`protocol/signed.go`; `PROTOCOL.md` §9.2; `PRECEDENTS.md`, Part 2, § 3). 🛑 A change to how a reader splits the parts breaks one of them: `OpenSigned` and `dr_open` agree on every `plain/` vector (`TestVectorsPlain`). 🛑 Never base64 the envelope inside JSON.
+- **Padding** (`protocol/pad.go`; §9.3): change the arithmetic in both clients together (`TestPaddingIsTheGoClients`, `TestSealedSizeIsWhatAgeWrites`).
+- **Every post seals to what its own read of the recipient returns** (`readMailbox`, `resolve`; §11.8, §12.2). 🛑 **A failed read is never an answer about the message:** it never reaches `undeliverable` and never moves an entry to `outbox/failed/` (`lookupError`).
+- 🛑 **A seal is made for one post and never kept** (`seal`; `TestAPostIsDatedAtThePost`). Each check a kept seal would need grows with every finding.
+- **A mailbox signs no message by a signer it holds revoked, nor under a working key that a statement it did not make shows another holds** (`seal`, `NotMade.OwnCertificate`).
+- **A sender checks what it writes against the reader's rules before keeping it** (`NewJSONEnvelope`, `SendJSON`, `dr_envcheck`).
+- **A prekey serial is signed once** (`Rekey`; §12.4).
 
 ### Reading what others wrote
 
-- **A mailbox never asks the server who a sender is,** and pins one only once its signature verified (`judge`, `pin`). It asks only whether a revocation of the sender exists, once per drain, after the signature verified.
-- 🛑 **Count the age recipient stanzas before age is given any prekey** (`oneNative`, `decrypt`; §12.3 check 1): exactly one native stanza, read by `protocol.ReadStanzas`.
-- **A fetch is read to the size its list gives, and no further** (§12.3); a cut fetch resumes by range (`client/partial.go`). 🛑 **The partial file is trusted only as far as the state records it synced.**
-- 🛑 **A lost state stops every command that receives, sends, delivers or renews until the owner runs `dromas init --restore`** (`keysMatch`; `PROTOCOL.md` §15.9 states the cost). A new such command calls `keysMatch` first and joins `mailCommands` in `client/restore_test.go`.
-- 🛑 **Keys are deleted, and the replay set pruned, only after a call the server answered, by the clock read then** (`prune`, `dropRetired`, `pruneSeen`). The zero time deletes nothing. A wrong clock is a failure case (§15.7), never guarded.
+- 🛑 **A mailbox never asks the server who a sender is, and pins one only once its signature verified** (`judge`, `pin`; §12.3).
+- 🛑 **Count the age recipient stanzas before age is given any prekey** (`oneNative`, `decrypt`; §12.3 check 1).
+- **Fetches, and a cut fetch's resume by range, follow §12.3** (`client/partial.go`). 🛑 **The partial file is trusted only as far as the state records it synced.**
+- 🛑 **A new command that receives, sends, delivers or renews calls `keysMatch` first and joins `mailCommands` in `client/restore_test.go`:** a lost state stops each until the owner runs `dromas init --restore` (`PROTOCOL.md` §15.9 states the cost).
+- 🛑 **Keys are deleted, and the replay set pruned, only after a call the server answered, by the clock read then** (`prune`, `dropRetired`, `pruneSeen`; §12.4). A wrong clock is a failure case (§15.7), never guarded.
 - 🛑 **A `304` answers only for the tag its poll sent** (`sameTag`; §12.3). Read `If-None-Match` with `protocol.IfNoneMatch`; never split it at commas.
 - 🛑 **A signature has one form** (`protocol.Dearmor`; §3.2). `ssh-keygen -Y verify` is a test of a signature, never its definition: it accepts forms the spec refuses (Appendix A).
-- **Every JSON text is read by one set of rules** (`protocol.Unmarshal`, `protocol.UnmarshalRequest`; §3.3), on `encoding/json/v2`. 🛑 **Never `encoding/json`'s `Unmarshal` on text a server, a sender or a file brought:** it matches names in any case and keeps the last duplicate.
-- 🛑 **A JSON number member is `int64` or `uint64`, never `int`, `uint`, a float or a named type** (`TestWireIntegersHaveAFixedWidth`). A serial is at most 2^53 − 1 (`protocol.MaxSerial`).
-- **Identity types are those of `PROTOCOL.md` §4.1** (`identityTypes`). Add a type in both clients together, with a vector for each document a client must refuse. Where the Go library and `ssh-keygen` differ on a key, the stricter rule goes into the spec and the other client makes it explicit, so one document gets one verdict. A well-formed document of a type a client lacks is `unsupported_key_type`, never `invalid_identity`, and only once it is known to be the sender's; a prekey's is `unsupported_prekey_type`. 🛑 The script reads a prekey's type before it runs `age -r`, which encrypts to more types than the protocol defines.
+- **Every JSON text is read by `protocol.Unmarshal` or `protocol.UnmarshalRequest`** (§3.3). 🛑 **Never `encoding/json`'s `Unmarshal` on text a server, a sender or a file brought:** it matches names in any case and keeps the last duplicate.
+- 🛑 **A JSON number member is `int64` or `uint64`, never `int`, `uint`, a float or a named type** (`TestWireIntegersHaveAFixedWidth`; a serial's bound: `protocol.MaxSerial`).
+- **Identity types are those of `PROTOCOL.md` §4.1** (`identityTypes`). Add a type in both clients together, with a vector for each document a client must refuse. Where the Go library and `ssh-keygen` differ on a key, the stricter rule goes into the spec and the other client makes it explicit, so one document gets one verdict. A type a client lacks is `unsupported_key_type`, never `invalid_identity` (§12.3 check 4; a prekey's: §6). 🛑 The script reads a prekey's type before it runs `age -r`, which encrypts to more types than the protocol defines.
 - 🛑 **Nothing may rest on a certificate having one set of bytes:** an ECDSA signature has a second valid form.
 - 🛑 **An identity key's checks are in `protocol.ParseIdentity`, not in `sshsig`.**
 
 ### Signers and the working key
 
-- **A mailbox signs with its identity, or with a working key under a certificate its identity made** (`protocol.Signer`, `client/internal/sign`; §5). 🛑 **A new way to sign goes in `sign`, never around it.**
-- 🛑 **Compare ranks as numbers** (0 for the identity, the serial for a certificate), and statements by `(c, p)` (`protocol.Order`). **Never compare prekey serials across signers.**
+- **A mailbox signs through `client/internal/sign`** (`protocol.Signer`; §5). 🛑 **A new way to sign goes in `sign`, never around it.**
+- 🛑 **Compare ranks as numbers, and statements by `(c, p)`** (`protocol.Order`). **Never compare prekey serials across signers.**
 - 🛑 **Find a working key by its certificate's serial, never its statement's** (`signerOf`, `rankOf`).
 - 🛑 **A verifier never reads a serial as a time,** and "one above the highest" stays (`protocol.SerialAt`; `TestALostMachinesFastClockDoesNotDelayTheRemedy`).
 - 🛑 **A number an attempt took is kept until its statement is published or spent** (`highestBegun`, `begin`).
 - **A renewal the server accepted is recorded before anything else** (`publish`, `recordTaken`).
 - 🛑 **A renewal the mailbox makes on its own never renews above a statement it did not make** once it has published one of its own (`renew`, `readOwn`): only the owner judges whose it is.
 - 🛑 **`ssh-keygen -Y verify` accepts certificates the spec refuses,** so the script reads a certificate's fields from its bytes (`TestVectorsCertificate`).
-- **A mailbox proves itself with a pass it signs; there is no token** (`protocol/pass.go`; §8). 🛑 **Nothing a server sends is decrypted with a key that reads messages.**
+- **A mailbox proves itself with a pass it signs; there is no token** (`protocol/pass.go`; §8). 🛑 **Nothing a server sends is decrypted with a key that reads messages** (§12.1).
 - 🛑 **A test reads a mailbox's number and never assumes one** (`numberOf`).
 
 ### Revocation
 
-- **A client accepts "revoked" only on the identity's own signature** (§10.1). 🛑 **A server's `mailbox_revoked` or `sender_revoked` is checked, never believed** (`proved`); no code `proved` checks goes back into `undeliverable` (`TestNoAnswerProvedIsUndeliverable`).
-- **A revocation that verified is kept and never removed.**
-- 🛑 **A mailbox that holds its own revocation signs nothing more:** every signature goes through `sign` and asks `finished` first, and every command that writes takes the lock through `locked`. A new command or path gets its case in `TestEveryCommandShownItsOwnRevocationAtEachCall`.
+- 🛑 **A server's `mailbox_revoked` or `sender_revoked` is checked, never believed** (`proved`; §10.1, §12.5); no code `proved` checks goes back into `undeliverable` (`TestNoAnswerProvedIsUndeliverable`).
+- 🛑 **A revocation that verified is kept and never removed** (§12.5).
+- 🛑 **A mailbox that holds its own revocation signs nothing more** (`finished`, `client/internal/sign`, `locked`): a new command or path gets its case in `TestEveryCommandShownItsOwnRevocationAtEachCall`.
 - 🛑 **A working key's signature is never a revocation** (`VerifyRevocation` verifies against the identity's bare key).
-- **No answer is not a negative answer** (`readRevocations`): a record served or `revocation_not_found` lets a drain go on, a `410 mailbox_revoked` whose record verifies refuses the message, and anything else, `mailbox_not_found` and a bare `410` among them, stops the drain with the messages still on the server.
+- 🛑 **No answer is not a negative answer** (`readRevocations`; §12.3 check 7).
 - 🛑 **The revocation statement is fixed text and never gains a field;** add a second statement under a new tag instead.
 - 🛑 **There is no way to revoke fewer certificates:** the highest verified serial stands (§10.2).
 - 🛑 **`cert revoke-earlier` publishes the revocation first, whatever the renewal meets** (`RenewAndRevoke`).
 - 🛑 **A mailbox reads its own state at its server through `known` alone.**
-- 🛑 **One function, `renewalMends`, says whether a renewal mends an error;** `Hold`, `mendable` and `receive` all call it.
-- 🛑 **What ends an address goes out only with that address written in full.**
+- 🛑 **One function, `renewalMends`, says whether a renewal mends an error;** never test it anywhere else.
+- 🛑 **What ends an address goes out only with that address written in full** (`publishCmd`, `publishRevokedCmd`).
 
 ### Who may write to a mailbox
 
 The client holds messages; the server's ACL refuses them (`protocol/acl.go`, `client/senders.go`; §12.3, §11.14).
-- **`held/` is not `refused/`:** `refused/` keeps messages that failed a check; `held/` keeps messages that passed, from a sender not yet allowed.
-- **A policy, `allowed` or `blocked` file that cannot be read stops a drain and a send,** and is never read as the default.
+- 🛑 **`held/` is not `refused/`:** a message from a sender not yet allowed passed every check, and is held, never refused (`client/senders.go`, `client/doc.go`).
+- 🛑 **A policy, `allowed` or `blocked` file that cannot be read is never read as the default** (`readSenders`).
 - 🛑 **An ACL always states whom it lets in:** never drop an empty `allow`, which would read as everyone.
 - 🛑 **Compare ACL documents, never tags** (`checkACL`); a drain or a send reads no ACL.
 - **Tests:** `env.mailbox` lands every sender's messages; a test of where a message lands uses `heldMailbox`.
 
 ### What a mailbox prints
 
-- **Every command prints JSON lines, `type` first, `time` second in the Go client** (`cmd/dromas/output.go`; `docs/output.md`). 🛑 **Build a line with `line` or `typed`, never by formatting text into JSON.** A new line type goes in `docs/output.md`'s table in the same commit.
+- **Every command prints JSON lines** (`cmd/dromas/output.go`; `docs/output.md`). 🛑 **Build a line with `line` or `typed`, never by formatting text into JSON.** A new line type goes in `docs/output.md`'s table in the same commit.
 - 🛑 **The envelope's members appear only inside `envelope`** (`TestNoLineCarriesAnEnvelopeMemberBesideTheEnvelope`).
-- **Exit status 3 means done, and the mailbox needs a look; 4 means a refusal no wait mends** (`needsALook`, `report`). A refused message never changes `recv`'s exit status.
-- 🛑 **Nothing someone else wrote is printed as this client's words:** a refusal is a code from a closed set with fixed words. A server's `detail`, `hint` and `title`, and net/http's error text, are never printed (`TestAnAPIErrorPrintsNoneOfTheServersWords`, `TestATransportErrorPrintsNoneOfTheServersWords`). A new code gets its sentence (`APIError.words`, `dr_api`) in the same commit. A new error path that formats outside text with `%s`, `%q` or `%v` breaks this rule.
-- **A printed or kept line escapes characters nobody sees** (`escapeUnseen`; Unicode's list, kept in both clients).
-- 🛑 **`refused/` keeps none of the server's strings in the clear,** and the state never records the identity a failed signature claims as its signer.
-- 🛑 **Never hold a message on the server to wait for a clock:** a refusal for a time is a verdict like any other.
+- **Exit statuses are `report`'s and the help's** (`needsALook`, `cmd/dromas/main.go`): a refused message never changes `recv`'s.
+- 🛑 **Nothing someone else wrote is printed as this client's words** (`cmd/dromas/output.go`, `client/errors.go`; `TestAnAPIErrorPrintsNoneOfTheServersWords`, `TestATransportErrorPrintsNoneOfTheServersWords`). A new code gets its sentence (`APIError.words`, `dr_api`) in the same commit. A new error path that formats outside text with `%s`, `%q` or `%v` breaks this rule.
+- **Both clients escape the same characters nobody sees** (`escapeUnseen`, `dr_line`).
+- 🛑 **`refused/` keeps none of the server's strings in the clear** (`servedRefusal`), and the state never records the identity a failed signature claims as its signer (`keptFindings`).
+- 🛑 **Never hold a message on the server to wait for a clock:** a refusal for a time is a verdict like any other (§12.3).
 - 🛑 **A secret is never an argument** (`account join` reads stdin; `recv --webhook` reads files), and no line carries one (`TestNoWebhookLineCarriesItsSecrets`).
 
 ### The command line
