@@ -45,7 +45,7 @@
 // state file's records among them, kept in the state file (format.go): every
 // command refuses a mailbox of a newer format, a reading one of an older, and a
 // command that writes the mailbox brings an older one forward. Where a part is,
-// is its Layout's and no format's. From the protocol freeze, a change to what a
+// is its Layout's and no format's. From v1, a change to what a
 // file holds is a new format, with its step and its line here; before it,
 // format 1 changes in place;
 // each format and what it changed:

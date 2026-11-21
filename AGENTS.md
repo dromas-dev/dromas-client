@@ -32,14 +32,14 @@ Each fact has one home. Put it there, and point to it from anywhere else.
 | The manual: install, user guide, command, configuration and output references | `docs/`, shown on dromas.dev/docs/ as of the commit the site builds from. |
 | The quickstart | `README.md`. |
 | The repo's layout; a mailbox's files | `README.md` § What is here; the top of `client/doc.go`. |
-| Anything undecided or not built | An issue. Every open issue is wanted for v1; one whose outcome could change the wire is settled before the freeze. |
+| Anything undecided or not built | An issue. Every open issue is wanted for v1; one whose outcome could change the wire is settled before v1. |
 
 - **`PROTOCOL.md` states the wire and nothing else.** It gives each rule once, a procedure's BCP 14 keyword at its head, and the reasoning in §15 (the threat model, what a hostile server can and cannot do, the residual risks). Elsewhere a rule gives at most a clause of reason, pointing at §15. It cites a standard rather than restating it. It never prescribes the client's own behaviour (the table above), what an owner does with the machine (backups, permissions), how a server stores things, a setting's value, history, issue numbers or a comparison. Where one of these costs a security property, §15 states the cost. A change to the wire changes the spec in the same commit as the code.
 - **`PRECEDENTS.md`:** Part 1 sets Dromas beside whole systems, Part 2 each decision beside the systems that make the same one, Part 3 the reference server's own build choices. Add a row when a big decision on the wire or the security model is made; a client's own behaviour gets none. A row gives the decision, its precedents, and where ours differs and why. Every claim about another system says how it is known: `read <date>` with its source, `review <date>`, or `from memory`.
 - **Pages and comments describe what is true now.** No story of a change, no "was", "since" or "used to" of this project's past, and no date except when a source was `read`, a measurement `measured`, a review made (`review`) or an outside document `dated`. Why a rule holds goes in the present tense; how it came about goes in its pull request. `TestEveryPageSaysWhatHoldsNow` fails on any other date written as `YYYY-MM-DD` in a page, a comment or a workflow, outside `PRECEDENTS.md` (its own rule, below) and `testdata/`.
 - **No judgement is written as a fact,** on a page, in a comment or in an issue: write what was measured, read at a source, or decided. Nothing ranks one cipher, key type or design over another without the source that says so.
 - **The README is the quickstart:** what a reader needs to run a mailbox safely, each command once, and pointers into `docs/`.
-  - Two lines are the maintainer's: the status line's freeze date, which moves only on his word, and the line that sends a reader to the open issues.
+  - Two lines are the maintainer's: the status line, and the line that sends a reader to the open issues. Neither gives a date for v1.
   - A limit in the README that an open issue plans to change has that issue's number beside it.
   - Who terminates TLS for dromas.dev is said in the README's § No server trust and in `SECURITY.md`, each marked as the operator's statement, and never in the status line.
   - 🛑 **Command lines are held by tests in three repos:** here, `TestHelpAndREADMENameTheEchoMailbox` holds the echo mailbox's link in the help and the README, and `TestEachInstallPageEndsWithTheQuickstart` the install pages' quickstarts; a test in dromas-server holds its link page's command; the site's tests require every command of `llms.txt` and the front page's install terminal to be a line of the README or of a page in `docs/`, comment included. Change a command line everywhere it appears.
@@ -72,7 +72,7 @@ Each page follows the published standard for its kind. A rule of this file says 
 - 🛑 **Where the words overpromise, fix the words, never the code.** The spec, the docs and this file are the project's own. When the code does not do what they say, first ask whether the words are right by industry practice. A promise stronger than the norm is a defect in the words: change them to the simple correct behaviour, and delete any code that served the overpromise.
   - A finding is a defect only where the code fails a user, the cryptography, or a norm read at its source.
   - Judge a fix by what peers doing the same job do. A fix that adds code, state, a guard or hedging words is suspect.
-- **Before the protocol freeze, choose the correct fix.** Backwards compatibility and an unchanged wire carry no weight.
+- **Before v1, choose the correct fix.** Backwards compatibility and an unchanged wire carry no weight.
   - 🛑 **Nor does a rule, format or behaviour of our own** (the server's, the spec's, a client's files, the script's). One that forces a workaround is a design question: put it to the maintainer with the best design for every side and its cost, and change every side together. It hides as a command changing shape, a workaround for the other side's rule, a known variance, or a reason that names what is already written.
   - **Nor does an old tool.** Assume a current client and a modern library; what the oldest `ssh-keygen` or `age` can do is never a reason for or against a design. The script's minimum versions follow the design.
 - 🛑 **A failure case gets the plainest recovery; write down its cost, never guard it.** A failure case is a lost or rolled-back state, a crash between two writes, a missing volume, a clock far off, or an owner's misconfiguration, even where a hostile server acts during one.
@@ -80,7 +80,7 @@ Each page follows the published standard for its kind. A rule of this file says 
   - Add no counter, floor, marker, set or refusal to make a failure look like the normal case.
   - Grade a finding that shows only a failure's edge by this rule: write down its cost, or decline it.
   - Keep writes crash-safe the standard way: write beside, sync, then rename into place.
-- 🛑 **A format uses a layout others already use, and its overhead is a fixed number of bytes, never a share of the message.** Read what the standards do, and what went wrong with them, and give each option's cost. Every format that cannot change after the freeze gets that look once (#39).
+- 🛑 **A format uses a layout others already use, and its overhead is a fixed number of bytes, never a share of the message.** Read what the standards do, and what went wrong with them, and give each option's cost. Every format that cannot change after v1 gets that look once (#39).
 - **Bound a list of entries of like size by a count, never by bytes** (`protocol.MaxACLEntries`): one bound, set well past any real use.
 - **Make speed calls among standard tools.** Never replace a standard function with hand-written code to save CPU; leave deeper optimisation until real load can be measured.
 - 🛑 **Clocks: add no allowance to a check, and never make a time-limited thing that asks for exactly what its verifier accepts** (`protocol.MaxSkew`; `PROTOCOL.md` §3.4, §12.1; `PRECEDENTS.md` § Clocks). Exactness to the second is for what is cryptographic, not for how long a server keeps a message.
@@ -139,7 +139,7 @@ The rules are in `PROTOCOL.md` and in the doc comments of the code named. Each l
 - 🛑 **Prekeys are never derived from a seed and never reused** (`PROTOCOL.md` §12.1, §12.4): either voids forward secrecy.
 - **Nothing depends on a file before it is on disk** (`writeFile`, `dr_put`; a renewal's files: `makePrekey`).
 - **The client's records about the mailbox are in its `state` file; keys, messages and the owner's files stay files** (`client/store.go`). 🛑 **No server call inside a transaction** (`update`).
-- 🛑 **From the protocol freeze, a change to what a mailbox's files hold, or where, is a new format** (`client/doc.go`, `client/format.go`).
+- 🛑 **From v1, a change to what a mailbox's files hold, or where, is a new format** (`client/doc.go`, `client/format.go`).
 - **The mailbox's lock is its `state` file** (`client/lock.go`; `locked`, `reading`). A new entry that waits ends with its context (`TestEveryEntryThatWaitsIsTriedWithItsContext`). 🛑 **The lock is not re-entrant** (`claim`): take it at the exported entry only, and call unexported twins below it (`syncACL`, `prune`, `resolve`).
 - 🛑 **Lowercase a protocol token with `protocol.LowerASCII` only** (`forbidigo` in `.golangci.yml` refuses `strings`/`bytes` case functions).
 - **Dependencies are minimums, moved by committed updates** (`go get -u ./... && go mod tidy`), never inside a build. Dependabot opens them weekly.
@@ -229,7 +229,7 @@ The client holds messages; the server's ACL refuses them (`protocol/acl.go`, `cl
 
 ### The command line
 
-`dromas <command>`, or `dromas <group> <command>` (`cmd/dromas`, on cobra). A renamed command keeps no old name before the freeze. `sh/dromas.sh` uses the same words.
+`dromas <command>`, or `dromas <group> <command>` (`cmd/dromas`, on cobra). A renamed command keeps no old name before v1. `sh/dromas.sh` uses the same words.
 - **Help works as in git-like tools** (clig.dev). 🛑 **`--help` prints help and runs nothing,** wherever it appears (`TestHelpRunsNothing`, `TestHelpIsReadAsAnyFlag`).
 - **A wrong command line runs nothing and exits 2** (`usageError`).
 - 🛑 **No flag has a shorthand of its own:** `-h` stays the deprecated alias of `--help`, in no help, and never gets another meaning; flags are written with two dashes everywhere (`TestFlagsAreWrittenWithTwoDashes`).
