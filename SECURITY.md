@@ -4,7 +4,7 @@ Dromas is designed so that nobody has to trust its server. Everything that prote
 
 ## Supported versions
 
-**Dromas is pre-v1. Only the latest release and the latest commit on `main` are supported.** A fix is a commit on `main`, released as the next patch. The protocol can still change until it's frozen, which the project expects by November 30, 2026. Before the freeze, every open issue in this repo and in [dromas-server](https://github.com/dromas-dev/dromas-server/issues) must be settled.
+**Dromas is pre-v1. Only the latest release and the latest commit on `main` are supported.** A fix is a commit on `main`, released as the next patch. The protocol can still change until it's frozen; the README's status line gives the planned date. Before the freeze, every open issue in this repo and in [dromas-server](https://github.com/dromas-dev/dromas-server/issues) must be settled.
 
 ## Reporting a vulnerability
 

@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # dromas.sh: the dromas client in stock tools (bash, age, ssh-keygen, curl, jq, iconv and coreutils).
 #
-# The same protocol and checks as the Go client in this repo, on a mailbox of its own: the proof that a mailbox made of stock tools exchanges messages with a
-# Go mailbox (AGENTS.md § The shell client), not a client to run. It fails CLOSED:
+# The protocol in stock tools, on a mailbox of its own: the proof that a mailbox made of stock tools exchanges messages with a
+# Go mailbox, held to the Go client on the vectors and where a difference would let through a forgery, a replay, a message its keys did not
+# decrypt, a signature it should not make, or a pass sent where a network can read it (AGENTS.md § The shell client), not a client to run. It fails CLOSED:
 # a failed check prints an error line, "REFUSED: <reason>", and stops (recv refuses that one message with a refused line, its code and its words, and goes on), and every API error prints its status and its code, and none of the server's words.
 # It prints JSON lines, as the Go client does, each with its "type" first: what a command did and met on stdout, and on stderr the
 # line that says it failed ("error", here sometimes more than one), that its command line was wrong ("usage_error"), or that it waits.
