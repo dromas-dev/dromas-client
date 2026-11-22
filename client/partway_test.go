@@ -181,10 +181,44 @@ const (
 
 var partwayVariants = []string{partwayRecord, partwayServed, partwayUnserved, partwayCert, partwayRead}
 
-// A partwayCase is a command in a state that reaches one of its paths.
+// A partwayCase is a command in a state that reaches one of its paths. cmd
+// is the command it runs, by its name in lockingCommands (Init, a function
+// of the package, is in no list there).
 type partwayCase struct {
-	name string
-	set  func(t *testing.T, e *env) partwaySet
+	name, cmd string
+	set       func(t *testing.T, e *env) partwaySet
+}
+
+// partwayStillRun are the commands of lockingCommands that a mailbox holding
+// its own revocation still runs (TestAMailboxThatKeepsItsOwnRevocationSignsNothingMore):
+// none carries a pass or signs anything, so its revocation shown partway
+// through one stops nothing.
+var partwayStillRun = []string{"Ask", "KeepRevocation", "Publish", "SetAlias", "RemoveAlias", "RemoveRefused", "ClearFailed", "RebuildAllowed"}
+
+// Each command of lockingCommands is run by a case of partwayCases, or is
+// one a finished mailbox still runs (partwayStillRun), and never both: a new
+// command is shown its own revocation at each call or this test fails.
+// TestEveryLockingCommandIsTriedFinished holds lockingCommands to the code.
+func TestEveryLockingCommandIsShownItsOwnRevocationPartway(t *testing.T) {
+	t.Parallel()
+	var cases []string
+	for _, c := range partwayCases() {
+		cases = append(cases, c.cmd)
+	}
+	refused, run := lockingCommands(context.Background(), nil, nil, nil, "")
+	for _, c := range append(refused, run...) {
+		switch in, still := slices.Contains(cases, c.name), slices.Contains(partwayStillRun, c.name); {
+		case !in && !still:
+			t.Errorf("%s takes the lock, and no case of partwayCases runs it: add one, or it to partwayStillRun if a finished mailbox still runs it", c.name)
+		case in && still:
+			t.Errorf("%s is run by a case of partwayCases and is in partwayStillRun", c.name)
+		}
+	}
+	for _, name := range partwayStillRun {
+		if !slices.ContainsFunc(run, func(c command) bool { return c.name == name }) {
+			t.Errorf("%s is in partwayStillRun and is not a command of lockingCommands a finished mailbox still runs", name)
+		}
+	}
 }
 
 // partwaySet is a mailbox put in its state: its directory, the mailbox whose
@@ -593,24 +627,24 @@ func partwayCases() []partwayCase {
 		return e.made(opt)
 	}
 	return []partwayCase{
-		{"recv", func(t *testing.T, e *env) partwaySet {
+		{"recv", "Receive", func(t *testing.T, e *env) partwaySet {
 			a, b := e.mailbox(), e.mailbox()
 			send(t, b, a, "waits")
 			return recv(e, a)
 		}},
-		{"recv, a renewal due", func(t *testing.T, e *env) partwaySet {
+		{"recv, a renewal due", "Receive", func(t *testing.T, e *env) partwaySet {
 			a, b := e.mailbox(), e.mailbox()
 			send(t, b, a, "waits")
 			e.clock.Add(25 * time.Hour)
 			return recv(e, a)
 		}},
-		{"recv, mended after a 404", func(t *testing.T, e *env) partwaySet {
+		{"recv, mended after a 404", "Receive", func(t *testing.T, e *env) partwaySet {
 			a := e.mailbox()
 			e.srv.Forget(a.Address())
 			e.clock.Add(time.Minute)
 			return recv(e, a)
 		}},
-		{"recv, mended after certificate_revoked", func(t *testing.T, e *env) partwaySet {
+		{"recv, mended after certificate_revoked", "Receive", func(t *testing.T, e *env) partwaySet {
 			e.working = true // a revocation of its certificates through the one in use
 			a, b := e.mailbox(), e.mailbox()
 			send(t, b, a, "waits")
@@ -618,29 +652,29 @@ func partwayCases() []partwayCase {
 			e.clock.Add(time.Minute)
 			return recv(e, a)
 		}},
-		{"recv, a renewal due on a mailbox its server forgot", func(t *testing.T, e *env) partwaySet {
+		{"recv, a renewal due on a mailbox its server forgot", "Receive", func(t *testing.T, e *env) partwaySet {
 			a := e.mailbox()
 			e.srv.Forget(a.Address())
 			e.clock.Add(25 * time.Hour)
 			return recv(e, a)
 		}},
-		{"prekey renew", func(t *testing.T, e *env) partwaySet {
+		{"prekey renew", "Rekey", func(t *testing.T, e *env) partwaySet {
 			a := e.mailbox()
 			e.clock.Add(2 * time.Second)
 			return partwaySet{dir: a.Dir(), a: a, run: func(ctx context.Context) (any, error) { return a.Rekey(ctx) }}
 		}},
-		{"prekey renew, a mailbox its server forgot", func(t *testing.T, e *env) partwaySet {
+		{"prekey renew, a mailbox its server forgot", "Rekey", func(t *testing.T, e *env) partwaySet {
 			a := e.mailbox()
 			e.srv.Forget(a.Address())
 			e.clock.Add(2 * time.Second)
 			return partwaySet{dir: a.Dir(), a: a, run: func(ctx context.Context) (any, error) { return a.Rekey(ctx) }}
 		}},
-		{"prekey renew, its server forgets it between its read and its upload", func(t *testing.T, e *env) partwaySet {
+		{"prekey renew, its server forgets it between its read and its upload", "Rekey", func(t *testing.T, e *env) partwaySet {
 			a := e.mailbox()
 			e.clock.Add(2 * time.Second)
 			return partwaySet{dir: a.Dir(), a: a, run: func(ctx context.Context) (any, error) { return a.Rekey(ctx) }, inner: forgetsAtUpload(e, a)}
 		}},
-		{"cert revoke-earlier, its server forgets it between its read and its upload", func(t *testing.T, e *env) partwaySet {
+		{"cert revoke-earlier, its server forgets it between its read and its upload", "RenewAndRevoke", func(t *testing.T, e *env) partwaySet {
 			e.working = true // a remedy is a working-key mailbox's
 			a := e.mailbox()
 			e.clock.Add(2 * time.Second)
@@ -648,13 +682,13 @@ func partwayCases() []partwayCase {
 			s.inner = forgetsAtUpload(e, a)
 			return s
 		}},
-		{"cert revoke-earlier", func(t *testing.T, e *env) partwaySet {
+		{"cert revoke-earlier", "RenewAndRevoke", func(t *testing.T, e *env) partwaySet {
 			e.working = true // a remedy is a working-key mailbox's
 			a := e.mailbox()
 			e.clock.Add(2 * time.Second)
 			return remedy(a)
 		}},
-		{"cert revoke-earlier after a conflict", func(t *testing.T, e *env) partwaySet {
+		{"cert revoke-earlier after a conflict", "RenewAndRevoke", func(t *testing.T, e *env) partwaySet {
 			e.working = true // a remedy is a working-key mailbox's
 			a := e.mailbox()
 			publishAt(t, e.srv.URL, ownRevocation(t, a, numberOf(t, a)+7200))
@@ -663,13 +697,13 @@ func partwayCases() []partwayCase {
 			s.inner = partwayHides(e, a)
 			return s
 		}},
-		{"RevokeEarlier", func(t *testing.T, e *env) partwaySet {
+		{"RevokeEarlier", "RevokeEarlier", func(t *testing.T, e *env) partwaySet {
 			e.working = true // a remedy is a working-key mailbox's
 			a := e.mailbox()
 			e.clock.Add(2 * time.Second)
 			return earlier(a)
 		}},
-		{"RevokeEarlier after a conflict", func(t *testing.T, e *env) partwaySet {
+		{"RevokeEarlier after a conflict", "RevokeEarlier", func(t *testing.T, e *env) partwaySet {
 			e.working = true // a remedy is a working-key mailbox's
 			a := e.mailbox()
 			publishAt(t, e.srv.URL, ownRevocation(t, a, numberOf(t, a)+7200))
@@ -678,24 +712,24 @@ func partwayCases() []partwayCase {
 			s.inner = partwayHides(e, a)
 			return s
 		}},
-		{"send", func(t *testing.T, e *env) partwaySet {
+		{"send", "SendWith", func(t *testing.T, e *env) partwaySet {
 			a, b := e.mailbox(), e.mailbox()
 			return partwaySet{dir: a.Dir(), a: a, check: outboxSaysItAlone, run: func(ctx context.Context) (any, error) { return a.Send(ctx, b.Address(), "sent") }}
 		}},
-		{"send, its ACL changed, the one its server took admitting no reply", func(t *testing.T, e *env) partwaySet {
+		{"send, its ACL changed, the one its server took admitting no reply", "SendWith", func(t *testing.T, e *env) partwaySet {
 			a, b := serverAllowed(e), e.mailbox()
 			if err := a.SyncACL(t.Context()); err != nil {
 				t.Fatal(err)
 			}
 			return partwaySet{dir: a.Dir(), a: a, check: outboxSaysItAlone, run: func(ctx context.Context) (any, error) { return a.Send(ctx, b.Address(), "sent") }}
 		}},
-		{"send JSON", func(t *testing.T, e *env) partwaySet {
+		{"send JSON", "SendJSON", func(t *testing.T, e *env) partwaySet {
 			a, b := e.mailbox(), e.mailbox()
 			return partwaySet{dir: a.Dir(), a: a, check: outboxSaysItAlone, run: func(ctx context.Context) (any, error) {
 				return a.SendJSON(ctx, b.Address(), []byte(`{"sent":true}`), client.Fields{})
 			}}
 		}},
-		{"outbox flush, two waiting", func(t *testing.T, e *env) partwaySet {
+		{"outbox flush, two waiting", "Flush", func(t *testing.T, e *env) partwaySet {
 			a, b, c := e.mailbox(), e.mailbox(), e.mailbox()
 			e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
 				if r.Method == http.MethodPost {
@@ -712,7 +746,7 @@ func partwayCases() []partwayCase {
 			e.srv.SetMiddle(nil)
 			return partwaySet{dir: a.Dir(), a: a, check: outboxSaysItAlone, joined: true, run: func(ctx context.Context) (any, error) { return a.Flush(ctx) }}
 		}},
-		{"outbox flush, its ACL changed, the one its server took admitting no reply", func(t *testing.T, e *env) partwaySet {
+		{"outbox flush, its ACL changed, the one its server took admitting no reply", "FlushReport", func(t *testing.T, e *env) partwaySet {
 			a, b := serverAllowed(e), e.mailbox()
 			if err := a.SyncACL(t.Context()); err != nil {
 				t.Fatal(err)
@@ -728,42 +762,95 @@ func partwayCases() []partwayCase {
 				t.Fatal("a send went out before the ACL that admits its reply")
 			}
 			e.srv.SetMiddle(nil)
-			return partwaySet{dir: a.Dir(), a: a, check: outboxSaysItAlone, joined: true, run: func(ctx context.Context) (any, error) { return a.Flush(ctx) }}
+			return partwaySet{dir: a.Dir(), a: a, check: outboxSaysItAlone, joined: true, run: func(ctx context.Context) (any, error) { return a.FlushReport(ctx) }}
 		}},
-		{"init, restored from its identity alone", func(t *testing.T, e *env) partwaySet {
+		{"send to a group", "SendGroup", func(t *testing.T, e *env) partwaySet {
+			a, b, c := e.mailbox(), e.mailbox(), e.mailbox()
+			return partwaySet{dir: a.Dir(), a: a, check: outboxSaysItAlone, joined: true, run: func(ctx context.Context) (any, error) {
+				return a.SendGroup(ctx, []protocol.Address{b.Address(), c.Address()}, "sent", client.Fields{})
+			}}
+		}},
+		{"send JSON to a group", "SendGroupJSON", func(t *testing.T, e *env) partwaySet {
+			a, b, c := e.mailbox(), e.mailbox(), e.mailbox()
+			return partwaySet{dir: a.Dir(), a: a, check: outboxSaysItAlone, joined: true, run: func(ctx context.Context) (any, error) {
+				return a.SendGroupJSON(ctx, []protocol.Address{b.Address(), c.Address()}, []byte(`{"sent":true}`), client.Fields{})
+			}}
+		}},
+		{"hold, a message arrives", "Hold", func(t *testing.T, e *env) partwaySet {
+			a, b := e.mailbox(), e.mailbox()
+			receive(t, a) // its tag is kept
+			send(t, b, a, "arrives")
+			return partwaySet{dir: a.Dir(), a: a, run: func(ctx context.Context) (any, error) { return a.Hold(ctx, 2*time.Second) }}
+		}},
+		{"await, a message arrives", "Await", func(t *testing.T, e *env) partwaySet {
+			a, b := e.mailbox(), e.mailbox()
+			receive(t, a) // its tag is kept
+			send(t, b, a, "arrives")
+			return partwaySet{dir: a.Dir(), a: a, run: func(ctx context.Context) (any, error) {
+				return nil, a.Await(ctx, time.Now().Add(3*time.Second), nil)
+			}}
+		}},
+		{"recv --follow", "Follow", func(t *testing.T, e *env) partwaySet {
+			a, b := e.mailbox(), e.mailbox()
+			send(t, b, a, "waits")
+			return partwaySet{dir: a.Dir(), a: a, run: func(ctx context.Context) (any, error) {
+				return nil, a.Follow(ctx, client.FollowOptions{Until: time.Now().Add(2 * time.Second)}, nil)
+			}}
+		}},
+		{"cert switch", "RenewUnderCertificate", func(t *testing.T, e *env) partwaySet {
+			a := e.mailbox()
+			e.clock.Add(2 * time.Second)
+			return partwaySet{dir: a.Dir(), a: a, run: func(ctx context.Context) (any, error) { return a.RenewUnderCertificate(ctx) }}
+		}},
+		{"cert request", "RequestCertificate", func(t *testing.T, e *env) partwaySet {
+			e.working = true // a request is a working-key mailbox's
+			a := e.mailbox()
+			return partwaySet{dir: a.Dir(), a: a, run: func(ctx context.Context) (any, error) { return a.RequestCertificate(ctx) }}
+		}},
+		{"cert install", "InstallCertificate", func(t *testing.T, e *env) partwaySet {
+			e.working = true // a certificate is a working-key mailbox's
+			a := e.mailbox()
+			r, err := a.RequestCertificate(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			line := certify(t, a, identityKey(t, a), r, protocol.SerialAt(e.clock.Now(), r.LowestSerial-1), e.clock.Now())
+			return partwaySet{dir: a.Dir(), a: a, run: func(ctx context.Context) (any, error) { return a.InstallCertificate(ctx, line) }}
+		}},
+		{"init, restored from its identity alone", "Init", func(t *testing.T, e *env) partwaySet {
 			return restored(t, e, e.mailbox())
 		}},
-		{"init, restored from its identity alone, its server forgot it", func(t *testing.T, e *env) partwaySet {
+		{"init, restored from its identity alone, its server forgot it", "Init", func(t *testing.T, e *env) partwaySet {
 			a := e.mailbox()
 			e.srv.Forget(a.Address())
 			return restored(t, e, a)
 		}},
-		{"peer allow", func(t *testing.T, e *env) partwaySet {
+		{"peer allow", "Allow", func(t *testing.T, e *env) partwaySet {
 			a, b := serverAllowed(e), e.mailbox()
 			return partwaySet{dir: a.Dir(), a: a, run: func(ctx context.Context) (any, error) { return a.Allow(ctx, b.Address()) }}
 		}},
-		{"peer block", func(t *testing.T, e *env) partwaySet {
+		{"peer block", "Block", func(t *testing.T, e *env) partwaySet {
 			a, b := e.mailbox(), e.mailbox()
 			return partwaySet{dir: a.Dir(), a: a, run: func(ctx context.Context) (any, error) { return a.Block(ctx, b.Address()) }}
 		}},
-		{"SyncACL", func(t *testing.T, e *env) partwaySet {
+		{"SyncACL", "SyncACL", func(t *testing.T, e *env) partwaySet {
 			a := serverAllowed(e)
 			return partwaySet{dir: a.Dir(), a: a, run: func(ctx context.Context) (any, error) { return nil, a.SyncACL(ctx) }}
 		}},
-		{"account join", func(t *testing.T, e *env) partwaySet {
+		{"account join", "Adopt", func(t *testing.T, e *env) partwaySet {
 			a := e.mailbox()
 			key := e.srv.AdoptKey("acct")
 			return partwaySet{dir: a.Dir(), a: a, run: func(ctx context.Context) (any, error) { return a.Adopt(ctx, key) }}
 		}},
-		{"account leave", func(t *testing.T, e *env) partwaySet {
+		{"account leave", "Leave", func(t *testing.T, e *env) partwaySet {
 			a := e.mailbox()
 			return partwaySet{dir: a.Dir(), a: a, run: func(ctx context.Context) (any, error) { return nil, a.Leave(ctx) }}
 		}},
-		{"Resolve a peer", func(t *testing.T, e *env) partwaySet {
+		{"Resolve a peer", "Resolve", func(t *testing.T, e *env) partwaySet {
 			a, b := e.mailbox(), e.mailbox()
 			return partwaySet{dir: a.Dir(), a: a, run: func(ctx context.Context) (any, error) { return a.Resolve(ctx, b.Address()) }}
 		}},
-		{"Resolve itself", func(t *testing.T, e *env) partwaySet {
+		{"Resolve itself", "Resolve", func(t *testing.T, e *env) partwaySet {
 			a := e.mailbox()
 			return partwaySet{dir: a.Dir(), a: a, run: func(ctx context.Context) (any, error) { return a.Resolve(ctx, a.Address()) }}
 		}},
