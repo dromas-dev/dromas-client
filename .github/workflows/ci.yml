@@ -278,7 +278,11 @@ jobs:
   vale:
     # The pages people read and the spec, against the Google developer
     # documentation style guide (.vale.ini): an error fails the job, and a
-    # warning or a suggestion is advice.
+    # warning or a suggestion is advice. Not on a tag's run (release.yml),
+    # where reviewdog's github-check fails to post to its own check run
+    # (404): the hand-run of release.yml that task release requires has run
+    # this job on the commit the tag names.
+    if: github.ref_type != 'tag'
     runs-on: ubuntu-26.04
     timeout-minutes: 10
     permissions:
