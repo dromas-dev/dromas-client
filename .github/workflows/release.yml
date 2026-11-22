@@ -69,12 +69,8 @@ jobs:
     needs: tag
     if: ${{ !failure() && !cancelled() }}
     uses: ./.github/workflows/ci.yml
-    # The most a called workflow's jobs may ask for: a called workflow can
-    # only lower the GITHUB_TOKEN permissions its caller passes (GitHub's
-    # "Reusing workflows"), and ci.yml's vale job writes a check run.
     permissions:
       contents: read
-      checks: write
 
   release:
     needs: [tag, ci]
