@@ -29,3 +29,12 @@ func tryGate(dir string) (*os.File, bool, error) {
 	}
 	return f, true, nil
 }
+
+// unflock lets go of f's flock before f is closed: a process that another
+// goroutine starts holds a copy of f from its fork to its exec, and the lock
+// lasts while any copy is open unless one copy lets go of it (flock(2); what
+// util-linux's flock -u is for). The error is ignored: f is closed next, and a
+// copy that outlives it ends at its process's exec.
+func unflock(f *os.File) {
+	_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN) //nolint:gosec // a descriptor fits an int
+}

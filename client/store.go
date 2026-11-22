@@ -155,14 +155,14 @@ func (b *Mailbox) view(f func(store) error) error {
 	}
 	db := b.db
 	if db == nil {
-		ro, err := b.openState(context.Background(), true)
+		ro, closeRO, err := b.openState(context.Background(), true)
 		if errors.Is(err, fs.ErrNotExist) {
 			return f(store{})
 		}
 		if err != nil {
 			return err
 		}
-		defer ro.Close() //nolint:errcheck // read only
+		defer closeRO() //nolint:errcheck // read only
 		db = ro
 	}
 	return db.View(func(tx *bolt.Tx) error {
@@ -218,9 +218,18 @@ var failWrite func() error
 // (#344). The file is opened as bbolt opens it, never made (openWhole), and only
 // once the mailbox's private files are judged (judgeFiles), the one place every
 // open comes through.
-func (b *Mailbox) openState(ctx context.Context, readOnly bool) (*bolt.DB, error) {
+//
+// It returns the database and the way to close it, which is closeState for a
+// reading: a process that another goroutine starts copies every open file
+// between its fork and its exec, and a flock is the open file's, so it lasts
+// until every copy is closed or one copy lets go of it (flock(2)). bbolt lets
+// go of a command's lock before it closes the file, and of a reading's never,
+// so closeState lets go of it first, as the gate's closing does (unflock): a
+// copy that outlived the close would make this program's next open wait for
+// its own lock (#991).
+func (b *Mailbox) openState(ctx context.Context, readOnly bool) (*bolt.DB, func() error, error) {
 	if err := b.judgeFiles(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	deadline := time.Now().Add(lockPatience)
 	told := false
@@ -240,7 +249,8 @@ func (b *Mailbox) openState(ctx context.Context, readOnly bool) (*bolt.DB, error
 	gated := false
 	defer func() {
 		if gate != nil {
-			_ = gate.Close() // lets go of its flock
+			unflock(gate)
+			_ = gate.Close()
 		}
 	}()
 	takeGate := func() error {
@@ -253,35 +263,55 @@ func (b *Mailbox) openState(ctx context.Context, readOnly bool) (*bolt.DB, error
 	if readOnly {
 		for {
 			if err := takeGate(); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			if gated {
 				break
 			}
 			if err := waited(); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			time.Sleep(lockTry)
 		}
 	}
 	for {
-		db, err := bolt.Open(b.path("state"), 0o600, &bolt.Options{Timeout: lockTry, ReadOnly: readOnly, OpenFile: openWhole, NoSync: !fsync})
+		var file *os.File
+		open := func(name string, flag int, perm os.FileMode) (*os.File, error) {
+			f, err := openWhole(name, flag, perm)
+			file = f
+			if err == nil && copiedHere != nil {
+				copiedHere(f, gate)
+			}
+			return f, err
+		}
+		db, err := bolt.Open(b.path("state"), 0o600, &bolt.Options{Timeout: lockTry, ReadOnly: readOnly, OpenFile: open, NoSync: !fsync})
 		if err == nil {
-			return db, nil
+			if !readOnly {
+				return db, db.Close, nil
+			}
+			return db, func() error {
+				unflock(file)
+				return db.Close()
+			}, nil
 		}
 		if !errors.Is(err, berrors.ErrTimeout) {
-			return nil, err
+			return nil, nil, err
 		}
 		if !gated {
 			if err := takeGate(); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 		}
 		if err := waited(); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
 }
+
+// copiedHere, if set, is called with the state file openState has just opened
+// and the gate it holds, if any: where a process that another goroutine
+// starts copies them. Nil but in a test, which keeps copies of its own.
+var copiedHere func(state, gate *os.File)
 
 // gateOf takes the mailbox's gate: tryGate, the system's, or noGate in a test of
 // a system that has none.

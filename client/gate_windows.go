@@ -33,3 +33,8 @@ func tryGate(dir string) (*os.File, bool, error) {
 	}
 	return f, true, nil
 }
+
+// unflock is nothing on Windows: a process that the program starts inherits
+// only the handles it is handed (os/exec's SysProcAttr), so none holds a copy
+// of the gate's or the state file's lock (gate_unix.go's unflock).
+func unflock(*os.File) {}
