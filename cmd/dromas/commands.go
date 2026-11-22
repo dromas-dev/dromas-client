@@ -514,14 +514,14 @@ With --webhook, recv posts each message delivered to inbox/ to the URL, beside
 --exec's program or alone: the message's "message" line is the body, as JSON,
 with no line feed. --webhook needs --wait or --follow, and the config file's
 [recv] webhook sets the URL where the command line names none. The URL may be
-http or https, on this machine or another: an http URL to another machine sends
+HTTP or HTTPS, on this machine or another: an HTTP URL to another machine sends
 each message across the network in the clear. A URL with a user or a password is
 refused, because a secret is never an argument. --webhook-header-file names a
-file whose one line, "Name: Value", is a header each post carries, for example
-Authorization: Bearer and a token. --webhook-secret-file names a file holding a
+file whose one line is a header that each post carries, as Name: Value, for
+example Authorization: Bearer and a token. --webhook-secret-file names a file holding a
 Standard Webhooks secret, whsec_ and the base64 of 24 to 64 random bytes, and
 each post is signed by Standard Webhooks' v1 scheme: the webhook-id header is the
-message's "id", the same at each try. recv refuses either file where others can
+message's id, the same at each try. recv refuses either file where others can
 read it, as ssh refuses a private key, and reads each once, at its start.
 
 The webhook runs apart from --exec's program: a failure of either never stops,

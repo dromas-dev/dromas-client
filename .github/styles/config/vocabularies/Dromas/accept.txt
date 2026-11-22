@@ -44,3 +44,6 @@ OpenBSD
 DragonFly
 BSD
 GitHub CLI
+recv
+addr
+umask

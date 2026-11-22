@@ -11,7 +11,7 @@ key file can then keep a passphrase.
 After a reboot, the agent holds no key, so the mailbox stays locked until you
 run dromas agent add again, or run a command with --askpass or at a terminal. A
 command that needs the key and gets it from none of these fails with
-"identity_locked".
+identity_locked.
 
 dromas uses the agent's key only when it matches the identity's public key: the
 key file's public key when the file carries one, and identity.pub otherwise.
