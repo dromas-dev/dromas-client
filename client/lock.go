@@ -46,12 +46,12 @@ func (b *Mailbox) hold(ctx context.Context) (func() error, error) {
 	if err := b.makeState(); err != nil {
 		return nil, fmt.Errorf("the mailbox's state file: %w", err)
 	}
-	db, err := b.openState(ctx, false)
+	db, closeDB, err := b.openState(ctx, false)
 	// Removed between makeState and the open: made again beside its place,
 	// never in place (openWhole).
 	if errors.Is(err, fs.ErrNotExist) {
 		if err = b.makeState(); err == nil {
-			db, err = b.openState(ctx, false)
+			db, closeDB, err = b.openState(ctx, false)
 		}
 	}
 	if err != nil {
@@ -64,7 +64,7 @@ func (b *Mailbox) hold(ctx context.Context) (func() error, error) {
 	b.db = db
 	release := func() error {
 		b.db = nil
-		return db.Close()
+		return closeDB()
 	}
 	// The mailbox's format comes before anything else of it is read or
 	// written, its directories among them, which a newer format may lay out
@@ -166,7 +166,7 @@ func reading[T any](ctx context.Context, b *Mailbox, f func() (T, error)) (v T, 
 	}
 	defer release()
 	defer b.forgetIdentity()
-	db, err := b.openState(ctx, true)
+	db, closeDB, err := b.openState(ctx, true)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
 		b.none = true
@@ -177,7 +177,7 @@ func reading[T any](ctx context.Context, b *Mailbox, f func() (T, error)) (v T, 
 		b.db = db
 		defer func() {
 			b.db = nil
-			_ = db.Close() // read only
+			_ = closeDB() // read only
 		}()
 	}
 	// A reading refuses a format other than this client's, before f reads
