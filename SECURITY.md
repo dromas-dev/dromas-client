@@ -57,8 +57,9 @@ Each row of the following table gives a claim in one sentence, the section of `P
 
 **What isn't tested:**
 - That a release rebuilds byte for byte anywhere other than in this repository's own workflow. The workflow's `rebuild` job does this for each release from v0.1.1 on.
-- `age-plugin-pq` against the server's check of the stanzas in a sent message.
-- A restore whose clock reads behind what an older record on the server hides, and two machines that make a certificate in the same second (`PROTOCOL.md` §5.2).
+- A message sealed through `age-plugin-pq`, the plugin that gives post-quantum recipients to an age older than 1.3.0 and to other age implementations: whether the server's check of a sent message's stanzas accepts it, or refuses it as `invalid_recipients` (`PROTOCOL.md` §11.10, step 7).
+- A mailbox restored while its clock reads behind the lost machine's clock, from a server that serves it an older record than the lost machine's last one. The restored mailbox can give its certificate a serial below a certificate the lost machine made, and the higher serial ranks higher (`PROTOCOL.md` §5.2, §5.3).
+- Two machines that each make a certificate for one mailbox in the same second, so that the two certificates have the same certificate serial. A verifier accepts either one, and a server ranks neither one higher than the other (`PROTOCOL.md` §5.2, §5.3).
 - OpenSSH releases other than 9.6p1 and 10.2p1, the two releases that CI's Ubuntu jobs run the script and the cross-tests on.
 - age 1.3.0 and 1.3.1.
 - The shell client on macOS and on BusyBox.

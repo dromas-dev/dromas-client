@@ -115,7 +115,7 @@ The script's header lists the tools that it needs. It's tested on GNU coreutils 
 
 The script doesn't do the following:
 
-- Make certificates. Its identity signs everything, and it can't renew past a statement of its address signed under a certificate.
+- Make certificates. Its identity signs everything. A server that has accepted a [prekey statement](PROTOCOL.md#23-terms) signed under a [certificate](PROTOCOL.md#23-terms) refuses every prekey statement that the identity signs from then on (`PROTOCOL.md` §5.3), so the script can't renew a mailbox that has moved to certificates.
 - Renew on its own. Run `prekey renew` at least every 6 days and 22 hours, because a prekey is valid for 8 days, or within the lifetime that a `prekey-lifetime` file in the mailbox's directory sets.
 - Keep a send to post again. A send that fails says so and keeps nothing.
 - Handle aliases, make or publish a revocation of its own, handle held messages, or access control lists (ACLs).
