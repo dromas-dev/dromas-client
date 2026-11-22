@@ -766,7 +766,7 @@ func writeConfigFile(file, text string) error {
 func (e *cli) configCmd() *cobra.Command {
 	return command("config", "print every setting and where it came from",
 		`Print a "config" line: the config file, the profile, and each setting's value
-and where it came from, "flag", "environment", "file" or "default". Each setting
+and where it came from: flag, environment, file, or default. Each setting
 comes from the first of those that sets it.
 
 A [policy] key that the config file does not set takes its default, and status

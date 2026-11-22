@@ -17,7 +17,7 @@ With --askpass, ssh-add runs that program through dromas (SSH_ASKPASS=\<dromas>
 SSH_ASKPASS_REQUIRE=force DROMAS_ASKPASS=\<program>), and dromas gives ssh-add no
 passphrase after the third, as ssh's NumberOfPasswordPrompts does. When no
 passphrase from the askpass program unlocks the key file, agent add fails with
-"identity_locked". Any other ssh-add failure is reported with what ssh-add wrote
+identity_locked. Any other ssh-add failure is reported with what ssh-add wrote
 to stderr.
 
 Before ssh-add runs, an "agent_add" line gives the command it runs. Once
