@@ -197,7 +197,7 @@ The rules are in `PROTOCOL.md` and in the doc comments of the code named. Each l
 
 - 🛑 **A server's `mailbox_revoked` or `sender_revoked` is checked, never believed** (`proved`; §10.1, §12.5); no code `proved` checks goes back into `undeliverable` (`TestNoAnswerProvedIsUndeliverable`).
 - 🛑 **A revocation that verified is kept and never removed** (§12.5).
-- 🛑 **A mailbox that holds its own revocation signs nothing more** (`finished`, `client/internal/sign`, `locked`): a new command or path gets its case in `partwayCases` (`client/partway_test.go`), which `TestEveryCommandShownItsOwnRevocationAtEachCall` runs: the list is typed by hand, and no test yet holds it to `lockingCommands`, as `client/restore_test.go` holds `mailCommands` (a gap against § Tests, not a rule).
+- 🛑 **A mailbox that holds its own revocation signs nothing more** (`finished`, `client/internal/sign`, `locked`): a new command or path gets its case in `partwayCases` (`client/partway_test.go`), which `TestEveryCommandShownItsOwnRevocationAtEachCall` runs and `TestEveryLockingCommandIsShownItsOwnRevocationPartway` holds to `lockingCommands`.
 - 🛑 **A working key's signature is never a revocation** (`VerifyRevocation` verifies against the identity's bare key).
 - 🛑 **No answer is not a negative answer** (`readRevocations`; §12.3 check 7).
 - 🛑 **The revocation statement is fixed text and never gains a field;** add a second statement under a new tag instead.
