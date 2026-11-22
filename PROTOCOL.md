@@ -9,7 +9,7 @@ Dromas carries end-to-end encrypted, sender-authenticated messages between progr
 - A *mailbox* is named by its *address*, which is the hash of the mailbox's identity document. An address authenticates the key that it names, so no directory is needed.
 - A sender encrypts a message to the recipient's *prekey*, which the recipient's identity or working key signed. The sender signs the message inside the encryption.
 - A mailbox signs with its identity, or with a *working key* that the identity certified to sign in the identity's place. With a working key, the identity can be kept away from daily work (Section 5).
-- The server stores ciphertext. The server holds no private key, no plaintext and no signature over any message.
+- The server stores ciphertext. The server holds no private key, no plaintext, and no signature over any message.
 
 The keys, and the objects that each key signs (Sections 4 to 6, 10):
 
@@ -54,11 +54,11 @@ The server is not trusted for confidentiality or for authenticity. Clients make 
 
 This document specifies the formats, the meaning of each HTTP operation, and the checks that a client and a server make. Alongside this document:
 
-- **`api/openapi.yaml` is normative for the HTTP shapes:** routes, methods, request and answer members with their types, status codes, error codes and headers. This document says what each operation means, who may call each operation, which checks are made and what each refusal means. Where `api/openapi.yaml` and this document disagree, `api/openapi.yaml` is right about a shape, and this document is right about a meaning.
+- **`api/openapi.yaml` is normative for the HTTP shapes:** routes, methods, request and answer members with their types, status codes, error codes, and headers. This document says what each operation means, who may call each operation, which checks are made and what each refusal means. Where `api/openapi.yaml` and this document disagree, `api/openapi.yaml` is right about a shape, and this document is right about a meaning.
 - **`testdata/vectors/` contains the conformance vectors (Section 16).**
 - **`PRECEDENTS.md` sets each design decision beside the published standards and deployed systems that make the same decision.**
 
-A reviewer of the cryptography needs Sections 2.2, 3 to 6, 8 to 10, 12.1, 12.3, 12.4 and 15. The other sections give the sender key types (Section 7), the HTTP API (Section 11), a client's other behaviour (the rest of Section 12), what a server stores (Section 13) and compatibility (Section 14).
+A reviewer of the cryptography needs Sections 2.2, 3 to 6, 8 to 10, 12.1, 12.3, 12.4, and 15. The other sections give the sender key types (Section 7), the HTTP API (Section 11), a client's other behavior (the rest of Section 12), what a server stores (Section 13), and compatibility (Section 14).
 
 ## 2. Conventions
 
@@ -221,7 +221,7 @@ Where this document uses a term below as a defined term, the term has the sense 
 
 The draft that the table names for age's KEM, draft-ietf-hpke-pq-03, is the version that C2SP age v1.1.0 cites. The conformance vectors and C2SP age v1.1.0 fix the KEM's bytes for this protocol (Section 16), whatever a later draft says.
 
-Inside age, every keyed hash is HMAC or HKDF. Outside age, the protocol defines no keyed function. The protocol applies plain SHA-384 and SHA-256 only to public inputs: the identity document, a prekey statement and the ciphertext.
+Inside age, every keyed hash is HMAC or HKDF. Outside age, the protocol defines no keyed function. The protocol applies plain SHA-384 and SHA-256 only to public inputs: the identity document, a prekey statement, and the ciphertext.
 
 ### 3.2. Signatures
 
@@ -285,7 +285,7 @@ A server and a client read every JSON text that the protocol carries by the rule
 - **Depth.** The depth is at most 32, with objects and arrays counted together and the outermost counted as one.
 - **Types.** A member that the protocol defines is of the type defined for that member. A member that the protocol defines and whose value is null is the same as that member left out, except for the envelope's `body` (Section 9.1). An integer member is written in digits alone, from 0 to 2^53 − 1. For example, `1.0` and `1e0` are not integers.
 - **Bytes.** A byte member is base64 (Section 2.2).
-- **Unknown members.** An unknown member is a member that the reader does not know. A server MUST refuse an unknown member in anything sent to the server, except in a revocation record. Every other reader MUST ignore an unknown member: a client in an answer, and a mailbox in an envelope. The rules above still apply inside an unknown member.
+- **Unknown members.** An unknown member is a member that the reader does not know. A server MUST refuse an unknown member in anything sent to the server, except in a revocation record. Every other reader MUST ignore an unknown member: a client in an answer, and a mailbox in an envelope. The preceding rules still apply inside an unknown member.
   - **A server MUST ignore an unknown member of a revocation record, as a client does.** A revocation record grows by a statement under a new tag (Section 14), and a record made in advance is published byte for byte (Section 12.5). So a server that refused the record whole would leave a revoked address live. The server still verifies each member that the server knows, or refuses the record.
 
 ### 3.4. Clocks
@@ -358,7 +358,7 @@ An address is shared as the link `https://<server>/to/<address>`.
 
 ## 5. Signers
 
-Every prekey statement, pass and message that a mailbox signs has an SSHSIG (Section 3.2). The SSHSIG's signing key is the **signer** of that prekey statement, pass or message. A signer has one of two forms:
+Every prekey statement, pass and message that a mailbox signs has an SSHSIG (Section 3.2). The SSHSIG's signing key is the **signer** of that prekey statement, pass, or message. A signer has one of two forms:
 
 | Signer | Rank |
 |---|---|
@@ -412,7 +412,7 @@ A certificate is an OpenSSH user certificate. A verifier MUST check every row of
     So a certificate serial is always above the address's revocation serial.
   - A verifier MUST NOT read a certificate serial as a time, or bound a certificate serial by the verifier's clock. Of two certificate serials, the higher one ranks higher.
   - Two certificates of one identity can share a certificate serial. A verifier that meets both accepts either one, and keeps only their shared certificate serial.
-- **Nothing may depend on a P-256 identity's signature having one set of bytes.** Anyone who has seen (r, s) can write (r, n − s) (Section 3.2). This is true of a certificate that the identity made, and of the prekey statements, passes and messages that the identity signs.
+- **Nothing may depend on a P-256 identity's signature having one set of bytes.** Anyone who has seen (r, s) can write (r, n − s) (Section 3.2). This is true of a certificate that the identity made, and of the prekey statements, passes, and messages that the identity signs.
 
 ### 5.3. Order
 
@@ -541,7 +541,7 @@ server-port    = %x31-39 *4DIGIT   ; no leading zero, at most 65535,
   base64-token     = 1*( 4( ALPHA / DIGIT / "+" ) )   ; base64 that is a token
   ```
 
-- **A server MUST refuse a value that is too long with `401 invalid_pass`, before the server hashes, parses or verifies the value.** A value is too long when, whitespace included, the value is longer than the form a client writes with a signature as long as the bound (Section 3.2).
+- **A server MUST refuse a value that is too long with `401 invalid_pass`, before the server hashes, parses, or verifies the value.** A value is too long when, whitespace included, the value is longer than the form a client writes with a signature as long as the bound (Section 3.2).
 - **Lifetime.** A client signs a pass to end at most 10 minutes after signing. A server accepts a pass that has not ended and that ends at most the skew allowance after the time on the server's own clock.
 - **A client MAY keep a pass, and use the kept pass for its calls until the pass is about to end.** A client MUST NOT use a kept pass with more than 10 minutes left, because the client's clock has then gone back since the client signed the pass. A client MUST NOT send a kept pass to a server whose name is not the one the pass was signed for. It keeps that name beside the pass, and signs a new pass for any other server, which could otherwise replay the kept pass at the server it names.
 - **A server MAY remember a pass it has verified, by the pass's values with the signature in the one form (Section 3.2).**
@@ -619,7 +619,7 @@ lowhexdig = DIGIT / %x61-66   ; HEXDIG in lowercase
   - Any other member SHOULD have a collision-resistant name that contains a domain its writer controls (`example.com/compress`), and never an `x-` prefix (RFC 6648).
   - Such a member adds to a message. Such a member never changes the meaning of a member this protocol defines. Therefore content that two clients transform between themselves goes inside `body`.
 
-### 9.2. The plaintext: envelope, signature and padding
+### 9.2. The plaintext: envelope, signature, and padding
 
 The sender signs the envelope with its signer (Section 5), in the namespace `dromas-msg-v1:<recipient>`. For example, a sender that signs with its identity can run this command:
 
@@ -690,7 +690,7 @@ The sender encrypts the plaintext to the recipient's prekey with age (C2SP age),
 
 A mailbox's identity can revoke the mailbox's address permanently. Only the identity can revoke the address.
 
-- **The revocation statement is fixed text, `revocation-of-address`.** The statement has no date, no reason and no number. A verifier builds the statement from the address. Therefore a copy signed at any time is the same revocation statement.
+- **The revocation statement is fixed text, `revocation-of-address`.** The statement has no date, no reason, and no number. A verifier builds the statement from the address. Therefore a copy signed at any time is the same revocation statement.
 - **The identity key signs the revocation statement.** The signature is in the namespace `dromas-revoke-v1:<A>`, `revoke-namespace`, with the bare identity key as the signing key. A working key's signature over the same revocation statement, under a certificate of that identity, is not a revocation. When a verifier checks this signature, the verifier's `allowed_signers` line names the identity key with no `cert-authority`.
 
   ```abnf
@@ -1081,7 +1081,7 @@ The server checks the steps below. Only step 9 stores anything.
    | `prekey_sha256` is not the hash of `B`'s current statement | `409 prekey_superseded` |
    | The age file does not have **exactly one native stanza** (`mlkem768x25519`) of the current prekey's type, or has anything beside that stanza and the grease stanzas that the server ignores | `invalid_recipients` |
 
-   The server ignores a stanza whose type matches `^[!-~]{1,8}-grease$` and that has at most 4 arguments, as age has a reader ignore a stanza that the reader does not recognise. Only the message cap bounds the body of such a stanza. The server cannot check which key the file is sealed to.
+   The server ignores a stanza whose type matches `^[!-~]{1,8}-grease$` and that has at most 4 arguments, as age has a reader ignore a stanza that the reader does not recognize. Only the message cap bounds the body of such a stanza. The server cannot check which key the file is sealed to.
 8. **Quotas, counted only for sends that carried their sender's pass:**
 
    | Failure | Answer |
@@ -1122,7 +1122,7 @@ The server checks the steps below. Only step 9 stores anything.
   |---|---|
   | `<B>` is an address | `400 invalid_address` |
   | the only parameters are `cursor` and `wait`, each at most once | `400 invalid_request`, naming the parameter |
-  | `cursor` has the form above, and the server can read it as a cursor it makes | `400 invalid_request`, naming `cursor` |
+  | `cursor` matches the ABNF rule `cursor`, and the server can read it as a cursor it makes | `400 invalid_request`, naming `cursor` |
   | `wait` is delay-seconds, digits alone | `400 invalid_request`, naming `wait` |
   | a list does not carry both `cursor` and `wait` | `400 invalid_request`, naming either one |
 
@@ -1302,7 +1302,7 @@ A mailbox may belong to one account at its server. The protocol fixes how a mail
   implementation-text = 1*128%x21-7E
   ```
 
-A server lists at most 64 deprecations, 64 sunsets and 64 capabilities. A client reads only the members it uses.
+A server lists at most 64 deprecations, 64 sunsets, and 64 capabilities. A client reads only the members it uses.
 
 ## 12. Clients
 
@@ -1337,7 +1337,7 @@ A server lists at most 64 deprecations, 64 sunsets and 64 capabilities. A client
   - The sender refuses a prekey statement under a certificate that the recipient's revocation of certificates covers, and seals nothing. The revocation of certificates that counts here is the one the sender keeps at that point (Section 5.1).
 - **No answer is not "no revocation shown."** If the lookup fails, or serves no mailbox (`404 mailbox_not_found`, or `410 mailbox_revoked` with nothing that verifies), the sender seals nothing and posts nothing.
 - **A conditional lookup.** A sender MAY keep the last `200` of a lookup whose checks passed, with the answer's `ETag`, and send that tag in the next lookup's `If-None-Match`.
-  - On a `304`, the sender checks the kept answer as this section checks a lookup's answer, every check above made again at that time.
+  - On a `304`, the sender checks the kept answer as this section checks a lookup's answer, every preceding check made again at that time.
   - A `304` whose `ETag`, compared weakly, is not the tag that the lookup sent is no answer.
   - A `304` to a lookup that sent no `If-None-Match` is malformed.
   - After a `409 prekey_superseded`, the sender's next lookup of that address sends no `If-None-Match`.
@@ -1492,7 +1492,7 @@ If the revocation of a mailbox's certificates covers the certificate that the ma
 
 ### 12.7. A mailbox whose identity is kept elsewhere
 
-A mailbox whose identity is kept elsewhere signs under certificates. The identity holder makes the mailbox's certificates and revocations. The mailbox keeps its working keys, prekeys and state.
+A mailbox whose identity is kept elsewhere signs under certificates. The identity holder makes the mailbox's certificates and revocations. The mailbox keeps its working keys, prekeys, and state.
 
 - **The mailbox makes and keeps each working key.** The identity holder certifies only the working key's public half. The steps run in this order:
   1. The mailbox gives the identity holder the public key and the lowest certificate serial that the certificate may have. That lowest serial is one above the highest certificate serial the mailbox knows of for itself (Section 5.2).
@@ -1665,7 +1665,7 @@ Dromas protects a message's content from everyone but the message's recipient. D
     - about a day, for a mailbox that renews daily and polls between renewals;
     - about two days, for a mailbox whose only drain is a daily one and which renews at the start of that drain.
   - The hour is for sends in flight. A server accepts a send only to the current prekey statement (Section 11.10, step 7). So once the server accepts a renewal, the server refuses a send to the prekey that the renewal replaced. A send that the server accepted before the renewal is stored and listed within that hour, or is not stored (Section 13).
-  - The bound keeps no state per peer, because the mailbox renews, drains and deletes on its own. The bound needs a server that accepts the mailbox's passes. A client that deletes by this hour relies on the promise of Section 13 on a send in flight, so that no message arrives sealed to a deleted prekey.
+  - The bound keeps no state per peer, because the mailbox renews, drains, and deletes on its own. The bound needs a server that accepts the mailbox's passes. A client that deletes by this hour relies on the promise of Section 13 on a send in flight, so that no message arrives sealed to a deleted prekey.
 - **A message waiting on the server is exposed until the mailbox fetches it.** A mailbox that stops renewing keeps its ended prekey as the current prekey. The mailbox's last messages stay exposed until the mailbox renews.
 - **A mailbox that no server accepts a pass from keeps its retired prekeys past their deletion time.** The mailbox keeps those prekeys until a server accepts a pass from the mailbox. This is because the mailbox cannot tell whether its clock is far ahead or a server is refusing the mailbox, and by that clock the mailbox deletes no key that a message may wait for.
 - **Forward secrecy depends on real deletion.** A key kept in a backup, a synced folder or a store with version history survives its deletion.
@@ -1768,7 +1768,7 @@ Dromas protects a message's content from everyone but the message's recipient. D
 - **Anything that terminates TLS for a server is part of the server.** A TLS terminator sees everything the server sees, and each pass in transit. For the minutes a pass has left, the pass does at that server everything that Section 15.5 lists. A third party in that position would replace the server for every mailbox whose pass the third party sees. That is why Section 11.1 keeps TLS inside the server.
 - **An address in a URL is seen wherever URLs are logged.** Such an address is seen, for example, by the party that terminates TLS, in a chat that unfurls links, and in a transcript. A leaked address is answered by a new mailbox and by revoking the old address.
 
-### 15.9. Addresses, messages and availability
+### 15.9. Addresses, messages, and availability
 
 - **An address is a send capability.** Keeping an address private is the first defence against unwanted messages. Sending to a mailbox hands that mailbox the sender's address, so the mailbox can write back.
 - **Authentic is not safe.** A signed message from a compromised or prompt-injected sender is genuine. Messages are data, never instructions: a verified signature proves who sent a message, not whether to obey the message. A mailbox's defence at the server is the mailbox's ACL, whose allow list names the senders that the mailbox accepts.
@@ -1796,7 +1796,7 @@ Dromas protects a message's content from everyone but the message's recipient. D
 
 ## 16. Test vectors
 
-`testdata/vectors/` has the conformance vectors: scenarios, each one file or the files that share one name, and the fixtures that scenarios share, such as mailboxes A, B and C. `testdata/vectors/README.md` gives each scenario's expected outcome, describes the vectors' format, and says how each vector is checked. A conforming client meets every vector of the parts it implements. The crypto and container vectors are checked by `age`, `head`, `sed`, `ssh-keygen` and `openssl`, which are tools written outside this project. The keys of the crypto and container vectors are published test keys.
+`testdata/vectors/` has the conformance vectors: scenarios, each one file or the files that share one name, and the fixtures that scenarios share, such as mailboxes A, B, and C. `testdata/vectors/README.md` gives each scenario's expected outcome, describes the vectors' format, and says how each vector is checked. A conforming client meets every vector of the parts it implements. The crypto and container vectors are checked by `age`, `head`, `sed`, `ssh-keygen`, and `openssl`, which are tools written outside this project. The keys of the crypto and container vectors are published test keys.
 
 <!-- vale off -->
 ## 17. References
