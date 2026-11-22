@@ -219,13 +219,13 @@ var failWrite func() error
 // once the mailbox's private files are judged (judgeFiles), the one place every
 // open comes through.
 //
-// It returns the database and the way to close it, which is closeState for a
-// reading: a process that another goroutine starts copies every open file
-// between its fork and its exec, and a flock is the open file's, so it lasts
-// until every copy is closed or one copy lets go of it (flock(2)). bbolt lets
-// go of a command's lock before it closes the file, and of a reading's never,
-// so closeState lets go of it first, as the gate's closing does (unflock): a
-// copy that outlived the close would make this program's next open wait for
+// It returns the database and the way to close it, which for a reading lets
+// go of the lock first: a process that another goroutine starts copies every
+// open file between its fork and its exec, and a flock is the open file's, so
+// it lasts until every copy is closed or one copy lets go of it (flock(2)).
+// bbolt lets go of a command's lock before it closes the file, and of a
+// reading's never, so the closer does, as the gate's closing does (unflock):
+// a copy that outlived the close would make this program's next open wait for
 // its own lock (#991).
 func (b *Mailbox) openState(ctx context.Context, readOnly bool) (*bolt.DB, func() error, error) {
 	if err := b.judgeFiles(); err != nil {

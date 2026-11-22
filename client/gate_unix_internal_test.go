@@ -14,16 +14,17 @@ import (
 // A copy of the state file and of the gate that outlives their close, as a
 // process that another goroutine starts holds one from its fork to its exec,
 // makes no later open of this program wait: a flock is the open file's, so
-// closeState and the gate's closing let go of it first (unflock, flock(2)).
+// openState's closer and the gate's closing let go of it first (unflock,
+// flock(2)).
 // recv --exec's program, started while recv's webhook read the mailbox, made
 // recv say once that it waited for its own lock (#991). The copies here are
 // dup(2)'s, the same open file a fork copies, kept open to the test's end.
 func TestACopyOfTheStateFileHeldPastItsCloseMakesNoOpenWait(t *testing.T) {
-	savedPatience, savedCopied := lockPatience, copiedHere
-	lockPatience = time.Second // a wait for a copy outlasts it, and is refused
+	SetLockPatience(t, time.Second) // a wait for a copy outlasts it, and is refused
+	savedCopied := copiedHere
 	var copies []int
 	t.Cleanup(func() {
-		lockPatience, copiedHere = savedPatience, savedCopied
+		copiedHere = savedCopied
 		for _, fd := range copies {
 			_ = syscall.Close(fd)
 		}
