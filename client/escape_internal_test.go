@@ -59,6 +59,29 @@ func TestEscapeUnseenEscapesWhatNobodySees(t *testing.T) {
 	}
 }
 
+// defaultIgnorable is Default_Ignorable_Code_Point exactly, derived as
+// DerivedCoreProperties.txt derives it, from the tables of Go's unicode
+// package (unicode.Version): a set built from the code points, never from
+// the list it holds.
+func TestDefaultIgnorableIsUnicodesDerivation(t *testing.T) {
+	t.Parallel()
+	listed := func(r rune) bool {
+		for _, x := range defaultIgnorable {
+			if r >= x[0] && r <= x[1] {
+				return true
+			}
+		}
+		return false
+	}
+	for r := rune(0); r <= unicode.MaxRune; r++ {
+		derived := (unicode.Is(unicode.Other_Default_Ignorable_Code_Point, r) || unicode.Is(unicode.Cf, r) || unicode.Is(unicode.Variation_Selector, r)) &&
+			!unicode.Is(unicode.White_Space, r) && !(r >= 0xFFF9 && r <= 0xFFFB) && !(r >= 0x13430 && r <= 0x13440) && !unicode.Is(unicode.Prepended_Concatenation_Mark, r)
+		if derived != listed(r) {
+			t.Errorf("U+%04X: Unicode %s says %v, the list %v", r, unicode.Version, derived, listed(r))
+		}
+	}
+}
+
 // No control character of Unicode's general category Cc reaches a line raw.
 // JSON carries U+0000 to U+001F only as escapes, and escapeUnseen escapes the
 // rest, U+007F and the C1 block, which JSON allows raw in a string. The set is

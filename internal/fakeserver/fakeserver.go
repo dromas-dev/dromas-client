@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/tls"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/hex"
@@ -156,6 +157,11 @@ func (s *Server) Client() *http.Client { return s.srv.Client() }
 
 // Certificate is the certificate of a server NewTLS made.
 func (s *Server) Certificate() *x509.Certificate { return s.srv.Certificate() }
+
+// TLS is the TLS configuration of a server NewInMemoryHTTP2 or NewTLS made,
+// its certificate and key among it: a test's own server at its address
+// serves with it.
+func (s *Server) TLS() *tls.Config { return s.srv.TLS }
 
 // newServer is a server on the clock now, and the handler that serves it.
 func newServer(t testing.TB, now func() time.Time) (*Server, http.Handler) {

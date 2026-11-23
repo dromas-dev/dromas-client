@@ -62,10 +62,12 @@ type Options struct {
 	// with no bound on the whole, so a message of any size moves on a slow
 	// link (#381); the rest of such a request, a send's answer once its
 	// ciphertext is sent and a fetch's answer that is not its ciphertext, and
-	// any other request, after a minute in all. A client
-	// given here is used as it is, its own timeouts its choice, and none of
-	// those bounds is added. The mailbox uses a copy of it that follows no
-	// redirect ([followNone]).
+	// any other request, after a minute in all. A client given here keeps
+	// its own timeouts, and none of those bounds is added. The mailbox uses a
+	// copy of it that follows no redirect ([followNone]), and where its
+	// transport is an *http.Transport, a clone of that which asks for no
+	// compressed answer and calls a server on this machine through no proxy
+	// (newTransport).
 	HTTPClient *http.Client
 	// RootCAs, if not nil, is the only set of certificates the server's TLS
 	// certificate may chain to, in place of the system's CAs. So the client
@@ -415,13 +417,17 @@ func (t *transport) renew(was *http.RoundTripper) {
 // machine, or one named localhost in any case, through no proxy, whatever
 // the transport's Proxy or the environment names (PROTOCOL.md §11.1): Go's
 // ProxyFromEnvironment exempts every loopback IP and the name localhost in
-// lowercase alone.
+// lowercase alone. It asks for no compressed answer, where net/http's asks for
+// gzip: a server never compresses (PROTOCOL.md §11.2), and anything in front
+// of it that would brings the leak of a compressed answer's length (§15.8). A
+// transport of another type is its giver's to set so.
 func newTransport(rt http.RoundTripper) http.RoundTripper {
 	if rt == nil {
 		rt = http.DefaultTransport
 	}
 	if ht, ok := rt.(*http.Transport); ok {
 		c := ht.Clone()
+		c.DisableCompression = true
 		proxy := c.Proxy
 		c.Proxy = func(r *http.Request) (*url.URL, error) {
 			if h := protocol.LowerASCII(r.URL.Hostname()); h == "localhost" || onThisMachine(h) || proxy == nil {

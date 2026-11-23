@@ -3,6 +3,8 @@ package client_test
 import (
 	"context"
 	"crypto/tls"
+	"errors"
+	"io"
 	"net"
 	"net/http"
 	"sync"
@@ -13,6 +15,7 @@ import (
 
 	"github.com/dromas-dev/dromas-client/client"
 	"github.com/dromas-dev/dromas-client/internal/fakeserver"
+	"golang.org/x/net/http2"
 )
 
 // forgetful is a connection a network can forget: from then on nothing it sends
@@ -296,6 +299,139 @@ func TestAnAnswerThatStallsInItsBodyOverHTTP2IsSilent(t *testing.T) {
 		// below how long the hold lived.
 		if h.KeepAlive != 2*time.Minute+22*time.Second {
 			t.Errorf("keep-alive %v", h.KeepAlive)
+		}
+	})
+}
+
+// goAwayMailbox is a mailbox of the default client over HTTP/2 whose every new
+// connection reaches a server that answers each request with GOAWAY and closes
+// the connection, as one that sheds every connection does, once the mailbox
+// has received once (its tag kept), each GOAWAY after the request has waited
+// after. dials counts its connections; past 100 the test fails.
+func goAwayMailbox(t *testing.T, after time.Duration) (b *client.Mailbox, dials *atomic.Int32) {
+	t.Helper()
+	e, m := newHTTP2Mailbox(t)
+	serve := e.srv.TLS().Clone()
+	serve.NextProtos = []string{"h2"}
+	config := e.http.Transport.(*http.Transport).TLSClientConfig.Clone()
+	config.NextProtos = []string{"h2"}
+	dials = new(atomic.Int32)
+	var mu sync.Mutex
+	var ends []net.Conn
+	t.Cleanup(func() {
+		mu.Lock()
+		defer mu.Unlock()
+		for _, c := range ends {
+			_ = c.Close()
+		}
+	})
+	client.UseDefaultClient(m.b, func(context.Context, string, string) (net.Conn, error) {
+		// A held call that ends nowhere fails here, where it would run on.
+		if n := dials.Add(1); n > 100 {
+			t.Errorf("connection %d: the call did not end", n)
+			return nil, net.ErrClosed
+		}
+		near, far := net.Pipe()
+		mu.Lock()
+		ends = append(ends, near, far)
+		mu.Unlock()
+		go goAway(tls.Server(far, serve), after)
+		return tls.Client(near, config), nil
+	})
+	return m.b, dials
+}
+
+// goAway answers the first request on c with GOAWAY, after it has waited
+// after, and closes c. It writes apart from its reading and reads until c
+// closes, as a server does: c is a pipe, which holds nothing a side writes
+// until the other reads it.
+func goAway(c net.Conn, after time.Duration) {
+	writes := make(chan func() error, 4)
+	go func() {
+		defer c.Close() //nolint:errcheck // a test's connection
+		for w := range writes {
+			if w() != nil {
+				return
+			}
+		}
+	}()
+	defer close(writes)
+	if _, err := io.ReadFull(c, make([]byte, len(http2.ClientPreface))); err != nil {
+		return
+	}
+	fr := http2.NewFramer(c, c)
+	writes <- func() error { return fr.WriteSettings() }
+	var shed bool
+	for {
+		f, err := fr.ReadFrame()
+		if err != nil {
+			return
+		}
+		switch f := f.(type) {
+		case *http2.SettingsFrame:
+			if !f.IsAck() && !shed {
+				writes <- fr.WriteSettingsAck
+			}
+		case *http2.HeadersFrame:
+			if !shed {
+				shed = true
+				writes <- func() error {
+					time.Sleep(after)
+					_ = fr.WriteGoAway(0, http2.ErrCodeNo, nil)
+					return net.ErrClosed // and close c
+				}
+			}
+		}
+	}
+}
+
+// A server that answers each new connection with GOAWAY, which net/http sends a
+// request again past without end, has a hold end unanswered at its second
+// connection, a call that holding again may get past.
+func TestAHoldAnsweredGoAwayOnEachConnectionEnds(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		b, dials := goAwayMailbox(t, 0)
+		start := time.Now()
+		h, err := b.Hold(t.Context(), 3*time.Second)
+		if h != nil || !client.Transient(err) || time.Since(start) >= 3*time.Second || dials.Load() != 2 {
+			t.Errorf("%+v, %v, after %v over %d connections", h, err, time.Since(start), dials.Load())
+		}
+	})
+}
+
+// Against the same server Await returns by until, having handed over a retry:
+// no hold runs past its bound, and the server holds none past its wait.
+func TestAwaitAnsweredGoAwayOnEachConnectionReturnsByUntil(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		b, _ := goAwayMailbox(t, 0)
+		start := time.Now()
+		var retries int
+		err := b.Await(t.Context(), start.Add(5*time.Second), func(_ context.Context, ev client.Event) error {
+			if ev.Kind == client.EventRetry {
+				retries++
+			}
+			return nil
+		})
+		if err != nil || time.Since(start) > 5*time.Second || retries == 0 {
+			t.Errorf("%v, after %v with %d retries", err, time.Since(start), retries)
+		}
+	})
+}
+
+// A post that a server answers with GOAWAY on each connection, a second after
+// it began, is sent again by net/http from its body's start each time: bytes
+// sent already, which are no progress, so the post is cut at requestTimeout
+// from the last byte that was (copyOf), over fewer connections than seconds.
+// The second's wait gives every copy time to read all it reads, and moves
+// nothing past the first copy: the server sends no WINDOW_UPDATE, so each copy
+// stops at the stream's window of 65,535 bytes.
+func TestAPostAnsweredGoAwayOnEachConnectionIsCutAtItsStall(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		b, dials := goAwayMailbox(t, time.Second)
+		start := time.Now()
+		err := client.PostCiphertext(t.Context(), b, "/v1/"+b.Address().String()+"/messages", make([]byte, 4<<20))
+		if took := time.Since(start); !errors.Is(err, context.DeadlineExceeded) || took > time.Minute+time.Second {
+			t.Errorf("%v, after %v over %d connections", err, took, dials.Load())
 		}
 	})
 }
