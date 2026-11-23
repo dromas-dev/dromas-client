@@ -2065,23 +2065,22 @@ dr_recv`
 }
 
 // The script's pass names the server as the Go client's does: its host,
-// lowercase, with no user before it, and its port as a number, with none when
+// lowercase, and its port as a number, with none when
 // it is 80 or 443 (PROTOCOL.md §8; client's TestAPassNamesTheServer holds the Go
 // client to the same).
 func TestTheScriptsPassNamesTheServer(t *testing.T) {
 	t.Parallel()
 	need(t, "bash")
 	for base, want := range map[string]string{
-		"https://dromas.dev":              "dromas.dev",
-		"https://dromas.dev:443":          "dromas.dev",
-		"https://Dromas.dev:0443/":        "dromas.dev",
-		"https://someone@dromas.dev:8443": "dromas.dev:8443",
-		"http://dromas:443":               "dromas",
-		"http://dromas:8080":              "dromas:8080",
-		"http://dromas:80":                "dromas",
-		"http://dromas:":                  "dromas",
-		"http://[::1]:8080":               "[::1]:8080",
-		"https://[::1]:443":               "[::1]",
+		"https://dromas.dev":       "dromas.dev",
+		"https://dromas.dev:443":   "dromas.dev",
+		"https://Dromas.dev:0443/": "dromas.dev",
+		"http://dromas:443":        "dromas",
+		"http://dromas:8080":       "dromas:8080",
+		"http://dromas:80":         "dromas",
+		"http://dromas:":           "dromas",
+		"http://[::1]:8080":        "[::1]:8080",
+		"https://[::1]:443":        "[::1]",
 	} {
 		if got, err := bash(t, nil, "dr_server '"+base+"'"); err != nil || got != want+"\n" {
 			t.Errorf("%s: the pass names %q, %v; want %q", base, got, err, want)
@@ -2103,6 +2102,7 @@ func TestBothClientsCallTheSameServers(t *testing.T) {
 		"http://example.com", "http://dromas:8080", "http://10.0.0.1:8080", "http://127.0.0.256", "http://127.01.0.1",
 		"http://127.0.0.1.example", "http://localhost.example", "http://localhost:1", "http://LOCALHOST", "http://[::2]:8080", "http://[::ffff:127.0.0.1]:8080",
 		"ftp://dromas.dev", "dromas.dev", "https://", "http://",
+		"https://dromas.dev/", "https://u:p@dromas.dev", "https://dromas.dev/api", "https://dromas.dev/v1/", "https://dromas.dev?x=1", "https://dromas.dev/?", "https://dromas.dev#f", "https://dromas.dev#", "https://dromas.dev/#", "https://dromas.dev//", "http://127.0.0.1:8080/x",
 	} {
 		_, err := client.Open(t.TempDir(), client.Options{Base: u})
 		goTakes := err == nil || !strings.Contains(err.Error(), refusal)

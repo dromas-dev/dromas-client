@@ -31,23 +31,22 @@ func TestOnlyTheDefaultClientIsBoundedByTheMailbox(t *testing.T) {
 	}
 }
 
-// A pass names the server by its host, lowercase, with no user before it, and
+// A pass names the server by its host, lowercase, and
 // its port as a number, with none when it is 80 or 443, so
 // https://dromas.dev:443 and https://dromas.dev name one server, as the server
 // reads its Host (PROTOCOL.md §8).
 func TestAPassNamesTheServer(t *testing.T) {
 	t.Parallel()
 	for base, want := range map[string]string{
-		"https://dromas.dev":              "dromas.dev",
-		"https://dromas.dev:443":          "dromas.dev",
-		"https://Dromas.dev:0443/":        "dromas.dev",
-		"https://someone@dromas.dev:8443": "dromas.dev:8443",
-		"http://dromas:443":               "dromas",
-		"http://dromas:8080":              "dromas:8080",
-		"http://dromas:80":                "dromas",
-		"http://dromas:":                  "dromas",
-		"http://[::1]:8080":               "[::1]:8080",
-		"https://[::1]:443":               "[::1]",
+		"https://dromas.dev":       "dromas.dev",
+		"https://dromas.dev:443":   "dromas.dev",
+		"https://Dromas.dev:0443/": "dromas.dev",
+		"http://dromas:443":        "dromas",
+		"http://dromas:8080":       "dromas:8080",
+		"http://dromas:80":         "dromas",
+		"http://dromas:":           "dromas",
+		"http://[::1]:8080":        "[::1]:8080",
+		"https://[::1]:443":        "[::1]",
 	} {
 		if got, err := (&Mailbox{base: strings.TrimRight(base, "/")}).serverName(); err != nil || got != want {
 			t.Errorf("%s: the pass names %q, %v; want %q", base, got, err, want)
@@ -69,7 +68,7 @@ func TestAPassNamesTheServer(t *testing.T) {
 // (PROTOCOL.md §8, §11.1).
 func TestHTTPSOnPort80IsRefused(t *testing.T) {
 	t.Parallel()
-	for _, base := range []string{"https://dromas.dev:80", "https://dromas.dev:0080/", "HTTPS://Dromas.dev:80", "https://someone@dromas.dev:80", "https://[::1]:80"} {
+	for _, base := range []string{"https://dromas.dev:80", "https://dromas.dev:0080/", "HTTPS://Dromas.dev:80", "https://[::1]:80"} {
 		if _, err := newMailbox(t.TempDir(), Options{Base: base}); err == nil || !strings.Contains(err.Error(), "never on port 80") {
 			t.Errorf("%s: %v", base, err)
 		}

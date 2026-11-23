@@ -189,6 +189,7 @@ func TestAServerIsCalledOverHTTPSOrOnThisMachine(t *testing.T) {
 		"http://example.com", "http://dromas:8080", "http://10.0.0.1:8080", "http://172.28.0.2:8080",
 		"http://127.0.0.1.example", "http://localhost.example", "http://localhost:8080", "http://LOCALHOST", "http://[::2]:8080", "http://[::ffff:127.0.0.1]:8080",
 		"http://0:0:0:0:0:0:0:1", "ftp://dromas.dev", "dromas.dev", "https://", "http://", "",
+		"https://someone@dromas.dev", "https://u:p@dromas.dev", "http://someone@127.0.0.1:1", "https://dromas.dev/api", "https://dromas.dev/v1", "https://dromas.dev?x=1", "https://dromas.dev/?", "https://dromas.dev#f", "https://dromas.dev#", "https://dromas.dev/#", "https://dromas.dev//",
 	} {
 		rt := &recorder{}
 		dir := filepath.Join(t.TempDir(), "mailbox")
@@ -217,7 +218,7 @@ func TestAServerIsCalledOverHTTPSOrOnThisMachine(t *testing.T) {
 	}
 	for _, u := range []string{
 		"https://dromas.dev", "HTTPS://dromas.dev", "https://10.0.0.1:8443",
-		"http://127.0.0.1:1", "http://127.255.0.9", "http://[::1]:1", "http://someone@127.0.0.1:1",
+		"http://127.0.0.1:1", "http://127.255.0.9", "http://[::1]:1", "https://dromas.dev/",
 	} {
 		rt := &recorder{}
 		_, err := client.Init(ctx, t.TempDir(), client.Options{Base: u, HTTPClient: &http.Client{Transport: rt}})

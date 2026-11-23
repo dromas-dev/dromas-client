@@ -760,7 +760,7 @@ A revocation record carries an identity's revocations, and the record proves its
 ### 11.1. Transport
 
 - **A client MUST call its server over `https`, with one exception.** The exception is a server on the client's own machine, named by an address in `127.0.0.0/8` or by `[::1]`. A client MAY call such a server over `http`. The name `localhost` is not such an address.
-- **A client MUST refuse a URL of any other form before the client sends anything.** A client MUST also refuse an `https` URL with a port of 80.
+- **A server's URL is a scheme, a host and an optional port.** A client MUST refuse a URL of any other form before the client sends anything: one with user information, a path other than `/`, a query or a fragment among them. A client MUST also refuse an `https` URL with a port of 80.
 - **A client MUST send a call to a loopback address, or to `localhost`, without a proxy.**
 - **A server's names are the names that the server's operator gives the server.** Each name is written as Section 8 writes a server name.
 - **A server SHOULD terminate its own TLS, on hosts its operator runs, with no third party between a client and the server.** Anything that terminates TLS for a server is part of the server (Section 15.8).

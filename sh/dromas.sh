@@ -112,20 +112,21 @@ dr_clock(){ # after a call the server refused: if it refused the pass, or a prek
   d=$(dr_dated) && d="the server dates its answer $d, and "
   dr_err "${d}this machine's clock reads $(jq -nr --argjson t "$(dr_now)" '$t | todate'). A server refuses a pass from a clock 10 minutes or more behind its own, or more than 50 ahead, and a prekey statement dated more than an hour ahead of it. Check this machine's clock against a time source you trust, not against the server"
 }
-dr_server(){ # <URL> → the server's name, as a pass names it (PROTOCOL.md §8): the URL's host, lowercase, and its port as a number, with none when it is 80 or 443. A user and an @ before the host are no part of it, as Go's url.Parse has it
+dr_server(){ # <URL> → the server's name, as a pass names it (PROTOCOL.md §8): the URL's host, lowercase, and its port as a number, with none when it is 80 or 443
   local h=${1#*://} p=
-  h=${h%%[/?#]*}; h=${h##*@}; h=${h,,}
+  h=${h%%[/?#]*}; h=${h,,}
   if [[ $h =~ ^(.*):([0-9]*)$ ]]; then h=${BASH_REMATCH[1]}; p=${BASH_REMATCH[2]}; fi      # an IPv6 address ends in ], so a colon there begins no port
   [ -z "$p" ] || { p=$((10#$p)); case $p in 443 | 80) ;; *) h+=:$p ;; esac; }
   echo "$h"
 }
 dr_here(){ # <URL> [localhost] → 0 when the URL's host is this machine by its address, an IPv4 address in 127.0.0.0/8 or [::1], and with localhost, that name too. Other spellings of an IPv6 loopback address are read as no address of this machine
-  local h=${1#*://}; h=${h%%[/?#]*}; h=${h##*@}; h=${h,,}
+  local h=${1#*://}; h=${h%%[/?#]*}; h=${h,,}
   [[ $h =~ ^(.*):[0-9]*$ ]] && h=${BASH_REMATCH[1]}      # an IPv6 address ends in ], so a colon there begins no port
   [[ $h = '[::1]' || $h =~ ^127(\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])){3}$ || ( ${2-} = localhost && $h = localhost ) ]]
 }
 dr_tls(){ # <URL> → 0 when it is a server this mailbox may call: https, or http only to a server on this machine, by its address: an IPv4 address in 127.0.0.0/8, or [::1]. A name is not, since localhost is what a resolver says it is (RFC 8252 §8.3), so that a pass, or the address a lookup asks about, never crosses a network in the clear (PROTOCOL.md §11.1). Otherwise a refusal, and 1
   local h=${1#*://}; h=${h%%[/?#]*}
+  [[ $h != *@* && ${1#*://"$h"} =~ ^/?$ ]] || { dr_refuse "$(printf '%.80s' "$1") is not a server this client calls: one is a scheme, a host and an optional port, with no user information, query or fragment, and no path but /"; return 1; }      # PROTOCOL.md §11.1, as the Go client's bare
   if [[ ${1,,} = https://?* && $h =~ :0*80$ ]]; then dr_refuse "$(printf '%.80s' "$1") is not a server this client calls: https is never on port 80"; return 1; fi      # its server name would drop the port (PROTOCOL.md §8, §11.1). An IPv6 address ends in ], so a colon there begins no port
   [[ ${1,,} = https://?* ]] || { [[ ${1,,} = http://?* ]] && dr_here "$1"; } ||
     dr_refuse "$(printf '%.80s' "$1") is not a server this client calls: one is https, or http only to this machine, by its address (127.0.0.0/8, ::1)"
@@ -848,6 +849,7 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
     dr_init) for a; do [ "$a" = --restore ] || dr_wrong "dromas.sh init takes no option but --restore, and no argument: $a" "$dr_use" "bash dromas.sh help init"; done ;;
   esac
   dr_tls "$DR_SERVER_URL" || exit 1      # refused before anything, as the Go client refuses to open a mailbox whose server it would not call
+  DR_SERVER_URL=${DR_SERVER_URL%/}      # a path of / is taken and dropped, as the Go client drops it, so every call and link is $DR_SERVER_URL/v1/… and $DR_SERVER_URL/to/…
   dr_p256 || exit 1      # refused before anything: a build that cannot verify every type the protocol defines takes part in no exchange
   "$dr_cmd" "$@"
 fi

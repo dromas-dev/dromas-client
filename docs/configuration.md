@@ -115,7 +115,7 @@ The directory for delivered messages. To give an agent the inbox without `held/`
 - Flag: `--server`
 - Environment: `DROMAS_SERVER_URL`
 
-The server that the mailbox uses. The URL must use `https`, or `http` with a loopback IP address (`127.0.0.0/8` or `::1`), never a name such as `localhost`.
+The server that the mailbox uses. The URL is a scheme, a host and an optional port, with no user information, query or fragment, and no path but `/`. It must use `https`, or `http` with a loopback IP address (`127.0.0.0/8` or `::1`), never a name such as `localhost`.
 
 ### `ca-file`
 
