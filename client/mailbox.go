@@ -308,7 +308,11 @@ func newMailbox(dir string, opt Options) (*Mailbox, error) {
 	if b.base == "" {
 		b.base = DefaultBase
 	}
-	if err := checkServerURL(b.base); err != nil {
+	raw := opt.Base
+	if raw == "" {
+		raw = DefaultBase
+	}
+	if err := checkServerURL(raw); err != nil {
 		return nil, err
 	}
 	if opt.RootCAs != nil && opt.HTTPClient != nil {
@@ -445,9 +449,14 @@ func CheckServerURL(s string) error { return checkServerURL(s) }
 // has left, and a lookup names the address it asks about, so neither
 // crosses a network in the clear (RFC 6750 §5.3). Nothing allows more. https on
 // port 80 is refused too: its server name would drop the port (PROTOCOL.md §8,
-// §11.1), and no server is there.
+// §11.1), and no server is there. The URL is a scheme, a host and an optional
+// port alone ([bare]); an empty fragment, which net/url does not record, is
+// refused by its "#".
 func checkServerURL(s string) error {
 	u, err := url.Parse(s)
+	if err == nil && (!bare(u) || strings.Contains(s, "#")) {
+		return fmt.Errorf("%.80q is not a server this client calls: one is a scheme, a host and an optional port, with no user information, query or fragment, and no path but /", s)
+	}
 	if err == nil && httpsOnPort80(u) {
 		return fmt.Errorf("%.80q is not a server this client calls: https is never on port 80", s)
 	}
@@ -455,6 +464,15 @@ func checkServerURL(s string) error {
 		return nil
 	}
 	return fmt.Errorf("%.80q is not a server this client calls: one is https, or http only to this machine, by its address (127.0.0.0/8, ::1)", s)
+}
+
+// bare reports whether u is a scheme, a host and an optional port alone, as
+// PROTOCOL.md §11.1 has a server's URL: no user information, which the Go
+// client would send as Basic authentication (RFC 3986 §3.2.1 deprecates a
+// password there), and no path but "/", query or fragment, since every API
+// path is under /v1/ at the host.
+func bare(u *url.URL) bool {
+	return u.User == nil && u.Opaque == "" && (u.Path == "" || u.Path == "/") && u.RawQuery == "" && !u.ForceQuery && u.Fragment == "" && u.RawFragment == ""
 }
 
 // httpsOnPort80 reports whether u is https on port 80, whose server name would
