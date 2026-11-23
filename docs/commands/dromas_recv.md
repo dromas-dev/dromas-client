@@ -62,8 +62,8 @@ Nothing of a message is ever on the command line. recv discards the program's
 stdout and stderr. The programs run one at a time, with the mailbox's lock free,
 so a program can run dromas. Each message is kept in inbox/ first, so the
 program is a notification and never the only copy. A message held in held/ runs
-no program, and neither does a message that another recv receives, so run one
-recv for each mailbox.
+no program. Two recv on one mailbox can each run the program for the same
+message, so run one recv for each mailbox.
 
 A program's exit status 0 means done, and 100 means failed for good. recv tries
 again after any other exit status, a signal, a run longer than --exec-timeout

@@ -227,6 +227,11 @@ func TestTheServersDocumentBreaksItsFormAsItSays(t *testing.T) {
 		`{"server":{"name":"a","version":"` + strings.Repeat("1", 129) + `"}}`:                "version",
 		`{"server":{"name":"a","version":"v1","revision":"é"}}`:                               "revision",
 		`{"deprecations":[{"version":"1.0","effective_at":"2027-02-01T00:00:00Z"}],"sunsets":[{"version":"1.0","effective_at":"2027-01-31T23:59:59Z"}]}`: "sunsets",
+		// A sunset of fewer versions than a deprecation, before it: 0.5 would
+		// be answered a Sunset before its Deprecation (RFC 9745 §4).
+		`{"deprecations":[{"below":"0.7","effective_at":"2027-06-01T00:00:00Z"}],"sunsets":[{"below":"0.6","effective_at":"2027-01-01T00:00:00Z"}]}`:   "sunsets",
+		`{"deprecations":[{"below":"2.0","effective_at":"2027-06-01T00:00:00Z"}],"sunsets":[{"below":"1.0","effective_at":"2027-01-01T00:00:00Z"}]}`:   "sunsets",
+		`{"deprecations":[{"below":"1.0","effective_at":"2027-06-01T00:00:00Z"}],"sunsets":[{"version":"0.5","effective_at":"2027-01-01T00:00:00Z"}]}`: "sunsets",
 	} {
 		var d ServerDocument
 		if err := Unmarshal([]byte(withMax(text)), &d); err != nil || d.MaxCertificateLifetime != 1 {
@@ -236,11 +241,14 @@ func TestTheServersDocumentBreaksItsFormAsItSays(t *testing.T) {
 			t.Errorf("%s: %v, naming %q, want %q", text, err, Member(err), member)
 		}
 	}
-	// A sunset on its deprecation's date, or of other versions, is no
-	// sunset earlier than a deprecation.
+	// A sunset on its deprecation's date, one of other versions, and one
+	// after the earliest deprecation of its versions give no answer a Sunset
+	// earlier than its Deprecation.
 	for _, text := range []string{
 		`{"deprecations":[{"version":"1.0","effective_at":"2027-02-01T00:00:00Z"}],"sunsets":[{"version":"1.0","effective_at":"2027-02-01T00:00:00Z"}]}`,
 		`{"deprecations":[{"version":"1.0","effective_at":"2027-02-01T00:00:00Z"}],"sunsets":[{"below":"1.0","effective_at":"2027-01-01T00:00:00Z"},{"version":"1.1","effective_at":"2027-01-01T00:00:00Z"}]}`,
+		`{"deprecations":[{"version":"0.6","effective_at":"2027-06-01T00:00:00Z"}],"sunsets":[{"below":"0.6","effective_at":"2027-01-01T00:00:00Z"}]}`,
+		`{"deprecations":[{"below":"0.7","effective_at":"2027-06-01T00:00:00Z"},{"below":"0.6","effective_at":"2026-12-01T00:00:00Z"}],"sunsets":[{"below":"0.6","effective_at":"2027-01-01T00:00:00Z"}]}`,
 	} {
 		var d ServerDocument
 		if err := Unmarshal([]byte(withMax(text)), &d); err != nil {

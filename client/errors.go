@@ -176,7 +176,7 @@ func (e *APIError) words() string {
 	case protocol.CodePrekeySuperseded:
 		return "the mailbox has a newer prekey than the one the message was encrypted to"
 	case protocol.CodePrekeyExpired:
-		return "the mailbox's prekey has expired at the server, so it takes no messages until its owner renews it"
+		return "the mailbox's prekey has ended, or its signer is revoked, at the server, so it takes no messages until its owner renews it"
 	case protocol.CodeRequestTimeout:
 		return "the server stopped waiting for the request's body, which arrived too slowly for it: send it again"
 	case protocol.CodeMailboxRevoked:

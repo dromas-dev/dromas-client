@@ -562,7 +562,7 @@ func TestScriptChecksTheMailboxItIsServed(t *testing.T) {
 		}
 	}
 	st, _ := w.srv.Prekey(b.addr)
-	w.reading(b.addr, func(br *protocol.MailboxResponse) { br.Prekey = withLine(br.Prekey, 4, op.recipient()) })
+	w.reading(b.addr, func(br *protocol.MailboxResponse) { br.Prekey = withLine(br.Prekey, 5, op.recipient()) })
 	refused("the operator swaps B's prekey", a, b.addr.String(), "not signed by its identity, or by a working key its identity certified")
 	w.honest()
 	if r := a.send(b.addr.String(), "bad \xff byte"); r.rc == 0 || !strings.Contains(r.err, "not UTF-8") || !a.bare() || w.posts(b.addr) != 1 {

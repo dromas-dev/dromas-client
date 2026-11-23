@@ -79,7 +79,7 @@ The program runs at least once for each message, and a crash can make it run twi
 
 If the program fails, `recv` tries it at most 3 times in total. When `recv` gives up on a message's program, `dromas status` reports the message under `attention` until you run `dromas inbox clear-failed`. That command clears the record of every message whose program `recv` gave up on, but not the record of a message that still has tries left. The messages stay in `inbox/`. Nothing runs the program again for a message that `recv` gave up on. To pass the message to a program yourself, run `dromas inbox show <id> | <program>`.
 
-`recv` doesn't run the program for a held message, or for a message that another `recv` received. Run one `recv` for each mailbox.
+`recv` doesn't run the program for a held message. Two `recv` processes on one mailbox can each run the program for the same message, so run one `recv` for each mailbox.
 
 ### Send each message to a webhook
 
@@ -291,7 +291,7 @@ Back up these files:
 - Your config file.
 - The `allowed`, `blocked`, and `aliases` lists.
 
-`prekeys/`, `work/`, and `tls-ticket` don't need a backup, because a restored mailbox makes new ones. A backup that contains `prekeys/` can still decrypt messages after the mailbox deletes its keys. Anyone who reads `tls-ticket` and is on the network path can impersonate your server to this mailbox. It's safe to delete `tls-ticket`. `state` doesn't need a backup.
+`prekeys/`, `work/`, and `tls-ticket` don't need a backup, because a restored mailbox makes new ones. A backup that contains `prekeys/` can still decrypt messages after the mailbox deletes its keys. Anyone who reads `tls-ticket` and is on the network path can impersonate your server to this mailbox. It's safe to delete `tls-ticket`. `state` doesn't need a backup, but a lost `state` loses the replay set and every revocation that the mailbox kept, of other mailboxes and its own (see [Restore required](#restore-required)).
 
 To restore a mailbox:
 
@@ -304,7 +304,7 @@ Without `allowed` and `blocked`, the first renewal that `recv` makes replaces th
 
 The mailbox stops with `restore_required` when `prekeys/` holds a prekey that `state` doesn't name. This happens when `state` is lost and `prekeys/` isn't, or when you restore `state` from a copy older than the last prekey renewal and keep `prekeys/`. Until you run `dromas init --restore`, the mailbox doesn't receive, send, deliver, or renew anything. `dromas init --restore` adopts the prekeys in `prekeys/` and then renews.
 
-When `state` is lost, its replay set is lost with it, so the mailbox might deliver a message again that it already accepted (`PROTOCOL.md` §15.9). If your agent's work must not happen twice, key the work by `from` and `msg_id`.
+When `state` is lost, its replay set and every revocation that the mailbox kept, of other mailboxes and its own, are lost with it. So the mailbox might deliver a message again that it already accepted. Until the mailbox sees a lost revocation again, it might also accept a message that the revocation covers, send to a revoked address or certificate, or sign under its own revoked one (`PROTOCOL.md` §15.9). If your agent's work must not happen twice, key the work by `from` and `msg_id`.
 
 ## Protect the identity key
 

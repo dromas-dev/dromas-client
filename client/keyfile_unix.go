@@ -16,7 +16,9 @@ const keyFix = "chmod 600 it; a mounted secret takes its mode from the mount (a 
 // owns is that user's to guard, as ssh(1) leaves it: a root-owned 0440 secret
 // mounted for a pod's group is read as it is. It judges the identity, a key its
 // owner may put in place, and a webhook's header and secret files. The keys and
-// the ticket the client writes are private files (checkPrivateFile).
+// the ticket the client writes are private files (checkPrivateFile). It
+// judges the mode alone, as sshkey_perm_ok does: an access list on the file,
+// such as one a macOS directory passes down, is never read.
 func checkKeyFile(path string) error { return checkKeyFileAs(path, os.Getuid()) }
 
 func checkKeyFileAs(path string, me int) error {

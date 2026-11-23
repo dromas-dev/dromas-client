@@ -318,7 +318,7 @@ dr_signed(){ # <address> <identity document> <namespace> <signature> <message> [
   fi
   r=$(dr_cert "$4" "$2" "$A") || return 1; read -r n a b <<< "$r"
   printf '%s cert-authority %s\n' "$A" "$(sed -n 2p "$2")" > "$DR/signers"      # ONE line, the other form's: only a certificate this identity signed, for this address
-  ssh-keygen -Y verify -f "$DR/signers" -I "$A" -n "$3" -s "$4" -O verify-time="$(dr_stamp $((a > 0 ? a : 1)))" < "$5" > /dev/null 2>&1 || return 1      # the two signatures, the identity's on the certificate and the working key's on the message, judged where the certificate begins (a second in, for one that begins at 0: ssh-keygen takes no verify-time of 0); the time is the next line's. A verifier sets no bound on how long one runs (PROTOCOL.md §5.2)
+  ssh-keygen -Y verify -f "$DR/signers" -I "$A" -n "$3" -s "$4" -O verify-time="$(dr_stamp $((a > 0 ? a : 1)))" < "$5" > /dev/null 2>&1 || return 1      # the two signatures, the identity's on the certificate and the working key's on the message, judged where the certificate begins (a second in, for one that begins at 0: ssh-keygen takes no verify-time of 0); the time is the next line's. How long one runs is bounded in dr_cert (PROTOCOL.md §5.2)
   [ "$a" -le "$t" ] || return 3; [ "$t" -lt "$b" ] || return 2
   echo "$n"
 }
