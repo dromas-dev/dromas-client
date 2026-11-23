@@ -91,7 +91,7 @@ Each vector has three files:
 Certificates of D's and E's, with the same three files as `cert/bad-*`, each statement in its own mailbox's namespace:
 
 - `d-bad-no-user-presence` and `e-bad-no-user-presence`: the identity's signature on the certificate has flags without user presence.
-- `d-bad-webauthn`: the identity's signature on the certificate is a `webauthn-sk-ecdsa-sha2-nistp256@openssh.com` signature. Go's `x/crypto/ssh` doesn't parse such a certificate.
+- `d-bad-webauthn`: the identity's signature on the certificate is a `webauthn-sk-ecdsa-sha2-nistp256@openssh.com` signature. Go's `x/crypto/ssh` doesn't parse such a certificate. Such a signature carries the base64 of what it signs, so every signature under the certificate is longer than the bound (PROTOCOL.md §3.2), and a reader refuses it before it reads the certificate.
 - `d-bad-working-key-a-security-key`: the certified key is E's identity key, a security key, where a working key is `ssh-ed25519`. E's key signed the signature under it.
 
 **Expected result:** every vector is refused for its mailbox. `ssh-keygen -Y verify` accepts the first three.

@@ -165,8 +165,8 @@ const webauthnFormat = "webauthn-sk-ecdsa-sha2-nistp256@openssh.com"
 func (w webauthnSigner) PublicKey() ssh.PublicKey { return w.pub }
 
 func (w webauthnSigner) Sign(_ io.Reader, data []byte) (*ssh.Signature, error) {
-	const origin = "https://dromas.example"
-	client := `{"type":"webauthn.get","challenge":"` + base64.RawURLEncoding.EncodeToString(data) + `","origin":"` + origin + `","crossOrigin":false}`
+	const origin = "ssh:" // short, so an SSHSIG of it is within the bound: a certificate's never is
+	client := `{"type":"webauthn.get","challenge":"` + base64.RawURLEncoding.EncodeToString(data) + `","origin":"` + origin + `"}`
 	ch := sha256.Sum256([]byte(client))
 	h := sha256.Sum256(u2fSigned(sktest.UserPresent, 0, ch[:]))
 	der, err := w.priv.Sign(nil, h[:], crypto.SHA256) // a nil rand: RFC 6979
@@ -504,6 +504,9 @@ func TestVectorsSecurityKeyRefusals(t *testing.T) {
 			if _, err := VerifySigned(id, st, read(t, f), ns, now); err == nil {
 				t.Errorf("%s: taken", f)
 			}
+			if len(read(t, f)) > MaxSignature {
+				t.Errorf("%s: longer than the bound, so its form is not what refuses it", f)
+			}
 			if _, err := Dearmor(read(t, f)); (err == nil) != form {
 				t.Errorf("%s: in its one form: %v, want %v", f, err == nil, form)
 			}
@@ -519,8 +522,11 @@ func TestVectorsSecurityKeyRefusals(t *testing.T) {
 			}
 			key, _, _, _, err := ssh.ParseAuthorizedKey(read(t, stem+".pub"))
 			if name == "bad-webauthn" {
-				if err == nil {
-					t.Errorf("%s: a certificate whose signature is a webauthn one parses", stem)
+				// A webauthn signature carries a hash of what it signs in
+				// base64 in its clientData: on a certificate, it makes every
+				// signature under it longer than the bound.
+				if err == nil || len(sig) <= MaxSignature {
+					t.Errorf("%s: a certificate whose signature is a webauthn one parses: %v, or its signature is within the bound", stem, err)
 				}
 				continue
 			}

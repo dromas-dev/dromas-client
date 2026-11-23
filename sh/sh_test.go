@@ -8,6 +8,9 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"encoding/base64"
+	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"encoding/json/jsontext"
 	"encoding/pem"
@@ -643,6 +646,59 @@ func TestTheScriptReadsABlobInItsOneForm(t *testing.T) {
 	for _, sig := range []string{"bad-extensions", "bad-reserved-field", "bad-nonce-of-16-bytes"} {
 		if err := cert("cert/" + sig + ".sig"); err == nil {
 			t.Errorf("cert/%s: dr_cert reads it", sig)
+		}
+	}
+	// A security key's signature: its flags and counter, exactly five bytes,
+	// the flags claiming user presence, and its own type, by the identity
+	// and on a certificate. ssh-keygen -Y verify takes the webauthn ones and
+	// those without user presence (Appendix A).
+	for _, m := range []string{"d", "e"} {
+		x, xDoc := identity(t, m)
+		oks, _ := filepath.Glob(filepath.Join(vectors, "sig", m+"-ok-*.sig"))
+		bads, _ := filepath.Glob(filepath.Join(vectors, "sig", m+"-bad-*.sig"))
+		if len(oks) == 0 || len(bads) < 3 {
+			t.Fatalf("mailbox %s: %d ok and %d bad sig/ vectors", m, len(oks), len(bads))
+		}
+		for _, f := range oks {
+			if err := rank(x, xDoc, "sig/"+filepath.Base(f)); err != nil {
+				t.Errorf("control: dr_rank does not read sig/%s: %v", filepath.Base(f), err)
+			}
+		}
+		for _, f := range bads {
+			if err := rank(x, xDoc, "sig/"+filepath.Base(f)); err == nil {
+				t.Errorf("sig/%s: dr_rank reads it", filepath.Base(f))
+			}
+		}
+		if _, err := bash(t, scratch(t), fmt.Sprintf("dr_cert %s %s %s", abs(t, filepath.Join(vectors, "prekey", m+"-signed-under-its-certificate.txt.sig")), xDoc, x)); err != nil {
+			t.Errorf("control: dr_cert does not read %s's certificate: %v", m, err)
+		}
+		certs, _ := filepath.Glob(filepath.Join(vectors, "cert", m+"-bad-*.sig"))
+		for _, f := range certs {
+			if _, err := bash(t, scratch(t), fmt.Sprintf("dr_cert %s %s %s", abs(t, f), xDoc, x)); err == nil {
+				t.Errorf("cert/%s: dr_cert reads it", filepath.Base(f))
+			}
+		}
+	}
+	// A certificate's own webauthn signature makes every signature under it
+	// longer than the bound, which dr_blob refuses first: so dr_sigform, as
+	// dr_cert calls it, is given that signature's bytes alone. Control: it
+	// takes D's own certificate's.
+	_, dDoc := identity(t, "d")
+	_, idLine, _ := strings.Cut(string(mustRead(t, dDoc)), "\n")
+	idKey, err := base64.StdEncoding.DecodeString(strings.Fields(idLine)[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	signedBy := append(binary.BigEndian.AppendUint32(nil, uint32(len(idKey))), idKey...) //nolint:gosec // a key's length
+	for cert, want := range map[string]bool{"d/work-cert.pub": true, "cert/d-bad-webauthn.pub": false, "cert/d-bad-no-user-presence.pub": false} {
+		wire, err := base64.StdEncoding.DecodeString(strings.Fields(string(mustRead(t, filepath.Join(vectors, cert))))[1])
+		i := bytes.LastIndex(wire, signedBy)
+		if err != nil || i < 0 || len(wire) < i+len(signedBy)+4 {
+			t.Fatalf("%s: no signature by D's identity", cert)
+		}
+		sig := wire[i+len(signedBy)+4:] // the signature, a string, is the last field
+		if _, err := bash(t, scratch(t), "dr_sigform "+hex.EncodeToString(sig)); (err == nil) != want {
+			t.Errorf("%s: dr_sigform on its own signature: %v, want taken %v", cert, err, want)
 		}
 	}
 }
