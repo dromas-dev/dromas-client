@@ -51,8 +51,10 @@ import (
 //   - The request. Each asks the server to hold it for the mailbox's wait,
 //     DefaultHold at first, and ends at that wait and a margin from the
 //     connection it got last, whether answered or not: a dead path is found
-//     there, never by a probe on a live one. Only a connection that drops with keep-alive
-//     at its floor shortens the wait, never below MinHold: a path whose
+//     there, never by a probe on a live one. It ends unanswered at once at
+//     a second new connection after a first (heldBound). Only a
+//     connection that drops with keep-alive at its floor shortens the
+//     wait, never below MinHold: a path whose
 //     probes keep nothing alive (an HTTP proxy's timeout, which TCP's
 //     keep-alive does not reach). Holds start at most about once a minute
 //     (holdEvery), so a connection that fails at once is a minute's poll,
@@ -252,11 +254,22 @@ var errHeldOut = fmt.Errorf("no answer within the wait: %w", context.DeadlineExc
 
 // heldBound is ctx, cut with errHeldOut once d passes from the connection
 // its request got last: net/http may send a GET again on another connection,
-// and that request's bound is its own.
+// and that request's bound is its own. It is cut at once at a second new
+// connection after a first: net/http sends a request again past each
+// HTTP/2 GOAWAY with no end, so a server that answers each connection so
+// would hold the call past every bound, where one new connection after a
+// reused one is the retry past a drop or a server's restart.
 func heldBound(ctx context.Context, d time.Duration) (context.Context, func()) {
 	ctx, cancel := context.WithCancelCause(ctx)
 	t := time.AfterFunc(d, func() { cancel(errHeldOut) })
-	ctx = httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{GotConn: func(httptrace.GotConnInfo) { t.Reset(d) }})
+	var dialled atomic.Bool
+	ctx = httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{GotConn: func(c httptrace.GotConnInfo) {
+		if !c.Reused && dialled.Swap(true) {
+			cancel(errHeldOut)
+			return
+		}
+		t.Reset(d)
+	}})
 	return ctx, func() {
 		t.Stop()
 		cancel(nil)
