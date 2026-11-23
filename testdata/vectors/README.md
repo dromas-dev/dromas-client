@@ -92,9 +92,9 @@ Certificates of D's and E's, with the same three files as `cert/bad-*`, each sta
 
 - `d-bad-no-user-presence` and `e-bad-no-user-presence`: the identity's signature on the certificate has flags without user presence.
 - `d-bad-webauthn`: the identity's signature on the certificate is a `webauthn-sk-ecdsa-sha2-nistp256@openssh.com` signature. Go's `x/crypto/ssh` doesn't parse such a certificate. Such a signature carries the base64 of what it signs, so every signature under the certificate is longer than the bound (PROTOCOL.md §3.2), and a reader refuses it before it reads the certificate.
-- `d-bad-working-key-a-security-key`: the certified key is E's identity key, a security key, where a working key is `ssh-ed25519`. E's key signed the signature under it.
+- `e-bad-working-key-a-security-key`: the certified key is D's and E's working key written as a security key, of type `sk-ssh-ed25519@openssh.com`, where a working key is `ssh-ed25519`. That security key signed the signature under it.
 
-**Expected result:** every vector is refused for its mailbox. `ssh-keygen -Y verify` accepts the first three.
+**Expected result:** every vector is refused for its mailbox. `ssh-keygen -Y verify` accepts all four.
 
 ### `revoke/bad-*.sig`
 
@@ -140,10 +140,10 @@ A signature in its one valid form and in other forms (PROTOCOL.md §3.2):
   - The blob: at version 0, hashed with SHA-256, with bytes in its `reserved` field, with its namespace ending in a NUL, with a byte after its five fields, and with its certificate's type ending in a NUL.
   - An Ed25519 S with L added: the working key's (`bad-s-plus-l`), or the identity's on the certificate (`bad-certificate-s-plus-l`).
 - Each `c-bad-*` is C's signature, over `c/prekey-1.txt` in C's prekey namespace: r with a zero byte before it, a padding bit set in the base64, and the base64 without its padding. The last two aren't the one encoding of the base64.
-- Each `d-*` and `e-*` vector is D's or E's signature, over its own `prekey-1.txt` in its own prekey namespace. `d-ok-sk-ecdsa` is `d/prekey-1.txt.sig`, and `e-ok-sk-ed25519` is `e/prekey-1.txt.sig`. `d-ok-the-other-s` is D's signature with s written as n − s. `e-ok-r-small-order` has the neutral R. The `bad-*` vectors are flags without user presence (`d-bad-no-user-presence`, `e-bad-no-user-presence`), a byte after the counter (`d-bad-a-byte-after-the-counter`, `e-bad-a-byte-after-the-counter`), r with a zero byte before it (`d-bad-r-padded`), L added to S (`e-bad-s-plus-l`), and a `webauthn-sk-ecdsa-sha2-nistp256@openssh.com` signature (`d-bad-webauthn`), which is a valid signature in that form.
+- Each `d-*` and `e-*` vector is D's or E's signature, over its own `prekey-1.txt` in its own prekey namespace. `d-ok-sk-ecdsa` is `d/prekey-1.txt.sig`, and `e-ok-sk-ed25519` is `e/prekey-1.txt.sig`. `d-ok-the-other-s` is D's signature with s written as n − s. `e-ok-r-small-order` has the neutral R. `d-ok-flags-21` has the flags that the Mac's Secure Enclave writes, user presence and user verification; `e-ok-flags-05` and `e-ok-flags-81` have user presence and other bits, ED among them, which nobody reads; and `e-ok-counter-ffffffff` has the highest counter. The `bad-*` vectors are flags without user presence (`d-bad-no-user-presence`, `e-bad-no-user-presence`, and `d-bad-flags-fe`, `e-bad-flags-fe` with every other bit set), a byte after the counter (`d-bad-a-byte-after-the-counter`, `e-bad-a-byte-after-the-counter`), r with a zero byte before it (`d-bad-r-padded`), L added to S (`e-bad-s-plus-l`), and a `webauthn-sk-ecdsa-sha2-nistp256@openssh.com` signature (`d-bad-webauthn`), which is a valid signature in that form.
 - `ok-r-small-order` and `bad-r-plus-order-2` are A's signatures with an R that the RFC 8032 signer never makes. The `TestVectorsEd25519R` test in `protocol` makes them.
 
-**Expected result:** `ok-*` accepted, and `bad-*` refused. `ssh-keygen -Y verify` accepts many of the `bad-*` vectors, because OpenSSH reads more forms than the one valid form, including the two without user presence and `d-bad-webauthn`. Here it's a validation tool, not the definition. On the builds that PROTOCOL.md Appendix A names, `ssh-keygen` judges the two R vectors the other way. Before the cutoff that Appendix A gives, it accepts the two vectors with L added to an Ed25519 S.
+**Expected result:** `ok-*` accepted, and `bad-*` refused. `ssh-keygen -Y verify` accepts many of the `bad-*` vectors, because OpenSSH reads more forms than the one valid form, including the four without user presence and `d-bad-webauthn`. Here it's a validation tool, not the definition. On the builds that PROTOCOL.md Appendix A names, `ssh-keygen` judges the two R vectors the other way. Before the cutoff that Appendix A gives, it accepts the two vectors with L added to an Ed25519 S.
 
 ### `cert/ok-*`
 

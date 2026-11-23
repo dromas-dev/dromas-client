@@ -84,6 +84,15 @@ func skVectorKey(t *testing.T, mailbox string) *sktest.Signer {
 	return s
 }
 
+// withFlags is a security-key mailbox's identity signing with the flags and
+// the counter given.
+func withFlags(t *testing.T, mailbox string, flags byte, counter uint32) *sktest.Signer {
+	t.Helper()
+	s := skVectorKey(t, mailbox)
+	s.Flags, s.Counter = flags, counter
+	return s
+}
+
 // rawEd25519Seed is the seed in input/<name>.ed25519.
 func rawEd25519Seed(t *testing.T, name string) []byte {
 	t.Helper()
@@ -325,20 +334,37 @@ func skVectorFiles(t *testing.T) map[string][]byte {
 			wa := webauthnSigner{priv, identity.PublicKey()}
 			files["sig/d-bad-webauthn.sig"] = sign(wa, st, ns)
 
-			// Certificates of D's out of the rules: one signed by a webauthn
-			// signature, and one that certifies a security key, E's, as its
-			// working key. Each signature is good under the certificate it
-			// carries.
+			// A certificate of D's signed by a webauthn signature, good
+			// under the certificate it carries.
 			c := skCert(t, id, wa, workKey.PublicKey(), serial, "cert/d-bad-webauthn")
 			files["cert/d-bad-webauthn.pub"] = ssh.MarshalAuthorizedKey(c)
 			files["cert/d-bad-webauthn.txt"] = statement(a, serial)
 			files["cert/d-bad-webauthn.sig"] = sign(under(c, workKey), statement(a, serial), ns)
-			e := skVectorKey(t, "e")
-			c = skCert(t, id, identity, e.PublicKey(), serial, "cert/d-bad-working-key-a-security-key")
-			files["cert/d-bad-working-key-a-security-key.pub"] = ssh.MarshalAuthorizedKey(c)
-			files["cert/d-bad-working-key-a-security-key.txt"] = statement(a, serial)
-			files["cert/d-bad-working-key-a-security-key.sig"] = sign(under(c, e), statement(a, serial), ns)
+
+			// Flags with user presence and other bits, as the Mac's Secure
+			// Enclave writes them (0x21: UP and UV).
+			files["sig/d-ok-flags-21.sig"] = sign(withFlags(t, m, 0x21, 0), st, ns)
+			files["sig/d-bad-flags-fe.sig"] = sign(withFlags(t, m, 0xfe, 0), st, ns)
 		case "e":
+			// Flags with user presence and other bits set, among them ED,
+			// which is never read; the highest counter; and every bit but
+			// user presence.
+			files["sig/e-ok-flags-05.sig"] = sign(withFlags(t, m, 0x05, 0), st, ns)
+			files["sig/e-ok-flags-81.sig"] = sign(withFlags(t, m, 0x81, 0), st, ns)
+			files["sig/e-ok-counter-ffffffff.sig"] = sign(withFlags(t, m, sktest.UserPresent, 0xffffffff), st, ns)
+			files["sig/e-bad-flags-fe.sig"] = sign(withFlags(t, m, 0xfe, 0), st, ns)
+
+			// A certificate of E's whose working key is a security key: the
+			// working key's own Ed25519 key, as an sk-ssh-ed25519 key, which
+			// signs under it.
+			skWork, err := sktest.New(ed25519.NewKeyFromSeed(rawEd25519Seed(t, "d-work")), SKApplication)
+			if err != nil {
+				t.Fatal(err)
+			}
+			c := skCert(t, id, identity, skWork.PublicKey(), serial, "cert/e-bad-working-key-a-security-key")
+			files["cert/e-bad-working-key-a-security-key.pub"] = ssh.MarshalAuthorizedKey(c)
+			files["cert/e-bad-working-key-a-security-key.txt"] = statement(a, serial)
+			files["cert/e-bad-working-key-a-security-key.sig"] = sign(under(c, skWork), statement(a, serial), ns)
 			files["sig/e-bad-s-plus-l.sig"] = sign(skChanged{identity, func(s *ssh.Signature) { s.Blob = plusL(s.Blob) }}, st, ns)
 			priv := ed25519.NewKeyFromSeed(rawEd25519Seed(t, "e"))
 			files["sig/e-ok-r-small-order.sig"] = sign(skNeutralR{priv, identity.PublicKey()}, st, ns)
@@ -496,7 +522,7 @@ func TestVectorsSecurityKeyRefusals(t *testing.T) {
 		m := v.mailbox
 		id, st := vectorIdentity(t, m), read(t, m+"/prekey-1.txt")
 		ns := PrekeyNamespace(id.Address())
-		for name, form := range map[string]bool{"bad-no-user-presence": true, "bad-a-byte-after-the-counter": false, "bad-r-padded": false, "bad-webauthn": false, "bad-s-plus-l": true} {
+		for name, form := range map[string]bool{"bad-no-user-presence": true, "bad-flags-fe": true, "bad-a-byte-after-the-counter": false, "bad-r-padded": false, "bad-webauthn": false, "bad-s-plus-l": true} {
 			f := "sig/" + m + "-" + name + ".sig"
 			if _, err := os.Stat(filepath.Join(vectors, f)); err != nil {
 				continue // the vector is the other type's
@@ -519,6 +545,9 @@ func TestVectorsSecurityKeyRefusals(t *testing.T) {
 			sig := read(t, stem+".sig")
 			if _, err := VerifySigned(id, read(t, stem+".txt"), sig, ns, now); err == nil {
 				t.Errorf("%s: taken", stem)
+			}
+			if len(sig) > MaxSignature && name != "bad-webauthn" {
+				t.Errorf("%s: longer than the bound, so the certificate is not what refuses it", stem)
 			}
 			key, _, _, _, err := ssh.ParseAuthorizedKey(read(t, stem+".pub"))
 			if name == "bad-webauthn" {

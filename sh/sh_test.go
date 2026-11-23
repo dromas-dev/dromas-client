@@ -472,7 +472,7 @@ func TestVectorsCertificate(t *testing.T) {
 	controls := []string{"bad-extensions", "bad-reserved-field", "bad-nonce-of-16-bytes", "bad-key-id", "bad-serial-zero", "bad-certifies-the-identity", "bad-critical-option"}
 	for _, m := range []string{"d", "e"} {
 		if readsMailbox(m) {
-			for _, n := range []string{m + "-bad-no-user-presence", m + "-bad-webauthn"} {
+			for _, n := range []string{m + "-bad-no-user-presence", m + "-bad-webauthn", m + "-bad-working-key-a-security-key"} {
 				if exists(filepath.Join(vectors, "cert", n+".sig")) {
 					controls = append(controls, n)
 				}
@@ -545,7 +545,7 @@ for f in "$DR/s" "$DR/c"; do ssh-keygen -Y verify -f "$f" -I %[1]s -n dromas-pre
 		}
 		// ssh-keygen takes a security key's signature without user presence,
 		// and a webauthn one: the script's own reading refuses them.
-		if name == "d-bad-webauthn.sig" || strings.HasSuffix(name, "-bad-no-user-presence.sig") {
+		if name == "d-bad-webauthn.sig" || strings.HasSuffix(name, "-bad-no-user-presence.sig") || strings.HasSuffix(name, "-bad-flags-fe.sig") {
 			if kerr != nil {
 				t.Errorf("control: ssh-keygen -Y verify refuses %s by itself: %v", name, kerr)
 			}

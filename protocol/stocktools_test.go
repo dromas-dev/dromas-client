@@ -277,7 +277,7 @@ func TestVectorsByToolsNotOurs(t *testing.T) {
 			for _, s := range globIn(t, dir, "sig/"+mailbox+"-*.sig") {
 				// An R that RFC 8032's signer never makes is judged the other
 				// way from 10.6p1 (PROTOCOL.md Appendix A), as A's is.
-				if strings.Contains(s, "-ok-") && !strings.Contains(s, "-ok-r-") || strings.HasSuffix(s, "-bad-no-user-presence.sig") || strings.HasSuffix(s, "-bad-webauthn.sig") {
+				if strings.Contains(s, "-ok-") && !strings.Contains(s, "-ok-r-") || strings.HasSuffix(s, "-bad-no-user-presence.sig") || strings.HasSuffix(s, "-bad-flags-fe.sig") || strings.HasSuffix(s, "-bad-webauthn.sig") {
 					verify(t, bare, mailbox, ns("dromas-prekey-v1", mailbox), mailbox+"/prekey-1.txt", s)
 				}
 			}
