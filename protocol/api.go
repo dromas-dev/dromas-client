@@ -208,8 +208,8 @@ type Receipt struct {
 
 // MessageList is GET /v1/<address>/messages: one page of metadata, oldest
 // first. NextCursor is null on the last page, and otherwise a cursor
-// (CheckCursor). The poll interval is no member: every list answer, a 304
-// among them, carries it in Retry-After.
+// (CheckCursor). The poll interval is no member: every 200 and 304 of a
+// list carries it in Retry-After.
 type MessageList struct {
 	Count      int64         `json:"total_count"`
 	Messages   []MessageInfo `json:"messages"`

@@ -1505,7 +1505,7 @@ components:
         type: string
         pattern: '^[0-9]+$'
     PollInterval:
-      description: A list's `Retry-After`, on every list answer, a `304` among them - the server's poll interval in seconds, in digits alone, as RFC 9773 §4.3 uses the field (`PROTOCOL.md` §11.11).
+      description: A list's `Retry-After`, on every `200` and `304` of a list - the server's poll interval in seconds, in digits alone, as RFC 9773 §4.3 uses the field (`PROTOCOL.md` §11.11).
       required: true
       schema:
         type: string

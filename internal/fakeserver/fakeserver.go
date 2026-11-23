@@ -1135,7 +1135,7 @@ func (s *Server) listed(w http.ResponseWriter, r *http.Request, b *mailbox, afte
 	return false
 }
 
-// PollInterval is the Retry-After every list answer carries: the poll
+// PollInterval is the Retry-After every 200 and 304 of a list carries: the poll
 // interval, in seconds.
 const PollInterval = "60"
 
