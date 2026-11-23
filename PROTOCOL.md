@@ -1359,7 +1359,7 @@ A server lists at most 64 deprecations, 64 sunsets, and 64 capabilities. A clien
 
 ### 12.3. Receiving
 
-A client drains every page of its list (Section 11.11) and fetches the message of each list entry (Section 11.12), but one that the verdict below lets it ack unfetched:
+A client drains every page of its list (Section 11.11) and fetches the message of each list entry (Section 11.12), but one that the verdict below lets it ack without a fetch:
 
 - **The client accepts only a body of the listed `size`, and reads at most one byte past it.** An answer whose body has another length is malformed, and the client judges nothing and acks nothing on that answer.
 - **A fetch that resumes a cut fetch by range (Section 11.12) is checked as a whole.** The client checks the bytes kept and the range together against the listed `size` and the message id (check 8), as for a body read whole.
