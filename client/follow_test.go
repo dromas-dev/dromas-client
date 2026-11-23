@@ -270,6 +270,7 @@ func TestFatalTellsARefusalNoWaitMendsFromARetry(t *testing.T) {
 		{"bad request", apiError(http.StatusBadRequest, protocol.CodeInvalidRequest), true, false},
 		{"a server error", apiError(http.StatusServiceUnavailable, protocol.CodeUnavailable), false, true},
 		{"a rate limit", apiError(http.StatusTooManyRequests, protocol.CodeRateLimited), false, true},
+		{"a concurrent modification", apiError(http.StatusConflict, protocol.CodeConcurrentModification), false, true},
 		{"the lock", client.ErrLocked, false, true},
 		{"a fault of the disk", errors.New("no space left on device"), false, false},
 		{"pass_expired, dated later than the clock", passExpired(now, now.Add(-time.Second)), true, false},
@@ -284,6 +285,54 @@ func TestFatalTellsARefusalNoWaitMendsFromARetry(t *testing.T) {
 		if got := client.Transient(c.err); got != c.transient {
 			t.Errorf("Transient(%s) = %v", c.name, got)
 		}
+	}
+}
+
+// A list, a fetch or an ack answered 409 concurrent_modification is sent again
+// unchanged (PROTOCOL.md §11.3): the run hands over a retry and goes on, and
+// the message is delivered once and acknowledged.
+func TestACallAnsweredConcurrentModificationIsSentAgain(t *testing.T) {
+	for _, call := range []struct {
+		name, method string
+		path         func(r *http.Request) bool
+	}{
+		{"a list", http.MethodGet, func(r *http.Request) bool { return strings.HasSuffix(r.URL.Path, "/messages") }},
+		{"a fetch", http.MethodGet, func(r *http.Request) bool { return strings.Contains(r.URL.Path, "/messages/") }},
+		{"an ack", http.MethodDelete, func(r *http.Request) bool { return strings.Contains(r.URL.Path, "/messages/") }},
+	} {
+		t.Run(call.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				e := newMemEnv(t)
+				a, b := e.mailbox(), e.mailbox()
+				send(t, a, b, "after a 409")
+				var once sync.Once
+				e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
+					refused := false
+					if r.Method == call.method && call.path(r) {
+						once.Do(func() { refused = true })
+					}
+					if refused {
+						forge.Refuse(w, protocol.CodeConcurrentModification)
+						return
+					}
+					next.ServeHTTP(w, r)
+				})
+				var retried []protocol.Code
+				var got []string
+				err := b.Follow(t.Context(), client.FollowOptions{Until: time.Now().Add(10 * time.Minute)}, func(_ context.Context, ev client.Event) error {
+					switch ev.Kind {
+					case client.EventRetry:
+						retried = append(retried, client.Code(ev.Err))
+					case client.EventDelivery:
+						got = append(got, bodyOf(t, *ev.Delivery))
+					}
+					return nil
+				})
+				if err != nil || !slices.Equal(retried, []protocol.Code{protocol.CodeConcurrentModification}) || !slices.Equal(got, []string{"after a 409"}) || e.srv.Count(b.Address()) != 0 {
+					t.Errorf("Follow: %v, retried %v, delivered %q, %d left at the server", err, retried, got, e.srv.Count(b.Address()))
+				}
+			})
+		})
 	}
 }
 

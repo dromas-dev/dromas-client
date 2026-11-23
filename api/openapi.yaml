@@ -960,6 +960,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '410':
           $ref: '#/components/responses/Gone'
         '412':
@@ -1046,6 +1048,8 @@ paths:
         '401':
           $ref: '#/components/responses/HeadUnauthorized'
         '404':
+          $ref: '#/components/responses/HeadRefused'
+        '409':
           $ref: '#/components/responses/HeadRefused'
         '410':
           $ref: '#/components/responses/HeadRefused'
@@ -1144,6 +1148,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '410':
           $ref: '#/components/responses/Gone'
         '412':
@@ -1211,6 +1217,8 @@ paths:
           $ref: '#/components/responses/HeadUnauthorized'
         '404':
           $ref: '#/components/responses/HeadRefused'
+        '409':
+          $ref: '#/components/responses/HeadRefused'
         '410':
           $ref: '#/components/responses/HeadRefused'
         '412':
@@ -1237,6 +1245,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '410':
           $ref: '#/components/responses/Gone'
         '412':

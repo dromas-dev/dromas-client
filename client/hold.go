@@ -288,8 +288,9 @@ func timedOut(err error) bool {
 }
 
 // Transient reports whether err is a call that failed and that making it
-// again may get past: no answer, a server error, a rate limit or a request
-// timeout. So is a lock another command held for as long as a command waits for
+// again may get past: no answer, a server error, a rate limit, a request
+// timeout, or a mailbox that changed during the request, which the server
+// says to send again unchanged (PROTOCOL.md §11.3). So is a lock another command held for as long as a command waits for
 // it, a renewal held back until renewTime after one that failed so, a drain
 // refused for what a renewal mends whose renewal failed so ([Mailbox.Receive]),
 // and an answer about a revocation whose read for the proof failed so. A
@@ -311,7 +312,7 @@ func Transient(err error) bool {
 	case errors.As(err, &up):
 		return Transient(up.read)
 	case errors.As(err, &ae):
-		return ae.Status >= 500 || ae.Status == http.StatusTooManyRequests || ae.Status == http.StatusRequestTimeout
+		return ae.Status >= 500 || ae.Status == http.StatusTooManyRequests || ae.Status == http.StatusRequestTimeout || ae.Problem.Code == protocol.CodeConcurrentModification
 	}
 	var te *transportError
 	return errors.As(err, &te)
