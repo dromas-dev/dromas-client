@@ -252,37 +252,40 @@ func TestVectorsByToolsNotOurs(t *testing.T) {
 			verify(t, bareA, "a", ns("dromas-revoke-certs-v1", "a"), strings.TrimSuffix(s, ".sig")+".txt", s)
 		}
 
-		// D and E, whose identities are security keys, on an OpenSSH built
-		// with them (PROTOCOL.md Appendix A): everything each identity signs
-		// itself, and its statement under its certificate. ssh-keygen also
-		// takes a signature whose flags claim no user present, and D's
-		// webauthn signature: each is a good signature, which the one form
-		// and the user-presence rule refuse.
+		// D and E, whose identities are security keys: everything each
+		// identity signs itself, and its statement under its certificate.
+		// ssh-keygen also takes a signature whose flags claim no user
+		// present, and D's webauthn signature: each is a good signature,
+		// which the one form and the user-presence rule refuse. An OpenSSH
+		// built without security keys, or without OpenSSL for D's, reads
+		// neither (PROTOCOL.md Appendix A): the subtest skips, which the
+		// gate's skip check reports.
 		for _, mailbox := range []string{"d", "e"} {
-			if _, err := run(t, []byte(key(t, mailbox)), "ssh-keygen", "-l", "-f", "-"); err != nil {
-				t.Logf("this ssh-keygen reads no %s/identity.doc, so it checks none of its signatures: a known variance of OpenSSH's builds: %v", mailbox, err)
-				continue
-			}
-			if _, err := run(t, nil, "ssh-keygen", "-L", "-f", mailbox+"/work-cert.pub"); err != nil {
-				t.Errorf("ssh-keygen -L %s/work-cert.pub: %v", mailbox, err)
-			}
-			bare := signers(mailbox+"-bare", mailbox, false)
-			for _, f := range []struct{ tag, stem string }{{"dromas-prekey-v1", "prekey-1.txt"}, {"dromas-pass-v1", "pass.txt"}, {"dromas-revoke-v1", "revoke.txt"}, {"dromas-revoke-certs-v1", "revoked-certs.txt"}} {
-				sig := mailbox + "/" + strings.TrimSuffix(f.stem, ".txt") + ".sig"
-				if f.tag == "dromas-prekey-v1" {
-					sig = mailbox + "/" + f.stem + ".sig"
+			t.Run(mailbox, func(t *testing.T) {
+				if _, err := run(t, []byte(key(t, mailbox)), "ssh-keygen", "-l", "-f", "-"); err != nil {
+					t.Skipf("this ssh-keygen reads no %s/identity.doc, so it checks none of its signatures: %v", mailbox, err)
 				}
-				verify(t, bare, mailbox, ns(f.tag, mailbox), mailbox+"/"+f.stem, sig)
-			}
-			for _, s := range globIn(t, dir, "sig/"+mailbox+"-*.sig") {
-				// An R that RFC 8032's signer never makes is judged the other
-				// way from 10.6p1 (PROTOCOL.md Appendix A), as A's is.
-				if strings.Contains(s, "-ok-") && !strings.Contains(s, "-ok-r-") || strings.HasSuffix(s, "-bad-no-user-presence.sig") || strings.HasSuffix(s, "-bad-flags-fe.sig") || strings.HasSuffix(s, "-bad-webauthn.sig") {
-					verify(t, bare, mailbox, ns("dromas-prekey-v1", mailbox), mailbox+"/prekey-1.txt", s)
+				if _, err := run(t, nil, "ssh-keygen", "-L", "-f", mailbox+"/work-cert.pub"); err != nil {
+					t.Errorf("ssh-keygen -L %s/work-cert.pub: %v", mailbox, err)
 				}
-			}
-			stem := "prekey/" + mailbox + "-signed-under-its-certificate.txt"
-			verify(t, signers(mailbox+"-ca", mailbox, true), mailbox, ns("dromas-prekey-v1", mailbox), stem, stem+".sig")
+				bare := signers(mailbox+"-bare", mailbox, false)
+				for _, f := range []struct{ tag, stem string }{{"dromas-prekey-v1", "prekey-1.txt"}, {"dromas-pass-v1", "pass.txt"}, {"dromas-revoke-v1", "revoke.txt"}, {"dromas-revoke-certs-v1", "revoked-certs.txt"}} {
+					sig := mailbox + "/" + strings.TrimSuffix(f.stem, ".txt") + ".sig"
+					if f.tag == "dromas-prekey-v1" {
+						sig = mailbox + "/" + f.stem + ".sig"
+					}
+					verify(t, bare, mailbox, ns(f.tag, mailbox), mailbox+"/"+f.stem, sig)
+				}
+				for _, s := range globIn(t, dir, "sig/"+mailbox+"-*.sig") {
+					// An R that RFC 8032's signer never makes is judged the other
+					// way from 10.6p1 (PROTOCOL.md Appendix A), as A's is.
+					if strings.Contains(s, "-ok-") && !strings.Contains(s, "-ok-r-") || strings.HasSuffix(s, "-bad-no-user-presence.sig") || strings.HasSuffix(s, "-bad-flags-fe.sig") || strings.HasSuffix(s, "-bad-webauthn.sig") {
+						verify(t, bare, mailbox, ns("dromas-prekey-v1", mailbox), mailbox+"/prekey-1.txt", s)
+					}
+				}
+				stem := "prekey/" + mailbox + "-signed-under-its-certificate.txt"
+				verify(t, signers(mailbox+"-ca", mailbox, true), mailbox, ns("dromas-prekey-v1", mailbox), stem, stem+".sig")
+			})
 		}
 	})
 }
