@@ -2401,23 +2401,30 @@ func TestTheScriptReadsNoCurlrc(t *testing.T) {
 
 // The script calls no server over TLS older than 1.2, the least the Go client
 // takes, whatever the least its curl's build would take: a server that offers
-// at most TLS 1.1 is no answer, and gets nothing.
+// at most TLS 1.1 is no answer, and gets nothing, where the same server at TLS
+// 1.2 makes the mailbox.
 func TestTheScriptCallsOverTLS12OrLater(t *testing.T) {
 	t.Parallel()
 	need(t, append(scriptTools, "curl")...)
-	srv := fakeserver.New(t, time.Now)
-	u, _ := url.Parse(srv.URL)
-	front := httptest.NewUnstartedServer(httputil.NewSingleHostReverseProxy(u))
-	front.TLS = &tls.Config{MinVersion: tls.VersionTLS10, MaxVersion: tls.VersionTLS11}
-	front.StartTLS()
-	t.Cleanup(front.Close)
-	ca := filepath.Join(t.TempDir(), "ca.pem")
-	if err := os.WriteFile(ca, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: front.Certificate().Raw}), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	env := []string{"DR_HOME=" + t.TempDir(), "DR_SERVER_URL=" + front.URL, "CURL_CA_BUNDLE=" + ca, "no_proxy=", "NO_PROXY="}
-	if out, err := bash(t, env, "dr_init"); err == nil || len(srv.Requests()) > 0 {
-		t.Errorf("init over TLS 1.1: %q, %v; the server got %d calls", out, err, len(srv.Requests()))
+	for _, c := range []struct {
+		max   uint16
+		taken bool
+	}{{tls.VersionTLS11, false}, {tls.VersionTLS12, true}} {
+		srv := fakeserver.New(t, time.Now)
+		u, _ := url.Parse(srv.URL)
+		front := httptest.NewUnstartedServer(httputil.NewSingleHostReverseProxy(u))
+		front.TLS = &tls.Config{MinVersion: tls.VersionTLS10, MaxVersion: c.max}
+		front.StartTLS()
+		t.Cleanup(front.Close)
+		ca := filepath.Join(t.TempDir(), "ca.pem")
+		if err := os.WriteFile(ca, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: front.Certificate().Raw}), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		env := []string{"DR_HOME=" + t.TempDir(), "DR_SERVER_URL=" + front.URL, "CURL_CA_BUNDLE=" + ca, "no_proxy=", "NO_PROXY="}
+		out, err := bash(t, env, "dr_init")
+		if taken := err == nil && len(srv.Requests()) > 0; taken != c.taken {
+			t.Errorf("init over %s: %q, %v; the server got %d calls", tls.VersionName(c.max), out, err, len(srv.Requests()))
+		}
 	}
 }
 
