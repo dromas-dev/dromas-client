@@ -186,7 +186,7 @@ Whether to add the identity's key to the agent after a passphrase unlocks the ke
 - Flag: `--unsafe-inbox-permissions`
 - Environment: `DROMAS_UNSAFE_INBOX_PERMISSIONS`
 
-When `true`, `dromas` reads `inbox-dir`, `held/`, and their message files even when other users can write to them or another user owns them. Anyone who can write to these locations can add a message that appears to be delivered.
+When `true`, `dromas` reads `base-dir`, `mail-dir`, `outbox/`, `inbox-dir`, `held/`, and the message files of the last two even when other users can write to them or another user owns them. Anyone who can write to these locations can add a file that `dromas` takes as yours, such as a list, a message to sign and send, or a message that appears to be delivered.
 
 ### `unsafe-state-permissions`
 

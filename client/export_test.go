@@ -61,6 +61,9 @@ func ListFiles() []string { return slices.Clone(listFiles) }
 // keptDirs.
 func KeptDirs() []string { return slices.Clone(keptDirs) }
 
+// JudgedDirs are b's directories judged at every open, read from judgedDirs.
+func JudgedDirs(b *Mailbox) []string { return b.judgedDirs() }
+
 // PublicFiles are the base directory's files no open judges.
 func PublicFiles() []string { return publicFiles }
 

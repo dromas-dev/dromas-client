@@ -3,47 +3,64 @@ package client_test
 import (
 	"context"
 	"errors"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/dromas-dev/dromas-client/client"
+	"github.com/dromas-dev/dromas-client/internal/forge"
 )
 
-// Each directory that keeps a message recv passed, inbox-dir and held/, that
-// others can write is refused by a command that writes the mailbox and by a
-// reading, naming it, with nothing acked: whoever can write there could put in
-// a message that reads as delivered (#717). The line the refusal gives puts it
-// right.
-func TestAKeptDirectoryOthersCanWriteIsRefused(t *testing.T) {
+// Each directory of the mailbox judged at every open, base-dir, mail-dir,
+// outbox/, inbox-dir and held/, that others can write is refused by a command
+// that writes the mailbox and by a reading, naming it, with nothing acked and
+// nothing sent: whoever can write there could put in a file the mailbox takes
+// as its owner's, a list, a message waiting to be sent, or one that reads as
+// delivered (#717). The line the refusal gives puts it right.
+func TestAMailboxDirectoryOthersCanWriteIsRefused(t *testing.T) {
 	t.Parallel()
-	for _, name := range client.KeptDirs() {
-		t.Run(name, func(t *testing.T) {
+	probe := newEnv(t).heldMailbox()
+	for i, d := range client.JudgedDirs(probe) {
+		name, err := filepath.Rel(probe.Dir(), d)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if name == "." {
+			name = "base-dir"
+		}
+		t.Run(filepath.ToSlash(name), func(t *testing.T) {
 			t.Parallel()
 			ctx := context.Background()
 			e := newEnv(t)
 			a, b := e.mailbox(), e.heldMailbox()
 			send(t, a, b, "waits")
-			path := b.Path(name)
+			forge.FailOnce(e.srv, http.MethodPost, "/v1/"+a.Address().String()+"/messages")
+			if _, err := b.Send(ctx, a.Address(), "waits in outbox/"); err == nil {
+				t.Fatal("the send to wait went through")
+			}
+			e.srv.SetMiddle(nil)
+			path := client.JudgedDirs(b)[i]
 			if err := os.MkdirAll(path, 0o700); err != nil {
 				t.Fatal(err)
 			}
 			openToWrites(t, path)
 			var refusal error
 			for what, run := range map[string]func() error{
-				"recv":  func() error { _, err := b.Receive(ctx); return err },
-				"inbox": func() error { _, err := b.Inbox(ctx); return err },
-				"held":  func() error { _, err := b.HeldMessages(ctx); return err },
+				"recv":         func() error { _, err := b.Receive(ctx); return err },
+				"inbox":        func() error { _, err := b.Inbox(ctx); return err },
+				"held":         func() error { _, err := b.HeldMessages(ctx); return err },
+				"outbox flush": func() error { _, err := b.Flush(ctx); return err },
 			} {
 				err := run()
-				if err == nil || !strings.Contains(err.Error(), path) || !strings.Contains(err.Error(), "reads as delivered") {
+				if err == nil || !strings.Contains(err.Error(), path) || !strings.Contains(err.Error(), "takes as its owner's") {
 					t.Fatalf("%s with %s open to others' writes: %v", what, path, err)
 				}
 				refusal = err
 			}
-			if n := e.srv.Count(b.Address()); n != 1 {
-				t.Fatalf("the server holds %d, and nothing was to be acked", n)
+			if n, m := e.srv.Count(b.Address()), e.srv.Count(a.Address()); n != 1 || m != 0 {
+				t.Fatalf("the servers hold %d for b and %d for a: something was acked or sent", n, m)
 			}
 			runFix(t, fixLine(t, refusal))
 			if res := receive(t, b); len(res.Delivered)+len(res.Held) != 1 {

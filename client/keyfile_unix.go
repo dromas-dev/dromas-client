@@ -55,11 +55,13 @@ func checkPrivateFileAs(path string, me int) error {
 	return nil
 }
 
-// checkKeptDir refuses inbox-dir or held/ where another user owns it or others
-// can write it, as sshd's StrictModes refuses a directory on the way to a key:
-// whoever can write there can put in a file that reads as a delivered message
-// (#717). Others may read it: each file in it is judged on its own (judgeKept).
-// It judges the owner first, as checkPrivateFile does.
+// checkKeptDir refuses a directory of the mailbox's (judgedDirs) where another
+// user owns it or others can write it, as sshd's StrictModes refuses each
+// directory from the user's home to a key: whoever can write there can put in a
+// file the mailbox takes as its owner's (#717). It judges the one directory at
+// path, and judgeFiles names each of the mailbox's. Others may read it: each
+// message in inbox-dir and held/ is judged on its own (judgeKept). It judges
+// the owner first, as checkPrivateFile does.
 func checkKeptDir(path string) error { return checkKeptDirAs(path, os.Getuid()) }
 
 func checkKeptDirAs(path string, me int) error {
@@ -68,10 +70,10 @@ func checkKeptDirAs(path string, me int) error {
 		return err
 	}
 	if st, ok := fi.Sys().(*syscall.Stat_t); ok && st.Uid != 0 && int64(st.Uid) != int64(me) {
-		return fmt.Errorf("the mailbox's directory %s is owned by another user (uid %d), who could put a message in it that reads as delivered: chown it to yourself if you made it", path, st.Uid)
+		return fmt.Errorf("the mailbox's directory %s is owned by another user (uid %d), %s: chown it to yourself if you made it", path, st.Uid, keptDirRisk)
 	}
 	if m := fi.Mode().Perm(); m&0o022 != 0 {
-		return fmt.Errorf("the mailbox's directory %s is writable by others (mode %04o), who could put a message in it that reads as delivered. Run: chmod go-w %q", path, m, path)
+		return fmt.Errorf("the mailbox's directory %s is writable by others (mode %04o), %s. Run: chmod go-w %q", path, m, keptDirRisk, path)
 	}
 	return nil
 }

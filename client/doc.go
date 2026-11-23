@@ -39,7 +39,8 @@
 // where it exists, before it opens the state file or the gate (judgeFiles): no
 // other user owns one, others can reach none of the first three, as a private
 // key is judged, and others can write none of the lists, as a config file is
-// judged.
+// judged. It judges base-dir, mail-dir, outbox/, inbox-dir and held/ the same
+// way, each where it exists: no other user owns one, and others can write none.
 //
 // The mailbox's format is one number for what each of these files holds, the
 // state file's records among them, kept in the state file (format.go): every

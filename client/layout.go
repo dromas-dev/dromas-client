@@ -99,9 +99,25 @@ var listFiles = []string{"allowed", "blocked", "aliases"}
 
 // keptDirs are the directories, by client/doc.go's names, that keep messages
 // recv passed and that inbox list, inbox show and peer allow print or move as
-// delivered: each is judged at every open (judgeFiles), and each of its files
+// delivered: each is judged at every open (judgedDirs), and each of its files
 // before it is read (judgeKept).
 var keptDirs = []string{"inbox", "held"}
+
+// judgedDirs are the mailbox's directories judged at every open (judgeFiles):
+// base-dir, which keeps the lists and the state; mail-dir, which keeps the
+// mail's folders; outbox/, whose entries the mailbox signs and sends as its
+// owner's; and keptDirs.
+func (b *Mailbox) judgedDirs() []string {
+	dirs := []string{b.path(), b.layout.Mail, b.path("outbox")}
+	for _, d := range keptDirs {
+		dirs = append(dirs, b.path(d))
+	}
+	return dirs
+}
+
+// keptDirRisk is why a directory of judgedDirs that others can write or another
+// user owns is refused (checkKeptDir).
+const keptDirRisk = "who could put a file in it that this mailbox takes as its owner's: a list, a message waiting to be sent, or one that reads as delivered"
 
 // fileRefused is a file of the mailbox judged (judgeFiles): the refusal is the
 // file's, whichever command met it.
@@ -114,9 +130,11 @@ func (e *fileRefused) Unwrap() error { return e.error }
 // refused: state, which holds the pass, gate and partial. It refuses a list
 // that others can write or another user owns, as a config file is refused
 // (CheckConfigFile), since whoever can write one says who may write to the
-// mailbox and by what name. It refuses inbox-dir and held/ where others can
-// write them or another user owns them (checkKeptDir), since whoever can write
-// there can put in a message that reads as delivered (#717). A file or
+// mailbox and by what name. It refuses each directory of judgedDirs where others
+// can write it or another user owns it (checkKeptDir), since whoever can write
+// there can put in a file the mailbox takes as its owner's (#717): a list,
+// swapped by a rename in base-dir; an entry of outbox/, which the mailbox
+// signs and sends; a message that reads as delivered. A file or
 // directory that is not there is not judged. It costs a stat or an access-list
 // read for each, and openState asks it before anything opens the state file or
 // the gate, so a file planted before init and one left open by another
@@ -142,11 +160,11 @@ func (b *Mailbox) judgeFiles() error {
 			return &fileRefused{err}
 		}
 	}
-	for _, d := range keptDirs {
+	for _, d := range b.judgedDirs() {
 		if b.unsafeInbox {
 			break
 		}
-		if err := checkKeptDir(b.path(d)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		if err := checkKeptDir(d); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return &fileRefused{err}
 		}
 	}

@@ -344,8 +344,9 @@ If `inbox-dir` is itself a mount point, it remains as an empty directory while t
 - `state`, `gate`, or `partial`, if other users can access the file or another user owns it. The error gives the command that fixes the file.
 - `allowed`, `blocked`, or `aliases`, if other users can write to the file or another user owns it, as ssh does for a config file.
 - `inbox-dir` or `held/`, or a message file in either one, if other users can write to it or another user owns it. Anyone who can write there can add a message that looks delivered.
+- `base-dir`, `mail-dir`, or `outbox/`, if other users can write to it or another user owns it. Anyone who can write there can swap your lists, or change a message before `dromas` signs and sends it.
 
-To turn off the last three checks, see [`unsafe-state-permissions`](configuration.md#unsafe-state-permissions) and [`unsafe-inbox-permissions`](configuration.md#unsafe-inbox-permissions).
+To turn off the last four checks, see [`unsafe-state-permissions`](configuration.md#unsafe-state-permissions) and [`unsafe-inbox-permissions`](configuration.md#unsafe-inbox-permissions).
 
 `dromas` doesn't write a `.gitignore` file. `dromas` warns you when a private key is inside a `.git` working tree. In that case, make sure that git ignores the key.
 

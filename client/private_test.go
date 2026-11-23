@@ -52,15 +52,15 @@ func TestEveryFileOfAMailboxIsItsOwnersAlone(t *testing.T) {
 }
 
 // A directory the client did not make stays as its maker left it, as ssh(1) leaves
-// ~/.ssh: only a key file is judged, and a directory that keeps delivered
-// messages only for others' writes (TestAKeptDirectoryOthersCanWriteIsRefused),
-// so the inbox here is open to others' reads. A mailbox made in one, and one
-// restored into one, work, and neither changes it.
+// ~/.ssh: only a key file is judged, and a directory of the mailbox only for
+// others' writes (TestAMailboxDirectoryOthersCanWriteIsRefused), so the base
+// directory and the inbox here are open to others' reads. A mailbox made in
+// one, and one restored into one, work, and neither changes it.
 func TestADirectoryTheClientDidNotMakeIsLeftAsItIs(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
 	made := filepath.Join(t.TempDir(), "made")
-	openToOthers(t, made)
+	openToReaders(t, made)
 	openToReaders(t, filepath.Join(made, "mail", "inbox"))
 	a, err := client.Init(t.Context(), made, e.opts())
 	if err != nil {
