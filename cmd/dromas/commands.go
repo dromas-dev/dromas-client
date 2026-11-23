@@ -811,10 +811,11 @@ func (e *cli) allowCmd() *cobra.Command {
 	c := command("allow [flags] <link, address or alias>", "deliver a sender's messages to inbox/, with what held/ keeps from it",
 		`Deliver a sender's messages to inbox/ from now on. allow moves what held/ keeps
 from that sender to inbox/, printing each message as recv does, then prints an
-"allowed" line.
+"allowed" line. allow refuses a sender this mailbox blocks, or whose address it
+holds revoked, and changes nothing.
 
 --rebuild, with no sender, adds back every address an alias names or sent/
-shows, for an allowed file that was lost.`,
+shows, but one this mailbox holds revoked, for an allowed file that was lost.`,
 		func(c *cobra.Command, args []string) error {
 			if rebuild && len(args) > 0 {
 				return wrong(c, "dromas peer allow --rebuild takes no sender: it adds back every address an alias names or sent/ shows")
@@ -930,7 +931,8 @@ func (e *cli) aliasAddCmd() *cobra.Command {
 	return command("add <name> <link or address>", "name a peer, so that send accepts the name",
 		`Name a peer for this mailbox only, so that send accepts the name. A name is up
 to 32 lowercase letters, digits, '.', '_' and '-', starting with a letter or a
-digit. Naming a peer allows it.`,
+digit. Naming a peer allows it, so a peer whose address this mailbox holds
+revoked is refused, and nothing is named.`,
 		nargs(2, 2), func(c *cobra.Command, args []string) error {
 			b, err := e.mailbox()
 			if err != nil {

@@ -165,10 +165,11 @@ type Options struct {
 	AddToAgent    bool
 	AgentLifetime time.Duration
 	NotAdded      func(error)
-	// UnsafeInboxPermissions reads inbox-dir and held/, and each file they
-	// keep, where others can write them or another user owns them, which the
-	// mailbox otherwise refuses ([Mailbox.judgeKept]): whoever can write there
-	// can put in a message that reads as delivered.
+	// UnsafeInboxPermissions runs every command on the mailbox where others
+	// can write one of its directories (judgedDirs), an outbox entry, or a
+	// message inbox-dir or held/ keeps, or another user owns one, which the
+	// mailbox otherwise refuses (judgeFiles, judgeKept): whoever can write
+	// there can put in a file the mailbox takes as its owner's.
 	UnsafeInboxPermissions bool
 	// UnsafeStatePermissions opens state, gate and partial where others can
 	// reach them, the lists where others can write them, and any of them

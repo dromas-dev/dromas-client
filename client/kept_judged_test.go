@@ -3,53 +3,142 @@ package client_test
 import (
 	"context"
 	"errors"
-	"os"
+	"io/fs"
+	"net/http"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/dromas-dev/dromas-client/client"
+	"github.com/dromas-dev/dromas-client/internal/forge"
 )
 
-// Each directory that keeps a message recv passed, inbox-dir and held/, that
-// others can write is refused by a command that writes the mailbox and by a
-// reading, naming it, with nothing acked: whoever can write there could put in
-// a message that reads as delivered (#717). The line the refusal gives puts it
+// busyMailbox is a held mailbox b of e with every directory of its layout in
+// use: a message sent and one that failed for good, in sent/ and
+// outbox/failed/; an entry waiting in outbox/ for a; and a message of a's
+// waiting on the server, unacked.
+func busyMailbox(t *testing.T) (e *env, a, b *client.Mailbox) {
+	t.Helper()
+	ctx := context.Background()
+	e = newEnv(t)
+	a, b, c := e.mailbox(), e.heldMailbox(), e.mailbox()
+	send(t, b, a, "sent")
+	revoke(t, e, c)
+	if _, err := b.Send(ctx, c.Address(), "to a revoked mailbox"); err == nil || !strings.Contains(err.Error(), "outbox/failed") {
+		t.Fatalf("a send that fails for good: %v", err)
+	}
+	forge.FailOnce(e.srv, http.MethodPost, "/v1/"+a.Address().String()+"/messages")
+	if _, err := b.Send(ctx, a.Address(), "waits in outbox/"); err == nil {
+		t.Fatal("the send to wait went through")
+	}
+	e.srv.SetMiddle(nil)
+	send(t, a, b, "waits")
+	return e, a, b
+}
+
+// mailboxDirs are b's directories, by their paths inside its base directory:
+// each its layout names (client.LayoutDirs) and each found in it on disk. None
+// is left out, so a directory that judgedDirs leaves out fails the test that
+// reads this.
+func mailboxDirs(t *testing.T, b *client.Mailbox) []string {
+	t.Helper()
+	var dirs []string
+	add := func(p string) {
+		rel, err := filepath.Rel(b.Dir(), p)
+		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			t.Fatalf("%s is outside the base directory %s", p, b.Dir())
+		}
+		if !slices.Contains(dirs, rel) {
+			dirs = append(dirs, rel)
+		}
+	}
+	for _, d := range client.LayoutDirs(b) {
+		add(d)
+	}
+	if err := filepath.WalkDir(b.Dir(), func(p string, d fs.DirEntry, err error) error {
+		if err == nil && d.IsDir() {
+			add(p)
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	slices.Sort(dirs)
+	return dirs
+}
+
+// Each directory of the mailbox that others can write is refused by a command
+// that writes the mailbox and by a reading, naming it, with nothing acked and
+// nothing sent: whoever can write there could put in or rename a file the
+// mailbox takes as its owner's, a list, a key, a message waiting to be sent,
+// or one that reads as delivered (#717). The line the refusal gives puts it
 // right.
-func TestAKeptDirectoryOthersCanWriteIsRefused(t *testing.T) {
+func TestAMailboxDirectoryOthersCanWriteIsRefused(t *testing.T) {
 	t.Parallel()
-	for _, name := range client.KeptDirs() {
+	_, _, probe := busyMailbox(t)
+	dirs := mailboxDirs(t, probe)
+	if len(dirs) < 11 {
+		t.Fatalf("%d directories: too few for a mailbox with every folder in use: %q", len(dirs), dirs)
+	}
+	for _, rel := range dirs {
+		name := filepath.ToSlash(rel)
+		if name == "." {
+			name = "base-dir"
+		}
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			ctx := context.Background()
-			e := newEnv(t)
-			a, b := e.mailbox(), e.heldMailbox()
-			send(t, a, b, "waits")
-			path := b.Path(name)
-			if err := os.MkdirAll(path, 0o700); err != nil {
-				t.Fatal(err)
-			}
+			e, a, b := busyMailbox(t)
+			path := filepath.Join(b.Dir(), rel)
 			openToWrites(t, path)
+			sentToA := e.srv.Count(a.Address())
 			var refusal error
 			for what, run := range map[string]func() error{
-				"recv":  func() error { _, err := b.Receive(ctx); return err },
-				"inbox": func() error { _, err := b.Inbox(ctx); return err },
-				"held":  func() error { _, err := b.HeldMessages(ctx); return err },
+				"recv":         func() error { _, err := b.Receive(ctx); return err },
+				"inbox":        func() error { _, err := b.Inbox(ctx); return err },
+				"held":         func() error { _, err := b.HeldMessages(ctx); return err },
+				"outbox flush": func() error { _, err := b.Flush(ctx); return err },
 			} {
 				err := run()
-				if err == nil || !strings.Contains(err.Error(), path) || !strings.Contains(err.Error(), "reads as delivered") {
+				if err == nil || !strings.Contains(err.Error(), path) || !strings.Contains(err.Error(), "takes as its owner's") {
 					t.Fatalf("%s with %s open to others' writes: %v", what, path, err)
 				}
 				refusal = err
 			}
-			if n := e.srv.Count(b.Address()); n != 1 {
-				t.Fatalf("the server holds %d, and nothing was to be acked", n)
+			if n, m := e.srv.Count(b.Address()), e.srv.Count(a.Address()); n != 1 || m != sentToA {
+				t.Fatalf("the servers hold %d for b and %d for a, from %d: something was acked or sent", n, m, sentToA)
 			}
 			runFix(t, fixLine(t, refusal))
 			if res := receive(t, b); len(res.Delivered)+len(res.Held) != 1 {
 				t.Fatalf("recv once the directory is put right: %+v", res)
 			}
 		})
+	}
+}
+
+// An outbox entry others can write is refused before it is read, naming it,
+// and nothing is sent: whoever can write it could have the mailbox sign and
+// send what they wrote as its owner's (#717). Once put right it is sent.
+func TestAnOutboxEntryOthersCanWriteIsRefused(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	e, a, b := busyMailbox(t)
+	entries, err := filepath.Glob(filepath.Join(b.Dir(), "outbox", "*.P"))
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("outbox: %q, %v", entries, err)
+	}
+	before := e.srv.Count(a.Address())
+	openFileToWrites(t, entries[0])
+	if _, err := b.Flush(ctx); err == nil || !strings.Contains(err.Error(), entries[0]) || !strings.Contains(err.Error(), "writable by") {
+		t.Fatalf("flush of an entry others can write: %v", err)
+	}
+	if n := e.srv.Count(a.Address()); n != before {
+		t.Fatalf("the entry was sent: %d at the server, from %d", n, before)
+	}
+	openFile(t, entries[0])
+	if sent, err := b.Flush(ctx); err != nil || len(sent) != 1 {
+		t.Fatalf("flush once the entry is put right: %v, %v", sent, err)
 	}
 }
 

@@ -215,12 +215,13 @@ func CheckConfigFile(path string) error {
 	return nil
 }
 
-// checkKeptDir refuses inbox-dir or held/ that another user owns, or that anyone
-// but its owner, SYSTEM and the Administrators can write (readAccess): whoever can
-// write there can put in a file that reads as a delivered message (#717).
-// Others may read it: each file in it is judged on its own (judgeKept). It judges
-// the owner before the list, as checkPrivateFile does. The refusal of a list
-// gives the icacls line that leaves it to those three alone.
+// checkKeptDir refuses a directory of the mailbox's (judgedDirs) that another
+// user owns, or that anyone but its owner, SYSTEM and the Administrators can
+// write (readAccess): whoever can write there can put in or rename a file the
+// mailbox takes as its owner's (#717). Others may read it: each message in
+// inbox-dir, held/ and outbox/ is judged on its own (judgeKept). It judges the
+// owner before the list, as checkPrivateFile does. The refusal of a list gives
+// the icacls line that leaves it to those three alone.
 func checkKeptDir(path string) error {
 	a, err := readAccess(path)
 	if err != nil {
@@ -231,7 +232,7 @@ func checkKeptDir(path string) error {
 		return err
 	}
 	if a.foreignOwner {
-		return fmt.Errorf(`the mailbox's directory %s is owned by %s, who could put a message in it that reads as delivered. If you made it, run: icacls "%s" /setowner *%s`, path, accountName(a.owner), path, self)
+		return fmt.Errorf(`the mailbox's directory %s is owned by %s, %s. If you made it, run: icacls "%s" /setowner *%s`, path, accountName(a.owner), keptDirRisk, path, self)
 	}
 	var writer *accessEntry
 	fix := fmt.Sprintf(`icacls "%s" /inheritance:r /grant:r *%s:(OI)(CI)F *S-1-5-18:(OI)(CI)F *S-1-5-32-544:(OI)(CI)F`, path, self)
@@ -249,7 +250,7 @@ func checkKeptDir(path string) error {
 		}
 	}
 	if writer != nil {
-		return fmt.Errorf("the mailbox's directory %s is writable by %s, who could put a message in it that reads as delivered. Run: %s", path, writer.trustee(), fix)
+		return fmt.Errorf("the mailbox's directory %s is writable by %s, %s. Run: %s", path, writer.trustee(), keptDirRisk, fix)
 	}
 	return nil
 }

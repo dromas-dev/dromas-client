@@ -516,10 +516,20 @@ func (b *Mailbox) expired(stem string) bool {
 	return ok && t.Before(b.now().Add(-protocol.TTL))
 }
 
+// readEntry reads an outbox entry's envelope, once judged as a kept message is
+// (judgeKept): whoever can write the file can have the mailbox sign and send
+// what they wrote as its owner's.
+func (b *Mailbox) readEntry(stem string) ([]byte, error) {
+	if err := b.judgeKept(stem + ".P"); err != nil {
+		return nil, err
+	}
+	return os.ReadFile(stem + ".P") //nolint:gosec // a path inside the mailbox's own directory
+}
+
 // sentAt returns the sent_at of an outbox entry's envelope as the outbox
 // keeps it: when the entry was written.
 func (b *Mailbox) sentAt(stem string) (time.Time, bool) {
-	p, err := os.ReadFile(stem + ".P") //nolint:gosec // a path inside the mailbox's own directory
+	p, err := b.readEntry(stem)
 	if err != nil {
 		return time.Time{}, false
 	}
@@ -604,7 +614,7 @@ func (b *Mailbox) postSealed(ctx context.Context, to protocol.Address, s *sealed
 // type. It is outside what is signed, so the signature is over the envelope
 // as dated.
 func (b *Mailbox) seal(ctx context.Context, to protocol.Address, stem string, l *lookups) (*sealed, error) {
-	written, err := os.ReadFile(stem + ".P") //nolint:gosec // a path inside the mailbox's own directory
+	written, err := b.readEntry(stem)
 	if err != nil {
 		return nil, err
 	}

@@ -102,6 +102,18 @@ func (b *Mailbox) addresses(name string) ([]protocol.Address, error) {
 	return out, nil
 }
 
+// mayAllow refuses to allow an address this mailbox holds revoked, as a
+// [RevokedError]: the one check that every way of allowing a sender passes, the
+// allowed file's (addAll) and an alias's (setAlias).
+func (b *Mailbox) mayAllow(a protocol.Address) error {
+	if gone, err := b.revoked(a); err != nil {
+		return err
+	} else if gone {
+		return &RevokedError{Address: a, Own: a == b.id.Address()}
+	}
+	return nil
+}
+
 // addTo adds an address to one of the mailbox's address lists, unless it is
 // there, and reports whether it added it: a line after what the file holds,
 // the whole file written beside it and moved into place (writeFile), so a
@@ -113,8 +125,16 @@ func (b *Mailbox) addTo(name string, a protocol.Address) (bool, error) {
 }
 
 // addAll is addTo of each address in addrs, in one write, and returns how
-// many it added.
+// many it added. An address added to allowed must pass mayAllow, or nothing
+// is written.
 func (b *Mailbox) addAll(name string, addrs []protocol.Address) (int, error) {
+	if name == "allowed" {
+		for _, a := range addrs {
+			if err := b.mayAllow(a); err != nil {
+				return 0, err
+			}
+		}
+	}
 	have, err := b.addresses(name)
 	if err != nil {
 		return 0, err
@@ -321,7 +341,9 @@ func (b *Mailbox) heldMessages() ([]UnknownSender, error) {
 
 // Allow allows a sender: its messages land in inbox/ from now on, whatever the
 // policy says, and what held/ keeps from it moves there. A sender the mailbox
-// blocks is refused, with nothing done: blocking wins. The moved messages
+// blocks is refused, with nothing done: blocking wins. So is a sender whose
+// address the mailbox holds revoked, as a [RevokedError] (mayAllow): what
+// held/ keeps from it stays there. The moved messages
 // are returned as Receive delivers them, oldest first, but for Plaintext and
 // Signature, which the mailbox never kept. Then the server is
 // sent the mailbox's ACL, if the change is one it holds ([Mailbox.SyncACL]): an
@@ -428,8 +450,8 @@ func (b *Mailbox) block(a protocol.Address) (int, error) {
 }
 
 // RebuildAllowed adds back to the allowed file every address the mailbox has
-// an alias for or has sent messages to, as sent/ names them, and returns how
-// many it added. What the file lists stays. It is for a mailbox whose allowed
+// an alias for or has sent messages to, as sent/ names them, but one it holds
+// revoked (mayAllow), and returns how many it added. What the file lists stays. It is for a mailbox whose allowed
 // file was lost: send, alias and allow keep it otherwise.
 func (b *Mailbox) RebuildAllowed(ctx context.Context) (int, error) {
 	return lockedFinished(ctx, b, b.rebuildAllowed)
@@ -456,6 +478,12 @@ func (b *Mailbox) rebuildAllowed() (int, error) {
 	}
 	added := 0
 	for _, a := range protocol.NewACLList(false, addrs).Addrs {
+		var gone *RevokedError
+		if err := b.mayAllow(a); errors.As(err, &gone) {
+			continue
+		} else if err != nil {
+			return added, err
+		}
 		ok, err := b.addTo("allowed", a)
 		if err != nil {
 			return added, err

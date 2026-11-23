@@ -199,7 +199,9 @@ func opensWith(path string, mask uint32) (bool, error) {
 // setAndJudge is the first plain user's half: each of accessLists on a file in a
 // directory of its own alone, so no right on the file comes from the directory, the
 // list no text form writes, and a mailbox that sent and received in a directory
-// others can modify.
+// others can modify, opened with UnsafeInboxPermissions, which lets such a
+// directory through, so that what is judged is the lists of the files it made
+// there.
 func setAndJudge(t *testing.T, reach, manifest string) {
 	t.Helper()
 	lists, err := os.MkdirTemp(reach, "lists-")
@@ -233,7 +235,9 @@ func setAndJudge(t *testing.T, reach, manifest string) {
 		t.Fatal(err)
 	}
 	openToOthers(t, made)
-	a, err := client.Init(t.Context(), made, e.opts())
+	opt := e.opts()
+	opt.UnsafeInboxPermissions = true
+	a, err := client.Init(t.Context(), made, opt)
 	if err != nil {
 		t.Fatal(err)
 	}
