@@ -135,9 +135,9 @@ const MaxACLEntries = 10000
 // CheckACL checks an ACL document as a server takes one, and returns it in
 // its checked form. A refusal is ErrACL, naming the member that breaks it
 // ([Member]): "allow" where there is none, or the list with an entry that is
-// neither an address nor AnyAddress. maxEntries bounds the entries of both lists together,
-// AnyAddress counting as one and a repeat counting as often as it is
-// written; 0 sets no bound.
+// neither an address nor AnyAddress. maxEntries bounds the entries of both
+// lists together, AnyAddress counting as one and a repeat counting as often
+// as it is written; 0 sets no bound.
 func CheckACL(d *ACLDocument, maxEntries int) (*ACL, error) {
 	if d.Allow == nil {
 		return nil, &memberError{name: "allow", known: true, of: ErrACL}

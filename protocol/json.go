@@ -45,7 +45,8 @@ var ErrUnknownMember = errors.New("the body has a member this call does not take
 var ErrMemberValue = errors.New("a member holds a value the protocol does not take there")
 
 // memberError is an [ErrUnknownMember], or with known set an
-// [ErrMemberValue], naming its member.
+// [ErrMemberValue], naming its member; with of set, it is also that
+// document's own error (ErrACL), whose words it carries.
 type memberError struct {
 	name  string
 	known bool
