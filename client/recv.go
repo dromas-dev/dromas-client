@@ -752,9 +752,9 @@ func keptLineOf(env *protocol.Envelope) ([]byte, error) {
 // the same value. A body can carry them raw inside a JSON string, the only
 // place JSON allows them. The line breaks other than LF are U+0085, U+2028
 // and U+2029 (Python's str.splitlines, Node's readline). The ones nobody sees
-// are Unicode's Default_Ignorable_Code_Point (DerivedCoreProperties, Unicode
-// 18.0): tag characters, BiDi controls and marks, zero-width characters,
-// variation selectors. A model reads each of these as text, and a person sees
+// are Unicode's Default_Ignorable_Code_Point (DerivedCoreProperties;
+// defaultIgnorable): tag characters, BiDi controls and marks, zero-width
+// characters, variation selectors. A model reads each of these as text, and a person sees
 // none, so a body could carry an instruction past whoever looks. It also
 // escapes the controls that JSON leaves raw, U+007F and the C1 block (Unicode's
 // general category Cc above U+001F), because a terminal can act on a C1
@@ -795,9 +795,10 @@ func escaped(r rune) bool {
 	return false
 }
 
-// defaultIgnorable is Unicode 18.0's Default_Ignorable_Code_Point, range for
-// range (DerivedCoreProperties-18.0.0.txt). dromas.sh's dr_line holds the
-// same list.
+// defaultIgnorable is Unicode's Default_Ignorable_Code_Point, range for range,
+// as DerivedCoreProperties derives it from the tables of the version of
+// Unicode that Go's unicode package gives (unicode.Version). dromas.sh's
+// dr_line holds the same list.
 var defaultIgnorable = [][2]rune{
 	{0x00AD, 0x00AD}, {0x034F, 0x034F}, {0x061C, 0x061C}, {0x115F, 0x1160}, {0x17B4, 0x17B5},
 	{0x180B, 0x180F}, {0x200B, 0x200F}, {0x202A, 0x202E}, {0x2060, 0x206F}, {0x3164, 0x3164},
