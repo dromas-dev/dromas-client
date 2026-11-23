@@ -553,3 +553,10 @@ func (b *Mailbox) Acknowledge(ctx context.Context) (*Restored, error) {
 
 // PauseAfter is how long the loop waits before the drain after res and err.
 func PauseAfter(res *Result, err error) time.Duration { return pauseAfter(res, err) }
+
+// PostCiphertext posts body to path as a ciphertext, the way a send posts
+// one, and returns its error.
+func PostCiphertext(ctx context.Context, b *Mailbox, path string, body []byte) error {
+	_, err := b.exchange(ctx, http.MethodPost, path, &ciphertext{bytes: body}, nil, nil)
+	return err
+}

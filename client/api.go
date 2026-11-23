@@ -225,6 +225,7 @@ type stall struct {
 	ctx     context.Context
 	base    time.Time    // when the stall began, with its monotonic reading
 	last    atomic.Int64 // when a byte last moved, in nanoseconds after base
+	reached atomic.Int64 // how far into the request's body any copy of it was read (copyOf)
 	mu      sync.Mutex   // holds timer, which check may read before newStall has set it, whole and stopped
 	timer   *time.Timer
 	whole   bool // the rest of the call is bounded whole (answering)
@@ -307,21 +308,47 @@ func (s *stall) why(err error) error {
 }
 
 // sending has each byte of req's body that is read to be sent count as one
-// that moved, and the end of it bound the rest of the call whole.
+// that moved, and the end of it bound the rest of the call whole. A copy of
+// the body that GetBody gives for a retry counts only the bytes past the
+// furthest any copy was read to (copyOf).
 func (s *stall) sending(req *http.Request) {
 	if s == nil || req.Body == nil || req.Body == http.NoBody {
 		return
 	}
-	req.Body = sent{s.reading(req.Body), s}
+	req.Body = sent{&copyOf{ReadCloser: req.Body, s: s}, s}
 	if get := req.GetBody; get != nil {
 		req.GetBody = func() (io.ReadCloser, error) {
 			b, err := get()
 			if err != nil {
 				return nil, err
 			}
-			return sent{s.reading(b), s}, nil
+			return sent{&copyOf{ReadCloser: b, s: s}, s}, nil
 		}
 	}
+}
+
+// copyOf is one copy of a request's body as net/http reads it to send: the
+// first, or one GetBody gave for a retry. A byte of it moves only where the
+// copy is read past the furthest any copy reached: a copy read again from its
+// start sends what was sent already, which is no progress, so a server that
+// has every try begin again (net/http sends a request again past each HTTP/2
+// GOAWAY with no end) is cut at requestTimeout.
+type copyOf struct {
+	io.ReadCloser
+	s  *stall
+	at int64
+}
+
+func (c *copyOf) Read(p []byte) (int, error) {
+	n, err := c.ReadCloser.Read(p)
+	c.at += int64(n)
+	for r := c.s.reached.Load(); n > 0 && c.at > r; r = c.s.reached.Load() {
+		if c.s.reached.CompareAndSwap(r, c.at) {
+			c.s.moved()
+			break
+		}
+	}
+	return n, err
 }
 
 // reading is r, each byte read of it counted as one that moved.

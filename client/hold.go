@@ -52,13 +52,13 @@ import (
 //     DefaultHold at first, and ends at that wait and a margin from the
 //     connection it got last, whether answered or not: a dead path is found
 //     there, never by a probe on a live one. It ends unanswered at once at
-//     a second new connection after a first (heldBound). Only a
-//     connection that drops with keep-alive at its floor shortens the
-//     wait, never below MinHold: a path whose
-//     probes keep nothing alive (an HTTP proxy's timeout, which TCP's
-//     keep-alive does not reach). Holds start at most about once a minute
-//     (holdEvery), so a connection that fails at once is a minute's poll,
-//     within the poll budget (PROTOCOL.md §11.5).
+//     a second new connection after a first (heldBound). Only a connection
+//     that drops with keep-alive at its floor shortens the wait, never
+//     below MinHold: a path whose probes keep nothing alive (an HTTP
+//     proxy's timeout, which TCP's keep-alive does not reach). Holds start
+//     at most about once a minute (holdEvery), so a connection that fails
+//     at once is a minute's poll, within the poll budget (PROTOCOL.md
+//     §11.5).
 //   - What the drops taught. Nothing tells a mailbox that a network which
 //     forgot its connections is gone, as nothing tells a host that a path
 //     MTU a loss lowered is stale, so the mailbox ages what it learned, as
@@ -213,13 +213,10 @@ func (h *holding) dialer() *net.Dialer {
 // defaultTransport is the default client's: net/http's own, a TLS session
 // cache so that a new connection resumes (RFC 8446 §2.2; no early data; a
 // mailbox with a directory wraps it in a ticketCache), HTTP/2's health check,
-// and a dialer that sends keep-alive only as h says. It asks for no
-// compressed answer, where net/http's asks for gzip: a server never
-// compresses (PROTOCOL.md §11.2), and anything in front of it that would
-// brings the leak of a compressed answer's length (§15.8).
+// and a dialer that sends keep-alive only as h says. newTransport asks it for
+// no compressed answer, as it asks every transport of net/http's type.
 func defaultTransport(h *holding) *http.Transport {
 	t := http.DefaultTransport.(*http.Transport).Clone()
-	t.DisableCompression = true
 	t.TLSClientConfig = &tls.Config{ClientSessionCache: tls.NewLRUClientSessionCache(0)}
 	t.IdleConnTimeout = connectionIdle
 	t.HTTP2 = &http.HTTP2Config{SendPingTimeout: healthCheckAfter, PingTimeout: healthCheckWait}
@@ -259,10 +256,16 @@ var errHeldOut = fmt.Errorf("no answer within the wait: %w", context.DeadlineExc
 // heldBound is ctx, cut with errHeldOut once d passes from the connection
 // its request got last: net/http may send a GET again on another connection,
 // and that request's bound is its own. It is cut at once at a second new
-// connection after a first: net/http sends a request again past each
-// HTTP/2 GOAWAY with no end, so a server that answers each connection so
-// would hold the call past every bound, where one new connection after a
-// reused one is the retry past a drop or a server's restart.
+// connection after a first: net/http sends a request again past each HTTP/2
+// GOAWAY with no end, so a server that answers each connection so would hold
+// the call past every bound. Where the first connection was reused, the one
+// new connection after it is the retry past a drop or a server's restart.
+// Where the first was new too, as at a process's first hold and at each hold
+// after a cut (cutOff renews the transport), one honest GOAWAY cuts the hold,
+// at this cost: Hold returns errHeldOut, which is Transient; the renewal drops
+// the pool; Await holds again at its next turn (holdEvery), with the same tag,
+// so nothing that arrived meanwhile waits for more than that turn; and recv
+// --wait and --follow print one "waiting" line.
 func heldBound(ctx context.Context, d time.Duration) (context.Context, func()) {
 	ctx, cancel := context.WithCancelCause(ctx)
 	t := time.AfterFunc(d, func() { cancel(errHeldOut) })
@@ -290,12 +293,13 @@ func timedOut(err error) bool {
 // Transient reports whether err is a call that failed and that making it
 // again may get past: no answer, a server error, a rate limit, a request
 // timeout, or a mailbox that changed during the request, which the server
-// says to send again unchanged (PROTOCOL.md §11.3). So is a lock another command held for as long as a command waits for
-// it, a renewal held back until renewTime after one that failed so, a drain
-// refused for what a renewal mends whose renewal failed so ([Mailbox.Receive]),
-// and an answer about a revocation whose read for the proof failed so. A
-// refusal no wait mends is not: [Fatal] names those, a folder of the mailbox
-// missing and a clock behind among them.
+// says to send again unchanged (PROTOCOL.md §11.3). So is a lock another
+// command held for as long as a command waits for it, a renewal held back
+// until renewTime after one that failed so, a drain refused for what a
+// renewal mends whose renewal failed so ([Mailbox.Receive]), and an answer
+// about a revocation whose read for the proof failed so. A refusal no wait
+// mends is not: [Fatal] names those, a folder of the mailbox missing and a
+// clock behind among them.
 func Transient(err error) bool {
 	var ae *APIError
 	var re *RevokedError
@@ -485,9 +489,12 @@ const ReceiveEvery = time.Hour
 // one; a refusal no wait mends ([Fatal]) ends it, as its error. h, when not
 // nil, is handed an [EventRetry] for each held request that failed and an
 // [EventConnectionDropped] for each connection that dropped, and an error from
-// h ends Await as that error. Await returns by until, its waits for a turn to
-// hold included (Hold). [Mailbox.Follow] is the whole cycle, of which Await is
-// the part that waits.
+// h ends Await as that error. Await asks each hold to end by until, its waits
+// for a turn to hold included (Hold). A server that holds a request past its
+// wait delays Await past until: with the default client by holdMargin at most,
+// and with an [Options.HTTPClient] given, until that client's own bound ends
+// the request. [Mailbox.Follow] is the whole cycle, of which Await is the part
+// that waits.
 //
 // With under a second left Await waits it out, so the Receive after is the
 // caller's last, never one of a burst of polls until the deadline passes.
