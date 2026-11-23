@@ -341,8 +341,9 @@ func skVectorFiles(t *testing.T) map[string][]byte {
 			files["cert/d-bad-webauthn.txt"] = statement(a, serial)
 			files["cert/d-bad-webauthn.sig"] = sign(under(c, workKey), statement(a, serial), ns)
 
-			// Flags with user presence and other bits, as the Mac's Secure
-			// Enclave writes them (0x21: UP and UV).
+			// Flags with user presence and bit 0x20, which WebAuthn's
+			// authenticator data reserves (RFU2): what every Secure Enclave
+			// signature measured carried (#41).
 			files["sig/d-ok-flags-21.sig"] = sign(withFlags(t, m, 0x21, 0), st, ns)
 			files["sig/d-bad-flags-fe.sig"] = sign(withFlags(t, m, 0xfe, 0), st, ns)
 		case "e":
