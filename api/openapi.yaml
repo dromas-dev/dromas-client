@@ -1752,8 +1752,7 @@ components:
                     enum: [mailbox_not_found, message_not_found, revocation_not_found]
     Conflict:
       description: |
-        `mailbox_already_exists` · `serial_too_low` (with `prekey_serial`, and
-        `certificate_serial` where the current signer is a certificate, or
+        `mailbox_already_exists` · `serial_too_low` (with `prekey_serial` or
         `revocation_serial`, as the call has one) · `concurrent_modification` · `prekey_superseded` · `prekey_expired`.
         `PROTOCOL.md` §11.3 has what each means.
       headers:
@@ -2457,7 +2456,7 @@ components:
             - $ref: '#/components/schemas/Integer'
             - type: 'null'
         certificate_serial:
-          description: '`serial_too_low` on a prekey: the current certificate''s serial, where the current signer is a certificate; `certificate_superseded`: the serial of the certificate the call takes a pass by, or of the one a new statement must be above, where that is a certificate (`PROTOCOL.md` §8).'
+          description: '`certificate_superseded`: the serial of the certificate the call takes a pass by, or of the one a new statement must be above, where that is a certificate (`PROTOCOL.md` §8).'
           anyOf:
             - $ref: '#/components/schemas/Integer'
             - type: 'null'
@@ -2480,7 +2479,7 @@ components:
           description: '`unsupported_sender_key_type`: the sender''s key type, an optional one the mailbox did not declare.'
           type: [string, 'null']
         param:
-          description: '`invalid_request`: the request member or query parameter that is missing, unknown or given twice, or holds a value its call does not take, a byte member not base64 in its one encoding among them. A send''s body that is not an age file names none.'
+          description: '`invalid_request`: the request member or query parameter that is missing, unknown or given twice, or holds a value its call does not take, a byte member not base64 in its one encoding among them. A send''s body whose age header does not parse names none.'
           type: [string, 'null']
         min_version:
           description: '`client_version_unsupported`: the lowest version the server takes, where it sets a floor, `MAJOR.MINOR` (`PROTOCOL.md` §11.17).'

@@ -34,9 +34,12 @@ import (
 //   - A peer this mailbox holds a revocation of is refused before anything is
 //     asked: a [RevokedError], whatever the server now serves for it.
 //
-// The identity is pinned, and the order recorded, only after every check
-// passed: nothing is kept of a peer whose statement did not verify. It holds
-// the mailbox's lock ([Mailbox.hold]).
+// The order is recorded, and the identity pinned with it, once the statement
+// verified, under no certificate this mailbox holds revoked and not ordered
+// before one seen, whatever the checks after those then find: its key's type,
+// its not_after, and whether the peer verifies this mailbox's key type
+// (PROTOCOL.md §12.2). Nothing is kept of a peer whose statement did not
+// verify. It holds the mailbox's lock ([Mailbox.hold]).
 func (b *Mailbox) Resolve(ctx context.Context, peer protocol.Address) (*protocol.Prekey, error) {
 	return locked(ctx, b, func() (*protocol.Prekey, error) {
 		r, err := b.resolve(ctx, peer, nil)

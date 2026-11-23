@@ -221,7 +221,7 @@ Where this document uses a term below as a defined term, the term has the sense 
 
 The draft that the table names for age's KEM, draft-ietf-hpke-pq-03, is the version that C2SP age v1.1.0 cites. The conformance vectors and C2SP age v1.1.0 fix the KEM's bytes for this protocol (Section 16), whatever a later draft says.
 
-Inside age, every keyed hash is HMAC or HKDF. Outside age, the protocol defines no keyed function. The protocol applies plain SHA-384 and SHA-256 only to public inputs: the identity document, a prekey statement, and the ciphertext.
+Outside age, the protocol defines no keyed function. The protocol applies plain SHA-384 and SHA-256 only to public inputs: the identity document, a prekey statement, and the ciphertext.
 
 ### 3.2. Signatures
 
@@ -315,7 +315,7 @@ A key of a type this section defines MUST be in that type's one encoding, and MU
 | Key type | Document | What fixes its one encoding | Key checks | Working key |
 |---|---|---|---|---|
 | `ssh-ed25519` | 91 bytes | the key's length, 32 (RFC 8709 §4) | a canonical point, not of small order | `ssh-ed25519` |
-| `ecdsa-sha2-nistp256` | 171 bytes | the curve's name, `nistp256`, and an uncompressed point | the point on the curve, not the point at infinity, each coordinate below the field's size | `ssh-ed25519` |
+| `ecdsa-sha2-nistp256` | 171 bytes | the curve's name, `nistp256`, and an uncompressed point: on the curve, not the point at infinity, each coordinate below the field's size | none beyond its encoding | `ssh-ed25519` |
 
 - **Every client MUST verify every key type this section defines.**
 - **A key type defined after this version is OPTIONAL (Section 14).** Each client decides whether to verify such a type, and each server decides whether to register such a type (Section 11.7). Only a mailbox whose client verifies an optional type can write to a mailbox of that type, or hear from one (Section 7). This version defines no optional type.
@@ -561,7 +561,7 @@ server-port    = %x31-39 *4DIGIT   ; no leading zero, at most 65535,
 |---|---|
 | `certificate_revoked` | the call accepts a pass by the current certificate, the identity has revoked that certificate, and the pass does not name the identity's key (Section 11.4, rule 1); or the call brings a prekey statement under a certificate that the identity revoked |
 | `pass_expired` | at the server's clock, the pass has ended or ends more than the skew allowance ahead, or the pass's certificate has not begun or has ended |
-| `certificate_superseded` | the pass is by any certificate other than the one the call accepts a pass by, or the certificate that the server keeps for the mailbox does not verify |
+| `certificate_superseded` | the pass is by any key other than the identity's and the certificate that the call accepts a pass by, or the certificate that the server keeps for the mailbox does not verify |
 | `invalid_pass` | there is no pass, or the pass is not this mailbox's, or the pass is not for this server, or the pass does not verify |
 
 A `certificate_superseded` answer names, in `certificate_serial`, the certificate that the call should have used:
@@ -798,7 +798,7 @@ A revocation record carries an identity's revocations, and the record proves its
 
 ### 11.3. Errors
 
-- **Every error body is RFC 9457 Problem Details (`application/problem+json`), in AEP-193's form, except the router's plain `404` and `405` (Section 11.2).** The members are `type`, `title`, `status`, `detail`, `code` and `hint`, and one more member for each value the error carries. Every value that `detail` names also has a member of its own.
+- **Every error body is RFC 9457 Problem Details (`application/problem+json`), in AEP-193's form, except the router's plain `404` and `405` (Section 11.2), and the HTTP server's own answer to a request whose head it cannot read, such as a `400` or a `431` (RFC 6585 §5).** The members are `type`, `title`, `status`, `detail`, `code` and `hint`, and one more member for each value the error carries. Every value that `detail` names also has a member of its own.
 - **`type`.** The value is `tag:dromas.dev,2026-10-26:errors/<code>` (RFC 4151), the same at every server. The tag resolves to nothing.
 - **Every `code` is on the closed list that `api/openapi.yaml` gives, under the status that the list gives the code, with the code's own `type`.**
   - A client ignores a code that the client does not know, a code under another status, and a code with another `type`.
@@ -811,14 +811,14 @@ A revocation record carries an identity's revocations, and the record proves its
   - A `hint` names a fix as a client command, never as a shell line.
 - **On every answer other than a `2xx`, a client reads `code`, the members, `Retry-After` and `Date`.**
 - **A `401` carries `WWW-Authenticate` with the scheme `dromas-pass` (Section 8).**
-- **`Retry-After` is delay-seconds, digits alone, on a `429`, on a `503` and on every list answer (Section 11.11).** A client reads an HTTP-date in `Retry-After` as no wait.
+- **`Retry-After` is delay-seconds, digits alone, on a `429`, on a `503` and on every `200` and `304` of a list (Section 11.11).** A client reads an HTTP-date in `Retry-After` as no wait.
 - **A code names how a client handles the error.** Where one call can fail for causes that a client handles differently, each cause has its own code.
 
 This table gives each code's meaning, and how a client acts on the code:
 
 | Status | Code | Meaning |
 |---|---|---|
-| 400 | `invalid_request` | a request body that is not a JSON text Section 3.3 accepts; a member or query parameter, named in `param`, that is missing, unknown, repeated, or has a value the call does not accept, including a byte member that is not base64 in base64's one encoding (Section 2.2); a send's body that is not an age file (Section 11.10, step 4) |
+| 400 | `invalid_request` | a request body that is not a JSON text Section 3.3 accepts; a member or query parameter, named in `param`, that is missing, unknown, repeated, or has a value the call does not accept, including a byte member that is not base64 in base64's one encoding (Section 2.2); a send's body whose age header does not parse (Section 11.10, step 4) |
 | 400 | `invalid_address` | a path address that is not an `address` (Section 4.2) |
 | 400 | `identity_mismatch` | an identity document that does not hash to the address, or that does not have the form Section 4.1 gives |
 | 400 | `unsupported_key_type` | an identity key type that this protocol does not define, or that this server does not register; `key_types` lists the types the server registers |
@@ -931,7 +931,7 @@ A quota counted against `ip` counts an IPv4 address by itself and an IPv6 addres
 
 A fetch and an ack of a message the mailbox holds spend no `calls`, and Section 11.12 gives a fetch's own budgets.
 
-**What a `HEAD` and a false precondition spend.** A list's `HEAD`, and a list refused by a false precondition, spend `polls`. Any other `HEAD`, and any other call refused by a false precondition, spend `calls`.
+**What a `HEAD` and a false precondition spend.** A list's `HEAD`, and a list refused by a false precondition, spend `polls`. Any other `HEAD` that carries the mailbox's pass, and any other call with that pass refused by a false precondition, spend `calls`.
 
 For a server's limit that is not one of these, the refusal has no `quota_id`.
 
@@ -1069,7 +1069,7 @@ The server checks the steps below. Only step 9 stores anything.
    3. the pass's own refusals, and the sender's `calls` (Section 11.5). Every send spends `calls`, including a send of a ciphertext that `B` already stores (step 6).
 2. **The path and the query.** `<B>` is an address → otherwise `invalid_address`. `prekey_sha256` is given once, as `statement-hash`, and no other parameter is given → otherwise `invalid_request`, naming the parameter.
 3. **The body's size.** The body is at most the sender's cap → otherwise `413 content_too_large`, with the cap in `limit`. The server refuses by the `Content-Length` before it reads anything, or while it reads.
-4. **The age file.** The body is an age file → otherwise `invalid_request`, with no `param`. An empty body gets the same refusal.
+4. **The age header.** The body begins with an age header that parses (C2SP age) → otherwise `invalid_request`, with no `param`. An empty body gets the same refusal.
 5. **`B` is active:** unknown → `404 mailbox_not_found`; revoked → `410 mailbox_revoked`.
 6. **Dedupe, while the message is live.** The server evaluates the send's preconditions before this step (Section 11.2). The message id is the ciphertext's SHA-256. If `B` stores an unacked message with that message id, from any sender, the server answers `200` with the receipt it kept, whatever has changed at `B` since. This answer comes ahead of steps 7 to 9, and ahead of every count except the budgets that bound any call (Section 11.5). The server keeps nothing of a message once the message is gone. So the same bytes sent after that are a new message, which the server stores and counts as any send. A reader that accepted those bytes once skips or refuses them (Section 12.3, check 8).
 7. **`B` accepts messages on this prekey, from this sender:**
@@ -1107,7 +1107,7 @@ The server checks the steps below. Only step 9 stores anything.
   cursor = 1*( ALPHA / DIGIT / "-" / "_" )
   ```
 
-- **On every list answer, a `304` included, `Retry-After` is the server's poll interval, in seconds.**
+- **On every `200` and `304` of a list, `Retry-After` is the server's poll interval, in seconds.**
 - **A first page carries an `ETag`.** The `ETag` is a strong validator of the page's body. The `ETag` changes whenever a message enters or leaves the page or the count. A page after the first carries no `ETag`.
 - **A mailbox that polls faster than its `polls` budget gets `429`, never `304`** (Section 11.5).
 - **A list with a cursor is a continuation only if the list meets all three of these conditions:**
@@ -1182,7 +1182,7 @@ A mailbox's ACL says from which senders the mailbox's server accepts messages to
 - **A `PUT` MAY carry `If-Match` (RFC 9110 §13.1.1), so that the `PUT` replaces only the ACL its writer read.**
 - **Every mailbox has an ACL and the ACL's tag, a mailbox with no ACL set included.** Therefore `If-None-Match: *` on a `PUT` is false (§13.1.2).
 - **Setting the ACL deletes no message.** A change to the ACL refuses only later sends. A send that passed the ACL check while the ACL changed may still be stored after the change.
-- **A mailbox pauses by setting its ACL to `{"allow":[],"deny":["*"]}`.** That ACL refuses every sender.
+- **The ACL `{"allow":[],"deny":["*"]}` refuses every sender.**
 - **The ACL is not signed.** Only the mailbox gets its ACL. Only the server acts on the ACL.
 
 ### 11.15. Revocations
@@ -1271,7 +1271,7 @@ A mailbox may belong to one account at its server. The protocol fixes how a mail
     - `below` a version, which covers every version whose major and minor come before that version's major and minor;
     - `version` a version, which covers every version whose major and minor are that version's.
 
-  A server MUST NOT schedule a sunset earlier than a deprecation of the same `below` or `version` (RFC 9745 §4).
+  A server MUST NOT set a policy under which an answer's `Sunset` would be earlier than its `Deprecation` (RFC 9745 §4).
 - **`Deprecation`.** An answer under `/v1/` carries `Deprecation` (RFC 9745 §2.1) when a deprecation covers the request's version. The field's date is the earliest date among the deprecations that cover the version.
   - The field's scope is the version that the request names, on every route under `/v1/`. That scope is wider than the resource that RFC 9745 §2.2 gives the field by default.
   - Only those answers carry `Deprecation`.
@@ -1330,7 +1330,7 @@ A server lists at most 64 deprecations, 64 sunsets, and 64 capabilities. A clien
     - the `not_after` not passed;
     - the prekey statement not earlier than any prekey statement the sender has seen (Section 5.3).
 
-  The sender records the prekey statement's `(c, p)` once the statement's signature, form, namespace, address and rank have checked, and no revocation that the sender keeps covers its signer. The statement must also be not earlier than any the sender has seen. The sender records the value whatever the checks of the key and the `not_after` then find.
+  The sender records the prekey statement's `(c, p)` once the statement's signature, form, namespace, address and rank have checked, and no revocation that the sender keeps covers its signer. The statement must also be not earlier than any the sender has seen. The sender records the value whatever the key's type and the `not_after` then find.
 - **Revocations:**
   - The sender verifies any revocation of the recipient's address or certificates that the lookup carries, and keeps each one that verifies (Section 12.5).
   - The sender posts nothing to an address if the sender keeps a revocation of that address, and makes no call about that address.
@@ -1364,6 +1364,7 @@ A client drains every page of its list (Section 11.11) and fetches the message o
 - **The client accepts only a body of the listed `size`, and reads at most one byte past it.** An answer whose body has another length is malformed, and the client judges nothing and acks nothing on that answer.
 - **A fetch that resumes a cut fetch by range (Section 11.12) is checked as a whole.** The client checks the bytes kept and the range together against the listed `size` and the message id (check 8), as for a body read whole.
 - **A `206` is malformed if the `Content-Range` is not the range asked for, or is not of the listed size.**
+- **A client MAY ack a list entry whose `id` is in its replay set (check 8) without fetching the message.**
 
 **The checks, in this order.** Each check but check 9 names the code it refuses with. A client MUST NOT accept a message that does not clear every check.
 
@@ -1386,7 +1387,7 @@ A client drains every page of its list (Section 11.11) and fetches the message o
    | 1 | a body is present, every member is of its type, and `from` and `to` are addresses | `invalid_envelope` |
    | 2 | `v` is the integer 1 | `invalid_envelope` |
    | 3 | `to` is this mailbox | `recipient_mismatch` |
-   | 4 | `msg_id` is in its form | `invalid_envelope` |
+   | 4 | `msg_id` is in its form, and `sent_at` is a time | `invalid_envelope` |
    | 5 | `sent_at` is no older than the TTL | `message_expired` |
    | 6 | `sent_at` is no more than the skew allowance ahead of this mailbox's clock | `message_not_yet_valid` |
 
@@ -1551,7 +1552,7 @@ A server chooses how it stores things. A server promises a client the following:
 - **A revocation of the address deletes every message in the mailbox, in the same way as an ack deletes one message.** The server also deletes its record of the mailbox, and keeps the revocation (Section 11.15).
 - **Setting the ACL deletes no message (Section 11.14).**
 - **A server finishes a send in flight well inside the hour for sends in flight that Section 15.3 gives a client.** A send in flight is a send to the prekey statement that a renewal replaced, which passed Section 11.10, step 7, before the server accepted the renewal. The server stores and lists the send's message within that time, or does not store the message.
-- **Logs.** A server MUST NOT log an address or a message id in the clear. Where a server would log one of these values, the server logs a name for the value instead. A day after the server logs a name, nobody, the server's operator included, can match the name to its value. For example, a server makes the name with a keyed pseudorandom function, under a random key that the server keeps only in memory and replaces each day. A server MUST NOT log a pass or a request body.
+- **Logs.** A server MUST NOT log an address or a message id in the clear. Where a server would log one of these values, the server logs a name for the value instead. A day after the server logs a name, nobody, the server's operator included, can match the name to its value from the log alone. For example, a server makes the name with a keyed pseudorandom function, under a random key that the server keeps only in memory and replaces each day. A server MUST NOT log a pass or a request body.
 
 ## 14. Compatibility and versioning
 
@@ -1713,7 +1714,7 @@ Dromas protects a message's content from everyone but the message's recipient. D
 - **The party that has the identity key chooses how long a certificate runs, up to the server's maximum and never past the protocol's maximum.** A shorter certificate ends a stolen working key sooner, and needs the identity more often. A reader checks a certificate at the reader's own clock, because nothing vouches for when a signature was made. A message may also wait the TTL before it is read. So a certificate signs messages that every reader accepts until the certificate's `valid before`, less the message margin (Section 2.3). For a certificate of the full maximum, that is the server's maximum less the skew allowance and the message margin, counted from when the maker made the certificate.
 - **A stolen pass works only for the time that the pass has left, at most an hour, and only at the server that the pass names.** A stolen pass:
   - gives the mailbox's metadata and ciphertext;
-  - gives control of the mailbox's availability: deleting unacked messages permanently, leaving the mailbox's account, and setting the mailbox's ACL, with which the stolen pass can pause the mailbox until the owner sets the next ACL;
+  - gives control of the mailbox's availability: deleting unacked messages permanently, leaving the mailbox's account, and setting the mailbox's ACL, with which the stolen pass can refuse every sender until the owner sets the next ACL;
   - gives sending in the mailbox's name, which verifies at no recipient;
   - never gives plaintext, signs no message and no prekey statement, and cannot revoke the address.
 
@@ -1784,6 +1785,7 @@ Dromas protects a message's content from everyone but the message's recipient. D
   - The mailbox's kept prekeys open that message, and the replay set that the mailbox now keeps does not record the message.
   - A reader whose work must not happen twice keys that work by `(from, msg_id)`, as a consumer of any at-least-once queue does.
   - A restore from the identity alone keeps no prekey. So no message that the lost mailbox delivered decrypts after that restore.
+- **A mailbox that loses the revocations it kept (Section 12.5), or puts back an older copy of them, has failed too.** A server can then withhold a lost revocation, as from a reader that has not seen it (Section 15.6), and the mailbox accepts a message that the revocation covers.
 - **Losing the identity loses the address.** So the identity is the one key whose loss a backup answers. A restored mailbox makes new working keys and prekeys, so neither needs a backup.
 - **A mailbox that does not renew is sent nothing once its prekey's `not_after` passes.** The mailbox's senders get `409 prekey_expired`. A mailbox under a certificate can poll while the certificate lasts. A mailbox that has its identity can poll with a pass by the identity. Once the certificate has ended, the mailbox's server accepts no pass under the certificate. A renewal brings the mailbox back while the server keeps the mailbox.
 

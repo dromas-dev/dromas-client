@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"regexp"
 	"slices"
@@ -257,10 +258,9 @@ type Capability struct {
 // sunset with exactly one of below and version and its date a time, each
 // capability's name of its form, the implementation's members of theirs,
 // and no more than MaxDeprecations,
-// MaxSunsets and MaxCapabilities of each; and to RFC 9745 §4's rule, no
-// sunset earlier than a deprecation of the same versions, the same below or
-// the same version, written alike (PROTOCOL.md §11.17). It names the member
-// that breaks it ([Member]).
+// MaxSunsets and MaxCapabilities of each; and to RFC 9745 §4's rule, that no
+// answer's Sunset is earlier than its Deprecation, for every version
+// (PROTOCOL.md §11.17). It names the member that breaks it ([Member]).
 func (d *ServerDocument) Check() error {
 	for name, v := range map[string]string{"min_version": d.MinVersion, "latest_version": d.LatestVersion} {
 		if v != "" {
@@ -280,10 +280,21 @@ func (d *ServerDocument) Check() error {
 			return err
 		}
 	}
-	for _, s := range d.Sunsets {
-		_, end, _ := s.parse()
-		for _, dep := range d.Deprecations {
-			if _, from, _ := dep.parse(); dep.Below == s.Below && dep.Version == s.Version && end.Before(from) {
+	// What covers a version changes only at a version the policy names, so
+	// each such version and the one just below it stand for every version.
+	for _, s := range append(slices.Clone(d.Deprecations), d.Sunsets...) {
+		p, _, _ := s.parse()
+		at := []Version{{Major: p.Major, Minor: p.Minor}}
+		switch {
+		case p.Minor > 0:
+			at = append(at, Version{Major: p.Major, Minor: p.Minor - 1})
+		case p.Major > 0:
+			at = append(at, Version{Major: p.Major - 1, Minor: math.MaxUint64})
+		}
+		for _, v := range at {
+			from, deprecated := d.DeprecationFor(v)
+			end, sunset := d.SunsetFor(v)
+			if deprecated && sunset && end.Before(from) {
 				return &memberError{name: "sunsets", known: true}
 			}
 		}
