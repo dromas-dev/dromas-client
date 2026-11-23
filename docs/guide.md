@@ -291,7 +291,7 @@ Back up these files:
 - Your config file.
 - The `allowed`, `blocked`, and `aliases` lists.
 
-`prekeys/`, `work/`, and `tls-ticket` don't need a backup, because a restored mailbox makes new ones. A backup that contains `prekeys/` can still decrypt messages after the mailbox deletes its keys. Anyone who reads `tls-ticket` and is on the network path can impersonate your server to this mailbox. It's safe to delete `tls-ticket`. `state` doesn't need a backup, but a lost `state` loses the replay set and every revocation that the mailbox kept (see [Restore required](#restore-required)).
+`prekeys/`, `work/`, and `tls-ticket` don't need a backup, because a restored mailbox makes new ones. A backup that contains `prekeys/` can still decrypt messages after the mailbox deletes its keys. Anyone who reads `tls-ticket` and is on the network path can impersonate your server to this mailbox. It's safe to delete `tls-ticket`. `state` doesn't need a backup, but a lost `state` loses the replay set and every revocation that the mailbox kept, of other mailboxes and its own (see [Restore required](#restore-required)).
 
 To restore a mailbox:
 
@@ -304,7 +304,7 @@ Without `allowed` and `blocked`, the first renewal that `recv` makes replaces th
 
 The mailbox stops with `restore_required` when `prekeys/` holds a prekey that `state` doesn't name. This happens when `state` is lost and `prekeys/` isn't, or when you restore `state` from a copy older than the last prekey renewal and keep `prekeys/`. Until you run `dromas init --restore`, the mailbox doesn't receive, send, deliver, or renew anything. `dromas init --restore` adopts the prekeys in `prekeys/` and then renews.
 
-When `state` is lost, its replay set and every revocation that the mailbox kept are lost with it. So the mailbox might deliver a message again that it already accepted, or a message that a lost revocation covers, if the server withholds that revocation (`PROTOCOL.md` §15.9). If your agent's work must not happen twice, key the work by `from` and `msg_id`.
+When `state` is lost, its replay set and every revocation that the mailbox kept, of other mailboxes and its own, are lost with it. So the mailbox might deliver a message again that it already accepted. Until the mailbox sees a lost revocation again, it might also accept a message that the revocation covers, send to a revoked address or certificate, or sign under its own revoked one (`PROTOCOL.md` §15.9). If your agent's work must not happen twice, key the work by `from` and `msg_id`.
 
 ## Protect the identity key
 

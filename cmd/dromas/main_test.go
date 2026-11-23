@@ -1008,7 +1008,7 @@ func TestRecvSaysItReplacedAnACL(t *testing.T) {
 	if _, err := b.Block(ctx, a.Address()); err != nil {
 		t.Fatal(err)
 	}
-	srv.PutACL(b.Address(), &protocol.ACL{Deny: protocol.ACLList{Any: true}}) // another writer's pause
+	srv.PutACL(b.Address(), &protocol.ACL{Deny: protocol.ACLList{Any: true}}) // another writer's deny-all ACL
 	useMailbox(t, b.Dir())
 	t.Setenv("DROMAS_SERVER_URL", srv.URL)
 	var out, errs bytes.Buffer

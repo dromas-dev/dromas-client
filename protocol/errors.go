@@ -22,7 +22,7 @@ type Code string
 // to it (TestCodeNames).
 const (
 	// 400
-	CodeInvalidRequest             Code = "invalid_request"               // not JSON, a missing, unknown or ill-formed field (a byte field not base64 among them), a bad cursor, a send's body that is not an age file
+	CodeInvalidRequest             Code = "invalid_request"               // not JSON, a missing, unknown or ill-formed field (a byte field not base64 among them), a bad cursor, a send's body whose age header does not parse
 	CodeInvalidAddress             Code = "invalid_address"               // not "d_" and 64 characters of base64url
 	CodeIdentityMismatch           Code = "identity_mismatch"             // the identity does not hash to the address, or breaks its grammar
 	CodeInvalidKey                 Code = "invalid_key"                   // an identity key, certificate or prekey statement that is malformed or does not verify

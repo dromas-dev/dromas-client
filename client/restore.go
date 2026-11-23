@@ -17,9 +17,10 @@ import (
 // system last used until its owner runs zpool import -f.
 //
 // The recovery accepts the failure's cost and does nothing more: a state lost
-// or put back has lost the replay set it held, so a server may deliver again a
-// message the mailbox accepted under that state, while protocol.TTL of its
-// sent_at lasts (PROTOCOL.md §15.9). A copy older than a message the mailbox
+// or put back has lost the replay set and the revocations it held, of other
+// addresses and its own, so a server may deliver again a message the mailbox
+// accepted under that state, while protocol.TTL of its sent_at lasts, and may
+// withhold a revocation the mailbox held (PROTOCOL.md §15.9). A copy older than a message the mailbox
 // accepted, but no older than its last renewal, holds every key and stops
 // nothing. A mailbox restored from its identity alone holds no key, so it
 // needs no acknowledgement.
@@ -129,7 +130,7 @@ func (b *Mailbox) notMatched() error {
 // notTheKeys is the refusal of a command that receives, sends, renews or hands
 // over a message where prekeys/ holds found keys the state names nowhere.
 func notTheKeys(found int) error {
-	return &RefusedError{Code: RestoreRequired, Reason: fmt.Sprintf("this mailbox's state does not match its prekeys: prekeys/ holds %d prekeys the state does not name, as after the state is lost, or put back from a copy older than a renewal. The mailbox receives, sends, delivers and renews nothing until its owner runs dromas init --restore, which adopts those prekeys and renews. A state lost or put back has lost its replay set, so a message the mailbox accepted before may be delivered again", found)}
+	return &RefusedError{Code: RestoreRequired, Reason: fmt.Sprintf("this mailbox's state does not match its prekeys: prekeys/ holds %d prekeys the state does not name, as after the state is lost, or put back from a copy older than a renewal. The mailbox receives, sends, delivers and renews nothing until its owner runs dromas init --restore, which adopts those prekeys and renews. A state lost or put back has lost its replay set and the revocations it held, of others and its own, so a message the mailbox accepted before may be delivered again, and a revoked address or certificate taken again until the mailbox sees its revocation again", found)}
 }
 
 // unnamedKeys is each key file in prekeys/ that the state file names nowhere

@@ -213,8 +213,10 @@ restored from an older copy while prekeys/ was kept, has failed: it receives,
 sends, delivers and renews nothing, init and peer allow included, until init
 --restore acknowledges the mismatch. init --restore adopts the prekeys the state
 does not name, and renews. The lost state took its replay set and every
-revocation it kept with it, so the mailbox may deliver again a message it
-accepted before, or one that a lost revocation covers. On a mailbox whose state
+revocation it kept, of others and its own, with it, so the mailbox may deliver
+again a message it accepted before, and take a revoked address or certificate
+again, to receive from, send to or sign under, until it sees that revocation
+again. On a mailbox whose state
 matches, init --restore changes nothing, so it can run at every start. A mailbox
 restored from its identity alone needs no --restore.`,
 		checked(nargs(0, 0), func(c *cobra.Command, _ []string) error {
@@ -286,7 +288,7 @@ func restoreWords(r client.Restored) string {
 	if !r.Acknowledged() {
 		return "this mailbox's state matches its prekeys: nothing to acknowledge, and nothing changed"
 	}
-	return fmt.Sprintf("acknowledged the restore: adopted %d prekeys the state did not name, and init renews now. The lost state took its replay set and every revocation it kept with it, so a message this mailbox accepted before may be delivered again, or one that a lost revocation covers", r.Adopted)
+	return fmt.Sprintf("acknowledged the restore: adopted %d prekeys the state did not name, and init renews now. The lost state took its replay set and every revocation it kept, of others and its own, with it, so a message this mailbox accepted before may be delivered again, and a revoked address or certificate taken again until this mailbox sees that revocation again", r.Adopted)
 }
 
 func (e *cli) addrCmd() *cobra.Command {

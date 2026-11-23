@@ -162,10 +162,10 @@ Notes on some of these vectors:
 
 ### `identity/*.doc`
 
-Malformed identity documents, and well-formed documents that hold a key that fails the checks for its type:
+Malformed identity documents, and well-formed documents that hold a key that is not in its type's one encoding or fails the checks for its type:
 
 - An Ed25519 key that is of small order, or not canonical, or (`off-curve`) not a point on the curve.
-- (`p256-*`) A P-256 point that is off the curve, compressed, not reduced, or the point at infinity. `p256-point-at-infinity` is one zero byte, as SEC1 writes it.
+- (`p256-*`) A P-256 point that is off the curve, compressed, not reduced, or the point at infinity, none of which is a P-256 key's one encoding (PROTOCOL.md §4.1). `p256-point-at-infinity` is one zero byte, as SEC1 writes it.
 - `ok-p256-short-coordinate` (x = 5) and `ok-p256-coordinate-over-order` (x = n + 3) are points on the curve. OpenSSH up to 10.2p1 refuses them, and from 10.3p1 accepts them, as the Go library does and the protocol does (PROTOCOL.md §4.1).
 - `type-name-ending-in-nul` and `p256-curve-name-ending-in-nul` are A's and C's keys, with a NUL at the end of the type's name or the curve's name. `ssh-keygen` reads each as that mailbox's key, and writes it back without the NUL, so neither is the key in its one valid encoding.
 - `unsupported-type.doc` is a well-formed document of a key type that nobody verifies. The `type-name-*` documents are of the same kind, but their type's name breaks RFC 4251 §6: two at signs, an at sign with no fully qualified domain name after it, and 65 characters.
