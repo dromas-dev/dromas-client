@@ -186,7 +186,9 @@ Whether to add the identity's key to the agent after a passphrase unlocks the ke
 - Flag: `--unsafe-inbox-permissions`
 - Environment: `DROMAS_UNSAFE_INBOX_PERMISSIONS`
 
-When `true`, `dromas` reads `base-dir`, `mail-dir`, `outbox/`, `inbox-dir`, `held/`, and the message files of the last two even when other users can write to them or another user owns them. Anyone who can write to these locations can add a file that `dromas` takes as yours, such as a list, a message to sign and send, or a message that appears to be delivered.
+When `true`, every command runs on the mailbox even when other users can write to one of its directories, an entry in `outbox/`, or a message file in `inbox-dir` or `held/`, or when another user owns one. Anyone who can write to these locations can add a file that `dromas` takes as yours, such as a list, a key, a message that `dromas` signs and sends, or a message that appears to be delivered.
+
+When `false`, a `base-dir` or `mail-dir` that you made yourself with group write is refused, for example one made under a umask of `002`, a shared folder with group write and the `setgid` bit, or a Windows folder that inherits Modify for Authenticated Users. To fix it, run `chmod go-w` on the directory, or on Windows give the folder an access list that only you, SYSTEM, and Administrators can write.
 
 ### `unsafe-state-permissions`
 

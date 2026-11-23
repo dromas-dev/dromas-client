@@ -58,9 +58,10 @@ func (b *Mailbox) aliases() ([]Alias, error) {
 }
 
 // SetAlias names a peer's address, and allows it: its messages land in inbox/
-// ([Mailbox.Allow]). A name that already names another address is refused,
-// never moved: remove it first, so no send goes to a peer other than the
-// one the name meant when it was learned.
+// ([Mailbox.Allow]). An address the mailbox holds revoked is refused, as a
+// [RevokedError], with nothing written (mayAllow). A name that already names
+// another address is refused, never moved: remove it first, so no send goes to
+// a peer other than the one the name meant when it was learned.
 func (b *Mailbox) SetAlias(ctx context.Context, name string, a protocol.Address) error {
 	if err := ValidAlias(name); err != nil {
 		return err
@@ -69,6 +70,9 @@ func (b *Mailbox) SetAlias(ctx context.Context, name string, a protocol.Address)
 }
 
 func (b *Mailbox) setAlias(name string, a protocol.Address) error {
+	if err := b.mayAllow(a); err != nil {
+		return err
+	}
 	switch have, err := b.aliased(name); {
 	case err != nil:
 		return err

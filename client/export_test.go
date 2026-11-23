@@ -57,9 +57,16 @@ func PrivateFiles() []string {
 // ListFiles are the lists, judged at every open as a config file is.
 func ListFiles() []string { return slices.Clone(listFiles) }
 
-// KeptDirs are the directories judged as keeping delivered messages, read from
-// keptDirs.
-func KeptDirs() []string { return slices.Clone(keptDirs) }
+// LayoutDirs are b's directories as its layout names them (layoutParts).
+func LayoutDirs(b *Mailbox) []string {
+	var dirs []string
+	for _, p := range layoutParts(b.dir, b.layout) {
+		if !p.file {
+			dirs = append(dirs, p.path)
+		}
+	}
+	return dirs
+}
 
 // JudgedDirs are b's directories judged at every open, read from judgedDirs.
 func JudgedDirs(b *Mailbox) []string { return b.judgedDirs() }

@@ -97,27 +97,25 @@ var publicFiles = []string{"identity.doc", "address"}
 // file is (judgeFiles).
 var listFiles = []string{"allowed", "blocked", "aliases"}
 
-// keptDirs are the directories, by client/doc.go's names, that keep messages
-// recv passed and that inbox list, inbox show and peer allow print or move as
-// delivered: each is judged at every open (judgedDirs), and each of its files
-// before it is read (judgeKept).
-var keptDirs = []string{"inbox", "held"}
-
-// judgedDirs are the mailbox's directories judged at every open (judgeFiles):
-// base-dir, which keeps the lists and the state; mail-dir, which keeps the
-// mail's folders; outbox/, whose entries the mailbox signs and sends as its
-// owner's; and keptDirs.
+// judgedDirs are every directory of the mailbox, judged at every open
+// (judgeFiles): base-dir, which keeps the lists and the state; mail-dir, which
+// keeps the mail's folders; inbox-dir and held/, whose messages read as
+// delivered; refused/; sent/, whose names peer allow --rebuild takes as the
+// peers this mailbox wrote to; outbox/, whose entries the mailbox signs and
+// sends as its owner's, and outbox/failed/; and rotating-keys-dir, prekeys/
+// and work/, which keep its keys. None is left out: what a write to a
+// directory lets through (a file renamed, swapped or deleted) is not what a
+// check of each file in it catches.
 func (b *Mailbox) judgedDirs() []string {
-	dirs := []string{b.path(), b.layout.Mail, b.path("outbox")}
-	for _, d := range keptDirs {
-		dirs = append(dirs, b.path(d))
+	return []string{
+		b.path(), b.layout.Mail, b.path("inbox"), b.path("held"), b.path("refused"), b.path("sent"),
+		b.path("outbox"), b.path("outbox", "failed"), b.layout.RotatingKeys, b.path("prekeys"), b.path("work"),
 	}
-	return dirs
 }
 
 // keptDirRisk is why a directory of judgedDirs that others can write or another
 // user owns is refused (checkKeptDir).
-const keptDirRisk = "who could put a file in it that this mailbox takes as its owner's: a list, a message waiting to be sent, or one that reads as delivered"
+const keptDirRisk = "who could put in it, or rename in it, a file this mailbox takes as its owner's: a list, a key, a message waiting to be sent, or one that reads as delivered"
 
 // fileRefused is a file of the mailbox judged (judgeFiles): the refusal is the
 // file's, whichever command met it.
@@ -132,9 +130,10 @@ func (e *fileRefused) Unwrap() error { return e.error }
 // (CheckConfigFile), since whoever can write one says who may write to the
 // mailbox and by what name. It refuses each directory of judgedDirs where others
 // can write it or another user owns it (checkKeptDir), since whoever can write
-// there can put in a file the mailbox takes as its owner's (#717): a list,
-// swapped by a rename in base-dir; an entry of outbox/, which the mailbox
-// signs and sends; a message that reads as delivered. A file or
+// there can put in or rename a file the mailbox takes as its owner's (#717): a
+// list, swapped by a rename in base-dir; held/, renamed into inbox/ in
+// mail-dir; an entry of outbox/, which the mailbox signs and sends; a key; a
+// message that reads as delivered. A file or
 // directory that is not there is not judged. It costs a stat or an access-list
 // read for each, and openState asks it before anything opens the state file or
 // the gate, so a file planted before init and one left open by another
@@ -171,11 +170,13 @@ func (b *Mailbox) judgeFiles() error {
 	return nil
 }
 
-// judgeKept refuses a file inbox-dir or held/ keeps that others can write or
-// another user owns, as a config file is refused (CheckConfigFile), before it
-// is read as a delivered message: whoever can write one can put in a message
-// that reads as delivered (#717). Others may read it. A file that is not there
-// is left to its read. Options.UnsafeInboxPermissions leaves it unjudged.
+// judgeKept refuses a file inbox-dir, held/ or outbox/ keeps that others can
+// write or another user owns, as a config file is refused (CheckConfigFile),
+// before it is read as a delivered message or as an entry the mailbox signs
+// and sends: whoever can write one can put in a message that reads as
+// delivered, or one sent as the owner's (#717). Others may read it. A file
+// that is not there is left to its read. Options.UnsafeInboxPermissions leaves
+// it unjudged.
 func (b *Mailbox) judgeKept(path string) error {
 	if b.unsafeInbox {
 		return nil

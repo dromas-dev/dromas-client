@@ -6,7 +6,8 @@ name a peer, so that send accepts the name
 
 Name a peer for this mailbox only, so that send accepts the name. A name is up
 to 32 lowercase letters, digits, '.', '_' and '-', starting with a letter or a
-digit. Naming a peer allows it.
+digit. Naming a peer allows it, so a peer whose address this mailbox holds
+revoked is refused, and nothing is named.
 
 ```
 dromas alias add <name> <link or address>
@@ -36,7 +37,7 @@ dromas alias add <name> <link or address>
       --profile profile                         read this profile's config file, in the config directory: $DROMAS_PROFILE, or default
       --rotating-keys-dir directory             the directory of prekeys/, work/ and tls-ticket, which need no backup: <base-dir>/keys
       --server URL                              the server's URL: $DROMAS_SERVER_URL, or https://dromas.dev
-      --unsafe-inbox-permissions[=true|false]   read base-dir, mail-dir, outbox/, inbox-dir and held/, and the messages of the last two, even when others can write to them or another user owns them, although anyone who can write there can add a file the mailbox takes as its owner's, such as a message that reads as delivered: $DROMAS_UNSAFE_INBOX_PERMISSIONS
+      --unsafe-inbox-permissions[=true|false]   run on the mailbox even when others can write to its directories, its outbox entries or the messages inbox-dir and held/ keep, or another user owns one, although anyone who can write there can add a file the mailbox takes as its owner's, such as a message it signs and sends or one that reads as delivered: $DROMAS_UNSAFE_INBOX_PERMISSIONS
       --unsafe-state-permissions[=true|false]   open state, gate and partial even when others can access them, and the lists even when others can write to them, or another user owns one; never a private key: $DROMAS_UNSAFE_STATE_PERMISSIONS
 ```
 

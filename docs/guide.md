@@ -59,10 +59,10 @@ Each message that you receive goes to one of three directories:
 | Directory | What it contains |
 |---|---|
 | `inbox/` | Delivered messages from senders that you allowed. |
-| `held/` | Messages from unknown senders that passed every check, kept until you run `dromas peer allow` or `dromas peer block`. |
+| `held/` | Messages from unknown senders that passed every check, kept until you run `dromas peer allow` or `dromas peer block`. A held message from a sender whose revocation the mailbox keeps stays in `held/`, because `dromas peer allow` refuses that sender. |
 | `refused/` | Messages that failed a check, kept as evidence. The sender isn't told. If the server serves a refused message again and it passes every check, `recv` delivers it. |
 
-The mailbox keeps each message in plaintext, one file for each message, and keeps each message that you send in `sent/`. `dromas peer allow` moves a sender's messages from `held/` to `inbox/`. `dromas` deletes a message file only when you run `dromas peer block`, which deletes that sender's messages in `held/`, or `dromas refused rm`, and when `recv` delivers a message that it refused earlier, which deletes that message's file in `refused/`. Managing the files is otherwise up to you. `dromas refused list` shows why `dromas` refused each message. `dromas refused rm <id>` deletes that message from `refused/`, and `dromas refused rm --all` empties `refused/`. The files in `refused/` keep what the server sent.
+The mailbox keeps each message in plaintext, one file for each message, and keeps each message that you send in `sent/`. `dromas peer allow` moves a sender's messages from `held/` to `inbox/`, unless the mailbox keeps a revocation of the sender's address: then `dromas peer allow`, `dromas alias add`, and `dromas peer allow --rebuild` don't allow that sender, and its messages stay in `held/`. `dromas` deletes a message file only when you run `dromas peer block`, which deletes that sender's messages in `held/`, or `dromas refused rm`, and when `recv` delivers a message that it refused earlier, which deletes that message's file in `refused/`. Managing the files is otherwise up to you. `dromas refused list` shows why `dromas` refused each message. `dromas refused rm <id>` deletes that message from `refused/`, and `dromas refused rm --all` empties `refused/`. The files in `refused/` keep what the server sent.
 
 Any process that runs as your user can put a file in `inbox/` or `held/` that looks like a delivered message, and no file mode prevents that. Give an agent's file tools read access to `inbox-dir`, but not write access.
 
@@ -344,9 +344,10 @@ If `inbox-dir` is itself a mount point, it remains as an empty directory while t
 - `state`, `gate`, or `partial`, if other users can access the file or another user owns it. The error gives the command that fixes the file.
 - `allowed`, `blocked`, or `aliases`, if other users can write to the file or another user owns it, as ssh does for a config file.
 - `inbox-dir` or `held/`, or a message file in either one, if other users can write to it or another user owns it. Anyone who can write there can add a message that looks delivered.
-- `base-dir`, `mail-dir`, or `outbox/`, if other users can write to it or another user owns it. Anyone who can write there can swap your lists, or change a message before `dromas` signs and sends it.
+- An entry in `outbox/`, if other users can write to it or another user owns it. Anyone who can write it can change a message before `dromas` signs and sends it.
+- Any other directory of the mailbox, if other users can write to it or another user owns it. In `base-dir`, another user can swap `allowed` and `blocked`. In `mail-dir`, another user can rename `held/` to `inbox/`. In `outbox/`, another user can add a message for `dromas` to sign and send. The same holds for `refused/`, `sent/`, `outbox/failed/`, `rotating-keys-dir`, `prekeys/`, and `work/`.
 
-To turn off the last four checks, see [`unsafe-state-permissions`](configuration.md#unsafe-state-permissions) and [`unsafe-inbox-permissions`](configuration.md#unsafe-inbox-permissions).
+To turn off the last five checks, see [`unsafe-state-permissions`](configuration.md#unsafe-state-permissions) and [`unsafe-inbox-permissions`](configuration.md#unsafe-inbox-permissions).
 
 `dromas` doesn't write a `.gitignore` file. `dromas` warns you when a private key is inside a `.git` working tree. In that case, make sure that git ignores the key.
 

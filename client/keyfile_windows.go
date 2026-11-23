@@ -217,11 +217,11 @@ func CheckConfigFile(path string) error {
 
 // checkKeptDir refuses a directory of the mailbox's (judgedDirs) that another
 // user owns, or that anyone but its owner, SYSTEM and the Administrators can
-// write (readAccess): whoever can write there can put in a file the mailbox
-// takes as its owner's (#717). Others may read it: each message in inbox-dir
-// and held/ is judged on its own (judgeKept). It judges
-// the owner before the list, as checkPrivateFile does. The refusal of a list
-// gives the icacls line that leaves it to those three alone.
+// write (readAccess): whoever can write there can put in or rename a file the
+// mailbox takes as its owner's (#717). Others may read it: each message in
+// inbox-dir, held/ and outbox/ is judged on its own (judgeKept). It judges the
+// owner before the list, as checkPrivateFile does. The refusal of a list gives
+// the icacls line that leaves it to those three alone.
 func checkKeptDir(path string) error {
 	a, err := readAccess(path)
 	if err != nil {

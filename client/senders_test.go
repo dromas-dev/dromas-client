@@ -501,6 +501,36 @@ func TestAllowingARevokedSenderDoesNothing(t *testing.T) {
 	}
 }
 
+// No way of allowing a sender takes an address the mailbox holds revoked: an
+// alias is refused with nothing named, and a rebuild of the allowed file
+// leaves it out, though sent/ names it (mayAllow).
+func TestNoWayOfAllowingTakesARevokedAddress(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	e := newEnv(t)
+	a, b := e.mailbox(), e.heldMailbox()
+	send(t, b, a, "sent before its recipient was revoked")
+	if _, kept, err := b.KeepRevocation(ctx, revoke(t, e, a)); err != nil || !kept.Revoked {
+		t.Fatalf("keep the revocation: %+v, %v", kept, err)
+	}
+	if err := os.Remove(filepath.Join(b.Dir(), "allowed")); err != nil {
+		t.Fatal(err)
+	}
+	var gone *client.RevokedError
+	if err := b.SetAlias(ctx, "gone", a.Address()); !errors.As(err, &gone) || gone.Address != a.Address() {
+		t.Errorf("alias add of a revoked address: %v", err)
+	}
+	if as, err := b.Aliases(ctx); err != nil || len(as) != 0 {
+		t.Errorf("aliases: %v, %v", as, err)
+	}
+	if n, err := b.RebuildAllowed(ctx); err != nil || n != 0 {
+		t.Errorf("rebuild: %d added, %v", n, err)
+	}
+	if allowed, err := b.Allowed(ctx); err != nil || slices.Contains(allowed, a.Address()) {
+		t.Errorf("allowed: %v, %v", allowed, err)
+	}
+}
+
 // A send waits for the mailbox's ACL only when the one its server last took would
 // refuse the reply (#180): with none taken the server refuses no sender, so
 // the send posts and says the ACL was not taken; with one taken under server
