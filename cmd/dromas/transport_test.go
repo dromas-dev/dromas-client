@@ -7,11 +7,14 @@ import (
 	"encoding/json"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -262,5 +265,122 @@ func TestTheBinarysStderrHoldsOnlyItsLines(t *testing.T) {
 	}
 	if strings.Contains(stderr.String(), "SYSTEM") {
 		t.Errorf("stderr holds the server's words: %s", stderr.String())
+	}
+}
+
+// aRoute is a request's route: its method and its path, with an address and a
+// message's id taken out.
+func aRoute(r *http.Request) string {
+	p := regexp.MustCompile(`d_[A-Za-z0-9_-]{64}`).ReplaceAllString(r.URL.Path, "{address}")
+	return r.Method + " " + regexp.MustCompile(`[0-9a-f]{64}`).ReplaceAllString(p, "{id}")
+}
+
+// Every route each command calls, answered with a redirect to another server on
+// this machine, which the server rule would take (PROTOCOL.md §11.1): nothing
+// reaches it. Each command runs once on an honest server to find its routes,
+// then once for each, that route alone redirected, by each redirect's status in
+// turn.
+func TestNoRouteOfACommandFollowsARedirect(t *testing.T) {
+	ctx := context.Background()
+	var mu sync.Mutex
+	var reached []string
+	x := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		reached = append(reached, aRoute(r))
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte("{}"))
+	}))
+	t.Cleanup(x.Close)
+	toA := func(a, _ *client.Mailbox) []string { return []string{a.Address().String()} }
+	sent := func(t *testing.T, a, b *client.Mailbox) {
+		if _, err := a.Send(ctx, b.Address(), "from a"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	allowed := func(t *testing.T, a, b *client.Mailbox) {
+		var out bytes.Buffer
+		if err := do(ctx, "peer allow", []string{a.Address().String()}, nil, &out, &out); err != nil {
+			t.Fatal(err, out.String())
+		}
+		sent(t, a, b)
+	}
+	statuses := []int{http.StatusMovedPermanently, http.StatusFound, http.StatusSeeOther, http.StatusTemporaryRedirect, http.StatusPermanentRedirect}
+	turn := 0
+	for _, c := range []struct {
+		command string
+		args    func(a, b *client.Mailbox) []string
+		stdin   string
+		setup   func(t *testing.T, a, b *client.Mailbox)
+		working bool
+	}{
+		{command: "recv", setup: sent},
+		{command: "recv", setup: allowed},
+		{command: "recv --headers", setup: allowed},
+		{command: "recv --wait 1s"},
+		{command: "send", args: toA, stdin: "hello"},
+		{command: "prekey renew"},
+		{command: "peer block", args: toA},
+		{command: "revocation ask", args: toA},
+		{command: "account join", stdin: "dra1_AAAA\n"},
+		{command: "account leave"},
+		{command: "cert revoke-earlier", working: true},
+	} {
+		// run runs c on a new server and mailbox, route answered with a redirect
+		// of status where it is not empty, and returns the routes it called.
+		run := func(route string, status int) []string {
+			srv := fakeserver.New(t, time.Now)
+			b, err := client.Init(ctx, t.TempDir(), client.Options{Base: srv.URL, WorkingKey: c.working})
+			if err != nil {
+				t.Fatal(err)
+			}
+			a, err := client.Init(ctx, t.TempDir(), client.Options{Base: srv.URL})
+			if err != nil {
+				t.Fatal(err)
+			}
+			useMailbox(t, b.Dir())
+			t.Setenv("DROMAS_SERVER_URL", srv.URL)
+			if c.setup != nil {
+				c.setup(t, a, b)
+			}
+			var called []string
+			srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
+				rt := aRoute(r)
+				mu.Lock()
+				if !slices.Contains(called, rt) {
+					called = append(called, rt)
+				}
+				mu.Unlock()
+				if rt == route {
+					http.Redirect(w, r, x.URL+r.URL.RequestURI(), status)
+					return
+				}
+				next.ServeHTTP(w, r)
+			})
+			var args []string
+			if c.args != nil {
+				args = c.args(a, b)
+			}
+			var out bytes.Buffer
+			_ = do(ctx, c.command, args, strings.NewReader(c.stdin), &out, &out)
+			mu.Lock()
+			defer mu.Unlock()
+			return called
+		}
+		routes := run("", 0)
+		if len(routes) == 0 {
+			t.Errorf("%s calls no route", c.command)
+		}
+		for _, route := range routes {
+			status := statuses[turn%len(statuses)]
+			turn++
+			run(route, status)
+			mu.Lock()
+			if len(reached) != 0 {
+				t.Errorf("%s, %s answered %d: the other server was reached: %q", c.command, route, status, reached)
+				reached = nil
+			}
+			mu.Unlock()
+		}
 	}
 }
