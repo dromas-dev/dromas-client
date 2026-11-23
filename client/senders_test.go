@@ -477,6 +477,30 @@ func TestAllowingABlockedSenderDoesNothing(t *testing.T) {
 	}
 }
 
+// A sender whose address the mailbox holds revoked is never allowed: allow is
+// refused as a revocation, and its held messages stay where they are.
+func TestAllowingARevokedSenderDoesNothing(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	e := newEnv(t)
+	a, b := e.mailbox(), e.heldMailbox()
+	send(t, a, b, "held before its sender was revoked")
+	if res := receive(t, b); len(res.Held) != 1 {
+		t.Fatalf("held %d", len(res.Held))
+	}
+	if _, kept, err := b.KeepRevocation(ctx, revoke(t, e, a)); err != nil || !kept.Revoked {
+		t.Fatalf("keep the revocation: %+v, %v", kept, err)
+	}
+	moved, err := b.Allow(ctx, a.Address())
+	var gone *client.RevokedError
+	inbox, _ := filepath.Glob(filepath.Join(b.Dir(), "mail", "inbox", "*.json"))
+	held, _ := filepath.Glob(filepath.Join(b.Dir(), "mail", "held", "*.json"))
+	allowed, _ := b.Allowed(ctx)
+	if !errors.As(err, &gone) || gone.Address != a.Address() || len(moved) != 0 || len(inbox) != 0 || len(held) != 1 || slices.Contains(allowed, a.Address()) {
+		t.Fatalf("allow of a revoked sender: %v, moved %d, inbox %d, held %d, allowed %v", err, len(moved), len(inbox), len(held), allowed)
+	}
+}
+
 // A send waits for the mailbox's ACL only when the one its server last took would
 // refuse the reply (#180): with none taken the server refuses no sender, so
 // the send posts and says the ACL was not taken; with one taken under server

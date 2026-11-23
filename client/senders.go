@@ -321,7 +321,9 @@ func (b *Mailbox) heldMessages() ([]UnknownSender, error) {
 
 // Allow allows a sender: its messages land in inbox/ from now on, whatever the
 // policy says, and what held/ keeps from it moves there. A sender the mailbox
-// blocks is refused, with nothing done: blocking wins. The moved messages
+// blocks is refused, with nothing done: blocking wins. So is a sender whose
+// address the mailbox holds revoked, as a [RevokedError]: what held/ keeps from
+// it stays there. The moved messages
 // are returned as Receive delivers them, oldest first, but for Plaintext and
 // Signature, which the mailbox never kept. Then the server is
 // sent the mailbox's ACL, if the change is one it holds ([Mailbox.SyncACL]): an
@@ -348,6 +350,11 @@ func (b *Mailbox) allow(a protocol.Address) ([]Delivery, error) {
 	}
 	if slices.Contains(blocked, a) {
 		return nil, refuse("%s is blocked, and blocking wins, so nothing is allowed or moved: delete its line in %s first", a, b.path("blocked"))
+	}
+	if gone, err := b.revoked(a); err != nil {
+		return nil, err
+	} else if gone {
+		return nil, &RevokedError{Address: a, Own: a == b.id.Address()}
 	}
 	if _, err := b.addTo("allowed", a); err != nil {
 		return nil, err

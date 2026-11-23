@@ -808,7 +808,8 @@ func (e *cli) allowCmd() *cobra.Command {
 	c := command("allow [flags] <link, address or alias>", "deliver a sender's messages to inbox/, with what held/ keeps from it",
 		`Deliver a sender's messages to inbox/ from now on. allow moves what held/ keeps
 from that sender to inbox/, printing each message as recv does, then prints an
-"allowed" line.
+"allowed" line. allow refuses a sender this mailbox blocks, or whose address it
+holds revoked, and changes nothing.
 
 --rebuild, with no sender, adds back every address an alias names or sent/
 shows, for an allowed file that was lost.`,
