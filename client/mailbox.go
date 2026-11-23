@@ -80,10 +80,10 @@ type Options struct {
 	RootCAs *x509.CertPool
 	// Now is the clock; time.Now if nil.
 	Now func() time.Time
-	// IdentityType is the type of identity key Init makes for a new mailbox:
-	// protocol.IdentityEd25519 if empty, and that is the one to use. Every
-	// client verifies every type PROTOCOL.md §4.1 defines. An existing identity
-	// key is used as it is, whatever this says.
+	// IdentityType is the type of identity key Init makes for a new mailbox,
+	// one of MadeIdentityTypes: protocol.IdentityEd25519 if empty, and that is
+	// the one to use. Every client verifies every type PROTOCOL.md §4.1
+	// defines. An existing identity key is used as it is, whatever this says.
 	IdentityType string
 	// WorkingKey has Init register the mailbox it makes or restores under a
 	// certificate (dromas init --offline), whose working key then signs, and
@@ -321,8 +321,8 @@ func newMailbox(dir string, opt Options) (*Mailbox, error) {
 	if opt.RootCAs != nil && opt.HTTPClient != nil {
 		return nil, errors.New("RootCAs sets the default HTTP client's CAs, and an HTTPClient given says its own: set the CAs in its transport")
 	}
-	if b.identityType != "" && !slices.Contains(protocol.IdentityTypes(), b.identityType) {
-		return nil, fmt.Errorf("this client makes no identity key of type %q: %s", b.identityType, strings.Join(protocol.IdentityTypes(), " or "))
+	if b.identityType != "" && !slices.Contains(MadeIdentityTypes(), b.identityType) {
+		return nil, fmt.Errorf("this client makes no identity key of type %q: %s", b.identityType, strings.Join(MadeIdentityTypes(), " or "))
 	}
 	var tickets *ticketCache
 	if b.http == nil {
@@ -950,6 +950,12 @@ func there[T any](b *Mailbox, f func() (T, error)) func() (T, error) {
 	}
 }
 
+// MadeIdentityTypes returns the identity key types Init makes a new identity
+// of: Ed25519 and P-256. Every client verifies the security-key types of
+// PROTOCOL.md §4.1 too, and a mailbox whose identity is one, held by an agent,
+// runs as any other; only a security key makes one.
+func MadeIdentityTypes() []string { return []string{protocol.IdentityEd25519, protocol.IdentityP256} }
+
 // newKey makes a new private key of the SSH key type t: an identity key, or a
 // working key of the type its identity's type gives (protocol.WorkingKeyType).
 func newKey(t string) (crypto.Signer, error) {
@@ -960,7 +966,7 @@ func newKey(t string) (crypto.Signer, error) {
 	case protocol.IdentityP256:
 		return ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	}
-	return nil, fmt.Errorf("this client makes no key of type %q: %s", t, strings.Join(protocol.IdentityTypes(), " or "))
+	return nil, fmt.Errorf("this client makes no key of type %q: %s", t, strings.Join(MadeIdentityTypes(), " or "))
 }
 
 // newIdentityKey makes a new identity key, written as ssh-keygen writes one

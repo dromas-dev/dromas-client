@@ -1,11 +1,18 @@
 package client_test
 
 import (
+	"bytes"
 	"context"
+	"crypto"
+	"crypto/ecdsa"
+	"crypto/ed25519"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/sha512"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -15,10 +22,14 @@ import (
 	"testing"
 	"time"
 
+	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/agent"
+
 	"github.com/dromas-dev/dromas-client/client"
 	"github.com/dromas-dev/dromas-client/internal/fakeserver"
 	"github.com/dromas-dev/dromas-client/internal/forge"
 	"github.com/dromas-dev/dromas-client/protocol"
+	"github.com/dromas-dev/dromas-client/protocol/sktest"
 )
 
 // unknownDoc is a well-formed identity document of a key type no client
@@ -252,19 +263,16 @@ func TestAMailboxDeclaresTheOptionalSenderKeyTypesItVerifies(t *testing.T) {
 }
 
 // Every mailbox takes a sender of every type PROTOCOL.md §4.1 defines, whatever
-// it declared: a mailbox on a P-256 identity sends to one on Ed25519, and the
-// other way, and its server is posted every message.
+// it declared: a mailbox on an identity of each type sends to one on each,
+// itself included, and its server is posted every message.
 func TestEveryMailboxTakesASenderOfEveryDefinedType(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
 	ctx := context.Background()
-	o := e.opts()
-	o.IdentityType = protocol.IdentityP256
-	p, err := client.Init(ctx, t.TempDir(), o)
-	if err != nil {
-		t.Fatal(err)
+	var boxes []*client.Mailbox
+	for _, ty := range protocol.IdentityTypes() {
+		boxes = append(boxes, e.mailboxOfType(ty))
 	}
-	ed := e.mailbox()
 	posts := 0
 	e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
 		if r.Method == http.MethodPost {
@@ -272,12 +280,151 @@ func TestEveryMailboxTakesASenderOfEveryDefinedType(t *testing.T) {
 		}
 		next.ServeHTTP(w, r)
 	})
-	for _, pair := range [][2]*client.Mailbox{{p, ed}, {ed, p}, {p, p}, {ed, ed}} {
-		if _, err := pair[0].Send(ctx, pair[1].Address(), "hello"); err != nil {
-			t.Errorf("%s to %s: %v", pair[0].Address(), pair[1].Address(), err)
+	for _, from := range boxes {
+		for _, to := range boxes {
+			if _, err := from.Send(ctx, to.Address(), "hello"); err != nil {
+				t.Errorf("%s to %s: %v", from.Identity().Type(), to.Identity().Type(), err)
+			}
 		}
 	}
-	if posts != 4 {
-		t.Fatalf("%d of 4 sends were posted", posts)
+	if want := len(boxes) * len(boxes); posts != want {
+		t.Fatalf("%d of %d sends were posted", posts, want)
+	}
+	for _, to := range boxes {
+		if res := receive(t, to); len(res.Delivered) != len(boxes) {
+			t.Errorf("a mailbox on %s: %d of %d delivered: %+v", to.Identity().Type(), len(res.Delivered), len(boxes), res.Refused)
+		}
+	}
+}
+
+// mailboxOfType makes and registers a mailbox whose identity is of the key
+// type ty: one Init makes (client.MadeIdentityTypes), or a security key, which
+// the client makes none of, held by an agent of the test's own (skMailbox).
+func (e *env) mailboxOfType(ty string) *client.Mailbox {
+	e.t.Helper()
+	if slices.Contains(client.MadeIdentityTypes(), ty) {
+		o := e.opts()
+		o.IdentityType = ty
+		return e.made(o)
+	}
+	b, _ := e.skMailbox(ty)
+	return b
+}
+
+// skMailbox makes and registers a mailbox whose identity is a security key
+// in software (protocol/sktest) of the key type ty, which only an agent
+// holds: Init has its identity.pub alone, as it has for any key in an agent.
+func (e *env) skMailbox(ty string) (*client.Mailbox, *sktest.Signer) {
+	e.t.Helper()
+	var priv crypto.Signer
+	var err error
+	switch ty {
+	case protocol.IdentitySKEd25519:
+		_, priv, err = ed25519.GenerateKey(rand.Reader)
+	case protocol.IdentitySKP256:
+		priv, err = ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	default:
+		e.t.Fatalf("%s is no security key's type", ty)
+	}
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	key, err := sktest.New(priv, protocol.SKApplication)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	dir := e.t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "identity.pub"), ssh.MarshalAuthorizedKey(key.PublicKey()), 0o600); err != nil {
+		e.t.Fatal(err)
+	}
+	opt := e.opts()
+	opt.Agent = serveAgent(e.t, skAgent{key})
+	b, err := client.Init(context.Background(), dir, opt)
+	if err != nil {
+		e.t.Fatalf("init: %v", err)
+	}
+	return b, key
+}
+
+// skAgent is an agent that holds one security key and signs with it, as
+// ssh-agent does for a key on a token, a touch each time.
+type skAgent struct{ key *sktest.Signer }
+
+func (a skAgent) List() ([]*agent.Key, error) {
+	k := a.key.PublicKey()
+	return []*agent.Key{{Format: k.Type(), Blob: k.Marshal()}}, nil
+}
+
+func (a skAgent) Sign(key ssh.PublicKey, data []byte) (*ssh.Signature, error) {
+	if !bytes.Equal(key.Marshal(), a.key.PublicKey().Marshal()) {
+		return nil, errors.New("not this agent's key")
+	}
+	return a.key.Sign(nil, data)
+}
+
+func (a skAgent) Signers() ([]ssh.Signer, error) { return []ssh.Signer{a.key}, nil }
+func (skAgent) Add(agent.AddedKey) error         { return errors.New("this agent takes no key") }
+func (skAgent) Remove(ssh.PublicKey) error       { return errors.New("this agent keeps its key") }
+func (skAgent) RemoveAll() error                 { return errors.New("this agent keeps its key") }
+func (skAgent) Lock([]byte) error                { return errors.New("this agent does not lock") }
+func (skAgent) Unlock([]byte) error              { return errors.New("this agent does not lock") }
+
+// The client makes no security key, and runs a mailbox whose identity is one
+// held by an agent, as it runs any other (PROTOCOL.md §4.1): it registers,
+// renews, sends and receives, by its identity and under a certificate, and
+// signs its revocation; Init makes only the types it can make.
+func TestAMailboxOnASecurityKeyIdentity(t *testing.T) {
+	t.Parallel()
+	for _, ty := range []string{protocol.IdentitySKEd25519, protocol.IdentitySKP256} {
+		for _, working := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s, under a certificate: %v", ty, working), func(t *testing.T) {
+				t.Parallel()
+				e := newEnv(t)
+				e.working = working
+				b, key := e.skMailbox(ty)
+				ed := e.mailbox()
+				if b.Identity().Type() != ty {
+					t.Fatalf("a mailbox on %s", b.Identity().Type())
+				}
+				if _, err := os.Stat(b.Path("identity")); !errors.Is(err, os.ErrNotExist) {
+					t.Errorf("a key file was written: %v", err)
+				}
+				send(t, b, ed, "from the security key")
+				send(t, ed, b, "to the security key")
+				if res := receive(t, ed); len(res.Delivered) != 1 || res.Delivered[0].Envelope.From != b.Address() {
+					t.Fatalf("the Ed25519 mailbox: %+v", res)
+				}
+				if res := receive(t, b); len(res.Delivered) != 1 || res.Delivered[0].Envelope.From != ed.Address() {
+					t.Fatalf("the security-key mailbox: %+v", res)
+				}
+				e.clock.Add(48 * time.Hour)
+				if _, err := b.Rekey(context.Background()); err != nil {
+					t.Fatalf("rekey: %v", err)
+				}
+				send(t, ed, b, "after the renewal")
+				if res := receive(t, b); len(res.Delivered) != 1 {
+					t.Fatalf("after a renewal: %+v", res)
+				}
+				// A key that signs without the touch it claims to need signs
+				// nothing that verifies: its renewal is refused.
+				key.Flags = 0
+				e.clock.Add(48 * time.Hour)
+				if _, err := b.Rekey(context.Background()); err == nil {
+					t.Error("a renewal whose signature claims no user present was taken")
+				}
+				key.Flags = sktest.UserPresent
+				if _, err := b.Revocation(context.Background()); err != nil {
+					t.Errorf("a revocation: %v", err)
+				}
+			})
+		}
+	}
+	e := newEnv(t)
+	o := e.opts()
+	for _, ty := range []string{protocol.IdentitySKEd25519, protocol.IdentitySKP256} {
+		o.IdentityType = ty
+		if _, err := client.Init(context.Background(), t.TempDir(), o); err == nil {
+			t.Errorf("init made a mailbox of %s", ty)
+		}
 	}
 }

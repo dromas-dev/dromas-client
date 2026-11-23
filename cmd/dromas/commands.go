@@ -220,8 +220,8 @@ again. On a mailbox whose state
 matches, init --restore changes nothing, so it can run at every start. A mailbox
 restored from its identity alone needs no --restore.`,
 		checked(nargs(0, 0), func(c *cobra.Command, _ []string) error {
-			if idType != "" && !slices.Contains(protocol.IdentityTypes(), idType) {
-				return wrong(c, "%s makes an identity of the key type %s, and %q is not one", c.CommandPath(), strings.Join(protocol.IdentityTypes(), " or "), idType)
+			if idType != "" && !slices.Contains(client.MadeIdentityTypes(), idType) {
+				return wrong(c, "%s makes an identity of the key type %s, and %q is not one", c.CommandPath(), strings.Join(client.MadeIdentityTypes(), " or "), idType)
 			}
 			return nil
 		}), func(c *cobra.Command, _ []string) error {
