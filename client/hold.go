@@ -491,9 +491,11 @@ const ReceiveEvery = time.Hour
 // [EventConnectionDropped] for each connection that dropped, and an error from
 // h ends Await as that error. Await asks each hold to end by until, its waits
 // for a turn to hold included (Hold). A server that holds a request past its
-// wait delays Await past until: with the default client by holdMargin at most,
-// and with an [Options.HTTPClient] given, until that client's own bound ends
-// the request. [Mailbox.Follow] is the whole cycle, of which Await is the part
+// wait delays Await past until: with the default client, until wait and
+// holdMargin pass from the connection the request got last (heldBound), which
+// starts after a dial and a handshake, and again at the one new connection
+// allowed after a reused one; with an [Options.HTTPClient] given, until that
+// client's own bound ends the request. [Mailbox.Follow] is the whole cycle, of which Await is the part
 // that waits.
 //
 // With under a second left Await waits it out, so the Receive after is the

@@ -291,7 +291,7 @@ func TestFatalTellsARefusalNoWaitMendsFromARetry(t *testing.T) {
 // A list, a fetch or an ack answered 409 concurrent_modification is a call to
 // make again (PROTOCOL.md §11.3): the run hands over a retry and goes on to a
 // new drain, and the message is delivered once and acknowledged.
-func TestACallAnsweredConcurrentModificationIsSentAgain(t *testing.T) {
+func TestACallAnsweredConcurrentModificationIsRetriedByANewDrain(t *testing.T) {
 	for _, call := range []struct {
 		name, method string
 		path         func(r *http.Request) bool

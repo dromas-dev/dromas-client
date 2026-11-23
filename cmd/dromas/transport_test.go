@@ -284,6 +284,7 @@ func aRoute(r *http.Request) string {
 // its routes, then once for each, that route alone redirected, by one of the
 // redirect statuses in turn, and that run must call the route.
 func TestNoRouteOfACommandFollowsARedirect(t *testing.T) {
+	cleanEnv(t)
 	ctx := context.Background()
 	var mu sync.Mutex
 	var reached []string
@@ -302,8 +303,8 @@ func TestNoRouteOfACommandFollowsARedirect(t *testing.T) {
 		working bool   // b is under certificates
 		fresh   bool   // the config names a directory with no mailbox, for init
 		admit   bool   // policy.admit is "allowed", so allowing a sender sends the ACL
-		none    string // why the command calls no server, so it is not run here
-		routes  string // the command whose routes are this one's, which runs here
+		none    string // why the command calls no server, which its run shows
+		notRun  string // why the command is not run here
 	}
 	toA := func(a, _ *client.Mailbox) []string { return []string{a.Address().String()} }
 	toB := func(_, b *client.Mailbox) []string { return []string{b.Address().String()} }
@@ -317,6 +318,41 @@ func TestNoRouteOfACommandFollowsARedirect(t *testing.T) {
 			t.Fatal(err)
 		}
 		sent(t, srv, a, b)
+	}
+	inboxed := func(t *testing.T, srv *fakeserver.Server, a, b *client.Mailbox) {
+		allowed(t, srv, a, b)
+		if _, err := b.Receive(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	named := func(t *testing.T, _ *fakeserver.Server, a, b *client.Mailbox) {
+		if err := b.SetAlias(ctx, "peer", a.Address()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// delivered is the id of the one message b's inbox-dir keeps.
+	delivered := func(t *testing.T, b *client.Mailbox) string {
+		res, err := b.Inbox(ctx)
+		if err != nil || len(res) != 1 {
+			t.Fatalf("inbox: %v, %v", res, err)
+		}
+		return res[0].ID
+	}
+	// recordOf is a file that holds a's revocation record.
+	recordOf := func(t *testing.T, a *client.Mailbox) string {
+		rec, err := a.Revocation(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		line, err := json.Marshal(rec)
+		if err != nil {
+			t.Fatal(err)
+		}
+		f := filepath.Join(t.TempDir(), "record.json")
+		if err := os.WriteFile(f, line, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return f
 	}
 	waiting := func(t *testing.T, srv *fakeserver.Server, a, b *client.Mailbox) {
 		forge.FailOnce(srv, http.MethodPost, "/v1/"+a.Address().String()+"/messages")
@@ -334,33 +370,33 @@ func TestNoRouteOfACommandFollowsARedirect(t *testing.T) {
 		"dromas config":               {{none: "it prints the configuration"}},
 		"dromas version":              {{none: "it prints this client's version"}},
 		"dromas inbox list":           {{none: "it reads inbox-dir"}},
-		"dromas inbox show":           {{none: "it reads inbox-dir"}},
+		"dromas inbox show":           {{none: "it reads inbox-dir", setup: inboxed, args: func(_, b *client.Mailbox) []string { return []string{delivered(t, b)} }}},
 		"dromas inbox clear-failed":   {{none: "it changes the state alone"}},
 		"dromas held list":            {{none: "it reads held/"}},
 		"dromas peer allow":           {{args: toA, admit: true}},
 		"dromas peer block":           {{args: toA}},
 		"dromas peer list":            {{none: "it reads the lists"}},
 		"dromas alias add":            {{args: func(a, _ *client.Mailbox) []string { return []string{"peer", a.Address().String()} }, admit: true}},
-		"dromas alias rm":             {{none: "it changes the aliases file alone"}},
+		"dromas alias rm":             {{none: "it changes the aliases file alone", setup: named, args: func(*client.Mailbox, *client.Mailbox) []string { return []string{"peer"} }}},
 		"dromas alias list":           {{none: "it reads the aliases file"}},
 		"dromas outbox flush":         {{setup: waiting}},
 		"dromas refused list":         {{none: "it reads refused/"}},
-		"dromas refused rm":           {{none: "it changes refused/ alone"}},
+		"dromas refused rm":           {{none: "it changes refused/ alone", args: func(*client.Mailbox, *client.Mailbox) []string { return []string{"--all"} }}},
 		"dromas prekey renew":         {{}},
 		"dromas prekey lifetime":      {{none: "it prints the lifetime the configuration sets"}},
 		"dromas cert switch":          {{args: toB}},
 		"dromas cert request":         {{working: true}},
-		"dromas cert install":         {{routes: "dromas prekey renew"}},
+		"dromas cert install":         {{notRun: "it needs a certificate that an identity kept elsewhere made"}},
 		"dromas cert revoke-earlier":  {{working: true}},
-		"dromas cert publish-revoked": {{routes: "dromas cert revoke-earlier"}},
+		"dromas cert publish-revoked": {{notRun: "it needs a revocation of certificates that an identity kept elsewhere signed"}},
 		"dromas account join":         {{stdin: "dra1_AAAA\n"}},
 		"dromas account leave":        {{}},
 		"dromas revocation make":      {{none: "it writes a record and publishes nothing"}},
 		"dromas revocation publish":   {{args: toB}},
-		"dromas revocation keep":      {{none: "it keeps a record it is handed"}},
+		"dromas revocation keep":      {{none: "it keeps a record it is handed", args: func(a, _ *client.Mailbox) []string { return []string{recordOf(t, a)} }}},
 		"dromas revocation ask":       {{args: toA}},
-		"dromas agent start":          {{none: "it runs an agent on this machine"}},
-		"dromas agent add":            {{none: "it adds a key to an agent on this machine"}},
+		"dromas agent start":          {{notRun: "it runs ssh-agent on this machine until it is stopped"}},
+		"dromas agent add":            {{notRun: "it adds a key to the ssh-agent of this machine"}},
 	}
 	statuses := []int{http.StatusMovedPermanently, http.StatusFound, http.StatusSeeOther, http.StatusTemporaryRedirect, http.StatusPermanentRedirect}
 	turn := 0
@@ -387,13 +423,7 @@ func TestNoRouteOfACommandFollowsARedirect(t *testing.T) {
 		}
 		command := strings.TrimPrefix(path, "dromas ")
 		for _, c := range cases {
-			if c.routes != "" {
-				if _, ok := ways[c.routes]; !ok {
-					t.Errorf("%s: its routes are said to be %s's, which is no command", path, c.routes)
-				}
-				continue
-			}
-			if c.none != "" {
+			if c.notRun != "" {
 				continue
 			}
 			// do runs c on a new server and mailbox, route answered with a
@@ -461,7 +491,10 @@ func TestNoRouteOfACommandFollowsARedirect(t *testing.T) {
 				return slices.Clone(called)
 			}
 			routes := do("", 0)
-			if len(routes) == 0 {
+			switch {
+			case c.none != "" && len(routes) > 0:
+				t.Errorf("%s calls %q, where %s", path, routes, c.none)
+			case c.none == "" && len(routes) == 0:
 				t.Errorf("%s calls no route: give it a way that does, or the reason it needs none", path)
 			}
 			for _, route := range routes {

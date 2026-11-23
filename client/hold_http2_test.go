@@ -422,6 +422,9 @@ func TestAwaitAnsweredGoAwayOnEachConnectionReturnsByUntil(t *testing.T) {
 // it began, is sent again by net/http from its body's start each time: bytes
 // sent already, which are no progress, so the post is cut at requestTimeout
 // from the last byte that was (copyOf), over fewer connections than seconds.
+// The second's wait gives every copy time to read all it reads, and moves
+// nothing past the first copy: the server sends no WINDOW_UPDATE, so each copy
+// stops at the stream's window of 65,535 bytes.
 func TestAPostAnsweredGoAwayOnEachConnectionIsCutAtItsStall(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		b, dials := goAwayMailbox(t, time.Second)

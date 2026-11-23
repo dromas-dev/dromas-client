@@ -62,10 +62,12 @@ type Options struct {
 	// with no bound on the whole, so a message of any size moves on a slow
 	// link (#381); the rest of such a request, a send's answer once its
 	// ciphertext is sent and a fetch's answer that is not its ciphertext, and
-	// any other request, after a minute in all. A client
-	// given here is used as it is, its own timeouts its choice, and none of
-	// those bounds is added. The mailbox uses a copy of it that follows no
-	// redirect ([followNone]).
+	// any other request, after a minute in all. A client given here keeps
+	// its own timeouts, and none of those bounds is added. The mailbox uses a
+	// copy of it that follows no redirect ([followNone]), and where its
+	// transport is an *http.Transport, a clone of that which asks for no
+	// compressed answer and calls a server on this machine through no proxy
+	// (newTransport).
 	HTTPClient *http.Client
 	// RootCAs, if not nil, is the only set of certificates the server's TLS
 	// certificate may chain to, in place of the system's CAs. So the client

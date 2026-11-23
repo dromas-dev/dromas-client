@@ -332,7 +332,11 @@ func (s *stall) sending(req *http.Request) {
 // copy is read past the furthest any copy reached: a copy read again from its
 // start sends what was sent already, which is no progress, so a server that
 // has every try begin again (net/http sends a request again past each HTTP/2
-// GOAWAY with no end) is cut at requestTimeout.
+// GOAWAY with no end) is cut at requestTimeout. The cost: over HTTP/2, a post
+// that net/http sends again after a GOAWAY below its stream or a
+// REFUSED_STREAM is cut where sending again what was sent (up to the stream's
+// window) takes longer than requestTimeout, and its entry stays in outbox/: one
+// retry.
 type copyOf struct {
 	io.ReadCloser
 	s  *stall
