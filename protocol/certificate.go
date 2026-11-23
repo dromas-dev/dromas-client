@@ -66,7 +66,8 @@ type Certificate struct {
 // MaxCertificateLifetime; begun, and not ended. It is in the one form its makers
 // write, NewCertificate and "ssh-keygen -s … -O clear": a nonce of 32 bytes,
 // no critical option, no extension and an empty reserved field, and the
-// identity's signature on it in its one form.
+// identity's signature on it in its one form, a security key's claiming a
+// user was present.
 func CheckCertificate(id *Identity, key ssh.PublicKey, now time.Time) (*Certificate, error) {
 	cert, err := certificateForm(id, key)
 	if err != nil {
@@ -139,8 +140,17 @@ func certificateForm(id *Identity, key ssh.PublicKey) (*ssh.Certificate, error) 
 	}
 	// Dearmor has held the identity's signature on it to its one form
 	// already; a certificate that reached here another way is held to it too.
-	if cert.Signature == nil || !bytes.Equal(ssh.Marshal(oneSignature(cert.Signature)), ssh.Marshal(cert.Signature)) {
+	if cert.Signature == nil {
 		return nil, fmt.Errorf("%w: the identity's signature on it is not in its one form", ErrCertificate)
+	}
+	if one, ok := oneSignature(cert.Signature); !ok || !bytes.Equal(ssh.Marshal(one), ssh.Marshal(cert.Signature)) {
+		return nil, fmt.Errorf("%w: the identity's signature on it is not in its one form", ErrCertificate)
+	}
+	// A security key's signature claims a user was present, as on every
+	// signature (PROTOCOL.md §3.2): the library's CertChecker, as OpenSSH's,
+	// reads no flags on a certificate's own signature, so it is checked here.
+	if !userPresent(cert.Signature) {
+		return nil, fmt.Errorf("%w: the identity's signature on it claims no user was present", ErrCertificate)
 	}
 
 	// The identity's signature, before any verdict on the dates: "it has not

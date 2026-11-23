@@ -291,8 +291,10 @@ func FuzzCheckCertificate(f *testing.F) {
 				t.Fatalf("took the principals %q for %s", cert.ValidPrincipals, id.Address())
 			case len(cert.CriticalOptions) != 0 || len(cert.Extensions) != 0 || len(cert.Reserved) != 0 || len(cert.Nonce) != 32:
 				t.Fatal("took a certificate out of the one form its makers write")
-			case !bytes.Equal(ssh.Marshal(oneSignature(cert.Signature)), ssh.Marshal(cert.Signature)):
+			case !inOneForm(cert.Signature):
 				t.Fatal("took a certificate whose signature is not in its one form")
+			case !userPresent(cert.Signature):
+				t.Fatal("took a certificate whose security key claims no user was present")
 			case !bytes.Equal(cert.SignatureKey.Marshal(), id.PublicKey().Marshal()):
 				t.Fatal("took a certificate another key signed")
 			case id.PublicKey().Verify(signedBytes(cert), cert.Signature) != nil:
@@ -691,4 +693,10 @@ func independentlyRead(data []byte) string {
 		return "empty"
 	}
 	return ""
+}
+
+// inOneForm reports whether an SSH signature is in its one form.
+func inOneForm(s *ssh.Signature) bool {
+	one, ok := oneSignature(s)
+	return ok && bytes.Equal(ssh.Marshal(one), ssh.Marshal(s))
 }

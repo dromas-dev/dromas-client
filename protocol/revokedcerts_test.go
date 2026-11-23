@@ -6,7 +6,6 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"errors"
-	"io"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -96,30 +95,12 @@ func TestRevokedCertificatesAreBuiltInOneForm(t *testing.T) {
 	}
 }
 
-// shortSigner signs as its identity does, again until r and s take at most width
-// bytes as an SSH signature's blob writes them, s the lower of s and n − s.
-type shortSigner struct {
-	ssh.Signer
-	width int
-}
-
-func (s shortSigner) Sign(rand io.Reader, data []byte) (*ssh.Signature, error) {
-	for {
-		sig, err := s.Signer.Sign(rand, data)
-		if err != nil {
-			return nil, err
-		}
-		if low := lowS(sig); len(low.Blob) <= s.width {
-			return low, nil
-		}
-	}
-}
-
 // A working key's signature is no revocation of its identity's certificates, by
 // a check of its own: the signature here is within the bound, in the one form and
 // good by VerifySigned, so only verifying under the identity's bare key refuses
-// it. The bound leaves room for one only under a P-256 identity whose certificate's
-// own r and s are short, at 70 bytes of blob, so the identity signs it until they are.
+// it. It is made under a P-256 identity's certificate, which is shorter than an
+// sk-ecdsa one's by the bytes a security key adds, so it is within the bound
+// whatever its r and s.
 func TestAWorkingKeysSignatureWithinTheBoundRevokesNoCertificates(t *testing.T) {
 	t.Parallel()
 	b := p256Mailbox(t)
@@ -128,7 +109,7 @@ func TestAWorkingKeysSignatureWithinTheBoundRevokesNoCertificates(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	cert, err := NewCertificate(b.id, shortSigner{b.identity, 70}, b.work.PublicKey(), 3, now, testLifetime)
+	cert, err := NewCertificate(b.id, b.identity, b.work.PublicKey(), 3, now, testLifetime)
 	if err != nil {
 		t.Fatal(err)
 	}

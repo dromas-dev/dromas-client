@@ -182,7 +182,9 @@ func TestVectorBadIdentities(t *testing.T) {
 		// A server answers a format error with identity_mismatch, a key
 		// error with invalid_key, and a well-formed document of a type it does
 		// not register with unsupported_key_type.
-		keyCase := strings.HasPrefix(name, "small-order") || name == "non-canonical.doc" || name == "negative-zero.doc" || name == "off-curve.doc"
+		point := strings.HasPrefix(name, "small-order") || name == "non-canonical.doc" || name == "negative-zero.doc" || name == "off-curve.doc" ||
+			name == "sk-ed25519-small-order.doc" || name == "sk-ed25519-non-canonical.doc"
+		keyCase := point || strings.Contains(name, "-application-")
 		want := ErrIdentityFormat
 		switch {
 		case keyCase:
@@ -197,7 +199,7 @@ func TestVectorBadIdentities(t *testing.T) {
 		// is what refused them, and edwards25519 itself decodes the point,
 		// so the check has to be ours. off-curve.doc is no point, so
 		// edwards25519 refuses it, where ssh-keygen reads it as a key.
-		if keyCase {
+		if point {
 			m := identityForm.FindSubmatch(doc)
 			if m == nil {
 				t.Errorf("%s: control: not a well-formed document", name)
@@ -582,6 +584,8 @@ func TestVectorBadPrekeys(t *testing.T) {
 		"signed-by-the-identity":         a,
 		"b-signed-under-its-certificate": b,
 		"c-signed-under-its-certificate": c,
+		"d-signed-under-its-certificate": vectorIdentity(t, "d"),
+		"e-signed-under-its-certificate": vectorIdentity(t, "e"),
 	}
 	for _, f := range glob(t, "prekey/*.txt") {
 		name := strings.TrimSuffix(filepath.Base(f), ".txt")
@@ -854,20 +858,19 @@ func TestVectorSignatures(t *testing.T) {
 // holds the script to the same verdicts.
 func TestVectorSignatureForms(t *testing.T) {
 	now := vectorNow(t)
-	a, c := vectorIdentity(t, "a"), vectorIdentity(t, "c")
+	a := vectorIdentity(t, "a")
 	for _, f := range glob(t, "sig/*.sig") {
 		name := "sig/" + filepath.Base(f)
-		id, stmt := a, read(t, "a/prekey-1.txt")
-		base := strings.TrimPrefix(filepath.Base(f), "c-")
-		if base != filepath.Base(f) {
-			id, stmt = c, read(t, "c/prekey-1.txt")
+		id, stmt, base := a, read(t, "a/prekey-1.txt"), filepath.Base(f)
+		if m, rest, ok := strings.Cut(base, "-"); ok && len(m) == 1 {
+			id, stmt, base = vectorIdentity(t, m), read(t, m+"/prekey-1.txt"), rest
 		}
 		_, err := VerifySigned(id, stmt, read(t, name), PrekeyNamespace(id.Address()), now)
 		if ok := strings.HasPrefix(base, "ok-"); ok != (err == nil) {
 			t.Errorf("%s: %v", name, err)
 		}
 	}
-	for v, signed := range map[string]string{"sig/ok-ed25519.sig": "a/prekey-1.txt.sig", "sig/c-ok-p256.sig": "c/prekey-1.txt.sig"} {
+	for v, signed := range map[string]string{"sig/ok-ed25519.sig": "a/prekey-1.txt.sig", "sig/c-ok-p256.sig": "c/prekey-1.txt.sig", "sig/d-ok-sk-ecdsa.sig": "d/prekey-1.txt.sig", "sig/e-ok-sk-ed25519.sig": "e/prekey-1.txt.sig"} {
 		if !bytes.Equal(read(t, v), read(t, signed)) {
 			t.Errorf("%s is not %s", v, signed)
 		}
@@ -942,7 +945,10 @@ func TestMaxSignatureIsTheLargestSignatureInTheOneForm(t *testing.T) {
 	now := vectorNow(t)
 	most := 0
 	for _, ty := range IdentityTypes() {
-		m := map[string]func(*testing.T) certMailbox{IdentityEd25519: newCertMailbox, IdentityP256: p256Mailbox}[ty]
+		sk := func(ty string) func(*testing.T) certMailbox {
+			return func(t *testing.T) certMailbox { return skMailbox(t, ty) }
+		}
+		m := map[string]func(*testing.T) certMailbox{IdentityEd25519: newCertMailbox, IdentityP256: p256Mailbox, IdentitySKEd25519: sk(IdentitySKEd25519), IdentitySKP256: sk(IdentitySKP256)}[ty]
 		if m == nil {
 			t.Fatalf("%s has no mailbox to sign with here", ty)
 		}
@@ -992,17 +998,18 @@ func armoredBlob(t *testing.T, armored []byte) []byte {
 }
 
 // widestECDSA is an SSHSIG blob in the one form with every ECDSA
-// signature in it, its own and its certificate's, given an r and an s of 33
+// signature in it, a security key's among them, its own and its
+// certificate's, given an r and an s of 33
 // bytes, the most the one form gives a P-256 number: the size of the largest
 // signature of its kind. It verifies no more.
 func widestECDSA(t *testing.T, blob []byte) []byte {
 	t.Helper()
 	wide := func(s *ssh.Signature) *ssh.Signature {
-		if !strings.HasPrefix(s.Format, "ecdsa-sha2-") {
+		if !strings.HasPrefix(s.Format, "ecdsa-sha2-") && s.Format != ssh.KeyAlgoSKECDSA256 {
 			return s
 		}
 		top := new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 256), big.NewInt(1))
-		return &ssh.Signature{Format: s.Format, Blob: ssh.Marshal(struct{ R, S *big.Int }{top, top})}
+		return &ssh.Signature{Format: s.Format, Blob: ssh.Marshal(struct{ R, S *big.Int }{top, top}), Rest: s.Rest}
 	}
 	r := wireReader(blob[10:])
 	var f [5][]byte
@@ -1146,6 +1153,10 @@ var plainVerdicts = map[string]string{
 	"refuse-from-null":                                   RefusedSenderMismatch,
 	"accept-p256-sender":                                 "",
 	"accept-p256-sender-under-a-certificate":             "",
+	"accept-sk-ecdsa-sender":                             "",
+	"accept-sk-ecdsa-sender-under-a-certificate":         "",
+	"accept-sk-ed25519-sender":                           "",
+	"accept-sk-ed25519-sender-under-a-certificate":       "",
 	"refuse-unsupported-key-type":                        RefusedKeyType,
 	"refuse-from-is-not-the-identity-of-an-unknown-type": RefusedSenderMismatch,
 	"refuse-to-another-mailbox":                          RefusedRecipientMismatch,
@@ -1206,6 +1217,14 @@ func TestVectorPlaintexts(t *testing.T) {
 			from = c
 		case strings.Contains(name, "p256-sender"):
 			from, rank = c, 0
+		case strings.Contains(name, "sk-ecdsa-sender-under-a-certificate"):
+			from = vectorIdentity(t, "d")
+		case strings.Contains(name, "sk-ecdsa-sender"):
+			from, rank = vectorIdentity(t, "d"), 0
+		case strings.Contains(name, "sk-ed25519-sender-under-a-certificate"):
+			from = vectorIdentity(t, "e")
+		case strings.Contains(name, "sk-ed25519-sender"):
+			from, rank = vectorIdentity(t, "e"), 0
 		case strings.Contains(name, "signed-by-the-identity"):
 			rank = 0
 		}

@@ -2,6 +2,7 @@ package protocol
 
 import (
 	"bytes"
+	"crypto"
 	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/elliptic"
@@ -16,6 +17,8 @@ import (
 	"time"
 
 	"golang.org/x/crypto/ssh"
+
+	"github.com/dromas-dev/dromas-client/protocol/sktest"
 )
 
 // p256Mailbox is a mailbox whose identity is a P-256 key, with an Ed25519 working key.
@@ -26,6 +29,42 @@ func p256Mailbox(t *testing.T) certMailbox {
 		t.Fatal(err)
 	}
 	identity, err := ssh.NewSignerFromKey(priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := IdentityOf(identity.PublicKey())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, w, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	work, err := ssh.NewSignerFromKey(w)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return certMailbox{id: id, identity: identity, work: work}
+}
+
+// skMailbox is a mailbox whose identity is a security key in software of the
+// type t, IdentitySKEd25519 or IdentitySKP256, with an Ed25519 working key.
+func skMailbox(t *testing.T, ty string) certMailbox {
+	t.Helper()
+	var priv crypto.Signer
+	var err error
+	switch ty {
+	case IdentitySKEd25519:
+		_, priv, err = ed25519.GenerateKey(rand.Reader)
+	case IdentitySKP256:
+		priv, err = ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	default:
+		t.Fatalf("%s is no security key's type", ty)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity, err := sktest.New(priv, SKApplication)
 	if err != nil {
 		t.Fatal(err)
 	}
