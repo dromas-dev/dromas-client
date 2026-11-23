@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"io"
 	"net/http"
@@ -259,5 +260,23 @@ func TestAHeldMessageAllowedSinceIsNotDeliveredAgain(t *testing.T) {
 	}
 	if res := receive(t, b); len(res.Delivered)+len(res.Held) != 0 || len(res.Duplicates) != 1 {
 		t.Errorf("the retry: delivered %d, held %d, duplicates %d", len(res.Delivered), len(res.Held), len(res.Duplicates))
+	}
+}
+
+// A message is known by its sender and its msg_id together (PROTOCOL.md §12.3
+// check 9): one msg_id from two senders is two messages, both delivered.
+func TestOneMsgIDFromTwoSendersIsTwoMessages(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	a, c, b := e.mailbox(), e.mailbox(), e.mailbox()
+	now := e.clock.Now().Format(protocol.TimeLayout)
+	env := func(from *client.Mailbox, body string) string {
+		return `{"v":1,"from":"` + from.Address().String() + `","to":"` + b.Address().String() + `","identity":"` + base64.StdEncoding.EncodeToString(from.Identity().Document()) +
+			`","sent_at":"` + now + `","msg_id":"77777777-2222-4333-8444-555555555555","body":"` + body + `"}`
+	}
+	message(t, e, c, b, env(c, "from C"))
+	message(t, e, a, b, env(a, "from A, the same msg_id"))
+	if res := receive(t, b); len(res.Delivered) != 2 || len(res.Duplicates) != 0 {
+		t.Errorf("delivered %d, duplicates %d", len(res.Delivered), len(res.Duplicates))
 	}
 }
