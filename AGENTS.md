@@ -117,12 +117,10 @@ Each page follows the published standard for its kind. A rule of this file says 
 ### Releases
 
 - **A release is a signed tag `v0.<minor>.<patch>`, made by `task release`** (`Taskfile.yml`). The task checks the checkout, asks, signs with `git tag -s` and pushes; `.github/workflows/release.yml` verifies the tag, runs `ci.yml`'s jobs for a push on the tagged commit, builds and publishes with GoReleaser, then checks the published release the way `docs/install/verify.md` tells a user to and rebuilds it from its tag to compare. Its comments name whose documented practice each step is. 🛑 **Nothing in the chain is hand-written where a standard path exists.**
-- 🛑 **Only the maintainer can unlock the release key.** Custos, his AI assistant, runs `task release` only on his go for that release, once he has unlocked the key. A patch or a new minor is released on his word; no tag is `v1.0.0` or above until he decides. Adding a key to `.github/allowed_signers` is his commit.
+- 🛑 **A release is a tag the maintainer signs.**
 - A dependency moves in a commit before the tag, never in the release. A platform joins `.goreleaser.yaml` once CI runs the client on it.
 
-### The maintainer's own commits
-
-The author is Drew and the message ends `Co-Authored-By: Custos <custos@custosbot.org>`, then the session line a harness adds; never a `Co-Authored-By: Claude …` trailer. They carry his sign-off (`git commit -s`), by his standing word to Custos. 🛑 **That arrangement is his with his own assistant:** a contributor's commits carry their own sign-off.
+### Merging
 
 `main` accepts changes only through a pull request and the merge queue, which tests each one on `main` with those queued ahead of it and squash-merges it once every required check passes (`gh pr merge <n>` queues one). Nobody bypasses it, an org admin included. `gh api repos/dromas-dev/dromas-client/rules/branches/main` lists the required checks; a CI job that is not among them can fail without blocking a merge. 🛑 **The ruleset is a setting of the repository, not a file, and only the maintainer changes it:** a pull request that renames, adds or removes a required job says so, and he changes the ruleset as it merges, or every pull request waits on a check that never reports.
 

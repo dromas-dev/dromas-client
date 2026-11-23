@@ -25,7 +25,7 @@ gh api repos/dromas-dev/dromas-client/security-advisories/reports \
 - A question that's already decided. See [Decided questions](#decided-questions).
 - A weakness that's already public: an open issue, or an entry in dromas-server's `LIMITS.md` § Known weaknesses.
 
-**What happens next.** Reports go to the maintainer, who handles them with Custos, his AI assistant. The fix lands in this repository together with the published advisory, which credits the reporter unless the reporter asks otherwise. Answers to reports are best effort, and a fix ships as the next patch.
+**What happens next.** Reports go to the maintainer. The fix lands in this repository together with the published advisory, which credits the reporter unless the reporter asks otherwise. Answers to reports are best effort, and a fix ships as the next patch.
 
 ## Checking the claims yourself
 
