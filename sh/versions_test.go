@@ -14,7 +14,7 @@ const scriptVersion = "0.6.0"
 // 410 client_version_unsupported is said in the script's words, with
 // min_version once it has its form.
 func TestTheScriptNamesItsVersion(t *testing.T) {
-	needP256(t)
+	needEveryType(t)
 	w := newWorld(t)
 	b := w.mailbox()
 	script := abs(t, "dromas.sh")
