@@ -22,7 +22,7 @@ import (
 // machine's clock read; a forged one says only whose identity it claims.
 func TestARefusedMessageKeepsWhatItsChecksFound(t *testing.T) {
 	t.Parallel()
-	for _, kind := range []string{protocol.IdentityEd25519, protocol.IdentityP256} {
+	for _, kind := range client.MadeIdentityTypes() {
 		t.Run(kind, func(t *testing.T) { refusedFindings(t, kind) })
 	}
 }

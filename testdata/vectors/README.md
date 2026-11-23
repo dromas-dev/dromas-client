@@ -1,11 +1,11 @@
 # Dromas v1 test vectors
 
-This directory holds files that any Dromas implementation can check itself against. Stock tools make most of the files: `generate.sh` uses `bash`, `od`, `base64`, `fold`, `sha256sum`, `ssh-keygen`, `openssl`, and `age` and `age-keygen` 1.3 or later. It needs the GNU coreutils: it runs `head -c -1`, which BSD `head` refuses, and it writes the output of `wc -c` into vectors, which BSD `wc` pads with spaces. On every run, `age-keygen` checks the recipient of the prekey of B and C, and `age` decrypts the three ciphertexts. `age` encrypts a ciphertext only when its file is missing. A Go test makes the few files that no stock tool can write, from the same published keys (`DROMAS_WRITE_VECTORS=1 go test ./protocol`, in `protocol/vectors_test.go`).
+This directory holds files that any Dromas implementation can check itself against. Stock tools make most of the files: `generate.sh` uses `bash`, `od`, `base64`, `fold`, `sha256sum`, `ssh-keygen`, `openssl`, and `age` and `age-keygen` 1.3 or later. It needs the GNU coreutils: it runs `head -c -1`, which BSD `head` refuses, and it writes the output of `wc -c` into vectors, which BSD `wc` pads with spaces. On every run, `age-keygen` checks the recipient of the prekey of B and C, and `age` decrypts the three ciphertexts. `age` encrypts a ciphertext only when its file is missing. A Go test makes the files that no stock tool can write, from the same published keys (`DROMAS_WRITE_VECTORS=1 go test ./protocol`, in `protocol/vectors_test.go` and `protocol/skvectors_test.go`). Those include every file of mailboxes D and E, whose identities are security keys: no stock tool signs as a security key without one.
 
 Judge every vector at the time in `now`, with the revocations of certificates that a reader holds (PROTOCOL.md §5):
 
 - **For mailbox A, the reader holds `a/revoked-certs.txt`.** This file revokes A's certificates through serial 1791590399, one less than 1791590400, the certificate serial that A's clock gives at `now`: `now` in seconds since 1970-01-01T00:00:00Z (PROTOCOL.md §5.2). A's certificates are numbered higher than that serial, starting from 1791590400, except `cert/bad-revoked` (serial 1791590399) and `cert/bad-serial-zero` (serial 0).
-- **For mailboxes B and C, the reader holds no revocation.**
+- **For mailboxes B, C, D, and E, the reader holds no revocation.**
 
 A reader accepts each identity's own signature on a statement, a pass, or a message. A reader accepts a certificate's signature if the certificate is numbered higher than the revocation that the reader holds, and accepts every certificate if the reader holds no revocation. A signs its statements, its pass, and its messages under its certificate, except where a vector's name says otherwise, as in `prekey/signed-by-the-identity` and `plain/accept-signed-by-the-identity`, which A's identity signs. B and C sign theirs with the identity. B's and C's certificates sign the vectors that show that a reader accepts those certificates.
 
@@ -17,6 +17,9 @@ A reader accepts each identity's own signature on a statement, a pass, or a mess
   - From RFC 8032 §7.1: mailbox A's identity is TEST 1, and mailbox B's identity is TEST 2. A's working key is TEST 3, and B's working key is TEST 1024. A second working key of A's is TEST SHA(abc).
   - From RFC 8032 §7.2: mailbox C's working key is the key of the first Ed25519ctx test.
 - **Mailbox C's identity** is of type `ecdsa-sha2-nistp256`. It's the test key of RFC 6979 §A.2.5. The `input/c.p256` file holds the private scalar, and then the public point as x and y, in hex.
+- **Mailbox D's identity** is of type `sk-ecdsa-sha2-nistp256@openssh.com`, for the application `ssh:`. It's the P-256 test key of RFC 9500 §2.3, `testECCP256`. The `input/d.p256` file holds it as `input/c.p256` holds C's.
+- **Mailbox E's identity** is of type `sk-ssh-ed25519@openssh.com`, for the application `ssh:`. It's the key of the RFC 8032 §7.3 tests, in `input/e.ed25519`.
+- **D's and E's working key** is one key, the key of the last Ed25519ctx test of RFC 8032 §7.2, in `input/d-work.ed25519`.
 - **The prekey of B and C** is the published test identity of the C2SP age testkit (CCTV `age/internal/testkit`). `input/b-1.pq.key` is its `TestHybridIdentity`, so each message here decrypts with any age implementation that supports post-quantum keys, such as `age` 1.3 or later.
 - **The other age recipients in `input/`** are public keys whose secret keys were discarded.
 
@@ -51,6 +54,19 @@ C's signatures are made once and kept.
 
 **Expected result:** all are valid, including the certificates, when the reader holds no revocation of B's or C's certificates. C's files are valid for a client that verifies `ecdsa-sha2-nistp256`. A client that doesn't verify that key type refuses C's document with its code for a key type that it doesn't support, never as malformed.
 
+### `d/`, `e/`
+
+Mailboxes D and E, whose identities are security keys: D's `identity.doc` is 218 bytes, and E's is 138. A security key in software (`protocol/sktest`) made each signature, with user presence and a counter of 0. Each directory holds the following:
+
+- `identity.doc` and `address`.
+- `prekey-1.txt` with its `.sig`, naming rank 0, signed by the identity itself.
+- `pass.txt`, `pass.sig`, and `pass.authorization`: a pass for `dromas.example`, signed by the identity itself. D's signature is written with its lower s, as a client writes a pass (PROTOCOL.md §8).
+- `revoke.txt` and `revoke.sig`: the mailbox's revocation of its address.
+- `revoked-certs.txt` and `revoked-certs.sig`: the mailbox's revocation of its certificates through serial 1791590399, which covers none of its certificates here.
+- `work-cert.pub`: a certificate that the mailbox's identity issued, serial 1791590400, valid under every rule for a certificate. `prekey/d-signed-under-its-certificate`, `prekey/e-signed-under-its-certificate`, `plain/accept-sk-ecdsa-sender-under-a-certificate`, and `plain/accept-sk-ed25519-sender-under-a-certificate` are signed under these certificates.
+
+**Expected result:** all are valid when the reader holds no revocation of D's or E's certificates. Every client verifies both types (PROTOCOL.md §4.1).
+
 ### `cert/bad-*`
 
 Each vector has three files:
@@ -69,6 +85,16 @@ Each vector has three files:
 - A certificate has one valid form: the form that `ssh-keygen -s … -O clear` writes. `bad-extensions` has the five extensions that `ssh-keygen` adds without `-O clear`. `bad-reserved-field` has bytes in its reserved field. `bad-nonce-of-16-bytes` has a nonce of 16 bytes instead of 32. The `TestVectorsCertificateForm` test in `protocol` makes the last two, because `ssh-keygen` writes neither. `bad-extensions` makes a signature longer than the bound (PROTOCOL.md §3.2), so a reader refuses the signature before it reads the certificate.
 - Used alone, `ssh-keygen -Y verify` accepts those three vectors, and also `bad-critical-option`, `bad-key-id`, and `bad-serial-zero`.
 - `bad-working-key-small-order` certifies the neutral point, which is a working key of small order. Its signature, with R the neutral point and S zero, satisfies the Ed25519 equation, so only the check on the working key refuses it.
+
+### `cert/d-bad-*`, `cert/e-bad-*`
+
+Certificates of D's and E's, with the same three files as `cert/bad-*`, each statement in its own mailbox's namespace:
+
+- `d-bad-no-user-presence` and `e-bad-no-user-presence`: the identity's signature on the certificate has flags without user presence.
+- `d-bad-webauthn`: the identity's signature on the certificate is a `webauthn-sk-ecdsa-sha2-nistp256@openssh.com` signature. Go's `x/crypto/ssh` doesn't parse such a certificate. Such a signature carries the base64 of what it signs, so every signature under the certificate is longer than the bound (PROTOCOL.md §3.2), and a reader refuses it before it reads the certificate.
+- `e-bad-working-key-a-security-key`: the certified key is D's and E's working key written as a security key, of type `sk-ssh-ed25519@openssh.com`, where a working key is `ssh-ed25519`. That security key signed the signature under it.
+
+**Expected result:** every vector is refused for its mailbox. `ssh-keygen -Y verify` accepts all four.
 
 ### `revoke/bad-*.sig`
 
@@ -114,9 +140,10 @@ A signature in its one valid form and in other forms (PROTOCOL.md §3.2):
   - The blob: at version 0, hashed with SHA-256, with bytes in its `reserved` field, with its namespace ending in a NUL, with a byte after its five fields, and with its certificate's type ending in a NUL.
   - An Ed25519 S with L added: the working key's (`bad-s-plus-l`), or the identity's on the certificate (`bad-certificate-s-plus-l`).
 - Each `c-bad-*` is C's signature, over `c/prekey-1.txt` in C's prekey namespace: r with a zero byte before it, a padding bit set in the base64, and the base64 without its padding. The last two aren't the one encoding of the base64.
+- Each `d-*` and `e-*` vector is D's or E's signature, over its own `prekey-1.txt` in its own prekey namespace. `d-ok-sk-ecdsa` is `d/prekey-1.txt.sig`, and `e-ok-sk-ed25519` is `e/prekey-1.txt.sig`. `d-ok-the-other-s` is D's signature with s written as n − s. `e-ok-r-small-order` has the neutral R. `d-ok-flags-21` has user presence and bit `0x20`, which the authenticator data's flags reserve, the flags of every Secure Enclave signature measured (#41); `e-ok-flags-05` has user presence and user verification (`0x04`), and `e-ok-flags-81` user presence and ED (`0x80`), bits that no verifier reads; and `e-ok-counter-ffffffff` has the highest counter. The `bad-*` vectors are flags without user presence (`d-bad-no-user-presence`, `e-bad-no-user-presence`, and `d-bad-flags-fe`, `e-bad-flags-fe` with every other bit set), a byte after the counter (`d-bad-a-byte-after-the-counter`, `e-bad-a-byte-after-the-counter`), r with a zero byte before it (`d-bad-r-padded`), L added to S (`e-bad-s-plus-l`), and a `webauthn-sk-ecdsa-sha2-nistp256@openssh.com` signature (`d-bad-webauthn`), which is a valid signature in that form.
 - `ok-r-small-order` and `bad-r-plus-order-2` are A's signatures with an R that the RFC 8032 signer never makes. The `TestVectorsEd25519R` test in `protocol` makes them.
 
-**Expected result:** `ok-*` accepted, and `bad-*` refused. `ssh-keygen -Y verify` accepts many of the `bad-*` vectors, because OpenSSH reads more forms than the one valid form. Here it's a validation tool, not the definition. On the builds that PROTOCOL.md Appendix A names, `ssh-keygen` judges the two R vectors the other way. Before the cutoff that Appendix A gives, it accepts the two vectors with L added to an Ed25519 S.
+**Expected result:** `ok-*` accepted, and `bad-*` refused. `ssh-keygen -Y verify` accepts many of the `bad-*` vectors, because OpenSSH reads more forms than the one valid form, including the four without user presence and `d-bad-webauthn`. Here it's a validation tool, not the definition. On the builds that PROTOCOL.md Appendix A names, `ssh-keygen` judges the two R vectors the other way. Before the cutoff that Appendix A gives, it accepts the two vectors with L added to an Ed25519 S.
 
 ### `cert/ok-*`
 
@@ -155,6 +182,7 @@ What mailbox B decrypts.
 Notes on some of these vectors:
 
 - `accept-signed-by-the-identity` is A's message, signed by A's identity itself at rank 0, which A's revocation of certificates doesn't cover.
+- `accept-sk-ecdsa-sender` and `accept-sk-ed25519-sender` are from mailboxes D and E, each signed by its identity, and the two `-under-a-certificate` vectors are the same messages under each one's certificate. Every client delivers them.
 - `accept-p256-sender` is from mailbox C, signed by C's identity, and is made once and kept. `accept-p256-sender-under-a-certificate` is the same message under C's certificate. A client that verifies `ecdsa-sha2-nistp256` delivers each one. A client that doesn't verify that type refuses each one with `unsupported_key_type`.
 - `refuse-certificate-revoked` passes PROTOCOL.md §12.3 checks 1 to 6. Only the revocation of certificates refuses it.
 - In `accept-anything-after-the-signature`, a second envelope, signed by B, follows the first END line, and the reader never reads it.
@@ -168,6 +196,7 @@ Malformed identity documents, and well-formed documents that hold a key that is 
 - (`p256-*`) A P-256 point that is off the curve, compressed, not reduced, or the point at infinity, none of which is a P-256 key's one encoding (PROTOCOL.md §4.1). `p256-point-at-infinity` is one zero byte, as SEC1 writes it.
 - `ok-p256-short-coordinate` (x = 5) and `ok-p256-coordinate-over-order` (x = n + 3) are points on the curve. OpenSSH up to 10.2p1 refuses them, and from 10.3p1 accepts them, as the Go library does and the protocol does (PROTOCOL.md §4.1).
 - `type-name-ending-in-nul` and `p256-curve-name-ending-in-nul` are A's and C's keys, with a NUL at the end of the type's name or the curve's name. `ssh-keygen` reads each as that mailbox's key, and writes it back without the NUL, so neither is the key in its one valid encoding.
+- (`sk-ecdsa-*`, `sk-ed25519-*`) A security key of D's or E's type whose application isn't exactly `ssh:`: empty, `ssh:x`, `web:`, and `ssh:` followed by a NUL (`application-ending-in-a-nul`), which `x/crypto/ssh` reads and writes back as it is, and `ssh-keygen` reads as D's or E's own key, writing it back without the NUL. Then each plain type's key checks: a point of D's type off the curve, compressed, with another curve's name, and with a byte after the key; a key of E's type of small order, and one not canonical.
 - `unsupported-type.doc` is a well-formed document of a key type that nobody verifies. The `type-name-*` documents are of the same kind, but their type's name breaks RFC 4251 §6: two at signs, an at sign with no fully qualified domain name after it, and 65 characters.
 - `nul-*` and `p256-nul-*` hold a NUL byte, in place of a line feed or elsewhere, and are as long as a valid document.
 
@@ -203,11 +232,11 @@ A's statement at serial 1, naming rank 0, signed by A's identity itself.
 
 **Expected result:** valid when the reader holds A's revocation of certificates, because that revocation covers only certificates. By `(c, p)` (PROTOCOL.md §5.3), this statement ranks lower than every statement of A's under a certificate, so a sender that holds one of those statements refuses it.
 
-### `prekey/b-signed-under-its-certificate`, `prekey/c-signed-under-its-certificate`
+### `prekey/<mailbox>-signed-under-its-certificate`
 
-B's and C's own statements. Each names its own mailbox's certificate (`b/work-cert.pub` or `c/work-cert.pub`), is signed under that certificate, and is in its own mailbox's namespace.
+The own statements of B, C, D, and E. Each names its own mailbox's certificate (`<mailbox>/work-cert.pub`), is signed under that certificate, and is in its own mailbox's namespace.
 
-**Expected result:** valid for B and for C, because nothing revokes their certificates.
+**Expected result:** valid for its mailbox, because nothing revokes the certificates of B, C, D, or E.
 
 ### `prekey/expired`
 
@@ -329,7 +358,7 @@ The `ok` vectors: an empty object, null members beside a revocation (a null memb
 
 ## Determinism
 
-Ed25519 signatures are deterministic, so an implementation that signs these statements with these keys, under these certificates, must produce byte-identical `.sig` files. A certificate is made once and kept, because `ssh-keygen` puts a random nonce in each certificate. Each signature by C's P-256 identity and each `message/*.age` file are also made once and kept, because ECDSA and age encryption are randomized. Everything else regenerates byte for byte.
+Ed25519 signatures are deterministic, so an implementation that signs these statements with these keys, under these certificates, must produce byte-identical `.sig` files. A certificate is made once and kept, because `ssh-keygen` puts a random nonce in each certificate. Each signature by C's P-256 identity and each `message/*.age` file are also made once and kept, because `ssh-keygen`'s ECDSA and age encryption are randomized. D's ECDSA signatures are deterministic (RFC 6979), and a certificate of D's or E's has a nonce made from its name, so D's and E's files regenerate byte for byte. Everything else regenerates byte for byte too.
 
 ## Tools that check the vectors
 
@@ -337,7 +366,7 @@ Ed25519 signatures are deterministic, so an implementation that signs these stat
 
 - `age` decrypts each `message/*.age` file with its prekey's published identity to exactly its `.plain`. The test uses the `age` on `PATH` if that `age` reads post-quantum files. Otherwise, it uses the `age` that `go.mod` names as a tool, which is the version that the client links.
 - `head -n 1` and `sed -n '2,/^-----END SSH SIGNATURE-----$/p'` split each plaintext into its `.line` and `.sig`.
-- `ssh-keygen -L` reads every certificate. At `now`, `ssh-keygen -Y verify` verifies every signature in `a/`, `b/`, `c/`, and `message/`, each `cert/ok-*` under its certificate, and each `revoked/ok-*`. It verifies a working key's signature under its identity as `cert-authority`, and an identity's own signature under its bare key. `ssh-keygen` has no concept of a revocation of certificates; a reader applies it.
+- `ssh-keygen -L` reads every certificate. At `now`, `ssh-keygen -Y verify` verifies every signature in `a/`, `b/`, `c/`, and `message/`, each `cert/ok-*` under its certificate, and each `revoked/ok-*`. Where it reads security keys (PROTOCOL.md Appendix A), it also verifies every signature in `d/` and `e/`, each `prekey/<mailbox>-signed-under-its-certificate` of the two, the `ok-*` signatures of each in `sig/` but `e-ok-r-small-order`, and the signatures that it accepts and the protocol refuses. It verifies a working key's signature under its identity as `cert-authority`, and an identity's own signature under its bare key. `ssh-keygen` has no concept of a revocation of certificates; a reader applies it.
 - `openssl dgst -sha384 -binary`, and then `openssl base64 -A` with `+` and `/` changed to `-` and `_` and with `d_` before it, gives each address from its identity document.
 
 So each of those vectors is in the standard's format, not in this code's reading of it.

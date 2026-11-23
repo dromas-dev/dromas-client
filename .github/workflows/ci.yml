@@ -150,7 +150,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: ${{ fromJSON(github.event_name == 'schedule' && '[{"name":"freebsd","version":"15.1","install":"sudo pkg install -y go bash jq"},{"name":"openbsd","version":"8.0","install":"sudo pkg_add go jq"},{"name":"netbsd","version":"11.0","install":"sudo pkgin -y install go jq bash openssh"},{"name":"dragonflybsd","version":"6.4.2","install":"sudo pkg install -y go bash jq"}]' || '[{"name":"freebsd","version":"15.1","install":"sudo pkg install -y go bash jq"},{"name":"openbsd","version":"8.0","install":"sudo pkg_add go jq"}]') }}
+        os: ${{ fromJSON(github.event_name == 'schedule' && '[{"name":"freebsd","version":"15.1","install":"sudo pkg install -y go bash jq"},{"name":"openbsd","version":"8.0","install":"sudo pkg_add go jq"},{"name":"netbsd","version":"11.0","install":"sudo pkgin -y install go jq bash openssh"},{"name":"dragonflybsd","version":"6.4.2","install":"sudo pkg install -y go bash jq openssh-portable"}]' || '[{"name":"freebsd","version":"15.1","install":"sudo pkg install -y go bash jq"},{"name":"openbsd","version":"8.0","install":"sudo pkg_add go jq"}]') }}
     name: test (${{ matrix.os.name }})
     runs-on: ubuntu-26.04
     # Twice the slowest VM's usual run, DragonFly's in the daily run, whose cold
@@ -195,16 +195,20 @@ jobs:
         # meet pkgsrc's OpenSSH: the base system's ssh-keygen certifies no
         # Ed25519 key with another (NetBSD 11.0; upstream 10.3p1 does). Before
         # it, the versioned Go package's bin: pkgsrc's go is a meta package
-        # that links no go command.
+        # that links no go command. On DragonFly, /usr/local/bin goes first, so
+        # they meet the openssh-portable package: the base system's (6.4.2,
+        # OpenSSH 9.1) is built without ENABLE_SK and reads no security key,
+        # which every client verifies (PROTOCOL.md §4.1); the package's
+        # default FIDO_U2F option builds it with security keys.
         run: |
           $INSTALL
-          for d in /usr/pkg/bin /usr/pkg/go1*/bin; do if [ -d "$d" ]; then PATH=$d:$PATH; fi; done
+          for d in /usr/local/bin /usr/pkg/bin /usr/pkg/go1*/bin; do if [ -d "$d" ]; then PATH=$d:$PATH; fi; done
           uname -a; go version; ssh -V; jq --version; bash --version | head -1
           if [ "$(go env GOVERSION)" != "$GOTOOLCHAIN" ]; then echo "::error::Go is $(go env GOVERSION), not the latest, '$GOTOOLCHAIN'"; exit 1; fi
       - name: check
         shell: cpa.sh {0}
         run: |
-          for d in /usr/pkg/bin /usr/pkg/go1*/bin; do if [ -d "$d" ]; then PATH=$d:$PATH; fi; done
+          for d in /usr/local/bin /usr/pkg/bin /usr/pkg/go1*/bin; do if [ -d "$d" ]; then PATH=$d:$PATH; fi; done
           export GOCACHE=$PWD/.gocache
           scripts/check.sh ${{ github.event_name == 'schedule' && 'full' || 'norace' }}
       - name: the rc.d script runs recv as its user
@@ -215,7 +219,7 @@ jobs:
         # log shows the script ran recv as the user, with HOME set, the flags
         # passed, and the output where the script sends it.
         run: |
-          for d in /usr/pkg/bin /usr/pkg/go1*/bin; do if [ -d "$d" ]; then PATH=$d:$PATH; fi; done
+          for d in /usr/local/bin /usr/pkg/bin /usr/pkg/go1*/bin; do if [ -d "$d" ]; then PATH=$d:$PATH; fi; done
           export GOCACHE=$PWD/.gocache
           go build -o dromas ./cmd/dromas
           sudo install -d /usr/local/bin

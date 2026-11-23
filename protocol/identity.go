@@ -20,20 +20,27 @@ const (
 )
 
 // The identity key types PROTOCOL.md §4.1 defines: the SSH name on line 2 of
-// an identity document. Every client verifies both. A type defined after them
-// is optional: a mailbox of one is reached only by clients that verify it,
-// which declare it (§7).
+// an identity document. Every client verifies all four. The last two are
+// OpenSSH's security-key types (PROTOCOL.u2f), each made for the application
+// SKApplication alone. A type defined after them is optional: a mailbox of
+// one is reached only by clients that verify it, which declare it (§7).
 const (
-	IdentityEd25519 = ssh.KeyAlgoED25519
-	IdentityP256    = ssh.KeyAlgoECDSA256
+	IdentityEd25519   = ssh.KeyAlgoED25519
+	IdentityP256      = ssh.KeyAlgoECDSA256
+	IdentitySKEd25519 = ssh.KeyAlgoSKED25519
+	IdentitySKP256    = ssh.KeyAlgoSKECDSA256
 )
+
+// SKApplication is the application of every security-key identity
+// (PROTOCOL.md §4.1): what ssh-keygen enrolls a security key for by default.
+const SKApplication = "ssh:"
 
 // IdentityTypes returns the identity key types this package verifies, those of
 // PROTOCOL.md §4.1 first.
 func IdentityTypes() []string { return slices.Clone(identityOrder) }
 
 // identityOrder is IdentityTypes' list, each a type identityTypes defines.
-var identityOrder = []string{IdentityEd25519, IdentityP256}
+var identityOrder = []string{IdentityEd25519, IdentityP256, IdentitySKEd25519, IdentitySKP256}
 
 // OptionalTypes returns the identity key types this package verifies that
 // PROTOCOL.md §4.1 does not define, in IdentityTypes' order: the declaration
@@ -104,8 +111,9 @@ const (
 // that type certifies (WorkingKeyType). Its document's form is the one every
 // type shares (identityForm), with the key in its one encoding: the base64 of
 // the wire key as it is written back once parsed (PROTOCOL.md §4.1). Ed25519's
-// is 91 bytes and P-256's 171. A working key's type is itself a type defined
-// here, and its key is held to that type's checks.
+// is 91 bytes, P-256's 171, sk-ssh-ed25519's 138 and sk-ecdsa's 218. A
+// working key's type is itself a type defined here, and its key is held to
+// that type's checks.
 var identityTypes = map[string]struct {
 	check func(ssh.PublicKey) error
 	work  string
@@ -126,6 +134,42 @@ var identityTypes = map[string]struct {
 		check: func(ssh.PublicKey) error { return nil },
 		work:  IdentityEd25519,
 	},
+	// A security key's are its plain type's, and its application is
+	// SKApplication: its wire key is the plain key's fields, then the
+	// application, which ends it.
+	IdentitySKEd25519: {
+		check: func(k ssh.PublicKey) error {
+			if err := checkApplication(k, 3); err != nil {
+				return err
+			}
+			return checkEd25519(k.(ssh.CryptoPublicKey).CryptoPublicKey().(ed25519.PublicKey))
+		},
+		work: IdentityEd25519,
+	},
+	IdentitySKP256: {
+		check: func(k ssh.PublicKey) error { return checkApplication(k, 4) },
+		work:  IdentityEd25519,
+	},
+}
+
+// checkApplication refuses a security key whose application, the last of the
+// fields of its wire key, is not SKApplication. x/crypto keeps the
+// application unexported, so it is read from the wire key, which ends with
+// it. Its bytes are compared whole: "ssh:" and a NUL, which x/crypto writes
+// back as it read it, is another application.
+func checkApplication(k ssh.PublicKey, fields int) error {
+	r := wireReader(k.Marshal())
+	var app []byte
+	ok := true
+	for range fields {
+		if app, ok = r.string(); !ok {
+			break
+		}
+	}
+	if !ok || len(r) != 0 || string(app) != SKApplication {
+		return fmt.Errorf("a security key's application is %q", SKApplication)
+	}
+	return nil
 }
 
 // WorkingKeyType returns the key type of every working key an identity of
@@ -147,7 +191,8 @@ type Identity struct {
 // Ed25519 a canonical point that is not of small order, which Go's
 // crypto/ed25519 accepts, as OpenSSH's own code did before 10.6p1, so the
 // check is explicit; for P-256 a point on the curve, which the library
-// checks as it reads the key, as OpenSSH from 10.3p1 does.
+// checks as it reads the key, as OpenSSH from 10.3p1 does; for a security
+// key, its plain type's checks and the application SKApplication.
 //
 // A well-formed document of a type this package does not define is
 // ErrIdentityType: nothing is wrong with it, and nothing it signed can be

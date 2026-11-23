@@ -8,6 +8,9 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"encoding/base64"
+	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"encoding/json/jsontext"
 	"encoding/pem"
@@ -85,26 +88,61 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-// p256 reports whether the local ssh-keygen reads a P-256 key. One built
-// without OpenSSL cannot, so the script refuses every P-256 identity there:
-// a known variance of OpenSSH's builds (PROTOCOL.md Appendix A).
-func p256() bool {
-	doc, err := os.ReadFile(filepath.Join(vectors, "c", "identity.doc"))
-	if err != nil {
-		return false
+// vectorMailboxes is each vector mailbox, by the key type of its identity:
+// every directory of the vectors that holds an identity document.
+var vectorMailboxes = sync.OnceValue(func() map[string]string {
+	m := map[string]string{}
+	docs, _ := filepath.Glob(filepath.Join(vectors, "*", "identity.doc"))
+	for _, d := range docs {
+		if id, err := protocol.ParseIdentity(mustReadFile(d)); err == nil {
+			m[filepath.Base(filepath.Dir(d))] = id.Type()
+		}
 	}
-	_, line, _ := strings.Cut(string(doc), "\n")
-	cmd := exec.Command("ssh-keygen", "-l", "-f", "-")
-	cmd.Stdin = strings.NewReader(line)
-	return cmd.Run() == nil
+	return m
+})
+
+// mustReadFile is a vector's bytes, or none.
+func mustReadFile(name string) []byte {
+	b, _ := os.ReadFile(name) //nolint:gosec // a test vector
+	return b
 }
 
-// needP256 skips a test that runs the script as a command where ssh-keygen
-// reads no P-256 key: every command refuses that build (dr_p256).
-func needP256(t *testing.T) {
+// readsMailbox reports whether the local ssh-keygen reads the key of a vector
+// mailbox's identity. One built without OpenSSL reads no P-256 key, an sk-ecdsa
+// one's included, and one built without security keys reads no security key,
+// so the script refuses every such identity there: known variances of
+// OpenSSH's builds (PROTOCOL.md Appendix A).
+func readsMailbox(mailbox string) bool {
+	_, line, _ := strings.Cut(string(mustReadFile(filepath.Join(vectors, mailbox, "identity.doc"))), "\n")
+	cmd := exec.Command("ssh-keygen", "-l", "-f", "-")
+	cmd.Stdin = strings.NewReader(line)
+	return line != "" && cmd.Run() == nil
+}
+
+// reads reports whether the local ssh-keygen reads a key of the identity type
+// ty, as the key of the vector mailbox of that type.
+func reads(ty string) bool {
+	for m, t := range vectorMailboxes() {
+		if t == ty {
+			return readsMailbox(m)
+		}
+	}
+	return false
+}
+
+// p256 reports whether the local ssh-keygen reads a P-256 key.
+func p256() bool { return reads(protocol.IdentityP256) }
+
+// needEveryType skips a test that runs the script as a command where
+// ssh-keygen reads a key of every type §4.1 defines, none of which the
+// script verifies otherwise: every command refuses that build (dr_p256,
+// dr_sk).
+func needEveryType(t *testing.T) {
 	t.Helper()
-	if !p256() {
-		t.Skipf("%s reads no P-256 key, and the script needs an OpenSSH built with OpenSSL", sshBuild())
+	for _, ty := range protocol.IdentityTypes() {
+		if !reads(ty) {
+			t.Skipf("%s reads no %s key, and the script needs an OpenSSH built with OpenSSL and with security keys", sshBuild(), ty)
+		}
 	}
 }
 
@@ -202,9 +240,12 @@ func TestVectorsIdentity(t *testing.T) {
 	t.Parallel()
 	need(t, scriptTools...)
 	t.Logf("ssh-keygen: %s", sshBuild())
-	for _, mailbox := range []string{"a", "b", "c"} { // c's identity is a P-256 key
-		if mailbox == "c" && !p256() {
-			t.Logf("%s reads no P-256 key, so the script refuses c/identity.doc: a known variance (PROTOCOL.md Appendix A)", sshBuild())
+	if len(vectorMailboxes()) == 0 {
+		t.Fatal("no vector mailboxes")
+	}
+	for mailbox, ty := range vectorMailboxes() {
+		if !readsMailbox(mailbox) {
+			t.Logf("%s reads no %s key, so the script refuses %s/identity.doc: a known variance (PROTOCOL.md Appendix A)", sshBuild(), ty, mailbox)
 			continue
 		}
 		a, _ := identity(t, mailbox)
@@ -336,8 +377,9 @@ func revokedExit(t *testing.T, mailbox string, s *protocol.Signer) int {
 const unrevoked = `dr_certrevoked "$A" "$c"; case $? in 0) exit 11 ;; 3) exit 3 ;; esac; echo "$c"`
 
 // A signature under each certificate of cert/ is refused, as the Go client
-// refuses it, with A's revocation of its certificates held, and one under a
-// mailbox's own certificate verifies. The signatures themselves are good: it
+// refuses it, with A's revocation of its certificates held, for A, or for the
+// mailbox its name begins with (d-*, e-*), and one under a mailbox's own
+// certificate verifies. The signatures themselves are good: it
 // is the certificate's form, its signer, its dates or that revocation that
 // fail, which ssh-keygen -Y verify
 // alone does not all check.
@@ -347,44 +389,51 @@ func TestVectorsCertificate(t *testing.T) {
 	now, setNow := vectorNow(t)
 	a, aDoc := identity(t, "a")
 	b, bDoc := identity(t, "b")
-	A, _ := protocol.ParseAddress(a)
-	id, err := protocol.ParseIdentity(mustRead(t, aDoc))
-	if err != nil {
-		t.Fatal(err)
+	// A cert/ vector is A's, but where its name gives another mailbox
+	// (d-*, e-*). The statement a signature of cert/ is over is the one
+	// beside it, which names that certificate's serial as its signer's rank.
+	mailboxOf := func(sig string) string {
+		if m, _, ok := strings.Cut(filepath.Base(sig), "-"); ok && len(m) == 1 && filepath.Base(filepath.Dir(sig)) == "cert" {
+			return m
+		}
+		return "a"
 	}
-	// The statement a signature of cert/ is over is the one beside it, which
-	// names that certificate's serial as its signer's rank.
 	stmtOf := func(sig string) string {
 		if filepath.Base(filepath.Dir(sig)) == "cert" {
 			return abs(t, strings.TrimSuffix(sig, ".sig")+".txt")
 		}
 		return abs(t, filepath.Join(vectors, "a/prekey-1.txt"))
 	}
-	signed := func(addr, doc, sig string) (string, error) {
-		return bash(t, scratch(t), setNow+held(t, "a")+fmt.Sprintf("A=%s; c=$(dr_signed %s %s dromas-prekey-v1:%s %s %s) || exit\n", addr, addr, doc, a, abs(t, sig), stmtOf(sig))+unrevoked)
+	signed := func(addr, doc, ns, sig string) (string, error) {
+		return bash(t, scratch(t), setNow+held(t, "a")+fmt.Sprintf("A=%s; c=$(dr_signed %s %s dromas-prekey-v1:%s %s %s) || exit\n", addr, addr, doc, ns, abs(t, sig), stmtOf(sig))+unrevoked)
 	}
 	// The script's status says which way it failed, as the Go client's error
 	// does: 2 for a certificate that has ended, 3 for one that has not begun,
 	// 1 for every other, and a revoked one's past those (revokedExit).
 	status := map[string]int{"bad-ended.sig": 2, "bad-not-begun.sig": 3}
-	verdict := func(sig string) (string, int) {
+	verdict := func(mailbox, sig string) (string, int) {
 		t.Helper()
-		signer, err := protocol.VerifySigned(id, mustRead(t, stmtOf(sig)), mustRead(t, sig), protocol.PrekeyNamespace(A), now)
+		_, doc := identity(t, mailbox)
+		id, err := protocol.ParseIdentity(mustRead(t, doc))
+		if err != nil {
+			t.Fatal(err)
+		}
+		signer, err := protocol.VerifySigned(id, mustRead(t, stmtOf(sig)), mustRead(t, sig), protocol.PrekeyNamespace(id.Address()), now)
 		if err != nil {
 			if s, ok := status[filepath.Base(sig)]; ok {
 				return "", s
 			}
 			return "", 1
 		}
-		if m := revokedExit(t, "a", signer); m != 0 {
+		if m := revokedExit(t, mailbox, signer); m != 0 {
 			return "", m
 		}
 		return fmt.Sprintln(signer.Rank()), 0
 	}
-	if out, err := signed(a, aDoc, filepath.Join(vectors, "a/prekey-1.txt.sig")); err != nil || out != fmt.Sprintln(vectorHeld(t, "a").Through+1) {
+	if out, err := signed(a, aDoc, a, filepath.Join(vectors, "a/prekey-1.txt.sig")); err != nil || out != fmt.Sprintln(vectorHeld(t, "a").Through+1) {
 		t.Fatalf("a/prekey-1.txt.sig under A's certificate, above its revocation of certificates: %q %v", out, err)
 	}
-	if _, err := signed(b, bDoc, filepath.Join(vectors, "a/prekey-1.txt.sig")); err == nil {
+	if _, err := signed(b, bDoc, a, filepath.Join(vectors, "a/prekey-1.txt.sig")); err == nil {
 		t.Error("A's certificate was taken for B's identity")
 	}
 	sigs, _ := filepath.Glob(filepath.Join(vectors, "cert", "*.sig"))
@@ -393,12 +442,17 @@ func TestVectorsCertificate(t *testing.T) {
 	}
 	kinds := map[int]int{}
 	for _, sig := range sigs {
-		name := filepath.Base(sig)
-		want, wantExit := verdict(sig)
-		if strings.HasPrefix(name, "ok-") != (wantExit == 0) {
+		name, mailbox := filepath.Base(sig), mailboxOf(sig)
+		if !readsMailbox(mailbox) {
+			t.Logf("%s: %s reads no %s key, so the script refuses every certificate of mailbox %s: a known variance (PROTOCOL.md Appendix A)", name, sshBuild(), vectorMailboxes()[mailbox], mailbox)
+			continue
+		}
+		addr, doc := identity(t, mailbox)
+		want, wantExit := verdict(mailbox, sig)
+		if strings.HasPrefix(strings.TrimPrefix(name, mailbox+"-"), "ok-") != (wantExit == 0) {
 			t.Errorf("%s: the Go client's verdict is exit %d", name, wantExit)
 		}
-		out, err := signed(a, aDoc, sig)
+		out, err := signed(addr, doc, addr, sig)
 		var exit *exec.ExitError
 		switch {
 		case wantExit == 0 && (err != nil || out != want):
@@ -413,10 +467,23 @@ func TestVectorsCertificate(t *testing.T) {
 	}
 	// Control: ssh-keygen alone takes the certificates whose fault is in
 	// their form, so the script's own reading of the fields is what refuses
-	// them.
-	for _, name := range []string{"bad-extensions", "bad-reserved-field", "bad-nonce-of-16-bytes", "bad-key-id", "bad-serial-zero", "bad-certifies-the-identity", "bad-critical-option"} {
+	// them; and a security key's certificate signed without user presence, or
+	// with a webauthn signature.
+	controls := []string{"bad-extensions", "bad-reserved-field", "bad-nonce-of-16-bytes", "bad-key-id", "bad-serial-zero", "bad-certifies-the-identity", "bad-critical-option"}
+	for _, m := range []string{"d", "e"} {
+		if readsMailbox(m) {
+			for _, n := range []string{m + "-bad-no-user-presence", m + "-bad-webauthn", m + "-bad-working-key-a-security-key"} {
+				if exists(filepath.Join(vectors, "cert", n+".sig")) {
+					controls = append(controls, n)
+				}
+			}
+		}
+	}
+	for _, name := range controls {
+		m := mailboxOf(filepath.Join(vectors, "cert", name+".sig"))
+		addr, doc := identity(t, m)
 		verify := fmt.Sprintf(`printf '%%s cert-authority %%s\n' %s "$(sed -n 2p %s)" > "$DR/s" && ssh-keygen -Y verify -f "$DR/s" -I %s -n dromas-prekey-v1:%s -s %s -O verify-time=20261010000000Z < %s`,
-			a, aDoc, a, a, abs(t, filepath.Join(vectors, "cert", name+".sig")), abs(t, filepath.Join(vectors, "cert", name+".txt")))
+			addr, doc, addr, addr, abs(t, filepath.Join(vectors, "cert", name+".sig")), abs(t, filepath.Join(vectors, "cert", name+".txt")))
 		if _, err := bash(t, scratch(t), "mkdir -p \"$DR\"; "+verify); err != nil {
 			t.Errorf("control: ssh-keygen -Y verify refuses %s by itself: %v", name, err)
 		}
@@ -453,10 +520,10 @@ func TestVectorsSignatureForm(t *testing.T) {
 	for _, sig := range sigs {
 		name := filepath.Base(sig)
 		mailbox := "a"
-		if strings.HasPrefix(name, "c-") {
-			mailbox = "c"
-			if !p256() {
-				t.Logf("%s: %s reads no P-256 key, so the script refuses every signature by C: a known variance (PROTOCOL.md Appendix A)", name, sshBuild())
+		if m, _, ok := strings.Cut(name, "-"); ok && len(m) == 1 {
+			mailbox = m
+			if !readsMailbox(mailbox) {
+				t.Logf("%s: %s reads no %s key, so the script refuses every signature of mailbox %s: a known variance (PROTOCOL.md Appendix A)", name, sshBuild(), vectorMailboxes()[mailbox], mailbox)
 				continue
 			}
 		}
@@ -472,9 +539,16 @@ func TestVectorsSignatureForm(t *testing.T) {
 for f in "$DR/s" "$DR/c"; do ssh-keygen -Y verify -f "$f" -I %[1]s -n dromas-prekey-v1:%[1]s -s %[3]s -O verify-time=20261010000000Z < %[4]s && exit 0; done; exit 1`,
 			addr, doc, abs(t, sig), stmt)
 		_, kerr := bash(t, scratch(t), verify)
-		if name == "ok-r-small-order.sig" || name == "bad-r-plus-order-2.sig" {
+		if name == "ok-r-small-order.sig" || name == "e-ok-r-small-order.sig" || name == "bad-r-plus-order-2.sig" {
 			edR[name] = [2]bool{err == nil, kerr == nil}
 			continue
+		}
+		// ssh-keygen takes a security key's signature without user presence,
+		// and a webauthn one: the script's own reading refuses them.
+		if name == "d-bad-webauthn.sig" || strings.HasSuffix(name, "-bad-no-user-presence.sig") || strings.HasSuffix(name, "-bad-flags-fe.sig") {
+			if kerr != nil {
+				t.Errorf("control: ssh-keygen -Y verify refuses %s by itself: %v", name, kerr)
+			}
 		}
 		ok := strings.Contains(name, "ok-")
 		if ok != (gerr == nil) {
@@ -492,6 +566,9 @@ for f in "$DR/s" "$DR/c"; do ssh-keygen -Y verify -f "$f" -I %[1]s -n dromas-pre
 		t.Errorf("the sig/ vectors judged: %v", verdicts)
 	}
 	small, plus2 := edR["ok-r-small-order.sig"], edR["bad-r-plus-order-2.sig"]
+	if sk, ok := edR["e-ok-r-small-order.sig"]; ok && sk != small {
+		t.Errorf("sig/e-ok-r-small-order.sig, as [the script, ssh-keygen] taken, is %v, and sig/ok-r-small-order.sig %v: a security key's Ed25519 is judged as the plain one", sk, small)
+	}
 	switch {
 	case small == [2]bool{true, true} && plus2 == [2]bool{false, false}:
 	case small == [2]bool{false, false} && plus2 == [2]bool{true, true}:
@@ -571,6 +648,59 @@ func TestTheScriptReadsABlobInItsOneForm(t *testing.T) {
 			t.Errorf("cert/%s: dr_cert reads it", sig)
 		}
 	}
+	// A security key's signature: its flags and counter, exactly five bytes,
+	// the flags claiming user presence, and its own type, by the identity
+	// and on a certificate. ssh-keygen -Y verify takes the webauthn ones and
+	// those without user presence (Appendix A).
+	for _, m := range []string{"d", "e"} {
+		x, xDoc := identity(t, m)
+		oks, _ := filepath.Glob(filepath.Join(vectors, "sig", m+"-ok-*.sig"))
+		bads, _ := filepath.Glob(filepath.Join(vectors, "sig", m+"-bad-*.sig"))
+		if len(oks) == 0 || len(bads) < 3 {
+			t.Fatalf("mailbox %s: %d ok and %d bad sig/ vectors", m, len(oks), len(bads))
+		}
+		for _, f := range oks {
+			if err := rank(x, xDoc, "sig/"+filepath.Base(f)); err != nil {
+				t.Errorf("control: dr_rank does not read sig/%s: %v", filepath.Base(f), err)
+			}
+		}
+		for _, f := range bads {
+			if err := rank(x, xDoc, "sig/"+filepath.Base(f)); err == nil {
+				t.Errorf("sig/%s: dr_rank reads it", filepath.Base(f))
+			}
+		}
+		if _, err := bash(t, scratch(t), fmt.Sprintf("dr_cert %s %s %s", abs(t, filepath.Join(vectors, "prekey", m+"-signed-under-its-certificate.txt.sig")), xDoc, x)); err != nil {
+			t.Errorf("control: dr_cert does not read %s's certificate: %v", m, err)
+		}
+		certs, _ := filepath.Glob(filepath.Join(vectors, "cert", m+"-bad-*.sig"))
+		for _, f := range certs {
+			if _, err := bash(t, scratch(t), fmt.Sprintf("dr_cert %s %s %s", abs(t, f), xDoc, x)); err == nil {
+				t.Errorf("cert/%s: dr_cert reads it", filepath.Base(f))
+			}
+		}
+	}
+	// A certificate's own webauthn signature makes every signature under it
+	// longer than the bound, which dr_blob refuses first: so dr_sigform, as
+	// dr_cert calls it, is given that signature's bytes alone. Control: it
+	// takes D's own certificate's.
+	_, dDoc := identity(t, "d")
+	_, idLine, _ := strings.Cut(string(mustRead(t, dDoc)), "\n")
+	idKey, err := base64.StdEncoding.DecodeString(strings.Fields(idLine)[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	signedBy := append(binary.BigEndian.AppendUint32(nil, uint32(len(idKey))), idKey...) //nolint:gosec // a key's length
+	for cert, want := range map[string]bool{"d/work-cert.pub": true, "cert/d-bad-webauthn.pub": false, "cert/d-bad-no-user-presence.pub": false} {
+		wire, err := base64.StdEncoding.DecodeString(strings.Fields(string(mustRead(t, filepath.Join(vectors, cert))))[1])
+		i := bytes.LastIndex(wire, signedBy)
+		if err != nil || i < 0 || len(wire) < i+len(signedBy)+4 {
+			t.Fatalf("%s: no signature by D's identity", cert)
+		}
+		sig := wire[i+len(signedBy)+4:] // the signature, a string, is the last field
+		if _, err := bash(t, scratch(t), "dr_sigform "+hex.EncodeToString(sig)); (err == nil) != want {
+			t.Errorf("%s: dr_sigform on its own signature: %v, want taken %v", cert, err, want)
+		}
+	}
 }
 
 // Every prekey statement of the vectors, as the Go client judges it with what
@@ -645,15 +775,15 @@ func TestVectorsPrekey(t *testing.T) {
 		name := strings.TrimSuffix(filepath.Base(st), ".txt")
 		mailbox := "a"
 		if strings.HasSuffix(name, "-signed-under-its-certificate") {
-			mailbox = name[:1] // B's and C's own, each in its own namespace
+			mailbox = name[:1] // each mailbox's own, in its own namespace
 		}
 		cases = append(cases, vector{"prekey/" + name + ".txt", "prekey/" + name + ".txt.sig", mailbox})
 	}
 	kinds := map[int]int{}
 	for _, c := range cases {
 		stmt, sig := filepath.Join(vectors, c.stmt), filepath.Join(vectors, c.sig)
-		if c.mailbox == "c" && !p256() {
-			t.Logf("%s for %s: %s reads no P-256 key, so the script refuses every statement of mailbox C: a known variance (PROTOCOL.md Appendix A)", c.sig, c.mailbox, sshBuild())
+		if !readsMailbox(c.mailbox) {
+			t.Logf("%s for %s: %s reads no %s key, so the script refuses every statement of mailbox %s: a known variance (PROTOCOL.md Appendix A)", c.sig, c.mailbox, sshBuild(), vectorMailboxes()[c.mailbox], c.mailbox)
 			continue
 		}
 		want, wantExit := verdict(stmt, sig, c.mailbox)
@@ -935,8 +1065,8 @@ func TestVectorsPlain(t *testing.T) {
 		out, err := bash(t, scratch(t), setNow+held(t, "a")+fmt.Sprintf(`cp %s "$DR/msg.T" && A=$(dr_open %s "$DR/msg") || { echo "$A"; exit 1; }
 c=$(dr_rank "$DR/msg.sig" "$DR/msg.doc" "$A") || exit 3; dr_certrevoked "$A" "$c"; case $? in 0) echo "certificate_revoked: revoked"; exit 1 ;; 3) exit 3 ;; esac
 echo "$A"; dr_line "$DR/msg.P"`, abs(t, f), b))
-		if gerr == nil && err != nil && signed.Sender.Type() == protocol.IdentityP256 && !p256() {
-			t.Logf("%s: %s reads no P-256 key, so the script refuses a P-256 sender: a known variance (PROTOCOL.md Appendix A)", name, sshBuild())
+		if gerr == nil && err != nil && !reads(signed.Sender.Type()) {
+			t.Logf("%s: %s reads no %s key, so the script refuses such a sender: a known variance (PROTOCOL.md Appendix A)", name, sshBuild(), signed.Sender.Type())
 			codes["delivered"]++
 			continue
 		}
@@ -955,8 +1085,8 @@ echo "$A"; dr_line "$DR/msg.P"`, abs(t, f), b))
 			codes[refusal]++
 			continue
 		}
-		if err != nil && signed.Sender.Type() == protocol.IdentityP256 && !p256() {
-			t.Logf("%s: %s reads no P-256 key, so the script refuses a P-256 sender: a known variance (PROTOCOL.md Appendix A)", name, sshBuild())
+		if err != nil && !reads(signed.Sender.Type()) {
+			t.Logf("%s: %s reads no %s key, so the script refuses such a sender: a known variance (PROTOCOL.md Appendix A)", name, sshBuild(), signed.Sender.Type())
 			codes["delivered"]++
 			continue
 		}
@@ -1153,39 +1283,42 @@ func TestTheScriptDeclaresNoSenderKeyType(t *testing.T) {
 }
 
 // A build of ssh-keygen that reads no P-256 key, as OpenSSH built without
-// OpenSSL is (PROTOCOL.md Appendix A), cannot verify every type §4.1
-// defines, so every command refuses it before anything else: one in PATH
-// that refuses every P-256 key stands for it.
-func TestTheScriptRefusesAnSSHKeygenThatReadsNoP256Key(t *testing.T) {
+// OpenSSL is, or no security key, as OpenSSH built without them is
+// (PROTOCOL.md Appendix A), cannot verify every type §4.1 defines, so every
+// command refuses it before anything else: one in PATH that refuses every
+// key of those types stands for each.
+func TestTheScriptRefusesAnSSHKeygenThatReadsNotEveryType(t *testing.T) {
 	t.Parallel()
 	need(t, scriptTools...)
-	bin := t.TempDir()
 	real, err := exec.LookPath("ssh-keygen")
 	if err != nil {
 		t.Fatal(err)
 	}
-	shim := "#!/usr/bin/env bash\nif [ \"$1\" = -l ]; then k=$(cat); case $k in \"ecdsa-sha2-nistp256 \"*) exit 255 ;; esac; exec " + real + " \"$@\" <<< \"$k\"; fi\nexec " + real + " \"$@\"\n"
-	if err := os.WriteFile(filepath.Join(bin, "ssh-keygen"), []byte(shim), 0o700); err != nil { //nolint:gosec // the test's own shim
-		t.Fatal(err)
-	}
-	called := filepath.Join(t.TempDir(), "curl-called")
-	if err := os.WriteFile(filepath.Join(bin, "curl"), []byte("#!/usr/bin/env bash\ntouch "+called+"\n"), 0o700); err != nil { //nolint:gosec // the test's own shim
-		t.Fatal(err)
-	}
-	for _, args := range [][]string{{"init"}, {"addr"}, {"recv"}, {"prekey", "renew"}, {"send", "d_" + strings.Repeat("A", 64)}} {
-		home := t.TempDir()
-		cmd := exec.Command("bash", append([]string{abs(t, "dromas.sh")}, args...)...)
-		cmd.Stdin = strings.NewReader("a body")
-		cmd.Env = append(os.Environ(), "DR_HOME="+home, "DR_SERVER_URL=http://127.0.0.1:9", "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-		out, err := cmd.CombinedOutput()
-		if err == nil || !strings.Contains(string(out), "this ssh-keygen reads no P-256 key") {
-			t.Errorf("dromas.sh %s on an ssh-keygen that reads no P-256 key: %v %q", strings.Join(args, " "), err, out)
+	for refused, words := range map[string]string{`"ecdsa-sha2-nistp256 "*`: "this ssh-keygen reads no P-256 key", `"sk-"*`: "this ssh-keygen reads no sk-ssh-ed25519@openssh.com key"} {
+		bin := t.TempDir()
+		shim := "#!/usr/bin/env bash\nif [ \"$1\" = -l ]; then k=$(cat); case $k in " + refused + ") exit 255 ;; esac; exec " + real + " \"$@\" <<< \"$k\"; fi\nexec " + real + " \"$@\"\n"
+		if err := os.WriteFile(filepath.Join(bin, "ssh-keygen"), []byte(shim), 0o700); err != nil { //nolint:gosec // the test's own shim
+			t.Fatal(err)
 		}
-		if _, err := os.Stat(called); err == nil {
-			t.Errorf("dromas.sh %s called a server before it refused", strings.Join(args, " "))
+		called := filepath.Join(t.TempDir(), "curl-called")
+		if err := os.WriteFile(filepath.Join(bin, "curl"), []byte("#!/usr/bin/env bash\ntouch "+called+"\n"), 0o700); err != nil { //nolint:gosec // the test's own shim
+			t.Fatal(err)
 		}
-		if es, err := os.ReadDir(home); err != nil || len(es) != 0 {
-			t.Errorf("dromas.sh %s made %v before it refused: %v", strings.Join(args, " "), es, err)
+		for _, args := range [][]string{{"init"}, {"addr"}, {"recv"}, {"prekey", "renew"}, {"send", "d_" + strings.Repeat("A", 64)}} {
+			home := t.TempDir()
+			cmd := exec.Command("bash", append([]string{abs(t, "dromas.sh")}, args...)...)
+			cmd.Stdin = strings.NewReader("a body")
+			cmd.Env = append(os.Environ(), "DR_HOME="+home, "DR_SERVER_URL=http://127.0.0.1:9", "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+			out, err := cmd.CombinedOutput()
+			if err == nil || !strings.Contains(string(out), words) {
+				t.Errorf("dromas.sh %s on an ssh-keygen that refuses %s: %v %q", strings.Join(args, " "), refused, err, out)
+			}
+			if _, err := os.Stat(called); err == nil {
+				t.Errorf("dromas.sh %s called a server before it refused", strings.Join(args, " "))
+			}
+			if es, err := os.ReadDir(home); err != nil || len(es) != 0 {
+				t.Errorf("dromas.sh %s made %v before it refused: %v", strings.Join(args, " "), es, err)
+			}
 		}
 	}
 }
@@ -1459,7 +1592,6 @@ func TestVectorsRevocation(t *testing.T) {
 	need(t, scriptTools...)
 	a, aDoc := identity(t, "a")
 	b, bDoc := identity(t, "b")
-	c, cDoc := identity(t, "c")
 	addr := func(s string) protocol.Address {
 		t.Helper()
 		x, err := protocol.ParseAddress(s)
@@ -1470,8 +1602,26 @@ func TestVectorsRevocation(t *testing.T) {
 	}
 	type vector struct{ addr, doc, sig string }
 	cases := []vector{
-		{a, aDoc, "a/revoke.sig"}, {c, cDoc, "c/revoke.sig"},
 		{b, aDoc, "a/revoke.sig"}, {a, bDoc, "a/revoke.sig"}, {b, bDoc, "revoke/bad-of-another-mailbox.sig"}, {a, aDoc, "a/prekey-1.txt.sig"},
+	}
+	// Each mailbox's own revocation, where it has one, is taken: a mailbox
+	// of a type the local ssh-keygen reads no key of is refused, a known
+	// variance, and is not compared.
+	want := 0
+	for m, ty := range vectorMailboxes() {
+		if !exists(filepath.Join(vectors, m, "revoke.sig")) {
+			continue
+		}
+		if !readsMailbox(m) {
+			t.Logf("%s reads no %s key, so the script refuses every revocation of mailbox %s: a known variance (PROTOCOL.md Appendix A), and those are not compared", sshBuild(), ty, m)
+			continue
+		}
+		x, xDoc := identity(t, m)
+		cases = append(cases, vector{x, xDoc, m + "/revoke.sig"})
+		want++
+	}
+	if want < 2 {
+		t.Fatalf("%d mailboxes' own revocations", want)
 	}
 	bads, _ := filepath.Glob(filepath.Join(vectors, "revoke", "bad-*.sig"))
 	if len(bads) != 5 {
@@ -1479,19 +1629,6 @@ func TestVectorsRevocation(t *testing.T) {
 	}
 	for _, f := range bads {
 		cases = append(cases, vector{a, aDoc, "revoke/" + filepath.Base(f)})
-	}
-	want := 2
-	if !p256() {
-		t.Logf("%s reads no P-256 key, so the script refuses every revocation of mailbox C: a known variance (PROTOCOL.md Appendix A), and those are not compared", sshBuild())
-		kept := cases[:0]
-		for _, v := range cases {
-			if v.addr != c {
-				kept = append(kept, v)
-			} else if _, err := protocol.VerifyRevocation(addr(v.addr), mustRead(t, v.doc), mustRead(t, filepath.Join(vectors, v.sig))); err == nil {
-				want--
-			}
-		}
-		cases = kept
 	}
 	taken := 0
 	for _, v := range cases {
@@ -1658,6 +1795,21 @@ func TestVectorsRevokedCertificates(t *testing.T) {
 		{b, bDoc, "ok-through-4.txt", "ok-through-4.sig"}, {a, bDoc, "ok-through-4.txt", "ok-through-4.sig"}, {b, aDoc, "ok-through-4.txt", "ok-through-4.sig"},
 		{a, aDoc, "ok-through-4.txt", "ok-through-the-highest.sig"},
 	}
+	// Each mailbox's own revocation of its certificates is taken, where the
+	// local ssh-keygen reads its key (a known variance otherwise).
+	want := 2
+	for m, ty := range vectorMailboxes() {
+		if !exists(filepath.Join(vectors, m, "revoked-certs.txt")) {
+			continue
+		}
+		if !readsMailbox(m) {
+			t.Logf("%s reads no %s key, so the script refuses mailbox %s's revocation of its certificates: a known variance (PROTOCOL.md Appendix A)", sshBuild(), ty, m)
+			continue
+		}
+		x, xDoc := identity(t, m)
+		cases = append(cases, vector{x, xDoc, "../" + m + "/revoked-certs.txt", "../" + m + "/revoked-certs.sig"})
+		want++
+	}
 	bads, _ := filepath.Glob(filepath.Join(vectors, "revoked", "bad-*.txt"))
 	if len(bads) != 20 {
 		t.Fatalf("%d revoked/bad-* vectors, want 20", len(bads))
@@ -1699,8 +1851,8 @@ func TestVectorsRevokedCertificates(t *testing.T) {
 			four = got
 		}
 	}
-	if taken != 2 || four == nil {
-		t.Fatalf("%d vectors taken as revocations of certificates, want the two that are", taken)
+	if taken != want || four == nil {
+		t.Fatalf("%d vectors taken as revocations of certificates, want the %d that are", taken, want)
 	}
 
 	// A kept one revokes the same certificates for both, at 2^53 - 1 too, and
@@ -1951,7 +2103,7 @@ var landAll = client.Policy{Unknown: client.LandInbox, Server: client.AdmitAll}
 func TestTheCommandLine(t *testing.T) {
 	t.Parallel()
 	need(t, append(scriptTools, "curl")...)
-	needP256(t)
+	needEveryType(t)
 	ctx := context.Background()
 	srv := fakeserver.New(t, time.Now)
 	home := t.TempDir()

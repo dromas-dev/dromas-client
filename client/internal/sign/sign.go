@@ -44,6 +44,27 @@ type Identity struct {
 	release func()
 }
 
+// ErrNoUserPresence is a security key's signature that claims no user was
+// present, which every verifier refuses (PROTOCOL.md §3.2): the identity
+// signs nothing that way.
+var ErrNoUserPresence = errors.New("the identity's security key signed without claiming a user was present, which every verifier refuses: a key enrolled to sign without a touch (ssh-keygen -O no-touch-required) cannot be an identity")
+
+// present is the identity's private key, refusing a signature every verifier
+// refuses: a security key's that claims no user was present. An agent's
+// security key may sign so, when it was enrolled to sign without a touch.
+type present struct{ ssh.Signer }
+
+func (k present) Sign(rand io.Reader, data []byte) (*ssh.Signature, error) {
+	sig, err := k.Signer.Sign(rand, data)
+	if err != nil {
+		return nil, err
+	}
+	if !protocol.UserPresent(sig) {
+		return nil, ErrNoUserPresence
+	}
+	return sig, nil
+}
+
 // errOtherKey is a private key Unlock gave that is not the identity's.
 var errOtherKey = errors.New("the identity's private key is not the key of its public key: identity.pub and the key file, or the agent, name two keys")
 
@@ -59,7 +80,8 @@ func (k *Identity) PublicKey() ssh.PublicKey { return k.pub }
 
 // signer is the identity's private key, unlocked at the first call after New or
 // Forget, and only after the mailbox says it is not finished, so a finished
-// mailbox asks no agent and no passphrase.
+// mailbox asks no agent and no passphrase. Each signature it makes claims a
+// user was present where the key is a security key (present).
 func (k *Identity) signer() (ssh.Signer, error) {
 	if err := k.finished(); err != nil {
 		return nil, err
@@ -79,8 +101,8 @@ func (k *Identity) signer() (ssh.Signer, error) {
 		}
 		return nil, errOtherKey
 	}
-	k.key, k.release = key, release
-	return key, nil
+	k.key, k.release = present{key}, release
+	return k.key, nil
 }
 
 // Borrowed reports whether the private key held is an agent's, which Unlock

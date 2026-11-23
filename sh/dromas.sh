@@ -18,14 +18,14 @@
 #   bash dromas.sh help [<command>]                this, or a command's lines; --help after a command does the same, and runs nothing
 #   The README has the rest: https://github.com/dromas-dev/dromas-client#readme
 #
-# Or source it at the top of every shell call and call the dr_* functions, which leaves out the command line's refusal of an ssh-keygen that reads no P-256 key (dr_p256). Agent tools run each command in a fresh
+# Or source it at the top of every shell call and call the dr_* functions, which leaves out the command line's refusal of an ssh-keygen that reads no P-256 key or no security key (dr_p256, dr_sk). Agent tools run each command in a fresh
 # shell, so all state lives in files in the mailbox's directory, never in variables.
 #
 # It gives up conveniences the Go client has: recv drains once and never waits for a message, and each step runs several
 # programs. And certificates: its own mailbox's identity signs its prekey statements, passes and messages (PROTOCOL.md §5),
 # and it makes no working key. It reads and writes to mailboxes that sign either way. Needs bash >= 4, age >= 1.3 (the first with post-quantum keys, the one prekey type; Ubuntu to 26.04 and Debian 13
-# ship older, and go install filippo.io/age/cmd/...@v1.3.2 is current), OpenSSH >= 9.1 built with OpenSSL (the first to take a
-# certificate's validity and a time to verify at in UTC; without OpenSSL it reads no P-256 key, which every client verifies), curl >= 8.4.0 (the first whose --max-filesize stops a body of unknown size, which dr_one's fetch relies on),
+# ship older, and go install filippo.io/age/cmd/...@v1.3.2 is current), OpenSSH >= 9.1 built with OpenSSL and with security keys, its default (the first to take a
+# certificate's validity and a time to verify at in UTC; without OpenSSL it reads no P-256 key, and without security keys no sk- key, each of which every client verifies), curl >= 8.4.0 (the first whose --max-filesize stops a body of unknown size, which dr_one's fetch relies on),
 # jq >= 1.7.1 (1.7.0 can abort on a number a sender writes, CVE-2023-50246; Ubuntu 24.04's fixed jq prints jq-1.7),
 # iconv, find, and coreutils (sha256sum, sha384sum, base64, fold, od, sync). Dates go through jq, never date -d, and base64 is never -w0.
 
@@ -39,6 +39,12 @@ DR_LOCK_WAIT=${DR_LOCK_WAIT:-120}   # how many seconds a command waits for the m
 DR_P256='ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBGD+1LolWp0xyWHrdMY1bWjASbiSO2H6bOZpYi5g8p+2eQP+EAi4vJmkGunpVii8ZPLxsgwtfp9Rd6PClNRGIpk='   # a P-256 key, mailbox C's identity in this repo's testdata/vectors/ (RFC 6979 §A.2.5's published test key), for dr_p256 to ask ssh-keygen to read
 dr_p256(){ # → 0 only where this build's ssh-keygen reads a P-256 key. Every client verifies every identity key type the protocol defines, ecdsa-sha2-nistp256 among them (PROTOCOL.md §4.1), and an OpenSSH built without OpenSSL reads none (PROTOCOL.md Appendix A): the script needs one built with it
   ssh-keygen -l -f - <<< "$DR_P256" > /dev/null 2>&1 || dr_refuse "this ssh-keygen reads no P-256 key, and every client verifies one: the script needs an OpenSSH built with OpenSSL (PROTOCOL.md §4.1)"
+}
+DR_SK='sk-ssh-ed25519@openssh.com AAAAGnNrLXNzaC1lZDI1NTE5QG9wZW5zc2guY29tAAAAIOwXK5OtXlY79JMscOEkUDTDVGfvLv1NZOv4GWg0Z+K/AAAABHNzaDo=
+sk-ecdsa-sha2-nistp256@openssh.com AAAAInNrLWVjZHNhLXNoYTItbmlzdHAyNTZAb3BlbnNzaC5jb20AAAAIbmlzdHAyNTYAAABBBEIlSPiPt4L/teyjdERSxyoeVY+9b3O+XkjpMjLMRcWxbEzRDEy41bihcTnpSILImSVymTQl9BQZq36QpCpJQnIAAAAEc3NoOg=='   # a key of each security-key type, mailboxes E's and D's identities in this repo's testdata/vectors/ (RFC 8032 §7.3's and RFC 9500's published test keys), for dr_sk to ask ssh-keygen to read
+dr_sk(){ # → 0 only where this build's ssh-keygen reads a key of each security-key type. Every client verifies both (PROTOCOL.md §4.1), and an OpenSSH built without security keys reads neither, as one built without OpenSSL reads no sk-ecdsa key (PROTOCOL.md Appendix A): the script needs one built with both
+  local k
+  while read -r k; do ssh-keygen -l -f - <<< "$k" > /dev/null 2>&1 || { dr_refuse "this ssh-keygen reads no ${k%% *} key, and every client verifies one: the script needs an OpenSSH built with security keys and with OpenSSL (PROTOCOL.md §4.1)"; return 1; }; done <<< "$DR_SK"
 }
 dr_out(){ jq -cn --arg type "$1" "${@:2}" '$ARGS.named'; }      # <type> [--arg <name> <text> | --argjson <name> <JSON>]… → one line of JSON on stdout, its type first and then each member in turn, as the Go client prints one: what a command did or met on the way
 dr_err(){ jq -cn --arg m "$*" '{type:"error", detail:$m}' >&2; }      # <words> → the line on stderr that says a command failed, in this script's own words
@@ -240,24 +246,27 @@ dr_keycheck(){ # <32 bytes in hex> → 0 only for an Ed25519 key that is a canon
   age -r "ssh-ed25519 $(printf "$(printf %s "0000000b$(dr_asc ssh-ed25519)00000020$1" | sed 's/../\\x&/g')" | base64 | tr -d '\n')" < /dev/null > /dev/null 2>&1      # a point on the curve: age decodes the key as the Go client's edwards25519 does, and refuses 32 bytes that are no point, which ssh-keygen reads as a key
 }
 dr_idcheck(){ # <identity document> [address] → 0 only for a two-line document whose key is in its one encoding and passes its type's checks (and hashing to the address, given one). 2 for a well-formed document of a key type this script does not verify: nothing is wrong with it, and nothing it signed can be checked here. 1 for anything else
-  local f=$1 l t fp
+  local f=$1 l t fp w
   l=$(sed -n 2p "$f"); t=${l%% *}
   [ "$(printf 'dromas-v1\n%s\n' "$l" | sha256sum)" = "$(sha256sum < "$f")" ] || return 1      # exactly the tag line and one more, each ending in LF, and not a byte else: the file against itself rebuilt from its second line. A shell variable drops a NUL, so a test of the variable alone would pass a file that holds one
   [ -z "${2-}" ] || [ "$(dr_address "$f")" = "$2" ] || return 1
   # the form every type shares: a key type's name as RFC 4251 §6 writes one (printable ASCII with no comma, and either no at-sign or one followed by a fully qualified domain name, at most 64 characters), one space, and the base64, in its one encoding, of a wire key that begins with that name
   grep -Eqx '[!-+.-?A-~-]+(@[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+)? [A-Za-z0-9+/]+={0,2}' <<< "$l" && [ ${#t} -le 64 ] && [ "$(printf %s "${l#* }" | base64 -d 2> /dev/null | base64 | tr -d '\n')" = "${l#* }" ] &&
     [ "$(printf %s "${l#* }" | base64 -d | head -c $((4 + ${#t})) | od -An -v -tx1 | tr -d ' \n')" = "$(printf %08x "${#t}")$(dr_asc "$t")" ] || return 1
-  case $t in ssh-ed25519 | ecdsa-sha2-nistp256) ;; *) return 2 ;; esac
+  case $t in ssh-ed25519 | ecdsa-sha2-nistp256 | sk-ssh-ed25519@openssh.com | sk-ecdsa-sha2-nistp256@openssh.com) ;; *) return 2 ;; esac
   # the key in its one encoding: ssh-keygen reads it, and its fingerprint, the SHA-256 of the key as OpenSSH writes it back, is the SHA-256 of these bytes. ssh-keygen refuses a P-256 point off the curve, compressed, at infinity or with a coordinate not below the field's size, which is all a P-256 key is held to (PROTOCOL.md §4.1). Up to 10.2p1 it also refuses one with a coordinate of 128 bits or fewer, or of the group's order less one or more, which the protocol takes: a known variance (PROTOCOL.md Appendix A)
   fp=$(ssh-keygen -l -E sha256 -f - <<< "$l" 2> /dev/null | awk '{print $2}') && fp=${fp#SHA256:} && [ -n "$fp" ] &&
     [ "$(printf '%s=' "$fp" | base64 -d | od -An -v -tx1 | tr -d ' \n')" = "$(printf %s "${l#* }" | base64 -d | sha256sum | cut -c1-64)" ] || return 1
-  case $t in      # then the type's own checks: an Ed25519 key canonical and not of small order
-    ssh-ed25519) dr_keycheck "$(printf %s "${l#* }" | base64 -d | tail -c 32 | od -An -v -tx1 | tr -d ' \n')" ;;
+  w=$(printf %s "${l#* }" | base64 -d | od -An -v -tx1 | tr -d ' \n')      # the wire key, in hex, which ssh-keygen has read field by field
+  case $t in      # then the type's own checks: an Ed25519 key canonical and not of small order; a security key's, its plain type's, and its last field, the application, exactly "ssh:" (PROTOCOL.md §4.1). Its other fields have one length each, so the key's whole length and its last 8 bytes hold the application to those 4 bytes, a NUL after them refused
+    ssh-ed25519) dr_keycheck "${w: -64}" ;;
+    sk-ssh-ed25519@openssh.com) [ ${#w} -eq 148 ] && [ "${w: -16}" = 000000047373683a ] && dr_keycheck "${w:68:64}" ;;      # the point at bytes 34 to 65, after the type's name
+    sk-ecdsa-sha2-nistp256@openssh.com) [ ${#w} -eq 254 ] && [ "${w: -16}" = 000000047373683a ] ;;
   esac
 }
-dr_blob(){ # <signature file> → the SSHSIG blob it armors, in hex, only for armour in its one form, the bytes ssh-keygen -Y sign and the Go client write (PROTOCOL.md §3.2), and at most 947 bytes, the bound on a signature (PROTOCOL.md §3.2): the BEGIN line, the base64 of the blob in its one encoding in lines of 70 characters, the END line, each ending in LF, and nothing before or after. The file is compared, as bytes, with the armour written back from the blob it holds, as the Go client's Dearmor compares it: any other form, CRLF, whitespace or a NUL among them, is refused. 1 for anything else
+dr_blob(){ # <signature file> → the SSHSIG blob it armors, in hex, only for armour in its one form, the bytes ssh-keygen -Y sign and the Go client write (PROTOCOL.md §3.2), and at most 1004 bytes, the bound on a signature (PROTOCOL.md §3.2): the BEGIN line, the base64 of the blob in its one encoding in lines of 70 characters, the END line, each ending in LF, and nothing before or after. The file is compared, as bytes, with the armour written back from the blob it holds, as the Go client's Dearmor compares it: any other form, CRLF, whitespace or a NUL among them, is refused. 1 for anything else
   local t h
-  [ "$(wc -c < "$1")" -le 947 ] || return 1
+  [ "$(wc -c < "$1")" -le 1004 ] || return 1
   t=$(sed '1d;$d' "$1" | tr -d '\n')      # what lies between the first line and the last, read as text: whatever it drops or a file holds besides, the comparison below refuses
   [[ $t =~ ^[A-Za-z0-9+/]+={0,2}$ ]] && h=$(printf %s "$t" | base64 -d 2> /dev/null | od -An -v -tx1 | tr -d ' \n') && [ -n "$h" ] || return 1
   [ "$(printf %s "$t" | base64 -d | base64 | tr -d '\n')" = "$t" ] || return 1      # the base64 in its one encoding: padded, and the unused bits of the last character zero
@@ -265,9 +274,14 @@ dr_blob(){ # <signature file> → the SSHSIG blob it armors, in hex, only for ar
   printf %s "$h"
 }
 dr_mpint(){ [[ $1 =~ ^(0[1-9a-f]|[1-7][0-9a-f]|00[89a-f][0-9a-f])([0-9a-f]{2})*$ ]]; }      # <an mpint's bytes, in hex> → 0 only for a positive number written minimally (RFC 4251 §5): no byte before its first but the one zero a set high bit needs
-dr_sigform(){ # <an SSH signature, in hex: its type as a string, then its bytes as one> → 0 only for one in its one form (PROTOCOL.md §3.2), and nothing after it: of type ssh-ed25519, 64 bytes whose S is below the group's order L (RFC 8032 §5.1.7: ssh-keygen before the cut PROTOCOL.md Appendix A gives takes one with L added to S); or of type ecdsa-sha2-nistp256, its bytes r and s, each a minimal mpint (dr_mpint), and nothing after them, s either of its two values, both of which ECDSA takes. Whether it verifies is ssh-keygen's. 1 for anything else
+dr_sigform(){ # <an SSH signature, in hex: its type as a string, then its bytes as one> → 0 only for one in its one form (PROTOCOL.md §3.2), and nothing after it: of type ssh-ed25519, 64 bytes whose S is below the group's order L (RFC 8032 §5.1.7: ssh-keygen before the cut PROTOCOL.md Appendix A gives takes one with L added to S); or of type ecdsa-sha2-nistp256, its bytes r and s, each a minimal mpint (dr_mpint), and nothing after them, s either of its two values, both of which ECDSA takes; or of a security key's type, sk-ssh-ed25519@openssh.com or sk-ecdsa-sha2-nistp256@openssh.com, its plain type's bytes in their one form, then exactly five bytes, the flags and the counter, whose flags claim a user was present (bit 0x01). ssh-keygen -Y verify takes flags without it, and a webauthn-sk-ecdsa-sha2-nistp256@openssh.com signature for an sk-ecdsa key, which are refused here (PROTOCOL.md Appendix A); no other flag, and never the counter, is read. Whether it verifies is ssh-keygen's. 1 for anything else
   local x=$1 o=0 l v t g s="" i a b L=1000000000000000000000000000000014def9dea2f79cd65812631a5cf5d3ed
-  dr_str && t=$v && dr_str && g=$v && [ "$o" -eq "${#x}" ] || return 1
+  dr_str && t=$v && dr_str && g=$v || return 1
+  case $t in
+    "$(dr_asc sk-ssh-ed25519@openssh.com)") t=$(dr_asc ssh-ed25519); [ $((${#x} - o)) -eq 10 ] && (( 16#${x:o:2} & 1 )) || return 1 ;;      # the flags and the counter, and nothing after them
+    "$(dr_asc sk-ecdsa-sha2-nistp256@openssh.com)") t=$(dr_asc ecdsa-sha2-nistp256); [ $((${#x} - o)) -eq 10 ] && (( 16#${x:o:2} & 1 )) || return 1 ;;
+    *) [ "$o" -eq "${#x}" ] || return 1 ;;
+  esac
   if [ "$t" = "$(dr_asc ssh-ed25519)" ]; then
     [ ${#g} -eq 128 ] || return 1
     for ((i = 126; i >= 64; i -= 2)); do s+=${g:i:2}; done      # S is the signature's last 32 bytes, little-endian: here it is read the other way round, to compare with L
@@ -850,6 +864,6 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
   esac
   dr_tls "$DR_SERVER_URL" || exit 1      # refused before anything, as the Go client refuses to open a mailbox whose server it would not call
   DR_SERVER_URL=${DR_SERVER_URL%/}      # a path of / is taken and dropped, as the Go client drops it, so every call and link is $DR_SERVER_URL/v1/… and $DR_SERVER_URL/to/…
-  dr_p256 || exit 1      # refused before anything: a build that cannot verify every type the protocol defines takes part in no exchange
+  dr_p256 && dr_sk || exit 1      # refused before anything: a build that cannot verify every type the protocol defines takes part in no exchange
   "$dr_cmd" "$@"
 fi

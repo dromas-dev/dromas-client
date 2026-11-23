@@ -19,6 +19,7 @@ import (
 	"golang.org/x/crypto/ssh"
 
 	"github.com/dromas-dev/dromas-client/protocol"
+	"github.com/dromas-dev/dromas-client/protocol/sktest"
 )
 
 // Nothing in the module signs but this package: no other file outside
@@ -101,6 +102,12 @@ func signers(t *testing.T, finished Finished) map[string]func() error {
 	if err != nil {
 		t.Fatal(err)
 	}
+	return signersOf(t, key, finished)
+}
+
+// signersOf is signers, with key as the identity's key and the working key.
+func signersOf(t *testing.T, key ssh.Signer, finished Finished) map[string]func() error {
+	t.Helper()
 	// The key is had only for a mailbox that is not finished.
 	id := NewIdentity(key.PublicKey(), func() (ssh.Signer, func(), error) {
 		if err := finished(); err != nil {
@@ -173,6 +180,36 @@ func TestAFinishedMailboxSignsNothing(t *testing.T) {
 			t.Errorf("%s on a finished mailbox: %v", name, err)
 		}
 		finished = nil
+	}
+}
+
+// Every signature the identity makes with a security key that claims no user
+// was present is refused, as every verifier refuses it (PROTOCOL.md §3.2):
+// each signing method of Identity, read from the type
+// (TestEverySignatureAsksTheMailbox), fails with ErrNoUserPresence.
+func TestNoIdentitySignatureLacksUserPresence(t *testing.T) {
+	t.Parallel()
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, err := sktest.New(priv, protocol.SKApplication)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key.Flags = 0
+	tried := 0
+	for name, f := range signersOf(t, key, func() error { return nil }) {
+		if !strings.HasPrefix(name, "Identity.") {
+			continue // a working key is an Ed25519 key, which has no flags
+		}
+		tried++
+		if err := f(); !errors.Is(err, ErrNoUserPresence) {
+			t.Errorf("%s with a key that claims no user present: %v", name, err)
+		}
+	}
+	if tried == 0 {
+		t.Fatal("no method of Identity was tried")
 	}
 }
 

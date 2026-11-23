@@ -164,11 +164,13 @@ func FuzzEnvelopeSender(f *testing.F) {
 // ParseIdentity takes a document only in the one form every type shares: it
 // gives back the document's own bytes, the address is their SHA-384, the
 // key is of a type the protocol defines, and the document is that key
-// written again; and an Ed25519 key only as a canonical point not of small
-// order (edwardsKeyFault, which reads it apart from the function's own
-// check). A refusal gives no identity.
+// written again; an Ed25519 key, a security key's included, only as a
+// canonical point not of small order (edwardsKeyFault, which reads it apart
+// from the function's own check); and a security key only for the
+// application SKApplication, its wire key's last field. A refusal gives no
+// identity.
 func FuzzParseIdentity(f *testing.F) {
-	seeds(f, "identity/*.doc", "a/identity.doc", "b/identity.doc", "c/identity.doc")
+	seeds(f, "identity/*.doc", "*/identity.doc")
 	f.Fuzz(func(t *testing.T, doc []byte) {
 		id, err := ParseIdentity(doc)
 		if err != nil {
@@ -191,8 +193,10 @@ func FuzzParseIdentity(f *testing.F) {
 			t.Fatalf("took a key of the type %q", key.Type())
 		case written != string(doc):
 			t.Fatalf("the document %q is not its key written again, %q", doc, written)
-		case key.Type() == ssh.KeyAlgoED25519 && edwardsKeyFault(key) != "":
+		case (key.Type() == ssh.KeyAlgoED25519 || key.Type() == ssh.KeyAlgoSKED25519) && edwardsKeyFault(key) != "":
 			t.Fatalf("took an Ed25519 key that is %s", edwardsKeyFault(key))
+		case securityKey(key.Type()) && !bytes.HasSuffix(key.Marshal(), sshString(SKApplication)):
+			t.Fatalf("took a security key whose application is not %s", SKApplication)
 		}
 		again, err := ParseIdentity(id.Document())
 		if err != nil || again.Address() != id.Address() {
@@ -205,7 +209,7 @@ func FuzzParseIdentity(f *testing.F) {
 // bytes: the blob it gives, armored, is the bytes it took, and the blob
 // written in the one form again is itself. A refusal gives no blob.
 func FuzzDearmor(f *testing.F) {
-	seeds(f, "sig/*.sig", "message/*.sig", "revoke/*.sig", "revoked/*.sig", "a/*.sig", "c/*.sig", "cert/*.sig")
+	seeds(f, "sig/*.sig", "message/*.sig", "revoke/*.sig", "revoked/*.sig", "*/*.sig", "cert/*.sig")
 	f.Fuzz(func(t *testing.T, armored []byte) {
 		blob, err := Dearmor(armored)
 		if err != nil {
@@ -238,7 +242,11 @@ func FuzzDearmor(f *testing.F) {
 // refuses.
 func FuzzCheckCertificate(f *testing.F) {
 	now := fuzzNow(f)
-	ids := []*Identity{fuzzIdentity(f, "a"), fuzzIdentity(f, "b"), fuzzIdentity(f, "c")}
+	var ids []*Identity
+	docs, _ := filepath.Glob(filepath.Join(vectors, "*", "identity.doc"))
+	for _, d := range docs {
+		ids = append(ids, fuzzIdentity(f, filepath.Base(filepath.Dir(d))))
+	}
 	var files []string
 	for _, p := range []string{"*/work-cert.pub", "cert/*.pub"} {
 		m, err := filepath.Glob(filepath.Join(vectors, p))
@@ -291,8 +299,10 @@ func FuzzCheckCertificate(f *testing.F) {
 				t.Fatalf("took the principals %q for %s", cert.ValidPrincipals, id.Address())
 			case len(cert.CriticalOptions) != 0 || len(cert.Extensions) != 0 || len(cert.Reserved) != 0 || len(cert.Nonce) != 32:
 				t.Fatal("took a certificate out of the one form its makers write")
-			case !bytes.Equal(ssh.Marshal(oneSignature(cert.Signature)), ssh.Marshal(cert.Signature)):
+			case !inOneForm(cert.Signature):
 				t.Fatal("took a certificate whose signature is not in its one form")
+			case !UserPresent(cert.Signature):
+				t.Fatal("took a certificate whose security key claims no user was present")
 			case !bytes.Equal(cert.SignatureKey.Marshal(), id.PublicKey().Marshal()):
 				t.Fatal("took a certificate another key signed")
 			case id.PublicKey().Verify(signedBytes(cert), cert.Signature) != nil:
@@ -401,10 +411,14 @@ func fuzzSender(line []byte) []byte {
 // ParseRevokedCertificates takes a statement only in its exact form, which
 // it writes back as it was.
 func FuzzRevocationVerifiers(f *testing.F) {
-	docs := [][]byte{read(f, "a/identity.doc"), read(f, "c/identity.doc")}
+	var docs [][]byte // each mailbox's that revokes itself
+	revoking, _ := filepath.Glob(filepath.Join(vectors, "*", "revoke.sig"))
+	for _, r := range revoking {
+		docs = append(docs, read(f, filepath.Base(filepath.Dir(r))+"/identity.doc"))
+	}
 	for _, doc := range docs {
 		own := Address(sha512.Sum384(doc))
-		for _, p := range []string{"revoke/*.sig", "c/revoke.sig"} {
+		for _, p := range []string{"revoke/*.sig", "*/revoke.sig"} {
 			m, _ := filepath.Glob(filepath.Join(vectors, p))
 			for _, name := range m {
 				sig, _ := os.ReadFile(name) //nolint:gosec // a vector of this repo
@@ -691,4 +705,10 @@ func independentlyRead(data []byte) string {
 		return "empty"
 	}
 	return ""
+}
+
+// inOneForm reports whether an SSH signature is in its one form.
+func inOneForm(s *ssh.Signature) bool {
+	one, ok := oneSignature(s)
+	return ok && bytes.Equal(ssh.Marshal(one), ssh.Marshal(s))
 }

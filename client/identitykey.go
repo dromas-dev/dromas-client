@@ -21,6 +21,13 @@ import (
 // as it is, then the key file and its passphrase. A command lets go of it when
 // it ends (locked), but under Options.KeepIdentity.
 
+// ErrNoUserPresence is a signature the identity's security key made without
+// claiming a user was present, as a key enrolled to sign without a touch
+// (ssh-keygen -O no-touch-required) makes each one. Every verifier refuses
+// such a signature (PROTOCOL.md §3.2), so the mailbox makes none, and the
+// command fails with this: no wait mends it ([Fatal]).
+var ErrNoUserPresence = sign.ErrNoUserPresence
+
 // IdentityLocked is the code of an [IdentityLockedError].
 const IdentityLocked = "identity_locked"
 

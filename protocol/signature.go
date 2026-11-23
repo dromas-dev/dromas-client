@@ -24,13 +24,13 @@ const (
 
 // MaxSignature is the most bytes an armored signature may be (PROTOCOL.md
 // §3.2): the largest a mailbox of any identity key type defined here makes in
-// the one form, a P-256 identity's prekey statement under a certificate whose
-// r and s each take 33 bytes. A field that carries one counts every byte it
+// the one form, an sk-ecdsa identity's prekey statement under a certificate
+// whose r and s each take 33 bytes. A field that carries one counts every byte it
 // holds; in a message it is the block from the BEGIN line through the END
 // line and its line feed. Dearmor refuses a longer one before reading it, so
 // every verifier here does. A key type added later whose signatures are longer
 // raises it with that type (PROTOCOL.md §14).
-const MaxSignature = 947
+const MaxSignature = 1004
 
 // Sign signs message in namespace and returns the signature armored
 // byte-for-byte as "ssh-keygen -Y sign" writes it.
@@ -74,9 +74,10 @@ func Armor(blob []byte) []byte {
 // does a document: so the armor is the BEGIN line, the base64 in lines of
 // armorWidth, LF and the END line and its LF, nothing before or after; the
 // blob is version 1, its signing key in its one encoding, an empty reserved
-// field, sha512, and its signature with nothing after it, an ECDSA one's r
-// and s each the minimal mpint. ECDSA's other s, n − s, is a signature of its
-// own in the one form, not another form of one: both verify.
+// field, sha512, and its signature with nothing after it but a security
+// key's flags and counter, an ECDSA one's r and s each the minimal mpint.
+// ECDSA's other s, n − s, is a signature of its own in the one form, not
+// another form of one: both verify.
 func Dearmor(armored []byte) ([]byte, error) {
 	if len(armored) > MaxSignature {
 		return nil, errors.New("a signature is longer than the most a signature may be")
@@ -130,44 +131,73 @@ func oneForm(blob []byte) ([]byte, error) {
 	if err != nil {
 		return nil, errors.New("the signature's key does not parse")
 	}
+	notOne := errors.New("the signature is not in its one form")
 	if cert, ok := k.(*ssh.Certificate); ok && cert.Signature != nil {
 		one := *cert
-		one.Signature = oneSignature(cert.Signature)
+		if one.Signature, ok = oneSignature(cert.Signature); !ok {
+			return nil, notOne
+		}
 		k = &one
 	}
 	s := new(ssh.Signature)
 	if err := ssh.Unmarshal(sig, s); err != nil {
 		return nil, bad
 	}
+	s, ok = oneSignature(s)
+	if !ok {
+		return nil, notOne
+	}
 	out := append([]byte("SSHSIG"), 0, 0, 0, 1)
-	for _, f := range [][]byte{k.Marshal(), namespace, nil, []byte("sha512"), ssh.Marshal(oneSignature(s))} {
+	for _, f := range [][]byte{k.Marshal(), namespace, nil, []byte("sha512"), ssh.Marshal(s)} {
 		out = appendWireString(out, f)
 	}
 	return out, nil
 }
 
 // oneSignature is an SSH signature in its one form: its type and its bytes,
-// nothing after them, and an ECDSA signature's r and s each written as the
-// minimal mpint, with no byte before it but the one zero a set high bit
-// needs (RFC 4251 §5). An ECDSA signature whose numbers do not parse is left
-// for the verifier to refuse.
-func oneSignature(s *ssh.Signature) *ssh.Signature {
+// nothing after them but a security key's flags and counter, which are
+// exactly five bytes (PROTOCOL.u2f), and an ECDSA signature's r and s each
+// written as the minimal mpint, with no byte before it but the one zero a set
+// high bit needs (RFC 4251 §5). A security key's signature with anything else
+// after its bytes has no one form: false. An ECDSA signature whose numbers do
+// not parse is left for the verifier to refuse.
+func oneSignature(s *ssh.Signature) (*ssh.Signature, bool) {
 	one := &ssh.Signature{Format: s.Format, Blob: s.Blob}
-	if strings.HasPrefix(s.Format, "ecdsa-sha2-") {
+	if securityKey(s.Format) {
+		if len(s.Rest) != 5 {
+			return nil, false
+		}
+		one.Rest = s.Rest
+	}
+	if strings.HasPrefix(s.Format, "ecdsa-sha2-") || s.Format == ssh.KeyAlgoSKECDSA256 {
 		var rs struct{ R, S *big.Int }
 		if ssh.Unmarshal(s.Blob, &rs) == nil {
 			one.Blob = ssh.Marshal(rs)
 		}
 	}
-	return one
+	return one, true
+}
+
+// securityKey reports whether a signature's type is a security key's, one
+// whose bytes its flags and counter follow (PROTOCOL.u2f).
+func securityKey(format string) bool {
+	return format == ssh.KeyAlgoSKECDSA256 || format == ssh.KeyAlgoSKED25519
+}
+
+// UserPresent reports whether a security key's signature in its one form
+// claims that a user was present (PROTOCOL.u2f's flags, bit 0x01): what every
+// verifier requires of one (PROTOCOL.md §3.2). It reads no other bit, and
+// never the counter. Any other signature has no flags: true.
+func UserPresent(s *ssh.Signature) bool {
+	return !securityKey(s.Format) || len(s.Rest) == 5 && s.Rest[0]&0x01 != 0
 }
 
 // lowS is an SSH signature with an ECDSA signature's s written as the lower
 // of s and n − s, which both verify (PROTOCOL.md §3.2): one signature for the
-// two a P-256 key's holder, or anyone who has seen one, can write. Any other
-// signature is as it was.
+// two a P-256 key's holder, or anyone who has seen one, can write. A security
+// key's flags and counter stay as they were. Any other signature is as it was.
 func lowS(s *ssh.Signature) *ssh.Signature {
-	if s.Format != ssh.KeyAlgoECDSA256 {
+	if s.Format != ssh.KeyAlgoECDSA256 && s.Format != ssh.KeyAlgoSKECDSA256 {
 		return s
 	}
 	var rs struct{ R, S *big.Int }
@@ -178,7 +208,7 @@ func lowS(s *ssh.Signature) *ssh.Signature {
 	if other := new(big.Int).Sub(n, rs.S); other.Sign() > 0 && other.Cmp(rs.S) < 0 {
 		rs.S = other
 	}
-	return &ssh.Signature{Format: s.Format, Blob: ssh.Marshal(rs)}
+	return &ssh.Signature{Format: s.Format, Blob: ssh.Marshal(rs), Rest: s.Rest}
 }
 
 // wireReader reads SSH wire form: RFC 4251's uint32 and string.

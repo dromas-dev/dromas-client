@@ -308,7 +308,7 @@ When `state` is lost, its replay set and every revocation that the mailbox kept,
 
 ## Protect the identity key
 
-An identity is an Ed25519 key. To make a P-256 identity instead, run `dromas init --identity-type ecdsa-sha2-nistp256`. Every client verifies both types (`PROTOCOL.md` §4.1).
+An identity is an Ed25519 key. To make a P-256 identity instead, run `dromas init --identity-type ecdsa-sha2-nistp256`. Every client verifies four types: these two, and the security-key types `sk-ssh-ed25519@openssh.com` and `sk-ecdsa-sha2-nistp256@openssh.com` (`PROTOCOL.md` §4.1). `dromas` makes no security key. A mailbox whose identity is a security key, enrolled for the application `ssh:` and held by an ssh-agent, signs through that agent, with a touch for each signature that the identity makes. A key enrolled with `ssh-keygen -O no-touch-required` can't be an identity, because its signatures don't claim that a user was present.
 
 By default, the identity's key file has no passphrase. To add one, run `ssh-keygen -p -f <identity-file>`, without `-m PEM`, so that the file stays in the OpenSSH format. A command then needs the key to be unlocked in one of these ways:
 

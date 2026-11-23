@@ -547,7 +547,7 @@ func TestAKeptMessageFileIsWrittenBesideAndMoved(t *testing.T) {
 func TestAddrNeedsAMailbox(t *testing.T) {
 	t.Parallel()
 	need(t, append(scriptTools, "curl")...)
-	needP256(t)
+	needEveryType(t)
 	srv := fakeserver.New(t, time.Now)
 	command := func(home string, args ...string) (string, string, int) {
 		t.Helper()
