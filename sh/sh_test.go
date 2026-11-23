@@ -7,6 +7,7 @@ package sh_test
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"encoding/json/jsontext"
 	"encoding/pem"
@@ -2395,6 +2396,28 @@ func TestTheScriptReadsNoCurlrc(t *testing.T) {
 	env = []string{"DR_HOME=" + t.TempDir(), "DR_SERVER_URL=" + front.URL, curlrc("insecure")}
 	if out, err := bash(t, env, "dr_init && dr_recv"); err == nil {
 		t.Errorf("insecure: a server whose certificate nobody signed made a mailbox and drained it: %q", out)
+	}
+}
+
+// The script calls no server over TLS older than 1.2, the least the Go client
+// takes, whatever the least its curl's build would take: a server that offers
+// at most TLS 1.1 is no answer, and gets nothing.
+func TestTheScriptCallsOverTLS12OrLater(t *testing.T) {
+	t.Parallel()
+	need(t, append(scriptTools, "curl")...)
+	srv := fakeserver.New(t, time.Now)
+	u, _ := url.Parse(srv.URL)
+	front := httptest.NewUnstartedServer(httputil.NewSingleHostReverseProxy(u))
+	front.TLS = &tls.Config{MinVersion: tls.VersionTLS10, MaxVersion: tls.VersionTLS11}
+	front.StartTLS()
+	t.Cleanup(front.Close)
+	ca := filepath.Join(t.TempDir(), "ca.pem")
+	if err := os.WriteFile(ca, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: front.Certificate().Raw}), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	env := []string{"DR_HOME=" + t.TempDir(), "DR_SERVER_URL=" + front.URL, "CURL_CA_BUNDLE=" + ca, "no_proxy=", "NO_PROXY="}
+	if out, err := bash(t, env, "dr_init"); err == nil || len(srv.Requests()) > 0 {
+		t.Errorf("init over TLS 1.1: %q, %v; the server got %d calls", out, err, len(srv.Requests()))
 	}
 }
 
