@@ -52,7 +52,7 @@ dr_time(){ # <timestamp> → its Unix time, only for exactly YYYY-MM-DDTHH:MM:SS
   local s; [[ $1 =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]] || return 1
   s=$(jq -nr --arg t "$1" '$t | fromdateiso8601 | select(todate == $t)' 2> /dev/null) && [ -n "$s" ] && echo "$s"
 }
-dr_api(){ # <METHOD> <PATH> [body file] [curl args…] → the body on stdout, as curl -o wrote it. The body file is sent as it is: a message's ciphertext, POSTed to …/messages, as application/octet-stream (PROTOCOL.md §11.10), and any other body as JSON. Any non-2xx: an error line with its status, its code (dr_code) and the wait its Retry-After asks for, and nothing the server wrote: its detail, hint and title are for a person reading the body (PROTOCOL.md §11.3). No answer at all: an error line with curl's words. Keeps the answer in $DR/error.json and what curl read of it in $DR/error.meta (dr_status), returns 1
+dr_api(){ # <METHOD> <PATH> [body file] [curl args…] → the body on stdout, as curl -o wrote it. The body file is sent as it is: a message's ciphertext, POSTed to …/messages, as application/vnd.age (PROTOCOL.md §11.10), and any other body as JSON. Any non-2xx: an error line with its status, its code (dr_code) and the wait its Retry-After asks for, and nothing the server wrote: its detail, hint and title are for a person reading the body (PROTOCOL.md §11.3). No answer at all: an error line with curl's words. Keeps the answer in $DR/error.json and what curl read of it in $DR/error.meta (dr_status), returns 1
   local m=$1 p=$2 f=${3-} t=application/json s c w v; local -a np=(); shift 2; [ $# -gt 0 ] && shift
   [[ "$m $p" == "POST /v1/"*"/messages?"* ]] && t=application/vnd.age
   dr_tls "$DR_SERVER_URL" || return 1
