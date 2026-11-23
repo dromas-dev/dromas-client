@@ -20,9 +20,9 @@ import (
 // or put back has lost the replay set and the revocations it held, of other
 // addresses and its own, so a server may deliver again a message the mailbox
 // accepted under that state, while protocol.TTL of its sent_at lasts, and may
-// withhold a revocation the mailbox held (PROTOCOL.md §15.9). A copy older than a message the mailbox
-// accepted, but no older than its last renewal, holds every key and stops
-// nothing. A mailbox restored from its identity alone holds no key, so it
+// withhold a revocation the mailbox held (PROTOCOL.md §15.9). A copy older
+// than a message the mailbox accepted, but no older than its last renewal,
+// holds every key and stops nothing. A mailbox restored from its identity alone holds no key, so it
 // needs no acknowledgement.
 
 // RestoreRequired is the code of a command refused because prekeys/ holds a
