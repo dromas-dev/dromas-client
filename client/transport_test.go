@@ -321,38 +321,51 @@ func TestACallWithNoAnswerSaysWhatKind(t *testing.T) {
 	}
 }
 
-// A mailbox asks for no compressed answer (PROTOCOL.md §11.2, §15.8), so a
-// front that compresses where it is asked to compresses nothing of its calls.
+// A mailbox asks for no compressed answer (PROTOCOL.md §11.2, §15.8), whether
+// it made its HTTP client or was handed one, so a front that compresses where
+// it is asked to compresses nothing of its calls.
 func TestAMailboxAsksForNoCompressedAnswer(t *testing.T) {
-	e := newEnv(t)
-	a, b := e.mailbox(), e.mailbox()
-	send(t, a, b, "never compressed")
-	var mu sync.Mutex
-	var asked []string
-	e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
-		if enc := r.Header.Get("Accept-Encoding"); enc != "" {
+	t.Parallel()
+	for name, given := range map[string]*http.Client{
+		"its own client":                         nil,
+		"a client handed it with no transport":   {},
+		"a client handed it with net/http's own": {Transport: &http.Transport{}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			e := newEnv(t)
+			opt := e.opts()
+			opt.HTTPClient = given
+			a, b := e.mailbox(), e.made(opt)
+			send(t, a, b, "never compressed")
+			var mu sync.Mutex
+			var asked []string
+			e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
+				if enc := r.Header.Get("Accept-Encoding"); enc != "" {
+					mu.Lock()
+					asked = append(asked, r.Method+" "+r.URL.Path+": "+enc)
+					mu.Unlock()
+					rec := httptest.NewRecorder()
+					next.ServeHTTP(rec, r)
+					var z bytes.Buffer
+					zw := gzip.NewWriter(&z)
+					_, _ = zw.Write(rec.Body.Bytes())
+					_ = zw.Close()
+					maps.Copy(w.Header(), rec.Header())
+					w.Header().Del("Content-Length")
+					w.Header().Set("Content-Encoding", "gzip")
+					w.WriteHeader(rec.Code)
+					_, _ = w.Write(z.Bytes())
+					return
+				}
+				next.ServeHTTP(w, r)
+			})
+			res := receive(t, b)
 			mu.Lock()
-			asked = append(asked, r.Method+" "+r.URL.Path+": "+enc)
-			mu.Unlock()
-			rec := httptest.NewRecorder()
-			next.ServeHTTP(rec, r)
-			var z bytes.Buffer
-			zw := gzip.NewWriter(&z)
-			_, _ = zw.Write(rec.Body.Bytes())
-			_ = zw.Close()
-			maps.Copy(w.Header(), rec.Header())
-			w.Header().Del("Content-Length")
-			w.Header().Set("Content-Encoding", "gzip")
-			w.WriteHeader(rec.Code)
-			_, _ = w.Write(z.Bytes())
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-	res := receive(t, b)
-	mu.Lock()
-	defer mu.Unlock()
-	if len(asked) != 0 || len(res.Delivered) != 1 {
-		t.Errorf("compression asked for by %q; %d delivered", asked, len(res.Delivered))
+			defer mu.Unlock()
+			if len(asked) != 0 || len(res.Delivered) != 1 {
+				t.Errorf("compression asked for by %q; %d delivered", asked, len(res.Delivered))
+			}
+		})
 	}
 }
