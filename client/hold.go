@@ -213,9 +213,13 @@ func (h *holding) dialer() *net.Dialer {
 // defaultTransport is the default client's: net/http's own, a TLS session
 // cache so that a new connection resumes (RFC 8446 §2.2; no early data; a
 // mailbox with a directory wraps it in a ticketCache), HTTP/2's health check,
-// and a dialer that sends keep-alive only as h says.
+// and a dialer that sends keep-alive only as h says. It asks for no
+// compressed answer, where net/http's asks for gzip: a server never
+// compresses (PROTOCOL.md §11.2), and anything in front of it that would
+// brings the leak of a compressed answer's length (§15.8).
 func defaultTransport(h *holding) *http.Transport {
 	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.DisableCompression = true
 	t.TLSClientConfig = &tls.Config{ClientSessionCache: tls.NewLRUClientSessionCache(0)}
 	t.IdleConnTimeout = connectionIdle
 	t.HTTP2 = &http.HTTP2Config{SendPingTimeout: healthCheckAfter, PingTimeout: healthCheckWait}
