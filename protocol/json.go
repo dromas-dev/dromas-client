@@ -45,15 +45,20 @@ var ErrUnknownMember = errors.New("the body has a member this call does not take
 var ErrMemberValue = errors.New("a member holds a value the protocol does not take there")
 
 // memberError is an [ErrUnknownMember], or with known set an
-// [ErrMemberValue], naming its member.
+// [ErrMemberValue], naming its member; with of set, it is also that
+// document's own error (ErrACL), whose words it carries.
 type memberError struct {
 	name  string
 	known bool
+	of    error // the document's own error, where the member breaks one: ErrACL
 }
 
 func newUnknownMember(name string) error { return &memberError{name: name} }
 
 func (e *memberError) Error() string {
+	if e.of != nil {
+		return fmt.Sprintf("%v: %q", e.of, e.name)
+	}
 	if e.known {
 		return fmt.Sprintf("%v: %q", ErrMemberValue, e.name)
 	}
@@ -61,7 +66,7 @@ func (e *memberError) Error() string {
 }
 
 func (e *memberError) Is(target error) bool {
-	return target == ErrMemberValue && e.known || target == ErrUnknownMember && !e.known
+	return target == ErrMemberValue && e.known || target == ErrUnknownMember && !e.known || e.of != nil && target == e.of
 }
 
 // Member is the name of the member an [ErrUnknownMember] or an
