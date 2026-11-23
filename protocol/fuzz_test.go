@@ -301,7 +301,7 @@ func FuzzCheckCertificate(f *testing.F) {
 				t.Fatal("took a certificate out of the one form its makers write")
 			case !inOneForm(cert.Signature):
 				t.Fatal("took a certificate whose signature is not in its one form")
-			case !userPresent(cert.Signature):
+			case !UserPresent(cert.Signature):
 				t.Fatal("took a certificate whose security key claims no user was present")
 			case !bytes.Equal(cert.SignatureKey.Marshal(), id.PublicKey().Marshal()):
 				t.Fatal("took a certificate another key signed")

@@ -26,6 +26,7 @@ import (
 	"golang.org/x/crypto/ssh/agent"
 
 	"github.com/dromas-dev/dromas-client/client"
+	"github.com/dromas-dev/dromas-client/client/internal/sign"
 	"github.com/dromas-dev/dromas-client/internal/fakeserver"
 	"github.com/dromas-dev/dromas-client/internal/forge"
 	"github.com/dromas-dev/dromas-client/protocol"
@@ -405,12 +406,23 @@ func TestAMailboxOnASecurityKeyIdentity(t *testing.T) {
 				if res := receive(t, b); len(res.Delivered) != 1 {
 					t.Fatalf("after a renewal: %+v", res)
 				}
-				// A key that signs without the touch it claims to need signs
-				// nothing that verifies: its renewal is refused.
+				// A key that signs without claiming a user was present makes
+				// signatures every verifier refuses: the mailbox makes none,
+				// and says why, for a renewal, a revocation, and a message
+				// where the identity signs one (under a certificate, the
+				// working key does).
 				key.Flags = 0
 				e.clock.Add(48 * time.Hour)
-				if _, err := b.Rekey(context.Background()); err == nil {
-					t.Error("a renewal whose signature claims no user present was taken")
+				_, rekey := b.Rekey(context.Background())
+				_, revoked := b.Revocation(context.Background())
+				refused := map[string]error{"a renewal": rekey, "a revocation": revoked}
+				if !working {
+					_, refused["a send"] = b.Send(context.Background(), ed.Address(), "without a touch")
+				}
+				for what, err := range refused {
+					if !errors.Is(err, sign.ErrNoUserPresence) {
+						t.Errorf("%s signed by a key that claims no user present: %v", what, err)
+					}
 				}
 				key.Flags = sktest.UserPresent
 				if _, err := b.Revocation(context.Background()); err != nil {

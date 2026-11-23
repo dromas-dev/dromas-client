@@ -184,11 +184,11 @@ func securityKey(format string) bool {
 	return format == ssh.KeyAlgoSKECDSA256 || format == ssh.KeyAlgoSKED25519
 }
 
-// userPresent reports whether a security key's signature in its one form
+// UserPresent reports whether a security key's signature in its one form
 // claims that a user was present (PROTOCOL.u2f's flags, bit 0x01): what every
 // verifier requires of one (PROTOCOL.md §3.2). It reads no other bit, and
 // never the counter. Any other signature has no flags: true.
-func userPresent(s *ssh.Signature) bool {
+func UserPresent(s *ssh.Signature) bool {
 	return !securityKey(s.Format) || len(s.Rest) == 5 && s.Rest[0]&0x01 != 0
 }
 

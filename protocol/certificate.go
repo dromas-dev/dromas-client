@@ -149,7 +149,7 @@ func certificateForm(id *Identity, key ssh.PublicKey) (*ssh.Certificate, error) 
 	// A security key's signature claims a user was present, as on every
 	// signature (PROTOCOL.md §3.2): the library's CertChecker, as OpenSSH's,
 	// reads no flags on a certificate's own signature, so it is checked here.
-	if !userPresent(cert.Signature) {
+	if !UserPresent(cert.Signature) {
 		return nil, fmt.Errorf("%w: the identity's signature on it claims no user was present", ErrCertificate)
 	}
 
