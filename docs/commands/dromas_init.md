@@ -33,8 +33,9 @@ A mailbox whose state does not match its prekeys/, as after state is lost, or
 restored from an older copy while prekeys/ was kept, has failed: it receives,
 sends, delivers and renews nothing, init and peer allow included, until init
 --restore acknowledges the mismatch. init --restore adopts the prekeys the state
-does not name, and renews. The lost state took its replay set with it, so the
-mailbox may deliver again a message it accepted before. On a mailbox whose state
+does not name, and renews. The lost state took its replay set and every
+revocation it kept with it, so the mailbox may deliver again a message it
+accepted before, or one that a lost revocation covers. On a mailbox whose state
 matches, init --restore changes nothing, so it can run at every start. A mailbox
 restored from its identity alone needs no --restore.
 
