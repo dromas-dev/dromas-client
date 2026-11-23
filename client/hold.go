@@ -325,8 +325,9 @@ func Transient(err error) bool {
 // Fatal reports whether err is a refusal no wait mends, which only the mailbox's
 // owner or its server's operator can put right: a revocation, a mailbox in
 // another format, a server's refusal that [Transient] does not take, such as no
-// mailbox at this address that a registration again does not mend, or this
-// client's own refusal. A supervisor that
+// mailbox at this address that a registration again does not mend, this
+// client's own refusal, or an identity whose security key signs without
+// claiming a user was present ([ErrNoUserPresence]). A supervisor that
 // starts the process again gains nothing. An error that is neither Fatal nor
 // Transient, such as a fault of the disk, ends a run and may pass.
 func Fatal(err error) bool {
@@ -337,7 +338,7 @@ func Fatal(err error) bool {
 	switch {
 	case err == nil, Transient(err):
 		return false
-	case errors.As(err, &re), errors.As(err, &fe), errors.As(err, &ae), errors.As(err, &rf):
+	case errors.As(err, &re), errors.As(err, &fe), errors.As(err, &ae), errors.As(err, &rf), errors.Is(err, ErrNoUserPresence):
 		return true
 	}
 	return false

@@ -414,6 +414,9 @@ func (b *Mailbox) post(ctx context.Context, to protocol.Address, stem string, as
 			if werr := b.waitAfter(stem, err); werr != nil {
 				return nil, errors.Join(err, werr)
 			}
+			if errors.Is(err, ErrNoUserPresence) {
+				return nil, fmt.Errorf("%w (kept in the outbox, which no flush posts while the identity's key signs so)", err)
+			}
 			return nil, fmt.Errorf("%w (kept in the outbox: retry with dromas outbox flush)", err)
 		}
 		return nil, b.undelivered(stem, err)

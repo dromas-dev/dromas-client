@@ -26,7 +26,6 @@ import (
 	"golang.org/x/crypto/ssh/agent"
 
 	"github.com/dromas-dev/dromas-client/client"
-	"github.com/dromas-dev/dromas-client/client/internal/sign"
 	"github.com/dromas-dev/dromas-client/internal/fakeserver"
 	"github.com/dromas-dev/dromas-client/internal/forge"
 	"github.com/dromas-dev/dromas-client/protocol"
@@ -419,10 +418,16 @@ func TestAMailboxOnASecurityKeyIdentity(t *testing.T) {
 				if !working {
 					_, refused["a send"] = b.Send(context.Background(), ed.Address(), "without a touch")
 				}
+				if !working {
+					_, refused["a receive"] = b.Receive(context.Background())
+				}
 				for what, err := range refused {
-					if !errors.Is(err, sign.ErrNoUserPresence) {
-						t.Errorf("%s signed by a key that claims no user present: %v", what, err)
+					if !errors.Is(err, client.ErrNoUserPresence) || !client.Fatal(err) {
+						t.Errorf("%s signed by a key that claims no user present: %v, fatal %v", what, err, client.Fatal(err))
 					}
+				}
+				if !working && !strings.Contains(refused["a send"].Error(), "which no flush posts") {
+					t.Errorf("a send kept in the outbox says %q", refused["a send"])
 				}
 				key.Flags = sktest.UserPresent
 				if _, err := b.Revocation(context.Background()); err != nil {
