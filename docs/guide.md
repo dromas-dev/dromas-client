@@ -345,7 +345,7 @@ If `inbox-dir` is itself a mount point, it remains as an empty directory while t
 - `allowed`, `blocked`, or `aliases`, if other users can write to the file or another user owns it, as ssh does for a config file.
 - `inbox-dir` or `held/`, or a message file in either one, if other users can write to it or another user owns it. Anyone who can write there can add a message that looks delivered.
 - An entry in `outbox/`, if other users can write to it or another user owns it. Anyone who can write it can change a message before `dromas` signs and sends it.
-- Any other directory of the mailbox, if other users can write to it or another user owns it. In `base-dir`, another user can swap `allowed` and `blocked`. In `mail-dir`, another user can rename `held/` to `inbox/`. In `outbox/`, another user can add a message for `dromas` to sign and send. The same holds for `refused/`, `sent/`, `outbox/failed/`, `rotating-keys-dir`, `prekeys/`, and `work/`.
+- Any other directory of the mailbox, if other users can write to it or another user owns it. In `base-dir`, another user can swap `allowed` and `blocked`. In `mail-dir`, another user can rename `held/` to `inbox/`. In `outbox/`, another user can delete or rename your waiting messages. The same holds for `refused/`, `sent/`, `outbox/failed/`, `rotating-keys-dir`, `prekeys/`, and `work/`.
 
 To turn off the last five checks, see [`unsafe-state-permissions`](configuration.md#unsafe-state-permissions) and [`unsafe-inbox-permissions`](configuration.md#unsafe-inbox-permissions).
 

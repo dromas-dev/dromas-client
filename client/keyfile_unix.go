@@ -61,7 +61,7 @@ func checkPrivateFileAs(path string, me int) error {
 // (misc.c), behind sshd's StrictModes, judges each directory from a key's own
 // up through the user's home, or up to / for a key outside the home. This
 // judges the one directory at path, and judgeFiles names each of the mailbox's;
-// none above base-dir, mail-dir or inbox-dir is walked (PRECEDENTS.md, Part 2,
+// none above base-dir, mail-dir, inbox-dir or rotating-keys-dir is walked (PRECEDENTS.md, Part 2,
 // § 4). Others may read it: each message in inbox-dir, held/ and outbox/ is
 // judged on its own (judgeKept). It judges the owner first, as
 // checkPrivateFile does.

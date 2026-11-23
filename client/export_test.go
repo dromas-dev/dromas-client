@@ -68,8 +68,8 @@ func LayoutDirs(b *Mailbox) []string {
 	return dirs
 }
 
-// JudgedDirs are b's directories judged at every open, read from judgedDirs.
-func JudgedDirs(b *Mailbox) []string { return b.judgedDirs() }
+// KeyDirs are b's key directories, which no unsafe option covers (keyDirs).
+func KeyDirs(b *Mailbox) []string { return b.keyDirs() }
 
 // PublicFiles are the base directory's files no open judges.
 func PublicFiles() []string { return publicFiles }

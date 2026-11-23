@@ -102,15 +102,23 @@ var listFiles = []string{"allowed", "blocked", "aliases"}
 // keeps the mail's folders; inbox-dir and held/, whose messages read as
 // delivered; refused/; sent/, whose names peer allow --rebuild takes as the
 // peers this mailbox wrote to; outbox/, whose entries the mailbox signs and
-// sends as its owner's, and outbox/failed/; and rotating-keys-dir, prekeys/
-// and work/, which keep its keys. None is left out: what a write to a
-// directory lets through (a file renamed, swapped or deleted) is not what a
-// check of each file in it catches.
+// sends as its owner's, and outbox/failed/; and the key directories
+// (keyDirs). None is left out: what a write to a directory lets through (a
+// file renamed, swapped or deleted) is not what a check of each file in it
+// catches.
 func (b *Mailbox) judgedDirs() []string {
-	return []string{
+	return append([]string{
 		b.path(), b.layout.Mail, b.path("inbox"), b.path("held"), b.path("refused"), b.path("sent"),
-		b.path("outbox"), b.path("outbox", "failed"), b.layout.RotatingKeys, b.path("prekeys"), b.path("work"),
-	}
+		b.path("outbox"), b.path("outbox", "failed"),
+	}, b.keyDirs()...)
+}
+
+// keyDirs are the directories that keep the mailbox's keys: rotating-keys-dir,
+// prekeys/ and work/. They are judged whatever --unsafe-inbox-permissions
+// says, since no unsafe option covers a key: whoever can write one can delete
+// a prekey a message is waiting for.
+func (b *Mailbox) keyDirs() []string {
+	return []string{b.layout.RotatingKeys, b.path("prekeys"), b.path("work")}
 }
 
 // keptDirRisk is why a directory of judgedDirs that others can write or another
@@ -159,9 +167,10 @@ func (b *Mailbox) judgeFiles() error {
 			return &fileRefused{err}
 		}
 	}
+	keys := b.keyDirs()
 	for _, d := range b.judgedDirs() {
-		if b.unsafeInbox {
-			break
+		if b.unsafeInbox && !slices.Contains(keys, d) {
+			continue
 		}
 		if err := checkKeptDir(d); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return &fileRefused{err}
