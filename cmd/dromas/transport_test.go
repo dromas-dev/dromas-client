@@ -21,7 +21,9 @@ import (
 
 	"github.com/dromas-dev/dromas-client/client"
 	"github.com/dromas-dev/dromas-client/internal/fakeserver"
+	"github.com/dromas-dev/dromas-client/internal/forge"
 	"github.com/dromas-dev/dromas-client/protocol"
+	"github.com/spf13/cobra"
 )
 
 // rawAnswer is a server that reads each request's head and answers it with
@@ -277,9 +279,10 @@ func aRoute(r *http.Request) string {
 
 // Every route each command calls, answered with a redirect to another server on
 // this machine, which the server rule would take (PROTOCOL.md §11.1): nothing
-// reaches it. Each command runs once on an honest server to find its routes,
-// then once for each, that route alone redirected, by each redirect's status in
-// turn.
+// reaches it. The commands are the command tree's, each with a way to run it
+// here, or the reason it needs none. Each runs once on an honest server to find
+// its routes, then once for each, that route alone redirected, by one of the
+// redirect statuses in turn, and that run must call the route.
 func TestNoRouteOfACommandFollowsARedirect(t *testing.T) {
 	ctx := context.Background()
 	var mu sync.Mutex
@@ -292,95 +295,193 @@ func TestNoRouteOfACommandFollowsARedirect(t *testing.T) {
 		_, _ = w.Write([]byte("{}"))
 	}))
 	t.Cleanup(x.Close)
+	type run struct {
+		args    func(a, b *client.Mailbox) []string
+		stdin   string
+		setup   func(t *testing.T, srv *fakeserver.Server, a, b *client.Mailbox)
+		working bool   // b is under certificates
+		fresh   bool   // the config names a directory with no mailbox, for init
+		admit   bool   // policy.admit is "allowed", so allowing a sender sends the ACL
+		none    string // why the command calls no server, so it is not run here
+		routes  string // the command whose routes are this one's, which runs here
+	}
 	toA := func(a, _ *client.Mailbox) []string { return []string{a.Address().String()} }
-	sent := func(t *testing.T, a, b *client.Mailbox) {
+	toB := func(_, b *client.Mailbox) []string { return []string{b.Address().String()} }
+	sent := func(t *testing.T, _ *fakeserver.Server, a, b *client.Mailbox) {
 		if _, err := a.Send(ctx, b.Address(), "from a"); err != nil {
 			t.Fatal(err)
 		}
 	}
-	allowed := func(t *testing.T, a, b *client.Mailbox) {
-		var out bytes.Buffer
-		if err := do(ctx, "peer allow", []string{a.Address().String()}, nil, &out, &out); err != nil {
-			t.Fatal(err, out.String())
+	allowed := func(t *testing.T, srv *fakeserver.Server, a, b *client.Mailbox) {
+		if _, err := b.Allow(ctx, a.Address()); err != nil {
+			t.Fatal(err)
 		}
-		sent(t, a, b)
+		sent(t, srv, a, b)
+	}
+	waiting := func(t *testing.T, srv *fakeserver.Server, a, b *client.Mailbox) {
+		forge.FailOnce(srv, http.MethodPost, "/v1/"+a.Address().String()+"/messages")
+		if _, err := b.Send(ctx, a.Address(), "waits"); err == nil {
+			t.Fatal("the send to wait went through")
+		}
+		srv.SetMiddle(nil)
+	}
+	ways := map[string][]run{
+		"dromas init":                 {{fresh: true}},
+		"dromas addr":                 {{none: "it prints the address the mailbox keeps"}},
+		"dromas send":                 {{args: toA, stdin: "hello"}},
+		"dromas recv":                 {{setup: sent}, {setup: allowed}, {args: func(*client.Mailbox, *client.Mailbox) []string { return []string{"--wait", "1s"} }}},
+		"dromas status":               {{none: "it reads the mailbox's own files and state"}},
+		"dromas config":               {{none: "it prints the configuration"}},
+		"dromas version":              {{none: "it prints this client's version"}},
+		"dromas inbox list":           {{none: "it reads inbox-dir"}},
+		"dromas inbox show":           {{none: "it reads inbox-dir"}},
+		"dromas inbox clear-failed":   {{none: "it changes the state alone"}},
+		"dromas held list":            {{none: "it reads held/"}},
+		"dromas peer allow":           {{args: toA, admit: true}},
+		"dromas peer block":           {{args: toA}},
+		"dromas peer list":            {{none: "it reads the lists"}},
+		"dromas alias add":            {{args: func(a, _ *client.Mailbox) []string { return []string{"peer", a.Address().String()} }, admit: true}},
+		"dromas alias rm":             {{none: "it changes the aliases file alone"}},
+		"dromas alias list":           {{none: "it reads the aliases file"}},
+		"dromas outbox flush":         {{setup: waiting}},
+		"dromas refused list":         {{none: "it reads refused/"}},
+		"dromas refused rm":           {{none: "it changes refused/ alone"}},
+		"dromas prekey renew":         {{}},
+		"dromas prekey lifetime":      {{none: "it prints the lifetime the configuration sets"}},
+		"dromas cert switch":          {{args: toB}},
+		"dromas cert request":         {{working: true}},
+		"dromas cert install":         {{routes: "dromas prekey renew"}},
+		"dromas cert revoke-earlier":  {{working: true}},
+		"dromas cert publish-revoked": {{routes: "dromas cert revoke-earlier"}},
+		"dromas account join":         {{stdin: "dra1_AAAA\n"}},
+		"dromas account leave":        {{}},
+		"dromas revocation make":      {{none: "it writes a record and publishes nothing"}},
+		"dromas revocation publish":   {{args: toB}},
+		"dromas revocation keep":      {{none: "it keeps a record it is handed"}},
+		"dromas revocation ask":       {{args: toA}},
+		"dromas agent start":          {{none: "it runs an agent on this machine"}},
+		"dromas agent add":            {{none: "it adds a key to an agent on this machine"}},
 	}
 	statuses := []int{http.StatusMovedPermanently, http.StatusFound, http.StatusSeeOther, http.StatusTemporaryRedirect, http.StatusPermanentRedirect}
 	turn := 0
-	for _, c := range []struct {
-		command string
-		args    func(a, b *client.Mailbox) []string
-		stdin   string
-		setup   func(t *testing.T, a, b *client.Mailbox)
-		working bool
-	}{
-		{command: "recv", setup: sent},
-		{command: "recv", setup: allowed},
-		{command: "recv --headers", setup: allowed},
-		{command: "recv --wait 1s"},
-		{command: "send", args: toA, stdin: "hello"},
-		{command: "prekey renew"},
-		{command: "peer block", args: toA},
-		{command: "revocation ask", args: toA},
-		{command: "account join", stdin: "dra1_AAAA\n"},
-		{command: "account leave"},
-		{command: "cert revoke-earlier", working: true},
-	} {
-		// run runs c on a new server and mailbox, route answered with a redirect
-		// of status where it is not empty, and returns the routes it called.
-		run := func(route string, status int) []string {
-			srv := fakeserver.New(t, time.Now)
-			b, err := client.Init(ctx, t.TempDir(), client.Options{Base: srv.URL, WorkingKey: c.working})
-			if err != nil {
-				t.Fatal(err)
+	var leaves func(c *cobra.Command) []*cobra.Command
+	leaves = func(c *cobra.Command) []*cobra.Command {
+		if !c.HasSubCommands() {
+			return []*cobra.Command{c}
+		}
+		var out []*cobra.Command
+		for _, s := range c.Commands() {
+			out = append(out, leaves(s)...)
+		}
+		return out
+	}
+	for _, leaf := range leaves((&cli{}).tree()) {
+		path := leaf.CommandPath()
+		if leaf.Hidden {
+			continue
+		}
+		cases, ok := ways[path]
+		if !ok {
+			t.Errorf("%s: no way to run it here, and no reason it needs none", path)
+			continue
+		}
+		command := strings.TrimPrefix(path, "dromas ")
+		for _, c := range cases {
+			if c.routes != "" {
+				if _, ok := ways[c.routes]; !ok {
+					t.Errorf("%s: its routes are said to be %s's, which is no command", path, c.routes)
+				}
+				continue
 			}
-			a, err := client.Init(ctx, t.TempDir(), client.Options{Base: srv.URL})
-			if err != nil {
-				t.Fatal(err)
+			if c.none != "" {
+				continue
 			}
-			useMailbox(t, b.Dir())
-			t.Setenv("DROMAS_SERVER_URL", srv.URL)
-			if c.setup != nil {
-				c.setup(t, a, b)
-			}
-			var called []string
-			srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
-				rt := aRoute(r)
+			// do runs c on a new server and mailbox, route answered with a
+			// redirect of status where it is not empty, and returns the routes it
+			// called.
+			do := func(route string, status int) []string {
+				srv := fakeserver.New(t, time.Now)
+				b, err := client.Init(ctx, t.TempDir(), client.Options{Base: srv.URL, WorkingKey: c.working})
+				if err != nil {
+					t.Fatal(err)
+				}
+				a, err := client.Init(ctx, t.TempDir(), client.Options{Base: srv.URL})
+				if err != nil {
+					t.Fatal(err)
+				}
+				dir := b.Dir()
+				if c.fresh {
+					dir = t.TempDir()
+				}
+				config := configFor(t, dir)
+				if c.admit {
+					f, err := os.OpenFile(config, os.O_APPEND|os.O_WRONLY, 0)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if _, err := f.WriteString("[policy]\nadmit = \"allowed\"\n"); err != nil {
+						t.Fatal(err)
+					}
+					if err := f.Close(); err != nil {
+						t.Fatal(err)
+					}
+				}
+				t.Setenv("DROMAS_CONFIG", config)
+				t.Setenv("DROMAS_SERVER_URL", srv.URL)
+				if c.setup != nil {
+					c.setup(t, srv, a, b)
+				}
+				var called []string
+				srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
+					rt := aRoute(r)
+					mu.Lock()
+					if !slices.Contains(called, rt) {
+						called = append(called, rt)
+					}
+					mu.Unlock()
+					if rt == route {
+						http.Redirect(w, r, x.URL+r.URL.RequestURI(), status)
+						return
+					}
+					next.ServeHTTP(w, r)
+				})
+				var args []string
+				if c.args != nil {
+					args = c.args(a, b)
+				}
+				var out bytes.Buffer
+				run, cancel := context.WithTimeout(ctx, 30*time.Second)
+				_ = doWithStdin(run, command, args, c.stdin, &out)
+				if run.Err() != nil {
+					t.Errorf("%s ran to its 30 s: %.300s", path, out.String())
+				}
+				cancel()
 				mu.Lock()
-				if !slices.Contains(called, rt) {
-					called = append(called, rt)
+				defer mu.Unlock()
+				return slices.Clone(called)
+			}
+			routes := do("", 0)
+			if len(routes) == 0 {
+				t.Errorf("%s calls no route: give it a way that does, or the reason it needs none", path)
+			}
+			for _, route := range routes {
+				status := statuses[turn%len(statuses)]
+				turn++
+				if got := do(route, status); !slices.Contains(got, route) {
+					t.Errorf("%s with %s answered %d called %q, not that route", path, route, status, got)
+				}
+				mu.Lock()
+				if len(reached) != 0 {
+					t.Errorf("%s, %s answered %d: the other server was reached: %q", path, route, status, reached)
+					reached = nil
 				}
 				mu.Unlock()
-				if rt == route {
-					http.Redirect(w, r, x.URL+r.URL.RequestURI(), status)
-					return
-				}
-				next.ServeHTTP(w, r)
-			})
-			var args []string
-			if c.args != nil {
-				args = c.args(a, b)
 			}
-			var out bytes.Buffer
-			_ = do(ctx, c.command, args, strings.NewReader(c.stdin), &out, &out)
-			mu.Lock()
-			defer mu.Unlock()
-			return called
-		}
-		routes := run("", 0)
-		if len(routes) == 0 {
-			t.Errorf("%s calls no route", c.command)
-		}
-		for _, route := range routes {
-			status := statuses[turn%len(statuses)]
-			turn++
-			run(route, status)
-			mu.Lock()
-			if len(reached) != 0 {
-				t.Errorf("%s, %s answered %d: the other server was reached: %q", c.command, route, status, reached)
-				reached = nil
-			}
-			mu.Unlock()
 		}
 	}
+}
+
+// doWithStdin is do with stdin the text given, and stdout and stderr both out.
+func doWithStdin(ctx context.Context, command string, args []string, stdin string, out *bytes.Buffer) error {
+	return do(ctx, command, args, strings.NewReader(stdin), out, out)
 }
