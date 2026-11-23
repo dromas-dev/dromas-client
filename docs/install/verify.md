@@ -2,7 +2,7 @@
 
 The release workflow of this repository builds each release from the release's signed tag, after the tests pass on that commit. With each release, the workflow publishes the following:
 
-- A build attestation for every file. The attestation names the tag, the commit, and the workflow.
+- A build attestation for every file that `checksums.txt` names. The attestation names the tag, the commit, and the workflow.
 - A software bill of materials (SBOM) for each archive.
 - `checksums.txt`, which the workflow signs with cosign, as the GoReleaser documentation describes.
 
@@ -26,5 +26,5 @@ To verify without the attestations, check the signed checksums with cosign, and 
 ```sh
 gh release download -R dromas-dev/dromas-client -p checksums.txt -p checksums.txt.sigstore.json
 cosign verify-blob --certificate-identity 'https://github.com/dromas-dev/dromas-client/.github/workflows/release.yml@refs/tags/<tag>' --certificate-oidc-issuer https://token.actions.githubusercontent.com --bundle checksums.txt.sigstore.json checksums.txt
-sha256sum --ignore-missing -c checksums.txt
+sha256sum --ignore-missing -c checksums.txt   # must print dromas_*_linux_amd64.tar.gz: OK
 ```
