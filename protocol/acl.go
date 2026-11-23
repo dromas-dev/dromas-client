@@ -133,28 +133,30 @@ var (
 const MaxACLEntries = 10000
 
 // CheckACL checks an ACL document as a server takes one, and returns it in
-// its checked form. maxEntries bounds the entries of both lists together,
+// its checked form. A refusal is ErrACL, naming the member that breaks it
+// ([Member]): "allow" where there is none, or the list with an entry that is
+// neither an address nor AnyAddress. maxEntries bounds the entries of both lists together,
 // AnyAddress counting as one and a repeat counting as often as it is
 // written; 0 sets no bound.
 func CheckACL(d *ACLDocument, maxEntries int) (*ACL, error) {
 	if d.Allow == nil {
-		return nil, ErrACL
+		return nil, &memberError{name: "allow", known: true, of: ErrACL}
 	}
 	if maxEntries > 0 && len(d.Allow)+len(d.Deny) > maxEntries {
 		return nil, ErrACLTooLarge
 	}
-	allow, err := parseACLList(d.Allow)
+	allow, err := parseACLList("allow", d.Allow)
 	if err != nil {
 		return nil, err
 	}
-	deny, err := parseACLList(d.Deny)
+	deny, err := parseACLList("deny", d.Deny)
 	if err != nil {
 		return nil, err
 	}
 	return &ACL{Allow: allow, Deny: deny}, nil
 }
 
-func parseACLList(entries []string) (ACLList, error) {
+func parseACLList(name string, entries []string) (ACLList, error) {
 	all := false
 	addrs := make([]Address, 0, len(entries))
 	for _, e := range entries {
@@ -164,7 +166,7 @@ func parseACLList(entries []string) (ACLList, error) {
 		}
 		a, err := ParseAddress(e)
 		if err != nil {
-			return ACLList{}, ErrACL
+			return ACLList{}, &memberError{name: name, known: true, of: ErrACL}
 		}
 		addrs = append(addrs, a)
 	}

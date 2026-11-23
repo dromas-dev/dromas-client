@@ -82,21 +82,22 @@ func TestCheckACL(t *testing.T) {
 	if acl.Allow.Len() != 2 || acl.Allow.Addrs[0] != aclAddr(0xaa) || !acl.Deny.Has(aclAddr(0xaa)) || acl.Admits(aclAddr(0xaa)) || !acl.Admits(aclAddr(0xbb)) {
 		t.Errorf("sorted, each once, deny first: %+v", acl)
 	}
-	for _, text := range []string{
-		`{}`,             // no allow list
-		`{"deny":["*"]}`, // no allow list
-		`{"allow":null}`, // null is left out
-		`{"allow":["*"],"deny":["` + strings.ToUpper(a) + `"]}`,
-		`{"allow":["` + a[:63] + `"]}`,
-		`{"allow":["*` + a[1:] + `"]}`, // no partial pattern
-		`{"allow":["**"]}`,
+	// Each refusal names the member that breaks the ACL (PROTOCOL.md §11.3).
+	for text, member := range map[string]string{
+		`{}`:             "allow", // no allow list
+		`{"deny":["*"]}`: "allow", // no allow list
+		`{"allow":null}`: "allow", // null is left out
+		`{"allow":["*"],"deny":["` + strings.ToUpper(a) + `"]}`: "deny",
+		`{"allow":["` + a[:63] + `"]}`:                          "allow",
+		`{"allow":["*` + a[1:] + `"]}`:                          "allow", // no partial pattern
+		`{"allow":["**"]}`:                                      "allow",
 	} {
 		var d ACLDocument
 		if err := UnmarshalRequest([]byte(text), &d); err != nil {
 			continue // refused as JSON, which is as good
 		}
-		if acl, err := CheckACL(&d, 0); !errors.Is(err, ErrACL) {
-			t.Errorf("%s: %+v, %v", text, acl, err)
+		if acl, err := CheckACL(&d, 0); !errors.Is(err, ErrACL) || Member(err) != member {
+			t.Errorf("%s: %+v, %v naming %q, want %q", text, acl, err, Member(err), member)
 		}
 	}
 	var d ACLDocument
