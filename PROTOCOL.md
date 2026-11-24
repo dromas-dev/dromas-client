@@ -215,7 +215,7 @@ Where this document uses a term below as a defined term, the term has the sense 
 | OpenSSH security key | the identity key of types `sk-ecdsa-sha2-nistp256@openssh.com` and `sk-ssh-ed25519@openssh.com`: the key's wire form, and what its signature covers | OpenSSH `PROTOCOL.u2f`, read 2026-11-23 |
 | SSHSIG | every signature other than a certificate's own: the signer's signature over SHA-512 of the message, in a namespace | OpenSSH 10.6p1 `PROTOCOL.sshsig` |
 | SSH public key text | `<key type> <base64 of the wire key>` | RFC 4253 §6.6, RFC 8709, RFC 5656 |
-| OpenSSH certificate | the certificate of a working key, with the certificate's own signature | draft-ietf-sshm-cert-01 |
+| OpenSSH certificate | the certificate of a working key, with the certificate's own signature | draft-ietf-sshm-cert-03 |
 | SHA-384 | the address | FIPS 180-4 |
 | SHA-256 | a message id; the hash of a prekey statement that a send names (Section 11.10); in what a security key signs, the hash of the application and of the signed bytes | FIPS 180-4 |
 | UUID | an envelope's `msg_id` | RFC 9562 |
@@ -395,7 +395,7 @@ A certificate is an OpenSSH user certificate. A verifier MUST check every row of
 | Key id | exactly `dromas-cert-v1` |
 | Principals | exactly one: the mailbox's address |
 | Validity | `valid after` ≤ now < `valid before`, at the verifier's clock, in whole seconds; each at or before `9999-12-31T23:59:59Z`; and `valid before` less `valid after` at most the protocol's maximum |
-| Critical options | none. A verifier MUST refuse a certificate with any critical option (draft-ietf-sshm-cert-01 §2.1.1) |
+| Critical options | none. A verifier MUST refuse a certificate with any critical option (draft-ietf-sshm-cert-03 §2.1.1) |
 | Extensions | none. A verifier MUST refuse a certificate with any extension |
 | Reserved | empty |
 | Nonce | exactly 32 bytes |
@@ -1819,7 +1819,7 @@ Dromas protects a message's content from everyone but the message's recipient. D
 - **[age]** C2SP, "age", v1.1.0, read 2026-11-02, <https://c2sp.org/age@v1.1.0>.
 - **[BIP 173]** Wuille, P. and G. Maxwell, "Base32 address format for native v0-16 witness outputs", BIP 173, March 2017, <https://github.com/bitcoin/bips/blob/master/bip-0173.mediawiki>.
 - **[draft-ietf-hpke-pq-03]** Barnes, R. and D. Connolly, "Post-Quantum and Post-Quantum/Traditional Hybrid Algorithms for HPKE", Work in Progress, Internet-Draft, draft-ietf-hpke-pq-03, 6 November 2025, <https://datatracker.ietf.org/doc/html/draft-ietf-hpke-pq-03>.
-- **[draft-ietf-sshm-cert-01]** Miller, D., "SSH Certificate Format", Work in Progress, Internet-Draft, draft-ietf-sshm-cert-01, 14 June 2026, <https://datatracker.ietf.org/doc/html/draft-ietf-sshm-cert-01>.
+- **[draft-ietf-sshm-cert-03]** Miller, D., "SSH Certificate Format", Work in Progress, Internet-Draft, draft-ietf-sshm-cert-03, 17 November 2026, <https://datatracker.ietf.org/doc/html/draft-ietf-sshm-cert-03>.
 - **[FIPS 180-4]** National Institute of Standards and Technology, "Secure Hash Standard (SHS)", FIPS PUB 180-4, DOI 10.6028/NIST.FIPS.180-4, August 2015, <https://csrc.nist.gov/pubs/fips/180-4/upd1/final>.
 - **[FIPS 186-5]** National Institute of Standards and Technology, "Digital Signature Standard (DSS)", FIPS PUB 186-5, DOI 10.6028/NIST.FIPS.186-5, February 2023, <https://csrc.nist.gov/pubs/fips/186-5/final>.
 - **[PROTOCOL.sshsig]** OpenSSH, "PROTOCOL.sshsig", OpenSSH 10.6p1, <https://github.com/openssh/openssh-portable/blob/V_10_6_P1/PROTOCOL.sshsig>.
