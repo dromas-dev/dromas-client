@@ -42,8 +42,8 @@ var answerTypes = map[string]func() any{
 // answer.
 func TestVectorAnswers(t *testing.T) {
 	files := glob(t, "answer/*.json")
-	if len(files) != 61 {
-		t.Fatalf("%d answer/ vectors, want 61", len(files))
+	if len(files) != 56 {
+		t.Fatalf("%d answer/ vectors, want 56", len(files))
 	}
 	for _, f := range files {
 		name := strings.TrimSuffix(filepath.Base(f), ".json")
@@ -152,16 +152,15 @@ func TestParseSendQuery(t *testing.T) {
 			t.Errorf("%q: %v", raw, err)
 		}
 	}
-	if v, err := ParseQuery("cursor=abc", "cursor"); err != nil || v["cursor"] != "abc" {
-		t.Errorf("a list's cursor: %v, %v", v, err)
+	if v, err := ParseQuery("wait=30", "wait"); err != nil || v["wait"] != "30" {
+		t.Errorf("a list's wait: %v, %v", v, err)
 	}
-	if v, err := ParseQuery("", "cursor"); err != nil || len(v) != 0 {
+	if v, err := ParseQuery("", "wait"); err != nil || len(v) != 0 {
 		t.Errorf("no query: %v, %v", v, err)
 	}
 }
 
-// A list's cursor is one or more of base64url's alphabet: opaque, and safe
-// in a URL as it is.
+// CheckCursor takes one or more of base64url's alphabet, and nothing else.
 func TestCheckCursor(t *testing.T) {
 	for _, c := range []string{"A", "AZaz09-_", "MTc5MjAwMDAwMA"} {
 		if CheckCursor(c) != nil {

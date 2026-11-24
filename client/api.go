@@ -135,9 +135,7 @@ func (b *Mailbox) exchange(ctx context.Context, method, path string, in any, hdr
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType)
 	}
-	// An error names the call by its method and its path, never its query,
-	// which can carry the server's own text: a list's cursor (PROTOCOL.md
-	// §11.3).
+	// An error names the call by its method and its path, never its query.
 	name, _, _ := strings.Cut(path, "?")
 	name = method + " " + name
 	resp, err := b.http.Do(req)

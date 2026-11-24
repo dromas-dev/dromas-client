@@ -337,7 +337,6 @@ The `bad` vectors:
 - A member twice, null after a value, `NaN` beside the record, a second value, nothing, and an array.
 - An integer member that is negative, greater than 2^53 − 1, a fraction, written with a fraction, or written with an exponent (`list-bad-total-count-written-with-an-exponent`).
 - A string or an object where another type goes, or a number where a string goes (`list-bad-id-a-number`).
-- A list's cursor that isn't one or more of `A`–`Z`, `a`–`z`, `0`–`9`, `-`, and `_` (`list-bad-cursor-a-slash`, `list-bad-cursor-a-percent`, `list-bad-cursor-empty`). `list-ok-cursor` holds the whole alphabet.
 - A listed ID that isn't a message ID, which is 64 lowercase hex digits (`list-bad-id-not-a-message-id`).
 - A problem whose `code` comes before a member that breaks the problem. Such a problem carries no code.
 

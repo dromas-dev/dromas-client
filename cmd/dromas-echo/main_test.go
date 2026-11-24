@@ -607,7 +607,7 @@ func TestEchoHoldsWithAReplyPending(t *testing.T) {
 				posts.Add(1)
 				w.WriteHeader(http.StatusServiceUnavailable)
 				return
-			case r.Method == http.MethodGet && r.URL.Path == mine && !r.URL.Query().Has("cursor"):
+			case r.Method == http.MethodGet && r.URL.Path == mine:
 				lists.Add(1)
 			}
 			next.ServeHTTP(w, r)

@@ -40,8 +40,9 @@ var ErrUnknownMember = errors.New("the body has a member this call does not take
 
 // ErrMemberValue is a JSON text with a member the protocol knows that holds
 // a value it does not take there: a revocation record that names a type
-// other than RecordType, or a list whose next_cursor is not a cursor. Its
-// words name the member, and so does [Member].
+// other than RecordType, or a list entry whose id is not a message id or
+// whose size is past MaxCiphertext. Its words name the member, and so does
+// [Member].
 var ErrMemberValue = errors.New("a member holds a value the protocol does not take there")
 
 // memberError is an [ErrUnknownMember], or with known set an
@@ -80,7 +81,7 @@ func Member(err error) string {
 }
 
 // typeChecked is a value with a check of its own after it is read: a
-// revocation record's type, a list's cursor.
+// revocation record's type, a list's entries.
 type typeChecked interface{ checkType() error }
 
 // Unmarshal reads data, a JSON text the protocol carries, into v: the rules

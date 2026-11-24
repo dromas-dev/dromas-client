@@ -206,14 +206,17 @@ type Receipt struct {
 	ExpiresAt  string `json:"expires_at"`
 }
 
-// MessageList is GET /v1/<address>/messages: one page of metadata, oldest
-// first. NextCursor is null on the last page, and otherwise a cursor
-// (CheckCursor). The poll interval is no member: every 200 and 304 of a
-// list carries it in Retry-After.
+// MessageList is GET /v1/<address>/messages: the oldest page of metadata,
+// oldest first, and the count of every live message (PROTOCOL.md §11.11).
+// The poll interval is no member: every 200 and 304 of a list carries it in
+// Retry-After.
+//
+// NextCursor is no member of the protocol, and is neither read nor written:
+// dromas-server's build alone names it.
 type MessageList struct {
 	Count      int64         `json:"total_count"`
 	Messages   []MessageInfo `json:"messages"`
-	NextCursor *string       `json:"next_cursor"`
+	NextCursor *string       `json:"-"`
 }
 
 // Wait reads a list's wait, the long poll's seconds: delay-seconds, digits
@@ -241,12 +244,11 @@ type MessageInfo struct {
 	ExpiresAt  string `json:"expires_at"`
 }
 
-// cursorGrammar is a list's cursor: opaque and URL-safe, one or more of
-// base64url's alphabet (AEP-158; PROTOCOL.md §11.11).
+// cursorGrammar is one or more of base64url's alphabet.
 var cursorGrammar = regexp.MustCompile(`\A[A-Za-z0-9_-]+\z`)
 
-// CheckCursor checks that s is a cursor as a list may hand one out. A client
-// refuses a list whose next_cursor is not one.
+// CheckCursor checks that s is one or more of A-Z, a-z, 0-9, - and _. No
+// call of the protocol takes a cursor: dromas-server's build alone names it.
 func CheckCursor(s string) error {
 	if !cursorGrammar.MatchString(s) {
 		return errors.New("the cursor is not one or more of A-Z, a-z, 0-9, - and _")
@@ -258,16 +260,13 @@ func CheckCursor(s string) error {
 // ciphertext, 64 lowercase hex digits (PROTOCOL.md §11.11).
 var messageIDGrammar = regexp.MustCompile(`\A[0-9a-f]{64}\z`)
 
-// checkType refuses a list whose next_cursor is not a cursor (CheckCursor),
-// that names a message by an id that is not a message id, or that gives a
-// message a size past MaxCiphertext, which is no ciphertext's (PROTOCOL.md
-// §11.10): each breaks the list's form, as a member of another type does, so
+// checkType refuses a list that names a message by an id that is not a
+// message id, or that gives a message a size past MaxCiphertext, which is no
+// ciphertext's (PROTOCOL.md §11.10): each breaks the list's form, as a
+// member of another type does, so
 // it is no answer, a reader writes no id of the server's into a path, and a
 // reader allocates nothing by a size it gives that is not held here first.
 func (l *MessageList) checkType() error {
-	if l.NextCursor != nil && CheckCursor(*l.NextCursor) != nil {
-		return &memberError{name: "next_cursor", known: true}
-	}
 	for _, m := range l.Messages {
 		if !messageIDGrammar.MatchString(m.ID) {
 			return &memberError{name: "id", known: true}

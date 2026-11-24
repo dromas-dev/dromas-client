@@ -556,8 +556,8 @@ func TestRecvWaitGoesOnPastADrainUnanswered(t *testing.T) {
 	})
 }
 
-// listsOf counts the lists of the first page made of srv's mailboxes: the
-// polls, and the held ones.
+// listsOf counts the lists made of srv's mailboxes: the polls, and the held
+// ones.
 func listsOf(srv *fakeserver.Server) (polls, holds *atomic.Int32) {
 	polls, holds = new(atomic.Int32), new(atomic.Int32)
 	srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {

@@ -85,7 +85,8 @@ type Result struct {
 	More bool
 	// Paced is how long the server asked the mailbox to wait before taking out
 	// more, when it paced the drain (a 429 fetch_rate_limited with
-	// Retry-After, on a fetch); zero otherwise.
+	// Retry-After on a fetch, or a 429 rate_limited of the polls quota with
+	// Retry-After on a list after the drain's first); zero otherwise.
 	Paced time.Duration
 	// PollAfter is the server's poll interval, in seconds: the list's
 	// Retry-After (retryAfter).
@@ -134,7 +135,7 @@ func (r *Result) Again() time.Duration {
 	return max(r.Paced, time.Duration(r.PollAfter)*time.Second)
 }
 
-// Receive drains the mailbox: every page, every message, up to the drain's
+// Receive drains the mailbox: a page at a time, every message, up to the drain's
 // limits, its time among them (Options.DrainTime). Each message is judged
 // by one gate (see [Mailbox.judge]); only one that passes every check lands,
 // where the mailbox's say over its sender puts it: inbox/ for a sender it
@@ -310,7 +311,7 @@ func (e *renewalOwed) Unwrap() error { return e.err }
 var (
 	maxDrainMessages = 1000     // messages handled in one drain
 	maxDrainBytes    = 64 << 20 // of ciphertext fetched in one drain
-	maxDrainPages    = 100      // list pages followed in one drain
+	maxDrainLists    = 100      // lists in one drain
 )
 
 // DefaultDrainTime is how long one Receive drains while bytes move, unless
@@ -346,21 +347,12 @@ func (b *Mailbox) drainPages(ctx context.Context, asked *lookups, res *Result) e
 	if err != nil {
 		return err
 	}
-	cursor := ""
 	messages, fetched := 0, 0
-	// What an error names: the list's path, never a cursor, which is the
-	// server's own text (PROTOCOL.md §11.3).
 	listed := b.mailboxPath("/messages")
 	for page := 0; ; page++ {
-		if page == maxDrainPages {
+		if page == maxDrainLists {
 			res.More = true
 			return nil
-		}
-		path := listed
-		if cursor != "" {
-			// A cursor is URL-safe as a list hands it out: one that is not
-			// makes the list no answer (protocol.CheckCursor).
-			path += "?cursor=" + cursor
 		}
 		var hdr http.Header
 		if page == 0 {
@@ -372,7 +364,15 @@ func (b *Mailbox) drainPages(ctx context.Context, asked *lookups, res *Result) e
 			}
 		}
 		var list protocol.MessageList
-		resp, err := b.ownerWith(ctx, http.MethodGet, path, hdr, nil, &list)
+		resp, err := b.ownerWith(ctx, http.MethodGet, listed, hdr, nil, &list)
+		// A list after the drain's first that the server refuses for the
+		// mailbox's polls is the server pacing the drain, as a paced fetch is
+		// (receiveOne): what is left waits on the server.
+		var api *APIError
+		if page > 0 && errors.As(err, &api) && api.Problem.Code == protocol.CodeRateLimited && api.Problem.QuotaID == protocol.QuotaPolls && api.RetryAfter > 0 {
+			res.More, res.Paced = true, api.RetryAfter
+			return nil
+		}
 		if err != nil {
 			// A server that says this mailbox is revoked, or its certificate, was
 			// held to what it shows (proved, in call).
@@ -415,8 +415,9 @@ func (b *Mailbox) drainPages(ctx context.Context, asked *lookups, res *Result) e
 			n, err := b.receiveOne(ctx, m, res, asked, who)
 			// A server that paces how much a mailbox takes out stops the drain
 			// as a drain's own limits do: what is left waits on the server.
-			// Only the fetch's own answer is pacing (receiveOne): any other
-			// call's refusal in the drain is an error (#116).
+			// Only a fetch's own answer (receiveOne) and a later list's
+			// (above) are pacing: any other call's refusal in the drain is an
+			// error (#116).
 			var paced *pacedError
 			if errors.As(err, &paced) {
 				res.More, res.Paced = true, paced.wait
@@ -428,16 +429,17 @@ func (b *Mailbox) drainPages(ctx context.Context, asked *lookups, res *Result) e
 			messages++
 			fetched += n
 		}
-		if list.NextCursor == nil {
+		// Every message of the page is acked: the next list answers the
+		// oldest of those left, while the count says there are some
+		// (PROTOCOL.md §12.3).
+		if list.Count <= int64(len(list.Messages)) {
 			return nil
 		}
-		cursor = *list.NextCursor
 	}
 }
 
-// pacedError is the server pacing a drain, as only the answer to a fetch
-// says it (PROTOCOL.md §11.12): a 429 fetch_rate_limited, with how
-// long to wait.
+// pacedError is the server pacing a drain, as the answer to a fetch says
+// it (PROTOCOL.md §11.12): a 429 fetch_rate_limited, with how long to wait.
 type pacedError struct {
 	wait time.Duration
 	err  error
@@ -927,10 +929,10 @@ func (b *Mailbox) ifNoneMatch() (http.Header, error) {
 	return http.Header{"If-None-Match": {string(t)}}, nil
 }
 
-// keepETag keeps the tag of a first page that found the mailbox empty, so the
-// next poll can be answered 304, and drops any once a page holds messages: a 304
-// then says only that the mailbox is still empty, and never hides messages
-// (PROTOCOL.md §12.3).
+// keepETag keeps the tag of a drain's first list that found the mailbox
+// empty, so the next poll can be answered 304, and drops any once a page
+// holds messages: a 304 then says only that the mailbox is still empty, and
+// never hides messages (PROTOCOL.md §12.3).
 func (b *Mailbox) keepETag(list *protocol.MessageList, tag string) error {
 	return b.update(func(s store) error {
 		if list.Count == 0 && len(list.Messages) == 0 && entityTag.MatchString(tag) {

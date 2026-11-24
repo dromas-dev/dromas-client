@@ -220,9 +220,8 @@ func Seal(t testing.TB, s *fakeserver.Server, to protocol.Address, plaintext ...
 // gives one, and a from beside each entry, which it gives none and a reader
 // ignores, as it does every member it does not know (§3.3).
 type Listed struct {
-	Count      int64         `json:"total_count"`
-	Messages   []ListedEntry `json:"messages"`
-	NextCursor *string       `json:"next_cursor"`
+	Count    int64         `json:"total_count"`
+	Messages []ListedEntry `json:"messages"`
 }
 
 // ListedEntry is one entry of a Listed: its members, and a from of any
@@ -232,7 +231,7 @@ type ListedEntry struct {
 	From any `json:"from,omitempty"`
 }
 
-// List answers r, a mailbox's list, with each page it answers edited first, and
+// List answers r, a mailbox's list, with each list it answers edited first, and
 // any other request as next does: an operator's own list, a from beside each
 // entry among what it can write.
 func List(t testing.TB, w http.ResponseWriter, r *http.Request, next http.Handler, edit func(*Listed)) {
@@ -257,7 +256,7 @@ func List(t testing.TB, w http.ResponseWriter, r *http.Request, next http.Handle
 		t.Errorf("an operator edits a list, and the server's is none: %v", err)
 		return
 	}
-	listed := Listed{Count: l.Count, NextCursor: l.NextCursor, Messages: make([]ListedEntry, len(l.Messages))}
+	listed := Listed{Count: l.Count, Messages: make([]ListedEntry, len(l.Messages))}
 	for i, m := range l.Messages {
 		listed.Messages[i].MessageInfo = m
 	}

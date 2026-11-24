@@ -76,7 +76,7 @@ dr_api(){ # <METHOD> <PATH> [body file] [curl args…] → the body on stdout, a
 }
 DR_TYPE='tag:dromas.dev,2026-10-26:errors/'      # an error's type is this and its code, which names the problem and resolves to nothing (PROTOCOL.md §11.3): a code counts only beside its own
 DR_CODES='{"invalid_request":400,"invalid_address":400,"identity_mismatch":400,"invalid_key":400,"invalid_validity_period":400,"certificate_lifetime_too_long":400,"unsupported_key_type":400,"invalid_recipients":400,"invalid_revocation":400,"invalid_pass":401,"pass_expired":401,"certificate_superseded":401,"certificate_revoked":401,"sender_not_registered":403,"sender_revoked":403,"sender_not_allowed":403,"unsupported_sender_key_type":403,"invalid_adopt_key":403,"mailbox_not_found":404,"message_not_found":404,"revocation_not_found":404,"mailbox_already_exists":409,"serial_too_low":409,"concurrent_modification":409,"prekey_superseded":409,"prekey_expired":409,"request_timeout":408,"mailbox_revoked":410,"client_version_unsupported":410,"precondition_failed":412,"content_too_large":413,"rate_limited":429,"fetch_rate_limited":429,"mailbox_full":429,"mailbox_rate_limited":429,"unavailable":503}'      # every code, and its status (PROTOCOL.md §11.3)
-DR_QUOTAS='["polls","pages","calls","sends","renewals","certificates","certificate_revocations","registrations","registrations_range","misses","misses_range","sends_before_pass","sends_before_pass_range","requests","requests_range"]'      # every limit a rate_limited may name in quota_id (PROTOCOL.md §11.5)
+DR_QUOTAS='["polls","calls","sends","renewals","certificates","certificate_revocations","registrations","registrations_range","misses","misses_range","sends_before_pass","sends_before_pass_range","requests","requests_range"]'      # every limit a rate_limited may name in quota_id (PROTOCOL.md §11.5)
 dr_member(){ jq -r --arg m "$1" --argjson known "$2" '.[$m] | strings | select(. as $v | $known | index([$v])) ' "$DR/error.json" 2> /dev/null; }      # <member> <known values, a JSON array> → the last API error's string member, only when it is one of them: a client shows no value it does not know (PROTOCOL.md §11.3)
 dr_status(){ sed -n '1{/^[0-9][0-9][0-9]$/p;}' "$DR/error.meta" 2> /dev/null | grep -vx 000; }      # the status of the last API error. error.meta is what curl's -w read of the final answer, a line each: its status (000 for none), then its Retry-After and its Date, each the first given, trimmed, as Go's Header.Get reads one
 dr_code(){ local s; s=$(dr_status) && [ -n "$s" ] && dr_shape "$DR/error.json" problem && jq -r --argjson codes "$DR_CODES" --argjson s "$s" --arg t "$DR_TYPE" '(.code | strings) as $c | select($codes[$c] == $s and .type == $t + $c) | $c' "$DR/error.json" 2> /dev/null; }   # the code of the last API error: one this client knows, under its own status, beside its own type, from an answer the Go client would read the same. Any other is no code
@@ -87,7 +87,7 @@ dr_shape(){ # <answer> <mailbox|list|record|receipt|problem> → 0 only for one 
     def record: (.type | . == null or . == "revocation_record") and all(.identity, .revocation_signature, .revoked_certificates, .revoked_certificates_signature; s);
     [inputs] | length == 1 and (.[0] | type == "object" and
     {mailbox: all(.identity, .prekey, .prekey_signature, .revoked_certificates, .revoked_certificates_signature; s),
-     list: ((.next_cursor | . == null or (type == "string" and test("\\A[A-Za-z0-9_-]+\\z"))) and (.messages | . == null or (type == "array" and all(.[]; . == null or (type == "object" and (.id | s) and (.size | n and (. // 0) <= 16777216)))))),
+     list: ((.total_count | n) and (.messages | . == null or (type == "array" and all(.[]; . == null or (type == "object" and (.id | s) and (.size | n and (. // 0) <= 16777216)))))),
      record: record,
      receipt: all(.id, .received_at, .expires_at; s),
      problem: (all(.type, .code; s) and (.record | . == null or (type == "object" and record)))}[$k])' "$1" > /dev/null 2>&1
@@ -611,19 +611,19 @@ dr_sent(){ # <address> → sent/<address>.<msg_id>.json, one line, {"envelope":�
 }
 
 # recipe: receive
-dr_recv(){ # drains the mailbox, every page up to a drain's limits. ACCEPT → inbox/ and a message line on stdout. REFUSED → refused/, never delivered, and a refused line on stdout. Both are acked
+dr_recv(){ # drains the mailbox, a page at a time, up to a drain's limits. ACCEPT → inbox/ and a message line on stdout. REFUSED → refused/, never delivered, and a refused line on stdout. Both are acked
   dr_held || { dr_lock dr_recv "$@"; return; }
   DR_LISTED=; dr_drain; local rc=$?; [ -z "$DR_LISTED" ] || dr_prune "$DR_LISTED"; return $rc      # keys deleted only once the server has answered the list, by the clock read then: a clock far ahead is stopped at its pass (PROTOCOL.md §12.4)
 }
-dr_drain(){ # stops at a transient error or a fault of this mailbox, leaving the rest on the server for the next drain. And at a number of messages and of pages (below): a server that lists messages without end costs one run that much
-  local B c="" n i id k=0 pages=0; B=$(cat "$DR/address") || return 1
+dr_drain(){ # lists the oldest page, fetches and acks it, and lists again while total_count says more remain. Stops at a transient error or a fault of this mailbox, leaving the rest on the server for the next drain. And at a number of messages and of lists (below): a server that lists messages without end costs one run that much
+  local B n i id k=0 lists=0; B=$(cat "$DR/address") || return 1
   dr_finished || { dr_done $?; return 1; }
   dr_matched || return      # nothing listed, fetched or acked on records that do not match prekeys/
   rm -f "$DR/asked"      # the senders this drain has asked the server about: one lookup each
   while :; do
-    [ $((pages += 1)) -le 100 ] || { dr_out more --arg detail "this run stopped at the most one drain takes: run recv again for the rest, which is still on the server"; return 0; }
-    dr_owner GET "/v1/$B/messages${c:+?cursor=$c}" > "$DR/list.json" || { dr_own; return 1; }
-    [ "$pages" -gt 1 ] || { DR_LISTED=$(dr_now) && dr_forget "$DR_LISTED"; } || return 1      # the replay set pruned only once the server has answered the list, by the clock read then: a clock far off is stopped at its pass first. DR_LISTED tells dr_recv the same reading for the keys
+    [ $((lists += 1)) -le 100 ] || { dr_out more --arg detail "this run stopped at the most one drain takes: run recv again for the rest, which is still on the server"; return 0; }
+    dr_owner GET "/v1/$B/messages" > "$DR/list.json" || { dr_own; return 1; }
+    [ "$lists" -gt 1 ] || { DR_LISTED=$(dr_now) && dr_forget "$DR_LISTED"; } || return 1      # the replay set pruned only once the server has answered the list, by the clock read then: a clock far off is stopped at its pass first. DR_LISTED tells dr_recv the same reading for the keys
     dr_shape "$DR/list.json" list && n=$(jq -r '.messages | length' "$DR/list.json") || { dr_err "the server's list of messages is not one this client reads: the messages stay on the server"; return 1; }
     for ((i = 0; i < n; i++)); do
       id=$(jq -r --argjson i "$i" '.messages[$i].id | strings | select(test("\\A[0-9a-f]{64}\\z"))' "$DR/list.json") && dr_hex "$id" || continue      # tested in jq: $(…) drops trailing LFs and every NUL
@@ -631,7 +631,7 @@ dr_drain(){ # stops at a transient error or a fault of this mailbox, leaving the
       if ! grep -q "^$id " "$DR/seen" 2> /dev/null; then jq -c --argjson i "$i" '.messages[$i]' "$DR/list.json" > "$DR/entry.json" && dr_one "$B" "$id" "$DR/entry.json" || return 1; fi   # an id already handled is only acked again
       dr_owner DELETE "/v1/$B/messages/$id" > /dev/null || [ "$(dr_code)" = message_not_found ] || return 1
     done
-    c=$(jq -r '.next_cursor // empty' "$DR/list.json"); [ -n "$c" ] || return 0      # one or more of A-Z, a-z, 0-9, - and _ (dr_shape), so it goes into the next query as it is
+    [ "$(jq -r '.total_count // 0' "$DR/list.json")" -gt "$n" ] || return 0      # every message of the page is acked, so the next list answers the oldest left (PROTOCOL.md §12.3); an integer of at most 2^53 - 1 (dr_shape)
   done
 }
 dr_one(){ # <me> <id> <its list entry> → 0 once the message is judged and its verdict is on disk; 1 on a transient error or a fault of this mailbox, so it is not acked. The fetch answers the ciphertext alone, of the size the list gives; when it came, on the server's word, is the list entry's, and who sent it is its signature's: a from the entry carries is never read

@@ -959,7 +959,7 @@ var answerTypes = map[string]func() any{
 
 // answerRead are the answer/ vectors the script refuses: those that are not one
 // object, or break a member the script reads (a byte member it decodes, an id
-// or a size it uses, the cursor it puts in a query, a record's type, in a
+// or a size it uses, the count it reads, a record's type, in a
 // record and in a problem's). Every other bad-* vector is the Go client's to
 // refuse, and breaks a member the script never reads but in two, which name a
 // member it reads twice: jq takes the last, where the Go client refuses the
@@ -970,7 +970,7 @@ var answerTypes = map[string]func() any{
 // that wrote both codes could have written either alone.
 var answerRead = map[string]bool{
 	"mailbox-bad-prekey-a-number": true, "mailbox-bad-revoked-certificates-a-number": true, "mailbox-bad-signature-unpadded": true,
-	"list-bad-cursor-a-number": true, "list-bad-cursor-a-percent": true, "list-bad-cursor-a-slash": true, "list-bad-cursor-empty": true,
+	"list-bad-total-count-negative": true, "list-bad-total-count-a-fraction": true, "list-bad-total-count-above-2-53": true,
 	"list-bad-id-a-number": true, "list-bad-messages-an-object": true, "list-bad-size-a-string": true, "list-bad-size-past-the-largest": true, "receipt-bad-id-an-array": true,
 	"record-bad-a-second-value": true, "record-bad-an-array": true, "record-bad-empty": true, "record-bad-identity-a-number": true,
 	"record-bad-identity-wrapped": true, "record-bad-revocation-signature-unpadded": true, "record-bad-revocation-signature-unused-bits-set": true,
@@ -984,8 +984,8 @@ func TestVectorsAnswer(t *testing.T) {
 	t.Parallel()
 	need(t, scriptTools...)
 	files, _ := filepath.Glob(filepath.Join(vectors, "answer", "*.json"))
-	if len(files) != 61 {
-		t.Fatalf("%d answer/ vectors, want 61", len(files))
+	if len(files) != 56 {
+		t.Fatalf("%d answer/ vectors, want 56", len(files))
 	}
 	for name := range answerRead {
 		if _, err := os.Stat(filepath.Join(vectors, "answer", name+".json")); err != nil {

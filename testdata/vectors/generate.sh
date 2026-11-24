@@ -765,26 +765,20 @@ at mailbox-bad-sender-key-types-a-string '{"identity":"%s","prekey":"%s","prekey
 at mailbox-bad-signature-unpadded '{"identity":"%s","prekey":"%s","prekey_signature":"%s"}' "$ID_A" "$P1" "$NOPAD"
 at mailbox-bad-prekey-a-number '{"identity":"%s","prekey":1,"prekey_signature":"%s"}' "$ID_A" "$P1S"
 at mailbox-bad-revoked-certificates-a-number '{"identity":"%s","prekey":"%s","prekey_signature":"%s","revoked_certificates":4}' "$ID_A" "$P1" "$P1S"
-at list-ok '{"total_count":1,"messages":[{"id":"%s","size":%s,"received_at":"%s","expires_at":"2026-10-16T22:58:00Z"}],"next_cursor":null}' "$HASH" "$(wc -c < message/a-to-b.age)" "$NOW"
-at list-ok-empty '{"total_count":0,"messages":[],"next_cursor":null}'
-at list-bad-total-count-negative '{"total_count":-1,"messages":[],"next_cursor":null}'
-at list-bad-total-count-above-2-53 '{"total_count":9007199254740992,"messages":[],"next_cursor":null}'
-at list-bad-total-count-a-fraction '{"total_count":0.5,"messages":[],"next_cursor":null}'
-at list-bad-total-count-written-with-a-fraction '{"total_count":1.0,"messages":[],"next_cursor":null}' # an integer member is written as one
-at list-bad-total-count-written-with-an-exponent '{"total_count":1e0,"messages":[],"next_cursor":null}' # jq gives it back as 1, so the script takes it: how jq reads a number, a difference that guards none of the five (AGENTS.md § The shell client)
-at list-bad-size-a-string '{"total_count":1,"messages":[{"id":"%s","size":"2048"}],"next_cursor":null}' "$HASH"
+at list-ok '{"total_count":1,"messages":[{"id":"%s","size":%s,"received_at":"%s","expires_at":"2026-10-16T22:58:00Z"}]}' "$HASH" "$(wc -c < message/a-to-b.age)" "$NOW"
+at list-ok-empty '{"total_count":0,"messages":[]}'
+at list-bad-total-count-negative '{"total_count":-1,"messages":[]}'
+at list-bad-total-count-above-2-53 '{"total_count":9007199254740992,"messages":[]}'
+at list-bad-total-count-a-fraction '{"total_count":0.5,"messages":[]}'
+at list-bad-total-count-written-with-a-fraction '{"total_count":1.0,"messages":[]}' # an integer member is written as one
+at list-bad-total-count-written-with-an-exponent '{"total_count":1e0,"messages":[]}' # jq gives it back as 1, so the script takes it: how jq reads a number, a difference that guards none of the five (AGENTS.md § The shell client)
+at list-bad-size-a-string '{"total_count":1,"messages":[{"id":"%s","size":"2048"}]}' "$HASH"
 # A size is at most 16 MiB, the largest ciphertext (PROTOCOL.md §11.10, §12.3): a list that gives a larger one is no answer, before anything is fetched
-at list-ok-size-the-largest '{"total_count":1,"messages":[{"id":"%s","size":16777216,"received_at":"%s","expires_at":"2026-10-16T22:58:00Z"}],"next_cursor":null}' "$HASH" "$NOW"
-at list-bad-size-past-the-largest '{"total_count":1,"messages":[{"id":"%s","size":16777217,"received_at":"%s","expires_at":"2026-10-16T22:58:00Z"}],"next_cursor":null}' "$HASH" "$NOW"
-at list-bad-messages-an-object '{"total_count":0,"messages":{},"next_cursor":null}'
-at list-bad-cursor-a-number '{"total_count":0,"messages":[],"next_cursor":7}'
-# A cursor is opaque and URL-safe (AEP-158): one or more of A-Z, a-z, 0-9, - and _, pasted into the next query as it is
-at list-ok-cursor '{"total_count":2,"messages":[],"next_cursor":"AZaz09-_"}'
-at list-bad-cursor-a-slash '{"total_count":2,"messages":[],"next_cursor":"a/b"}'
-at list-bad-cursor-a-percent '{"total_count":2,"messages":[],"next_cursor":"a%%2Fb"}'
-at list-bad-cursor-empty '{"total_count":2,"messages":[],"next_cursor":""}'
-at list-bad-id-a-number '{"total_count":1,"messages":[{"id":5,"size":%s}],"next_cursor":null}' "$(wc -c < message/a-to-b.age)" # the id names what is fetched and acked
-at list-bad-id-not-a-message-id '{"total_count":1,"messages":[{"id":"../acl","size":%s}],"next_cursor":null}' "$(wc -c < message/a-to-b.age)" # a client writes the id into a fetch's and an ack's path
+at list-ok-size-the-largest '{"total_count":1,"messages":[{"id":"%s","size":16777216,"received_at":"%s","expires_at":"2026-10-16T22:58:00Z"}]}' "$HASH" "$NOW"
+at list-bad-size-past-the-largest '{"total_count":1,"messages":[{"id":"%s","size":16777217,"received_at":"%s","expires_at":"2026-10-16T22:58:00Z"}]}' "$HASH" "$NOW"
+at list-bad-messages-an-object '{"total_count":0,"messages":{}}'
+at list-bad-id-a-number '{"total_count":1,"messages":[{"id":5,"size":%s}]}' "$(wc -c < message/a-to-b.age)" # the id names what is fetched and acked
+at list-bad-id-not-a-message-id '{"total_count":1,"messages":[{"id":"../acl","size":%s}]}' "$(wc -c < message/a-to-b.age)" # a client writes the id into a fetch's and an ack's path
 at receipt-ok '{"id":"%s","received_at":"%s","expires_at":"2026-10-16T22:58:00Z"}' "$HASH" "$NOW"
 at receipt-bad-id-an-array '{"id":["%s"],"received_at":"%s"}' "$HASH" "$NOW"
 at problem-ok '{"type":"tag:dromas.dev,2026-10-26:errors/revocation_not_found","title":"Not revoked","status":404,"detail":"no revocation of this address is held here","code":"revocation_not_found","hint":"nothing to do"}'
