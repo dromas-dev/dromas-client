@@ -43,13 +43,13 @@ func (b at) recv() drain {
 
 func (b at) now() int64 { return time.Now().Add(b.off).Unix() }
 
-// A mailbox whose clock is 9 minutes slow, or 49 fast, registers, renews, and
+// A mailbox whose clock is 9 minutes slow, or 5 fast, registers, renews, and
 // exchanges messages with a mailbox made that moment. One 11 minutes slow is
 // refused at its pass and told what its clock reads beside the server's
 // word.
 func TestScriptAtTheEdgesOfAClock(t *testing.T) {
 	w := newWorld(t)
-	for _, off := range []time.Duration{-9 * time.Minute, 49 * time.Minute} {
+	for _, off := range []time.Duration{-9 * time.Minute, 5 * time.Minute} {
 		s := at{w.empty(), off}
 		s.must("dr_init")
 		s.addr = mustAddress(t, s.dir)
@@ -77,7 +77,8 @@ func TestScriptAtTheEdgesOfAClock(t *testing.T) {
 }
 
 // A mailbox first made, or renewed, while its clock read over an hour ahead, or
-// 55 minutes: refused, its statement for ending too far ahead or its pass, and
+// 55 minutes, past what a server takes of a pass: refused, its statement for
+// ending too far ahead or its pass, and
 // with the clock right it registers again with its statement made again, for
 // the same prekey, and a renewal it left is spent; a serial never goes back.
 func TestScriptAfterAClockAhead(t *testing.T) {
@@ -85,7 +86,7 @@ func TestScriptAfterAClockAhead(t *testing.T) {
 	for _, c := range []struct {
 		ahead time.Duration
 		code  string
-	}{{61 * time.Minute, "invalid_validity_period"}, {55 * time.Minute, "pass_expired"}} { // a statement ending more than the longest prekey lifetime and an hour after the server's clock, which it reads before the pass; then a pass ending more than an hour after it
+	}{{61 * time.Minute, "invalid_validity_period"}, {55 * time.Minute, "pass_expired"}} { // a statement ending more than the longest prekey lifetime and an hour after the server's clock, which it reads before the pass; then a pass ending more than 15 minutes after it
 		b := at{w.empty(), c.ahead}
 		if r := b.sh("dr_init"); r.rc == 0 || !strings.Contains(r.err, c.code) {
 			t.Fatalf("a mailbox %v fast registered: %v", c.ahead, r)
@@ -136,13 +137,14 @@ func TestScriptNumbersByTheClock(t *testing.T) {
 }
 
 // A send from a clock two hours fast is refused at its pass and keeps
-// nothing; a kept pass is not used once the clock has gone back; a message dated
-// more than an hour ahead of its reader is refused as future.
+// nothing, the refused pass included, so a clock too far ahead is refused at
+// every call; a kept pass is not used once the clock has gone back; a message
+// dated more than an hour ahead of its reader is refused as future.
 func TestScriptSendsAndReadsByItsClock(t *testing.T) {
 	w := newWorld(t)
 	p, q := w.mailbox(), w.mailbox()
-	if r := (at{p, 2 * time.Hour}).sh("printf 'dated two hours ahead' | dr_send " + q.addr.String()); r.rc == 0 || !strings.Contains(r.err, "pass_expired") || !p.bare() {
-		t.Errorf("a send from a clock two hours fast: %v", r)
+	if r := (at{p, 2 * time.Hour}).sh("printf 'dated two hours ahead' | dr_send " + q.addr.String()); r.rc == 0 || !strings.Contains(r.err, "pass_expired") || !p.bare() || p.has("pass") {
+		t.Errorf("a send from a clock two hours fast: %v, the refused pass kept: %v", r, p.has("pass"))
 	}
 	if d := q.recv(); len(d.messages) != 0 || strings.Contains(d.said, "message_not_yet_valid") || w.srv.Count(q.addr) != 0 {
 		t.Errorf("its reader was sent something: %v", d)
@@ -178,14 +180,14 @@ func TestScriptKeepsItsPassForItsServer(t *testing.T) {
 func TestScriptKeepsItsReplaySetByItsClock(t *testing.T) {
 	w := newWorld(t)
 	p, q := w.mailbox(), w.mailbox()
-	l := p.line(q.addr, "00000000-0000-4000-8000-0000000000f2", "pay invoice 7 once", protocol.TTL-49*time.Minute)
+	l := p.line(q.addr, "00000000-0000-4000-8000-0000000000f2", "pay invoice 7 once", protocol.TTL-4*time.Minute)
 	sig := p.sign(q.addr, l)
 	oid := w.inject(q, "", l, sig)
 	if d := q.recv(); d.rc != 0 || !slices.Equal(d.bodies(), []string{"pay invoice 7 once"}) {
 		t.Fatalf("the first delivery: %v", d)
 	}
-	if d := (at{q, 50 * time.Minute}).recv(); d.rc != 0 { // the TTL and a minute old by this clock, which a server takes
-		t.Fatalf("a drain 50 minutes fast: %v", d)
+	if d := (at{q, 5 * time.Minute}).recv(); d.rc != 0 { // the TTL and a minute old by this clock, which a server takes
+		t.Fatalf("a drain 5 minutes fast: %v", d)
 	}
 	w.inject(q, oid, l, sig)
 	if d := (at{q, -9 * time.Minute}).recv(); len(d.messages) != 0 || d.rc != 0 || !strings.Contains(q.read("seen"), oid+" ") {

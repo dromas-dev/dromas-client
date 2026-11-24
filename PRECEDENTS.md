@@ -73,7 +73,7 @@ Noise: 1b. **What the survey found:** nothing else offers an end-to-end encrypte
 
 ## 1. How a mailbox proves itself to the server: a pass it signs for itself
 
-**Ours** (§8): the mailbox's signer, its identity or a working key it certified, signs a four-line pass (tag, address, server name, end), sent in `Authorization` on every call; a client asks 10 minutes, a server takes up to an hour, and issues and keeps nothing.
+**Ours** (§8): the mailbox's signer, its identity or a working key it certified, signs a four-line pass (tag, address, server name, end), sent in `Authorization` on every call; a client asks 10 minutes, a server takes up to 15, and issues and keeps nothing.
 
 | Who | What they do | Their numbers | How it is known |
 |---|---|---|---|
@@ -203,9 +203,9 @@ None was a flaw in the layout: each was a verifier that read an object different
 - **A recipient decrypts before it verifies,** as every system above that signs inside; what is lost is S/MIME's signature checkable without the decryption key.
 - **No sender is kept at rest, and none is listed** (§11.11, §13, §15.8): the signature inside attributes a message, as Signal's service keeps no record of who messages whom (its published answers to subpoenas, from memory), but with no sealed sender, since a send's pass is what the server's limits and the mailbox's ACL count. So nothing that would keep the pair is kept: the dedupe lasts while the message is live (§11.10 step 6), and one sender filling a mailbox is answered by its ACL, with no cap per pair.
 
-## 3a. Clocks: every check is exact, and whatever is made leaves an hour of room
+## 3a. Clocks: every check is exact, and whatever is made leaves room: an hour, or a pass 5 minutes
 
-**Ours** (§3.4): every check is exact at the checker's clock; the maker of a time-limited thing leaves an hour (§12.4). A certificate starts an hour back, a server takes a prekey up to an hour past 8 days and a pass up to 60 minutes against the 10 asked, and a reader takes a `sent_at` up to an hour ahead; a server takes a mailbox from under 10 minutes slow to 50 fast.
+**Ours** (§3.4): every check is exact at the checker's clock; the maker of a time-limited thing leaves an hour (§12.4). A certificate starts an hour back, a server takes a prekey up to an hour past 8 days, and a reader takes a `sent_at` up to an hour ahead. A pass leaves 5 minutes of its own (§8): a server takes one up to 15 minutes against the 10 asked, so it takes a new pass from a mailbox under 10 minutes slow to 5 fast.
 
 **The maker dates the start back, and the verifier's check is exact:**
 
@@ -226,13 +226,13 @@ None was a flaw in the layout: each was a verifier that read an object different
 | Who | What they do | Their numbers | How it is known |
 |---|---|---|---|
 | **JWT** (RFC 7519 §4.1.4, §4.1.5) | Optional leeway | "usually no more than a few minutes" | read 2026-11-01: [RFC 7519](https://www.rfc-editor.org/rfc/rfc7519) |
-| **Kerberos** (RFC 4120 §3.2.3, §8.2) | Leeway both ways | "the allowable clock skew (e.g., 5 minutes)" | read 2026-11-01: [RFC 4120](https://www.rfc-editor.org/rfc/rfc4120) |
+| **Kerberos** (RFC 4120 §3.2.3, §8.2; MIT krb5's `clockskew`) | Leeway both ways | "the allowable clock skew (e.g., 5 minutes)"; MIT's default "is 300 seconds, or five minutes" | read 2026-11-01: [RFC 4120](https://www.rfc-editor.org/rfc/rfc4120); read 2026-11-24: [MIT krb5, krb5.conf](https://web.mit.edu/kerberos/krb5-latest/doc/admin/conf_files/krb5_conf.html) |
 | **DPoP** (RFC 9449 §11.1) | Leeway for an `iat` ahead, or a server nonce | seconds or minutes | read 2026-10-13: [RFC 9449](https://www.rfc-editor.org/rfc/rfc9449) |
 | **Mastodon's HTTP signatures** | Leeway both ways | an hour (`CLOCK_SKEW_MARGIN`) | read 2026-10-13: `app/lib/signed_request.rb` |
 | **DKIM** (RFC 6376 §3.5) | Verifiers "MAY ignore signatures that have a timestamp in the future", and "MAY add a 'fudge factor'" at expiry | none set | read 2026-10-13: [RFC 6376](https://www.rfc-editor.org/rfc/rfc6376) |
 | **GitHub Apps** | The maker backdates `iat` | 60 seconds | § 1 |
 
-**Where ours sits:** exact checks with the room in what is made are X.509's and OpenSSH's shape, and nobody above checks exactly at both ends. An hour is what Let's Encrypt, OpenMLS and BIND backdate, each making things strangers verify; 30 seconds to 5 minutes is what Vault, Kubernetes, OpenSSH and GitHub's app JWTs leave, and Kerberos's and JWT's leeway for a short-lived token is minutes. Ours leaves an hour, since nothing it makes lives less than a day. The pass's 10 minutes slow is twice Kerberos's 5; a `sent_at` an hour ahead is Mastodon's margin.
+**Where ours sits:** exact checks with the room in what is made are X.509's and OpenSSH's shape, and nobody above checks exactly at both ends. An hour is what Let's Encrypt, OpenMLS and BIND backdate, each making things strangers verify; 30 seconds to 5 minutes is what Vault, Kubernetes, OpenSSH and GitHub's app JWTs leave, and Kerberos's and JWT's leeway for a short-lived token is minutes. Ours leaves an hour for what lives a day or more, and a pass, which lives 10 minutes, leaves 5 minutes fast, MIT Kerberos's default; the pass's 10 minutes slow is twice that; a `sent_at` an hour ahead is Mastodon's margin.
 
 **Where ours differs, and why:**
 - **No leeway at any verifier,** where JWT and Kerberos put theirs: every check is one comparison with no number in it to disagree on.

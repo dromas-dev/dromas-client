@@ -21,6 +21,9 @@ type RefusedError struct {
 	// renews is set on a refusal that the mailbox's next renewal puts right
 	// (renewalMends).
 	renews bool
+	// clock is set on a refusal that this machine's clock, set right, puts
+	// right (clockOff).
+	clock bool
 }
 
 func (e *RefusedError) Error() string { return "REFUSED: " + e.Reason }
@@ -33,6 +36,21 @@ func refuse(format string, args ...any) error {
 // right (renewalMends).
 func refuseRenews(format string, args ...any) error {
 	return &RefusedError{Reason: fmt.Sprintf(format, args...), renews: true}
+}
+
+// refuseClock is refuse, of a refusal that this machine's clock, set right,
+// puts right (clockOff).
+func refuseClock(format string, args ...any) error {
+	return &RefusedError{Reason: fmt.Sprintf(format, args...), clock: true}
+}
+
+// clockOff reports whether err is a refusal that this machine's clock and its
+// server's, once they agree, put right: a pass the server refused for its
+// time, or this mailbox's certificate not begun by its own clock. It ends one
+// Receive as [Fatal] does; [Mailbox.Follow] waits it out.
+func clockOff(err error) bool {
+	var re *RefusedError
+	return code(err) == protocol.CodePassExpired || errors.As(err, &re) && re.clock
 }
 
 // lookupError is a read of a mailbox that served nothing to seal to: no answer,
@@ -294,9 +312,9 @@ func knownTypes(names []string) string {
 // clock is what an error says about this machine's clock when the server
 // refused the pass, or a prekey statement, for its time: what the clock
 // reads, and the date on the server's answer. A new pass does not cure that
-// refusal, so it is nearly always a clock, and a server takes a pass from a
+// refusal, so it is nearly always a clock, and a server takes a new pass from a
 // mailbox whose clock is less than PassLifetime slow and no more than
-// MaxPassLifetime less PassLifetime fast (protocol.MaxSkew).
+// MaxPassLifetime less PassLifetime fast (protocol.MaxPassLifetime).
 //
 // The date is the server's word and is given as that. A server may lie about
 // the time, and a clock set by a lie makes an ended certificate valid again

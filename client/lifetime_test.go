@@ -234,14 +234,14 @@ func TestALifetimeOutOfRangeIsRefused(t *testing.T) {
 }
 
 // At the shortest lifetime, a day, the two clocks furthest apart that a server
-// takes, a mailbox 9 minutes slow and a sender 49 fast (PROTOCOL.md §15.7),
+// takes a new pass from, a mailbox 9 minutes slow and a sender 5 fast (PROTOCOL.md §15.7),
 // still meet: the mailbox renews once its prekey is RenewAt old, which leaves
 // that sender two hours of it.
 func TestTheShortestLifetimesAtTheClocksFurthestApart(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	for _, c := range []struct{ life, slow, fast time.Duration }{
-		{client.MinPrekeyLifetime, -9 * time.Minute, 49 * time.Minute},
+		{client.MinPrekeyLifetime, -9 * time.Minute, 5 * time.Minute},
 	} {
 		t.Run(c.life.String(), func(t *testing.T) {
 			e := newEnv(t)
@@ -288,9 +288,9 @@ func TestTheDocumentedCadenceLeavesRoomForAClock(t *testing.T) {
 		life          time.Duration
 		mailbox, from time.Duration // the mailbox's clock and the sender's, from the server's
 	}{
-		{client.MinPrekeyLifetime, -9 * time.Minute, 49 * time.Minute},
-		{3*24*time.Hour + time.Hour, 0, 30 * time.Minute},
-		{protocol.PrekeyLifetime, -9 * time.Minute, 49 * time.Minute},
+		{client.MinPrekeyLifetime, -9 * time.Minute, 5 * time.Minute},
+		{3*24*time.Hour + time.Hour, 0, 3 * time.Minute},
+		{protocol.PrekeyLifetime, -9 * time.Minute, 5 * time.Minute},
 	} {
 		e := newEnv(t)
 		mailboxOff, fromOff := c.mailbox, c.from

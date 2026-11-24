@@ -10,8 +10,8 @@ import (
 )
 
 // Every check is exact at the verifier's own clock, and whoever makes a
-// time-limited thing leaves MaxSkew of room (PROTOCOL.md §3.4). MaxSkew is the
-// width of the clocks a server's pass check takes. This holds the claim
+// time-limited thing leaves MaxSkew of room (PROTOCOL.md §3.4). MaxSkew is
+// wider than the clocks a server's pass check takes. This holds the claim
 // itself, with the real checks: it finds the fastest and the slowest clock a
 // server takes a new pass from, and then has the mailbox with the fastest clock
 // make a certificate, a prekey statement and an envelope, and the server and
@@ -48,7 +48,7 @@ func TestWhatAMailboxWithTheFastestClockMakesIsTakenByTheSlowest(t *testing.T) {
 			fastest, taken(fastest), taken(fastest+time.Second), -slowest, taken(slowest), taken(slowest-time.Second))
 	}
 	if apart := fastest - slowest; apart >= MaxSkew {
-		t.Fatalf("the two clocks furthest apart that a server takes are %v apart, and MaxSkew is %v", apart, MaxSkew)
+		t.Fatalf("the two clocks furthest apart that a server takes a new pass from are %v apart, and MaxSkew is %v", apart, MaxSkew)
 	}
 
 	fast, slow := server.Add(fastest), server.Add(slowest)
@@ -117,6 +117,55 @@ func TestOnlyACertificateTheIdentitySignedIsJudgedByItsDates(t *testing.T) {
 		}
 		if _, err := CheckCertificate(b.id, signed, now); !errors.Is(err, ErrCertificateTime) {
 			t.Errorf("%s, signed: %v, want a verdict on its dates", name, err)
+		}
+	}
+}
+
+// In numbers: a pass leaves 5 minutes of its own for clocks that differ, and
+// a certificate and a prekey statement leave the hour (PROTOCOL.md §3.4, §8).
+// A server takes a pass that ends 14 minutes after its clock and refuses one
+// that ends 16 after; a verifier takes a certificate made 59 minutes ahead of
+// its clock and refuses one made 61 ahead; and a server takes a prekey
+// statement that ends 8 days and 59 minutes after its clock and refuses one
+// that ends 8 days and 61 minutes after.
+func TestAPassLeavesFiveMinutesAndACertificateAndAPrekeyTheHour(t *testing.T) {
+	b := newCertMailbox(t)
+	server := time.Date(2026, 10, 13, 12, 0, 0, 0, time.UTC)
+	const name = "dromas.example"
+	cert, err := NewCertificate(b.id, b.identity, b.work.PublicKey(), 1, server, testLifetime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signer, err := cert.Signer(b.work)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for ends, ok := range map[time.Duration]bool{14 * time.Minute: true, 15 * time.Minute: true, 16 * time.Minute: false} {
+		h, notAfter, err := NewPass(signer, b.id.Address(), name, server.Add(ends-10*time.Minute))
+		if err != nil {
+			t.Fatal(err)
+		}
+		p, err := ParsePass(h)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = p.Verify(b.id, name, server)
+		if notAfter.Sub(server) != ends || (err == nil) != ok || (!ok && (!errors.Is(err, ErrPass) || errors.Is(err, ErrPassExpired))) {
+			t.Errorf("a pass that ends %v after the server's clock: %v, want taken=%v", notAfter.Sub(server), err, ok)
+		}
+	}
+	for ahead, want := range map[time.Duration]error{59 * time.Minute: nil, 61 * time.Minute: ErrCertificateNotBegun} {
+		c, err := NewCertificate(b.id, b.identity, b.work.PublicKey(), 1, server.Add(ahead), testLifetime)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := CheckCertificate(b.id, c.PublicKey(), server); !errors.Is(err, want) || (want == nil && err != nil) {
+			t.Errorf("a certificate made %v ahead of the verifier's clock: %v, want %v", ahead, err, want)
+		}
+	}
+	for ends, ok := range map[time.Duration]bool{8*24*time.Hour + 59*time.Minute: true, 8*24*time.Hour + 61*time.Minute: false} {
+		if err := (&Prekey{NotAfter: server.Add(ends)}).CheckLifetime(server); (err == nil) != ok {
+			t.Errorf("a prekey statement that ends %v after the server's clock: %v, want taken=%v", ends, err, ok)
 		}
 	}
 }

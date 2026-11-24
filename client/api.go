@@ -506,7 +506,9 @@ func passRefused(c protocol.Code) bool {
 // the server no longer takes, the mailbox signs another and tries once more. A
 // pass under a certificate that is not the mailbox's current one at the server
 // has the mailbox read itself there first (known), which records a renewal the
-// server took whose answer the mailbox never had.
+// server took whose answer the mailbox never had. A pass the server refused
+// is never kept, the second included, so a clock too far ahead is refused at
+// every call rather than taken once the kept pass runs down.
 func (b *Mailbox) owner(ctx context.Context, method, path string, in, out any) (*http.Response, error) {
 	return b.ownerWith(ctx, method, path, nil, in, out)
 }
@@ -524,16 +526,19 @@ func (b *Mailbox) ownerWith(ctx context.Context, method, path string, hdr http.H
 		}
 		h.Set("Authorization", pass)
 		resp, err := b.call(ctx, method, path, in, h, out)
-		if attempt > 0 || !passRefused(code(err)) {
+		if !passRefused(code(err)) {
+			return resp, err
+		}
+		if derr := b.dropPass(); derr != nil {
+			return nil, derr
+		}
+		if attempt > 0 {
 			return resp, err
 		}
 		if code(err) == protocol.CodeCertificateSuperseded {
 			if _, err := b.known(ctx); err != nil {
 				return nil, err
 			}
-		}
-		if err := b.dropPass(); err != nil {
-			return nil, err
 		}
 	}
 }

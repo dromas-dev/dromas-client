@@ -118,7 +118,7 @@ func staleProblem(w http.ResponseWriter) {
 // The script reading a Go sender's retry that the server stretched past the
 // outbox's TTL (59s on the mailbox read, 59s on a post answered 409
 // prekey_superseded), with every pass one an honest server takes: the script's
-// clock 50m fast at the drain that prunes, then 9m59s slow a second later.
+// clock 5m fast at the drain that prunes, then 9m59s slow a second later.
 func TestTheScriptTakesAStretchedRetryAtHonestClocks(t *testing.T) {
 	t.Parallel()
 	need(t, append(scriptTools, "curl")...)
@@ -204,9 +204,9 @@ func TestTheScriptTakesAStretchedRetryAtHonestClocks(t *testing.T) {
 			}
 			server := 2*protocol.TTL + 10*time.Minute + time.Second
 			clk.Set(server)
-			out, err := sh(server+50*time.Minute, "dr_recv")
+			out, err := sh(server+5*time.Minute, "dr_recv")
 			if err != nil {
-				t.Fatalf("dr_recv 50 minutes fast: %q, %v", out, err)
+				t.Fatalf("dr_recv 5 minutes fast: %q, %v", out, err)
 			}
 			server += time.Second
 			clk.Set(server)

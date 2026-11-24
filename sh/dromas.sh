@@ -108,7 +108,7 @@ dr_owner(){ # <METHOD> <PATH> [body file] [curl args…] → dr_api as this mail
   dr_authed "$p" "$@" && return 0
   case $(dr_code) in invalid_pass | pass_expired | certificate_superseded | certificate_revoked) ;; *) return 1 ;; esac
   rm -f "$DR/pass" "$DR/pass-server"; p=$(dr_pass) && dr_authed "$p" "$@" && return 0
-  dr_clock; return 1
+  rm -f "$DR/pass" "$DR/pass-server"; dr_clock; return 1      # a refused pass is never kept: a clock too far ahead is refused at every call, never taken once the kept pass runs down
 }
 dr_look(){ # <address> → dr_api GET of a mailbox from this mailbox's server (GET /v1/<address>), with no pass: the read is public, and a server reads none on it (PROTOCOL.md §11.8)
   dr_api GET "/v1/$1"
@@ -116,7 +116,7 @@ dr_look(){ # <address> → dr_api GET of a mailbox from this mailbox's server (G
 dr_clock(){ # after a call the server refused: if it refused the pass, or a prekey statement, for its time, says what the server dates its answer and what this machine's clock reads. A new pass does not cure that, so it is nearly always a clock. The date is the server's word: a clock set by a server's lie makes an ended certificate valid again, so this sends its reader to a time source of their own
   local d; case $(dr_code) in pass_expired | invalid_validity_period) ;; *) return 0 ;; esac
   d=$(dr_dated) && d="the server dates its answer $d, and "
-  dr_err "${d}this machine's clock reads $(jq -nr --argjson t "$(dr_now)" '$t | todate'). A server refuses a pass from a clock 10 minutes or more behind its own, or more than 50 ahead, and a prekey statement dated more than an hour ahead of it. Check this machine's clock against a time source you trust, not against the server"
+  dr_err "${d}this machine's clock reads $(jq -nr --argjson t "$(dr_now)" '$t | todate'). A server refuses a pass from a clock 10 minutes or more behind its own, or more than 5 ahead, and a prekey statement dated more than an hour ahead of it. Check this machine's clock against a time source you trust, not against the server"
 }
 dr_server(){ # <URL> → the server's name, as a pass names it (PROTOCOL.md §8): the URL's host, lowercase, and its port as a number, with none when it is 80 or 443
   local h=${1#*://} p=

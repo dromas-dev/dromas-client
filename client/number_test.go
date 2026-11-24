@@ -208,10 +208,10 @@ func TestALostMachinesFastClockDoesNotDelayTheRemedy(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	e := newWorkEnv(t)
-	fast := 40 * time.Minute
+	fast := 4 * time.Minute
 	lost, err := client.Init(ctx, t.TempDir(), e.skewed(&fast))
 	if err != nil {
-		t.Fatalf("a mailbox whose clock reads 40 minutes fast: %v", err)
+		t.Fatalf("a mailbox whose clock reads 4 minutes fast: %v", err)
 	}
 	reader := e.mailbox()
 	ahead := numberOf(t, lost)

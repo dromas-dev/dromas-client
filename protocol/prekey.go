@@ -25,8 +25,7 @@ const (
 	PrekeyLifetime = TTL + 24*time.Hour
 	// MaxPrekeyLifetime is the longest a prekey statement may still have to
 	// run when a server takes it: MaxSkew more than a client asks for, so
-	// that a client whose clock is ahead of the server's is not refused. It
-	// is the pass's rule (PassLifetime, MaxPassLifetime).
+	// that a client whose clock is ahead of the server's is not refused.
 	MaxPrekeyLifetime = PrekeyLifetime + MaxSkew
 	// MaxSerial is the largest serial, of a prekey or a certificate, and the
 	// largest a revocation of certificates runs through: MaxInteger, 2^53 − 1,

@@ -173,9 +173,12 @@ var (
 // minute. Under [FollowOptions.Owed] so is a handover of what is owed that
 // such a fault cuts short, at reading the records or at clearing one: what is
 // left stays owed, and is handed over again, in order, before the next drain.
-// A folder of the mailbox missing, or a clock behind, ends the loop as any
-// refusal no wait mends does ([Fatal]), and what is owed stays owed for the
-// next loop. Where the retry lands past Until the error ends the loop, as any
+// So is a drain refused for a clock ([clockOff]): its pass refused for its
+// time (pass_expired), or the mailbox's certificate not begun by its own
+// clock, each Fatal to one Receive. The loop goes on once this machine's
+// clock and the server's agree. A folder of the mailbox missing ends the loop as
+// any refusal no wait mends does ([Fatal]), and what is owed stays owed for
+// the next loop. Where the retry lands past Until the error ends the loop, as any
 // other drain's error does. Follow returns that error, the handler's, ctx's
 // when ctx ended, and nil for [ErrStop] or at Until. Under
 // [FollowOptions.Webhook] it returns, where it would return nil, the fault
@@ -255,7 +258,7 @@ func (b *Mailbox) Follow(ctx context.Context, o FollowOptions, h Handler) (err e
 		switch {
 		case ctx.Err() != nil:
 			return ctx.Err()
-		case stopped == nil && Transient(err) && (o.Until.IsZero() || time.Until(o.Until) > pause):
+		case stopped == nil && (Transient(err) || clockOff(err)) && (o.Until.IsZero() || time.Until(o.Until) > pause):
 			if herr := h(ctx, Event{Kind: EventRetry, Err: err}); herr != nil {
 				return ended(herr)
 			}
