@@ -634,11 +634,14 @@ func (b *Mailbox) ClearFailed(ctx context.Context) (int, error) {
 
 // RetryFailed records every message whose handling gave up ([ErrGaveUp]), the
 // handler's and the webhook's, as owed that handling again, in one
-// transaction, so that [Mailbox.Follow] hands each over again when it next
-// begins with [FollowOptions.Owed] or [FollowOptions.Webhook]. It returns how many records it moved, so a message
-// whose handler and webhook both gave up counts twice. It writes the mailbox,
-// so it waits while another command holds the lock, and a mailbox that holds
-// its own revocation runs it too: it signs and asks nothing.
+// transaction. [Mailbox.Follow] hands a handler's record over when it next
+// begins with [FollowOptions.Owed], and never during a Follow under way; a
+// webhook's record when it next begins with [FollowOptions.Webhook], or, in a
+// Follow under way, after its next drain that delivers a message. A record
+// stays owed until a Follow runs its handling. It returns how many records it
+// moved, so a message whose handler and webhook both gave up counts twice. It
+// writes the mailbox, so it waits while another command holds the lock, and a
+// mailbox that holds its own revocation runs it too: it signs and asks nothing.
 func (b *Mailbox) RetryFailed(ctx context.Context) (int, error) {
 	return lockedFinished(ctx, b, func() (int, error) {
 		moved := 0

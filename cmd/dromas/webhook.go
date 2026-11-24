@@ -16,7 +16,9 @@ import (
 // those and Stripe's go on for days, as GitHub's, which tries once: --webhook
 // hands a message to an endpoint as a notification, and inbox/ keeps it, so a
 // longer failure is its owner's to see (dromas status) and to have posted
-// again (dromas inbox retry-failed), as GitHub's redelivery does on request.
+// again (dromas inbox retry-failed), as GitHub's "Redeliver a delivery for a
+// repository webhook" does on request
+// (https://docs.github.com/en/rest/repos/webhooks, read 2026-11-24).
 const webhookTries = 3
 
 // webhookDelays are the waits before the second and the third post.

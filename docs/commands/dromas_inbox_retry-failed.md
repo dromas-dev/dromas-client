@@ -9,12 +9,15 @@ owed that program or post again, and print a "failed_retried" line with their
 "count": the programs' records and the webhook's, so a message whose program and
 webhook both gave up counts twice.
 
-retry-failed takes no id, and runs and posts nothing itself. The next recv that
-runs a program (--exec, or [recv] exec) runs it again for each such message,
-with the tries any message gets, and the next recv --webhook posts each again,
-signed and with its header as any post. Until then dromas status counts them as
-pending, not as given up. A message that inbox/ no longer holds as recv wrote it
-gets an "exec_skipped" or "webhook_skipped" line instead.
+retry-failed takes no id, and runs and posts nothing itself. A recv that runs a
+program (--exec, or [recv] exec) runs it again for each such message at its next
+start, with the tries any message gets: a recv --follow already running does
+not. recv --webhook posts each again at its next start, or, already running,
+after its next drain that delivers a message, signed and with its header as any
+post. Until then dromas status counts them as pending, not as given up. A
+message waits for a recv that runs its program or webhook: one whose program or
+webhook is no longer set stays pending. A message that inbox/ no longer holds as
+recv wrote it gets an "exec_skipped" or "webhook_skipped" line instead.
 
 ```
 dromas inbox retry-failed

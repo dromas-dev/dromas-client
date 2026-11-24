@@ -72,11 +72,12 @@ again after any other exit status, a signal, a run longer than --exec-timeout
 (which kills the process), or a program that does not start, up to 3 tries in
 all, 30s apart. Each failed attempt prints an "exec_attempt_failed" line, and a
 message with no attempts left an "exec_failed" line, which dromas status then
-lists under attention until dromas inbox clear-failed clears it. recv then
-continues with the next message, and exits with status 3 at its end.
+lists under attention until dromas inbox retry-failed or clear-failed takes it.
+recv then continues with the next message, and exits with status 3 at its end.
 
 Nothing runs that message's program again until dromas inbox retry-failed, after
-which the next recv --exec runs it with the program it names. A process killed
+which recv --exec runs it at its next start, with the program it names: a recv
+already running does not. A process killed
 before a program's tries end runs that program again when recv --exec next
 starts, so the program runs at least once for each message and may run twice: it
 should use the "id" as the message's name.
@@ -103,10 +104,11 @@ other answer or none within 30s, up to 3 tries in all: at once, then 5s after
 the first and 5m0s after the second, or longer where the answer's Retry-After
 asks, up to 5m0s. Each failed attempt prints a
 "webhook_attempt_failed" line, and a message with no attempts left a
-"webhook_failed" line, which dromas status lists until dromas inbox clear-failed
-clears it, and recv exits with status 3. Nothing posts that message again until
-dromas inbox retry-failed, after which the next recv --webhook posts it, signed
-and with its header as any post. A process killed before a message's tries end
+"webhook_failed" line, which dromas status lists until dromas inbox
+retry-failed or clear-failed takes it, and recv exits with status 3. Nothing
+posts that message again until dromas inbox retry-failed, after which recv
+--webhook posts it at its next start, or, already running, after its next drain
+that delivers a message, signed and with its header as any post. A process killed before a message's tries end
 posts it again when recv --webhook next starts, so the endpoint should use
 webhook-id or the "id" as the message's name.
 

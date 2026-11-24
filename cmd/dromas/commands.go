@@ -507,11 +507,12 @@ again after any other exit status, a signal, a run longer than --exec-timeout
 (which kills the process), or a program that does not start, up to %d tries in
 all, %s apart. Each failed attempt prints an "exec_attempt_failed" line, and a
 message with no attempts left an "exec_failed" line, which dromas status then
-lists under attention until dromas inbox clear-failed clears it. recv then
-continues with the next message, and exits with status 3 at its end.
+lists under attention until dromas inbox retry-failed or clear-failed takes it.
+recv then continues with the next message, and exits with status 3 at its end.
 
 Nothing runs that message's program again until dromas inbox retry-failed, after
-which the next recv --exec runs it with the program it names. A process killed
+which recv --exec runs it at its next start, with the program it names: a recv
+already running does not. A process killed
 before a program's tries end runs that program again when recv --exec next
 starts, so the program runs at least once for each message and may run twice: it
 should use the "id" as the message's name.
@@ -538,10 +539,11 @@ other answer or none within %s, up to %d tries in all: at once, then %s after
 the first and %s after the second, or longer where the answer's Retry-After
 asks, up to %s. Each failed attempt prints a
 "webhook_attempt_failed" line, and a message with no attempts left a
-"webhook_failed" line, which dromas status lists until dromas inbox clear-failed
-clears it, and recv exits with status 3. Nothing posts that message again until
-dromas inbox retry-failed, after which the next recv --webhook posts it, signed
-and with its header as any post. A process killed before a message's tries end
+"webhook_failed" line, which dromas status lists until dromas inbox
+retry-failed or clear-failed takes it, and recv exits with status 3. Nothing
+posts that message again until dromas inbox retry-failed, after which recv
+--webhook posts it at its next start, or, already running, after its next drain
+that delivers a message, signed and with its header as any post. A process killed before a message's tries end
 posts it again when recv --webhook next starts, so the endpoint should use
 webhook-id or the "id" as the message's name.`,
 			formatTime(client.RecvWithin(protocol.PrekeyLifetime)), execTries, execDelay,
@@ -596,8 +598,14 @@ webhook-id or the "id" as the message's name.`,
 
 // inboxListCmd prints each message's headers and inboxShowCmd the message, as
 // an IMAP client fetches a message's ENVELOPE apart from its body (RFC 9051
-// §6.4.5), and as gh issue list and gh issue view, or notmuch search and
-// notmuch show, list a summary and show the whole.
+// §6.4.5); as gh issue list lists issues and gh issue view displays "the title,
+// body, and other information about an issue"
+// (https://cli.github.com/manual/gh_issue_list,
+// https://cli.github.com/manual/gh_issue_view, read 2026-11-24); and as
+// notmuch search outputs "a summary of each thread" and notmuch show "Shows all
+// messages matching the search terms"
+// (https://notmuchmail.org/doc/latest/man1/notmuch-search.html,
+// https://notmuchmail.org/doc/latest/man1/notmuch-show.html, read 2026-11-24).
 func (e *cli) inboxListCmd() *cobra.Command {
 	return command("list", "list the messages in inbox/, one headers line each",
 		`Print a "message_headers" line for each message in inbox/, oldest first by
@@ -648,9 +656,16 @@ refused before any file is read.`,
 }
 
 // inboxRetryFailedCmd hands every message whose callback gave up to the next
-// recv, and takes no id, as clear-failed takes none. Standard Webhooks' replay,
-// Svix's recovery of failed messages, stripe events resend and GitHub's
-// redelivery each hand a failed delivery over again on the operator's request.
+// recv, and takes no id, as clear-failed takes none. Each of these hands a
+// failed delivery over again on its operator's request, read 2026-11-24:
+// Standard Webhooks' "Visibility into failures and manual retries", "a way to
+// manually replay specific webhooks or failures within a range"
+// (https://github.com/standard-webhooks/standard-webhooks/blob/main/spec/standard-webhooks.md,
+// § Additional functionality); Svix's "Recover Failed", which retries "all
+// failed messages starting from a given date" (https://docs.svix.com/retries);
+// stripe events resend (https://docs.stripe.com/cli/events/resend); and
+// GitHub's "Redeliver a delivery for a repository webhook"
+// (https://docs.github.com/en/rest/repos/webhooks).
 func (e *cli) inboxRetryFailedCmd() *cobra.Command {
 	return command("retry-failed", "have the next recv run each --exec program and post each webhook that gave up again",
 		`Record every message whose recv --exec program or recv --webhook post gave up as
@@ -658,12 +673,15 @@ owed that program or post again, and print a "failed_retried" line with their
 "count": the programs' records and the webhook's, so a message whose program and
 webhook both gave up counts twice.
 
-retry-failed takes no id, and runs and posts nothing itself. The next recv that
-runs a program (--exec, or [recv] exec) runs it again for each such message,
-with the tries any message gets, and the next recv --webhook posts each again,
-signed and with its header as any post. Until then dromas status counts them as
-pending, not as given up. A message that inbox/ no longer holds as recv wrote it
-gets an "exec_skipped" or "webhook_skipped" line instead.`,
+retry-failed takes no id, and runs and posts nothing itself. A recv that runs a
+program (--exec, or [recv] exec) runs it again for each such message at its next
+start, with the tries any message gets: a recv --follow already running does
+not. recv --webhook posts each again at its next start, or, already running,
+after its next drain that delivers a message, signed and with its header as any
+post. Until then dromas status counts them as pending, not as given up. A
+message waits for a recv that runs its program or webhook: one whose program or
+webhook is no longer set stays pending. A message that inbox/ no longer holds as
+recv wrote it gets an "exec_skipped" or "webhook_skipped" line instead.`,
 		nargs(0, 0), func(c *cobra.Command, _ []string) error {
 			b, err := e.mailbox()
 			if err != nil {
