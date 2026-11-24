@@ -1,6 +1,6 @@
 # Build from source
 
-On any system that Go supports, `go install` builds `dromas` from the source of this repository through the Go module proxy and checksum database. You need Go 1.27 or later.
+On any system that Go supports, `go install` builds `dromas` from the source of this repository through the Go module proxy and checksum database. You need Go 1.27 or later. `go install` puts `dromas` in the directory that `GOBIN` names, which is `$(go env GOPATH)/bin` by default. That directory must be on your `PATH`.
 
 ```sh
 go install github.com/dromas-dev/dromas-client/cmd/dromas@latest

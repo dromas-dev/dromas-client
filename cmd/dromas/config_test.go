@@ -395,6 +395,33 @@ func TestInitWritesAProfilesFileAndRunsFromIt(t *testing.T) {
 	}
 }
 
+// init --base-dir writes the profile's rotating keys under that directory, as
+// --rotating-keys-dir's default says, so two mailboxes of one profile name in
+// two base directories share no prekeys/.
+func TestInitBaseDirKeepsTheKeysUnderIt(t *testing.T) {
+	home := cleanEnv(t)
+	srv := fakeserver.New(t, time.Now)
+	file := filepath.Join(confDir(home), "bot.toml")
+	for _, base := range []string{filepath.Join(t.TempDir(), "a"), filepath.Join(t.TempDir(), "b")} {
+		if err := os.Remove(file); err != nil && !errors.Is(err, os.ErrNotExist) {
+			t.Fatal(err)
+		}
+		if err := do(t.Context(), "init", []string{"--profile", "bot", "--base-dir", base, "--server", srv.URL}, nil, io.Discard, io.Discard); err != nil {
+			t.Fatalf("init --base-dir %s: %v", base, err)
+		}
+		raw, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := "rotating-keys-dir = " + tomlString(filepath.Join(base, "keys")); !strings.Contains(string(raw), want) {
+			t.Errorf("the file does not say %s:\n%s", want, raw)
+		}
+		if _, err := os.Stat(filepath.Join(base, "keys", "prekeys")); err != nil {
+			t.Error(err)
+		}
+	}
+}
+
 // With no file, flags that say every required key run a mailbox and write no file.
 func TestFlagsAloneRunAMailbox(t *testing.T) {
 	home := cleanEnv(t)
@@ -426,7 +453,7 @@ func TestATablesSettingsAreTheCommandsFlags(t *testing.T) {
 	if _, err := a.Send(ctx, b.Address(), "the body"); err != nil {
 		t.Fatal(err)
 	}
-	file := writeConfig(t, "base-dir = "+tomlString(b.Dir())+"\nmail-dir = "+tomlString(filepath.Join(b.Dir(), "mail"))+"\nserver = "+tomlString(srv.URL)+"\n[recv]\nheaders = true\n[inbox.list]\nheaders = true\n")
+	file := writeConfig(t, "base-dir = "+tomlString(b.Dir())+"\nmail-dir = "+tomlString(filepath.Join(b.Dir(), "mail"))+"\nserver = "+tomlString(srv.URL)+"\n[recv]\nheaders = true\n")
 	t.Setenv("DROMAS_CONFIG", file)
 	var out bytes.Buffer
 	if err := do(ctx, "recv", nil, strings.NewReader(""), &out, io.Discard); err != nil {
@@ -435,12 +462,15 @@ func TestATablesSettingsAreTheCommandsFlags(t *testing.T) {
 	if !strings.Contains(out.String(), "message_headers") || strings.Contains(out.String(), "the body") {
 		t.Errorf("recv under headers = true: %s", out.String())
 	}
-	out.Reset()
-	if err := do(ctx, "inbox list", []string{"--headers=false"}, strings.NewReader(""), &out, io.Discard); err != nil {
+	if _, err := a.Send(ctx, b.Address(), "the second body"); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), "the body") {
-		t.Errorf("inbox list --headers=false over the file: %s", out.String())
+	out.Reset()
+	if err := do(ctx, "recv", []string{"--headers=false"}, strings.NewReader(""), &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "the second body") {
+		t.Errorf("recv --headers=false over the file: %s", out.String())
 	}
 }
 

@@ -77,9 +77,9 @@ exec = ["/usr/local/bin/bot", "--quiet"]
 
 The program runs at least once for each message, and a crash can make it run twice. In the same step that keeps a message, `recv` records that the program still needs to run for that message. When `recv` starts again, it first runs the program for every message that still needs it.
 
-If the program fails, `recv` tries it at most 3 times in total. When `recv` gives up on a message's program, `dromas status` reports the message under `attention` until you run `dromas inbox clear-failed`. That command clears the record of every message whose program `recv` gave up on, but not the record of a message that still has tries left. The messages stay in `inbox/`. Nothing runs the program again for a message that `recv` gave up on. To pass the message to a program yourself, run `dromas inbox show <id> | <program>`.
+If the program fails, `recv` tries it at most 3 times in total. When `recv` gives up on a message's program, `dromas status` reports the message under `attention` until you run `dromas inbox clear-failed`. That command clears the record of every message whose program `recv` gave up on, but not the record of a message that still has tries left. The messages stay in `inbox/`. Nothing runs the program again for a message that `recv` gave up on until you run `dromas inbox retry-failed`. That command records every such message as still needing the program, and the next `recv --exec` runs the program for each of them, with all its tries.
 
-`recv` doesn't run the program for a held message. Two `recv` processes on one mailbox can each run the program for the same message, so run one `recv` for each mailbox.
+The program and the webhook get only the messages that this `recv` delivers. A message that `dromas peer allow` moves from `held/` to `inbox/`, or that another `recv` delivers, reaches neither of this `recv`'s: the command that delivered it printed its line. Two `recv` processes with `--exec` can also each run the program for the same message. So run one `recv` for each mailbox.
 
 ### Send each message to a webhook
 
@@ -96,7 +96,7 @@ The header file contains one line, such as `Authorization: Bearer <token>`. If y
 
 The webhook runs independently of the program. A failure of either one never stops, delays, or fails the other. `recv` sends posts one at a time, so the tries for one message hold back the post of the next message. With `--wait`, `recv` exits after the webhook finishes its tries for the messages that `recv` delivered.
 
-A `2xx` response means success. Any other response, including a redirect, or no response within 30 seconds, is a failed try. `recv` doesn't follow redirects. `recv` tries a post at most 3 times in total: immediately, then 5 seconds after the first try, then 5 minutes after the second try. A response's `Retry-After` can make a wait longer, up to 5 minutes. When all 3 tries for a message fail, `dromas status` reports the message under `attention` until `dromas inbox clear-failed` clears it. Nothing posts that message again. To post it yourself, run `dromas inbox show <id> | curl --data-binary @- <url>`, which posts the same `message` line.
+A `2xx` response means success. Any other response, including a redirect, or no response within 30 seconds, is a failed try. `recv` doesn't follow redirects. `recv` tries a post at most 3 times in total: immediately, then 5 seconds after the first try, then 5 minutes after the second try. A response's `Retry-After` can make a wait longer, up to 5 minutes. When all 3 tries for a message fail, `dromas status` reports the message under `attention` until `dromas inbox clear-failed` clears it. Nothing posts that message again until you run `dromas inbox retry-failed`. The next `recv --webhook` then posts each message whose webhook gave up, with its header and signature, as it posts any message.
 
 If `recv` stops or crashes before it finishes the tries for a message, `recv --webhook` posts that message the next time it starts, so an endpoint can get a message twice. To recognize a message that you already have, use the line's `id`. If you set the secret file, the `webhook-id` header carries the same value.
 
@@ -297,6 +297,8 @@ To restore a mailbox:
 
 1. Put your config file back, and put `identity` at the path that `identity-file` names. If you kept the lists, put them in `base-dir`.
 2. If you also kept `prekeys/`, run `dromas init --restore`. Otherwise, run `dromas prekey renew`.
+
+The first renewal after a restore, the one in step 2, can print a `prekey_not_made` line and exit with status `3`, because the server still serves the lost machine's prekey statement, which this mailbox didn't make. If the lost machine is gone and nobody else can have its files, that statement is your own, and the line's recommendation to revoke the address doesn't apply. `recv` and `status` repeat the line until the mailbox's next read of its own record serves the renewal.
 
 Without `allowed` and `blocked`, the first renewal that `recv` makes replaces the server's access control list (ACL) with an open one. A sender that you blocked then reaches `held/` again until you restore the lists.
 

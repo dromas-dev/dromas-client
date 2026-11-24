@@ -98,8 +98,9 @@ var ErrStop = errors.New("the handler stopped the loop")
 // the webhook's ([FollowOptions.Webhook]), for a delivery whose handling failed
 // for good. [Mailbox.Follow] records it, for [Mailbox.Status] to list under
 // attention until [Mailbox.ClearFailed] clears every such record, and goes on:
-// nothing tries it again, unless the record could not be written, when it stays
-// owed and is handed over again.
+// nothing tries it again until [Mailbox.RetryFailed] records it owed again,
+// unless the record could not be written, when it stays owed and is handed
+// over again.
 var ErrGaveUp = errors.New("the handler gave up on the message")
 
 // FollowOptions says how [Mailbox.Follow] runs. The zero value runs until its
@@ -600,7 +601,7 @@ func (b *Mailbox) owedCounts(r records) (owed int, gaveUp []string, err error) {
 // [Mailbox.Status] lists none until a handling gives up again. It returns how
 // many records it deleted, so a message whose handler and webhook both gave
 // up counts twice. Each message inbox/ keeps stays there, and nothing hands
-// one over again. It writes the mailbox, so it waits while another command
+// one over again but [Mailbox.RetryFailed], which then has none. It writes the mailbox, so it waits while another command
 // holds the lock, and a mailbox that holds its own revocation runs it too: it
 // signs and asks nothing.
 func (b *Mailbox) ClearFailed(ctx context.Context) (int, error) {
@@ -628,6 +629,44 @@ func (b *Mailbox) ClearFailed(ctx context.Context) (int, error) {
 			return 0, err
 		}
 		return cleared, nil
+	})
+}
+
+// RetryFailed records every message whose handling gave up ([ErrGaveUp]), the
+// handler's and the webhook's, as owed that handling again, in one
+// transaction, so that [Mailbox.Follow] hands each over again when it next
+// begins with [FollowOptions.Owed] or [FollowOptions.Webhook]. It returns how many records it moved, so a message
+// whose handler and webhook both gave up counts twice. It writes the mailbox,
+// so it waits while another command holds the lock, and a mailbox that holds
+// its own revocation runs it too: it signs and asks nothing.
+func (b *Mailbox) RetryFailed(ctx context.Context) (int, error) {
+	return lockedFinished(ctx, b, func() (int, error) {
+		moved := 0
+		err := b.update(func(s store) error {
+			for _, r := range []records{handlerRecords, webhookRecords} {
+				var ids []string
+				if err := s.each(r.gaveUp, func(k, _ []byte) error {
+					ids = append(ids, string(k))
+					return nil
+				}); err != nil {
+					return err
+				}
+				for _, id := range ids {
+					if _, err := owe(s, r, id); err != nil {
+						return err
+					}
+					if err := s.del(r.gaveUp, id); err != nil {
+						return err
+					}
+				}
+				moved += len(ids)
+			}
+			return nil
+		})
+		if err != nil {
+			return 0, err
+		}
+		return moved, nil
 	})
 }
 

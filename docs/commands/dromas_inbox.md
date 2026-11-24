@@ -1,14 +1,15 @@
 ## dromas inbox
 
-messages recv delivered: list, show, clear-failed
+messages recv delivered: list, show, retry-failed, clear-failed
 
 ### Synopsis
 
 recv keeps each message it delivers as a file in inbox/, holding the "message"
 line it printed. dromas never deletes these files: managing them is up to you.
 
-These commands print those lines again, or clear what dromas status reports
-about --exec programs that gave up. They call no server.
+These commands list those messages and print their lines again, or hand the
+messages whose --exec program or webhook gave up to the next recv, or clear what
+dromas status reports of them. They call no server.
 
 ```
 dromas inbox
@@ -46,6 +47,7 @@ dromas inbox
 
 * [dromas](dromas.md)	 - 
 * [dromas inbox clear-failed](dromas_inbox_clear-failed.md)	 - clear what status reports of every --exec program and webhook that gave up
-* [dromas inbox list](dromas_inbox_list.md)	 - list the messages in inbox/, one JSON line each
+* [dromas inbox list](dromas_inbox_list.md)	 - list the messages in inbox/, one headers line each
+* [dromas inbox retry-failed](dromas_inbox_retry-failed.md)	 - have the next recv run each --exec program and post each webhook that gave up again
 * [dromas inbox show](dromas_inbox_show.md)	 - print a message in inbox/, as recv printed it
 

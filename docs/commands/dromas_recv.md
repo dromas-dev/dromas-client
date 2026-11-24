@@ -61,9 +61,11 @@ its arguments.
 Nothing of a message is ever on the command line. recv discards the program's
 stdout and stderr. The programs run one at a time, with the mailbox's lock free,
 so a program can run dromas. Each message is kept in inbox/ first, so the
-program is a notification and never the only copy. A message held in held/ runs
-no program. Two recv on one mailbox can each run the program for the same
-message, so run one recv for each mailbox.
+program is a notification and never the only copy. The program and the webhook
+get only the messages this recv delivers: a message that dromas peer allow moves
+from held/ to inbox/, or that another recv delivers, was printed by that command
+and reaches neither. Two recv with --exec can also each run the program for one
+message. So run one recv for each mailbox.
 
 A program's exit status 0 means done, and 100 means failed for good. recv tries
 again after any other exit status, a signal, a run longer than --exec-timeout
@@ -73,11 +75,11 @@ message with no attempts left an "exec_failed" line, which dromas status then
 lists under attention until dromas inbox clear-failed clears it. recv then
 continues with the next message, and exits with status 3 at its end.
 
-Nothing runs that message's program again: dromas inbox show \<id> | \<program>
-hands it to a program by hand. A process killed before a program's tries end
-runs that program again when recv --exec next starts, so the program runs at
-least once for each message and may run twice: it should use the "id" as the
-message's name.
+Nothing runs that message's program again until dromas inbox retry-failed, after
+which the next recv --exec runs it with the program it names. A process killed
+before a program's tries end runs that program again when recv --exec next
+starts, so the program runs at least once for each message and may run twice: it
+should use the "id" as the message's name.
 
 With --webhook, recv posts each message delivered to inbox/ to the URL, beside
 --exec's program or alone: the message's "message" line is the body, as JSON,
@@ -102,10 +104,11 @@ the first and 5m0s after the second, or longer where the answer's Retry-After
 asks, up to 5m0s. Each failed attempt prints a
 "webhook_attempt_failed" line, and a message with no attempts left a
 "webhook_failed" line, which dromas status lists until dromas inbox clear-failed
-clears it, and recv exits with status 3. Nothing posts that message again: dromas
-inbox show \<id> | curl --data-binary @- \<url> posts it by hand. A process killed
-before a message's tries end posts it again when recv --webhook next starts, so
-the endpoint should use webhook-id or the "id" as the message's name.
+clears it, and recv exits with status 3. Nothing posts that message again until
+dromas inbox retry-failed, after which the next recv --webhook posts it, signed
+and with its header as any post. A process killed before a message's tries end
+posts it again when recv --webhook next starts, so the endpoint should use
+webhook-id or the "id" as the message's name.
 
 ```
 dromas recv [flags] [-- <argument>...]

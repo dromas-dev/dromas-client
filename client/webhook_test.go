@@ -279,6 +279,46 @@ func TestClearFailedClearsTheWebhooksRecordsToo(t *testing.T) {
 	}
 }
 
+// RetryFailed records every handling that gave up, the handler's and the
+// webhook's, as owed again, and counts both; the next Follow hands each over
+// to both, and nothing is listed after.
+func TestRetryFailedHandsEveryHandlingThatGaveUpToTheNextFollow(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	e := newEnv(t)
+	a, b := e.mailbox(), e.mailbox()
+	send(t, a, b, "one")
+	send(t, a, b, "two")
+	handler, hook := &bodies{result: gaveUp}, &bodies{result: gaveUp}
+	if err := b.Follow(ctx, client.FollowOptions{Until: time.Now(), Owed: true, Webhook: hook.handle}, handler.handle); err != nil {
+		t.Fatal(err)
+	}
+	if st, err := b.Status(ctx); err != nil || len(st.GaveUp) != 2 || len(st.WebhookGaveUp) != 2 {
+		t.Fatalf("status: %+v, %v", st, err)
+	}
+	if n, err := b.RetryFailed(ctx); err != nil || n != 4 {
+		t.Fatalf("RetryFailed: %d, %v, want 4", n, err)
+	}
+	if st, err := b.Status(ctx); err != nil || len(st.GaveUp) != 0 || len(st.WebhookGaveUp) != 0 || st.Owed != 2 || st.WebhookOwed != 2 {
+		t.Fatalf("status after RetryFailed: %+v, %v; want each owed again", st, err)
+	}
+	handler, hook = &bodies{}, &bodies{}
+	if err := b.Follow(ctx, client.FollowOptions{Until: time.Now(), Owed: true, Webhook: hook.handle}, handler.handle); err != nil {
+		t.Fatal(err)
+	}
+	for _, h := range []*bodies{handler, hook} {
+		if got := slices.Sorted(slices.Values(h.list())); !slices.Equal(got, []string{"one", "two"}) {
+			t.Errorf("the next Follow handed over %q, want both", got)
+		}
+	}
+	if st, err := b.Status(ctx); err != nil || st.Owed != 0 || st.WebhookOwed != 0 || len(st.GaveUp) != 0 || len(st.WebhookGaveUp) != 0 || len(st.Attention) != 0 {
+		t.Fatalf("status after the next Follow: %+v, %v", st, err)
+	}
+	if n, err := b.RetryFailed(ctx); err != nil || n != 0 {
+		t.Fatalf("RetryFailed with nothing to retry: %d, %v", n, err)
+	}
+}
+
 // A message held in held/ is owed nothing: the webhook is handed none.
 func TestAHeldMessageIsOwedTheWebhookNothing(t *testing.T) {
 	t.Parallel()

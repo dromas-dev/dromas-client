@@ -19,7 +19,7 @@ Each release includes a zip archive for `amd64` and `arm64`.
 4. Add the folder to your `Path`, and then open a new shell:
 
    ```powershell
-   [Environment]::SetEnvironmentVariable('Path', [Environment]::GetEnvironmentVariable('Path', 'User') + ";$env:LOCALAPPDATA\Programs\dromas", 'User')
+   [Environment]::SetEnvironmentVariable('Path', [Environment]::GetEnvironmentVariable('Path', 'User') + ";$env:LOCALAPPDATA\Programs\dromas", 'User')   # then open a new shell
    ```
 
 ## Quickstart

@@ -27,13 +27,14 @@ import (
 func (e *cli) tree() *cobra.Command {
 	root := e.group("dromas", "", "",
 		e.initCmd(), e.addrCmd(), e.sendCmd(), e.recvCmd(), e.statusCmd(), e.configCmd(), e.versionCmd(),
-		e.group("inbox", "messages recv delivered: list, show, clear-failed",
+		e.group("inbox", "messages recv delivered: list, show, retry-failed, clear-failed",
 			`recv keeps each message it delivers as a file in inbox/, holding the "message"
 line it printed. dromas never deletes these files: managing them is up to you.
 
-These commands print those lines again, or clear what dromas status reports
-about --exec programs that gave up. They call no server.`,
-			e.inboxListCmd(), e.inboxShowCmd(), e.inboxClearFailedCmd()),
+These commands list those messages and print their lines again, or hand the
+messages whose --exec program or webhook gave up to the next recv, or clear what
+dromas status reports of them. They call no server.`,
+			e.inboxListCmd(), e.inboxShowCmd(), e.inboxRetryFailedCmd(), e.inboxClearFailedCmd()),
 		e.group("held", "messages from unknown senders, held to allow or block: list",
 			`A message that passed every check, from an unknown sender (one this mailbox has
 not written to, named or allowed), is kept in held/, and recv does not print it.
@@ -495,9 +496,11 @@ its arguments.
 Nothing of a message is ever on the command line. recv discards the program's
 stdout and stderr. The programs run one at a time, with the mailbox's lock free,
 so a program can run dromas. Each message is kept in inbox/ first, so the
-program is a notification and never the only copy. A message held in held/ runs
-no program. Two recv on one mailbox can each run the program for the same
-message, so run one recv for each mailbox.
+program is a notification and never the only copy. The program and the webhook
+get only the messages this recv delivers: a message that dromas peer allow moves
+from held/ to inbox/, or that another recv delivers, was printed by that command
+and reaches neither. Two recv with --exec can also each run the program for one
+message. So run one recv for each mailbox.
 
 A program's exit status 0 means done, and 100 means failed for good. recv tries
 again after any other exit status, a signal, a run longer than --exec-timeout
@@ -507,11 +510,11 @@ message with no attempts left an "exec_failed" line, which dromas status then
 lists under attention until dromas inbox clear-failed clears it. recv then
 continues with the next message, and exits with status 3 at its end.
 
-Nothing runs that message's program again: dromas inbox show <id> | <program>
-hands it to a program by hand. A process killed before a program's tries end
-runs that program again when recv --exec next starts, so the program runs at
-least once for each message and may run twice: it should use the "id" as the
-message's name.
+Nothing runs that message's program again until dromas inbox retry-failed, after
+which the next recv --exec runs it with the program it names. A process killed
+before a program's tries end runs that program again when recv --exec next
+starts, so the program runs at least once for each message and may run twice: it
+should use the "id" as the message's name.
 
 With --webhook, recv posts each message delivered to inbox/ to the URL, beside
 --exec's program or alone: the message's "message" line is the body, as JSON,
@@ -536,10 +539,11 @@ the first and %s after the second, or longer where the answer's Retry-After
 asks, up to %s. Each failed attempt prints a
 "webhook_attempt_failed" line, and a message with no attempts left a
 "webhook_failed" line, which dromas status lists until dromas inbox clear-failed
-clears it, and recv exits with status 3. Nothing posts that message again: dromas
-inbox show <id> | curl --data-binary @- <url> posts it by hand. A process killed
-before a message's tries end posts it again when recv --webhook next starts, so
-the endpoint should use webhook-id or the "id" as the message's name.`,
+clears it, and recv exits with status 3. Nothing posts that message again until
+dromas inbox retry-failed, after which the next recv --webhook posts it, signed
+and with its header as any post. A process killed before a message's tries end
+posts it again when recv --webhook next starts, so the endpoint should use
+webhook-id or the "id" as the message's name.`,
 			formatTime(client.RecvWithin(protocol.PrekeyLifetime)), execTries, execDelay,
 			client.WebhookTimeout, webhookTries, webhookDelays[0], webhookDelays[1], webhookLongest),
 		checked(o.takesArguments, func(c *cobra.Command, args []string) error {
@@ -590,13 +594,17 @@ the endpoint should use webhook-id or the "id" as the message's name.`,
 	return c
 }
 
+// inboxListCmd prints each message's headers and inboxShowCmd the message, as
+// an IMAP client fetches a message's ENVELOPE apart from its body (RFC 9051
+// §6.4.5), and as gh issue list and gh issue view, or notmuch search and
+// notmuch show, list a summary and show the whole.
 func (e *cli) inboxListCmd() *cobra.Command {
-	var headers bool
-	c := command("list [flags]", "list the messages in inbox/, one JSON line each",
-		`Print a "message" line for each message in inbox/, oldest first by sent_at, as
-recv printed it: the messages recv delivered that nobody has deleted since. A
-file there that is not a message to this mailbox is left out, and dromas inbox
-show names it.`,
+	return command("list", "list the messages in inbox/, one headers line each",
+		`Print a "message_headers" line for each message in inbox/, oldest first by
+sent_at, as recv --headers prints it: the messages recv delivered that nobody
+has deleted since, with none of the text their senders chose. dromas inbox
+show <id> prints a message's "message" line. A file there that is not a
+message to this mailbox is left out, and dromas inbox show names it.`,
 		nargs(0, 0), func(c *cobra.Command, _ []string) error {
 			b, err := e.mailbox()
 			if err != nil {
@@ -606,15 +614,18 @@ show names it.`,
 			if err != nil {
 				return err
 			}
-			return e.messageLines(c.Context(), b, ds, headers)
+			n := namesOf(c.Context(), b)
+			for _, d := range ds {
+				if err := e.out(messageHeaders(d, n)); err != nil {
+					return err
+				}
+			}
+			return nil
 		})
-	c.Flags().BoolVar(&headers, "headers", false, "print each message's checked fields and its body's size, without its body or subject, as recv --headers does")
-	return c
 }
 
 func (e *cli) inboxShowCmd() *cobra.Command {
-	var headers bool
-	c := command("show <id> [flags]", "print a message in inbox/, as recv printed it",
+	return command("show <id>", "print a message in inbox/, as recv printed it",
 		`Print the "message" line of a message in inbox/, by the id recv printed, as recv
 prints it without --headers. An id that is not 64 lowercase hex characters is
 refused before any file is read.`,
@@ -632,10 +643,38 @@ refused before any file is read.`,
 			if err != nil {
 				return err
 			}
-			return e.messageLines(c.Context(), b, []client.Delivery{d}, headers)
+			return e.out(message(d, namesOf(c.Context(), b)))
 		})
-	c.Flags().BoolVar(&headers, "headers", false, "print the message's checked fields and its body's size, without its body or subject, as recv --headers does")
-	return c
+}
+
+// inboxRetryFailedCmd hands every message whose callback gave up to the next
+// recv, and takes no id, as clear-failed takes none. Standard Webhooks' replay,
+// Svix's recovery of failed messages, stripe events resend and GitHub's
+// redelivery each hand a failed delivery over again on the operator's request.
+func (e *cli) inboxRetryFailedCmd() *cobra.Command {
+	return command("retry-failed", "have the next recv run each --exec program and post each webhook that gave up again",
+		`Record every message whose recv --exec program or recv --webhook post gave up as
+owed that program or post again, and print a "failed_retried" line with their
+"count": the programs' records and the webhook's, so a message whose program and
+webhook both gave up counts twice.
+
+retry-failed takes no id, and runs and posts nothing itself. The next recv that
+runs a program (--exec, or [recv] exec) runs it again for each such message,
+with the tries any message gets, and the next recv --webhook posts each again,
+signed and with its header as any post. Until then dromas status counts them as
+pending, not as given up. A message that inbox/ no longer holds as recv wrote it
+gets an "exec_skipped" or "webhook_skipped" line instead.`,
+		nargs(0, 0), func(c *cobra.Command, _ []string) error {
+			b, err := e.mailbox()
+			if err != nil {
+				return err
+			}
+			n, err := b.RetryFailed(c.Context())
+			if err != nil {
+				return err
+			}
+			return e.out(line("failed_retried", "count", n))
+		})
 }
 
 // inboxClearFailedCmd clears every record of a callback that gave up, and takes
@@ -653,8 +692,8 @@ program or a webhook gives up again.
 
 clear-failed takes no id. It clears every message whose program or webhook gave
 up, and none that still has tries left; with none, the count is 0. Each message
-stays in inbox/, and nothing runs its program or posts it again: dromas inbox
-show <id> | <program> hands a message to a program by hand.`,
+stays in inbox/, and nothing runs its program or posts it again: to have recv do
+that, run dromas inbox retry-failed instead.`,
 		nargs(0, 0), func(c *cobra.Command, _ []string) error {
 			b, err := e.mailbox()
 			if err != nil {
@@ -666,22 +705,6 @@ show <id> | <program> hands a message to a program by hand.`,
 			}
 			return e.out(line("failed_cleared", "count", n))
 		})
-}
-
-// messageLines prints a "message" line for each of ds, or with headers a
-// "message_headers" line, naming each sender as b names it.
-func (e *cli) messageLines(ctx context.Context, b *client.Mailbox, ds []client.Delivery, headers bool) error {
-	n := namesOf(ctx, b)
-	for _, d := range ds {
-		l := message(d, n)
-		if headers {
-			l = messageHeaders(d, n)
-		}
-		if err := e.out(l); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func (e *cli) refusedListCmd() *cobra.Command {

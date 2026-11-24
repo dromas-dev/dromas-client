@@ -13,8 +13,8 @@ program or a webhook gives up again.
 
 clear-failed takes no id. It clears every message whose program or webhook gave
 up, and none that still has tries left; with none, the count is 0. Each message
-stays in inbox/, and nothing runs its program or posts it again: dromas inbox
-show \<id> | \<program> hands a message to a program by hand.
+stays in inbox/, and nothing runs its program or posts it again: to have recv do
+that, run dromas inbox retry-failed instead.
 
 ```
 dromas inbox clear-failed
@@ -50,5 +50,5 @@ dromas inbox clear-failed
 
 ### SEE ALSO
 
-* [dromas inbox](dromas_inbox.md)	 - messages recv delivered: list, show, clear-failed
+* [dromas inbox](dromas_inbox.md)	 - messages recv delivered: list, show, retry-failed, clear-failed
 

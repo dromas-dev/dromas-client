@@ -28,7 +28,7 @@ rotating-keys-dir = "~/.local/state/dromas/default/keys"
 # headers = false
 ```
 
-`dromas init` writes the file only if no file exists, so you can make the file read-only. `dromas init` always writes the four path keys `base-dir`, `mail-dir`, `identity-file`, and `rotating-keys-dir`: each is the path that you pass to `dromas init`, or else a path that `dromas init` chooses. That path is under `~/.local/share` for `base-dir`, under `base-dir` for `mail-dir` and `identity-file`, and under `~/.local/state` for `rotating-keys-dir`. The values in the file take the place of the defaults that this page gives for those keys, such as `<base-dir>/keys` for `rotating-keys-dir`. `dromas init` also writes the values that you pass to its `--inbox-dir`, `--server`, `--ca-file`, `--prekey-lifetime`, and `--certificate-lifetime` flags. When `XDG_DATA_HOME` or `XDG_STATE_HOME` is set to an absolute path, `dromas init` writes paths under that directory instead of under `~/.local/share` or `~/.local/state`. On Windows, if those variables aren't set, `dromas init` puts the mailbox in `%LocalAppData%\dromas\<profile>` and its keys in the mailbox's `keys` directory. Neither the file nor the mailbox is in `%AppData%`, because a roaming profile copies `%AppData%` to every machine that the user signs in to, and a mailbox runs on one machine only.
+`dromas init` writes the file only if no file exists, so you can make the file read-only. `dromas init` always writes the four path keys `base-dir`, `mail-dir`, `identity-file`, and `rotating-keys-dir`: each is the path that you pass to `dromas init`, or else a path that `dromas init` chooses. That path is under `~/.local/share` for `base-dir`, under `base-dir` for `mail-dir` and `identity-file`, and under `~/.local/state` for `rotating-keys-dir`, or under `base-dir` when you pass `--base-dir`. If that base directory is synced or backed up, also pass `--rotating-keys-dir` to keep the keys out of it: see [Back up and restore](guide.md#back-up-and-restore). The values in the file take the place of the defaults that this page gives for those keys, such as `<base-dir>/keys` for `rotating-keys-dir`. `dromas init` also writes the values that you pass to its `--inbox-dir`, `--server`, `--ca-file`, `--prekey-lifetime`, and `--certificate-lifetime` flags. When `XDG_DATA_HOME` or `XDG_STATE_HOME` is set to an absolute path, `dromas init` writes paths under that directory instead of under `~/.local/share` or `~/.local/state`. On Windows, if those variables aren't set, `dromas init` puts the mailbox in `%LocalAppData%\dromas\<profile>` and its keys in the mailbox's `keys` directory. Neither the file nor the mailbox is in `%AppData%`, because a roaming profile copies `%AppData%` to every machine that the user signs in to, and a mailbox runs on one machine only.
 
 ### Location
 
@@ -36,6 +36,8 @@ The config file for the default profile is `~/.config/dromas/default.toml`, or `
 
 - `--profile <name>` or `DROMAS_PROFILE` selects `<name>.toml` in the same directory. A profile name can contain only letters, digits, `-`, and `_`.
 - `--config <file>` or `DROMAS_CONFIG` selects the file at that path.
+
+To make a second mailbox, give it a profile of its own: `dromas init --profile <name>`. When the profile's file already exists, `dromas init` doesn't change it, and a path flag that you pass, such as `--base-dir`, overrides only its own key: the file's other keys still apply.
 
 A flag takes precedence over an environment variable. It's an error for two flags, or two environment variables, to name both a profile and a file. `dromas` never looks for a config file in the working directory.
 
@@ -50,7 +52,7 @@ Each setting takes its value from the first of these sources that sets it:
 3. The config file
 4. The default
 
-`dromas config` prints the value of each setting in effect and where the value came from. It leaves out a setting that nothing sets: `ca-file`, `askpass`, `certificate-lifetime`, and each key of the `[policy]`, `[recv]`, and `[inbox.*]` tables appear only when a source sets them.
+`dromas config` prints the value of each setting in effect and where the value came from. It leaves out a setting that nothing sets: `ca-file`, `askpass`, `certificate-lifetime`, and each key of the `[policy]` and `[recv]` tables appear only when a source sets them.
 
 ### Paths
 
@@ -82,7 +84,7 @@ The directory that holds the mailbox's state file and lists (`state`, `allowed`,
 - Default: none; the key is required
 - Flag: `--mail-dir`
 
-The directory that holds `inbox/`, `held/`, `refused/`, and `sent/`. The mailbox keeps every message in plaintext and never deletes a message.
+The directory that holds `inbox/`, `held/`, `refused/`, and `sent/`. The mailbox keeps every message in plaintext and never deletes a message from `inbox/` or `sent/`. It deletes messages from `held/` and `refused/` only as [Receive messages](guide.md#receive-messages) describes.
 
 ### `identity-file`
 
@@ -283,22 +285,6 @@ A file that contains a [Standard Webhooks](https://www.standardwebhooks.com/) se
 - Flag: `dromas recv --log-file`
 
 A file that `recv` appends its lines to: the lines that it would otherwise print on stdout and stderr. Use this key when the service manager doesn't keep a log of its own, such as Windows Task Scheduler. If the file doesn't exist, `recv` creates it, readable only by you. If the file exists, `recv` keeps its permissions and appends to it. Nothing rotates the file. See [Run as a service](guide.md#run-as-a-service).
-
-### `inbox.list.headers`
-
-- Type: boolean
-- Default: `false`
-- Flag: `dromas inbox list --headers`
-
-When `true`, `inbox list` prints the checked fields and the body size of each message, but not the body or the subject.
-
-### `inbox.show.headers`
-
-- Type: boolean
-- Default: `false`
-- Flag: `dromas inbox show --headers`
-
-When `true`, `inbox show` prints the checked fields and the body size of the message, but not the body or the subject.
 
 ## Environment variables
 

@@ -15,7 +15,8 @@ import (
 // example schedule and Svix's begin (read 2026-11-17). They stop there, where
 // those and Stripe's go on for days, as GitHub's, which tries once: --webhook
 // hands a message to an endpoint as a notification, and inbox/ keeps it, so a
-// longer failure is its owner's to see (dromas status) and post again by hand.
+// longer failure is its owner's to see (dromas status) and to have posted
+// again (dromas inbox retry-failed), as GitHub's redelivery does on request.
 const webhookTries = 3
 
 // webhookDelays are the waits before the second and the third post.
@@ -74,7 +75,7 @@ func (r *recvRun) post(ctx context.Context, id string, body []byte) error {
 		if try == webhookTries {
 			r.gaveUp.Store(true)
 			r.print(line("webhook_failed", "id", id, "attempts", try, "detail",
-				"the webhook has no try left: inbox/ keeps the message, nothing posts it again, and dromas status lists it until dromas inbox clear-failed"))
+				"the webhook has no try left: inbox/ keeps the message, and dromas status lists it until dromas inbox retry-failed has the next recv --webhook post it again, or dromas inbox clear-failed"))
 			return client.ErrGaveUp
 		}
 		select {

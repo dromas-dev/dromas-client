@@ -9,14 +9,13 @@ prints it without --headers. An id that is not 64 lowercase hex characters is
 refused before any file is read.
 
 ```
-dromas inbox show <id> [flags]
+dromas inbox show <id>
 ```
 
 ### Options
 
 ```
-      --headers[=true|false]   print the message's checked fields and its body's size, without its body or subject, as recv --headers does
-      --help[=true|false]      print this help, and run nothing
+      --help[=true|false]   print this help, and run nothing
 ```
 
 ### Options inherited from parent commands
@@ -43,5 +42,5 @@ dromas inbox show <id> [flags]
 
 ### SEE ALSO
 
-* [dromas inbox](dromas_inbox.md)	 - messages recv delivered: list, show, clear-failed
+* [dromas inbox](dromas_inbox.md)	 - messages recv delivered: list, show, retry-failed, clear-failed
 
