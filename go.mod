@@ -41,6 +41,7 @@ require (
 
 tool (
 	filippo.io/age/cmd/age
+	filippo.io/age/cmd/age-inspect
 	filippo.io/age/cmd/age-keygen
 	github.com/akavel/rsrc
 )

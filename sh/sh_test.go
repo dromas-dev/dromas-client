@@ -71,7 +71,7 @@ var bashMajor = sync.OnceValue(func() int {
 	return v
 })
 
-var scriptTools = []string{"bash", "age", "age-keygen", "ssh-keygen", "jq", "iconv", "find", "sha256sum", "sha384sum", "base64", "od", "sync"}
+var scriptTools = []string{"bash", "age", "age-keygen", "age-inspect", "ssh-keygen", "jq", "iconv", "find", "sha256sum", "sha384sum", "base64", "od", "sync"}
 
 // TestMain puts an age that makes post-quantum mailboxes first in PATH for every
 // test and every shell they run: the local one when it can, else go.mod's.

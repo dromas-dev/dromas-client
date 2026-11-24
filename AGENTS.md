@@ -166,7 +166,7 @@ The rules are in `PROTOCOL.md` and in the doc comments of the code named. Each l
 ### Reading what others wrote
 
 - 🛑 **A mailbox never asks the server who a sender is, and pins one only once its signature verified** (`judge`, `pin`; §12.3).
-- 🛑 **Count the age recipient stanzas before age is given any prekey** (`oneNative`, `decrypt`; §12.3 check 1).
+- 🛑 **Count the age recipient stanzas before age is given any prekey** (`oneNative`, `decrypt`, `dr_judge`; §12.3 check 1).
 - **Fetches, and a cut fetch's resume by range, follow §12.3** (`client/partial.go`). 🛑 **The partial file is trusted only as far as the state records it synced.**
 - 🛑 **A new command that receives, sends, delivers or renews calls `keysMatch` first and joins `mailCommands` in `client/restore_test.go`:** a lost state stops each until the owner runs `dromas init --restore` (`PROTOCOL.md` §15.9 states the cost).
 - 🛑 **Keys are deleted, and the replay set pruned, only after a call the server answered, by the clock read then** (`prune`, `dropRetired`, `pruneSeen`; §12.4). A wrong clock is a failure case (§15.7), never guarded.

@@ -1,6 +1,7 @@
 package sh_test
 
 import (
+	"bytes"
 	"crypto/rand"
 	"fmt"
 	"io"
@@ -12,6 +13,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"filippo.io/age"
 
 	"github.com/dromas-dev/dromas-client/internal/fakeserver"
 	"github.com/dromas-dev/dromas-client/protocol"
@@ -271,4 +274,59 @@ func TestScriptPads(t *testing.T) {
 func prekeyOf(w *world, b *shMailbox) []byte {
 	st, _ := w.srv.Prekey(b.addr)
 	return st
+}
+
+// A file without exactly one native recipient stanza is refused as
+// decrypt_error before age is given any prekey: here the mailbox's own stanza
+// twice, and a stranger's before it, either of which age alone decrypts. A
+// file of one is delivered (PROTOCOL.md §12.3 check 1; the Go client's
+// TestNoKeyAgreementBeforeTheStanzasAreCounted).
+func TestScriptCountsTheStanzasBeforeItDecrypts(t *testing.T) {
+	w := newWorld(t)
+	p, q := w.mailbox(), w.mailbox()
+	st, _ := w.srv.Prekey(q.addr)
+	pk, err := protocol.ParsePrekey(st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	own, err := pk.Recipient()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stranger, err := age.GenerateHybridIdentity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	seal := func(msgID, body string, to ...age.Recipient) []byte {
+		t.Helper()
+		l := p.line(q.addr, msgID, body, 0)
+		var ct bytes.Buffer
+		aw, err := age.Encrypt(&ct, to...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := aw.Write(slices.Concat(l, p.sign(q.addr, l))); err != nil {
+			t.Fatal(err)
+		}
+		if err := aw.Close(); err != nil {
+			t.Fatal(err)
+		}
+		return ct.Bytes()
+	}
+	for i, c := range []struct {
+		name string
+		to   []age.Recipient
+	}{
+		{"the mailbox's stanza twice", []age.Recipient{own, own}},
+		{"a stranger's stanza, then the mailbox's", []age.Recipient{stranger.Recipient(), own}},
+	} {
+		w.put(q, "", seal(fmt.Sprintf("00000000-0000-4000-8000-00000000010%d", i), c.name, c.to...))
+		if d := q.recv(); len(d.messages) != 0 || d.refused("decrypt_error") != 1 || w.srv.Count(q.addr) != 0 {
+			t.Errorf("%s: %v", c.name, d)
+		}
+	}
+	w.put(q, "", seal("00000000-0000-4000-8000-000000000109", "one stanza", own))
+	if d := q.recv(); !slices.Equal(d.bodies(), []string{"one stanza"}) {
+		t.Errorf("a file of the mailbox's one stanza: %v", d)
+	}
 }

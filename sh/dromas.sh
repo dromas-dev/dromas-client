@@ -23,7 +23,7 @@
 #
 # It gives up conveniences the Go client has: recv drains once and never waits for a message, and each step runs several
 # programs. And certificates: its own mailbox's identity signs its prekey statements, passes and messages (PROTOCOL.md §5),
-# and it makes no working key. It reads and writes to mailboxes that sign either way. Needs bash >= 4, age >= 1.3 (the first with post-quantum keys, the one prekey type; Ubuntu to 26.04 and Debian 13
+# and it makes no working key. It reads and writes to mailboxes that sign either way. Needs bash >= 4, age >= 1.3 with its age-inspect (the first with post-quantum keys, the one prekey type; Ubuntu to 26.04 and Debian 13
 # ship older, and go install filippo.io/age/cmd/...@v1.3.2 is current), OpenSSH >= 9.1 built with OpenSSL and with security keys, its default (the first to take a
 # certificate's validity and a time to verify at in UTC; without OpenSSL it reads no P-256 key, and without security keys no sk- key, each of which every client verifies), curl >= 8.4.0 (the first whose --max-filesize stops a body of unknown size, which dr_one's fetch relies on),
 # jq >= 1.7.1 (1.7.0 can abort on a number a sender writes, CVE-2023-50246; Ubuntu 24.04's fixed jq prints jq-1.7),
@@ -667,6 +667,8 @@ dr_judge(){ # <me> <message stem> → 0 only if EVERY check passes, in this orde
     age-keygen -y "$k" > /dev/null 2>&1 || { echo "cannot read the prekey key $k"; return 3; }
     ids+=(-i "$k"); done      # a key file age cannot read is a fault of this mailbox, which stops the drain: never a message refused for it
   [ ${#ids[@]} -gt 0 ] || { echo "this mailbox has no prekeys"; return 3; }
+  age-inspect --json < "$m.age" 2> /dev/null | jq -e '[.stanza_types[] | select(. == "mlkem768x25519")] | length == 1' > /dev/null ||      # the stanzas counted as age reads them, before age is given any prekey: a file of many costs a reader a key agreement for each, with each prekey (PROTOCOL.md §12.3 check 1)
+    { echo "decrypt_error: it is not encrypted to exactly one recipient of a prekey's type, as every server takes a send: nothing was decrypted"; return 1; }
   age -d "${ids[@]}" < "$m.age" > "$m.T" 2> /dev/null || { echo "decrypt_error: it does not decrypt with this mailbox's prekeys"; return 1; }
   A=$(dr_open "$B" "$m") || { echo "$A"; return 1; }      # the sender, proved by what was decrypted
   t=$(dr_time "$(jq -r .sent_at "$m.P")") || { echo "cannot read the sent_at of what was decrypted"; return 3; }

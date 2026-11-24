@@ -19,17 +19,18 @@ import (
 // /dev/null included, which would make this false on every age.
 func PQ() bool { return exec.Command("age-keygen", "-pq").Run() == nil }
 
-// Path is PATH with an age and age-keygen that make post-quantum keys first
-// in it: PATH itself when its own do, otherwise the module's tools before it.
-// It runs go from the working directory, which must be inside this module.
+// Path is PATH with an age and age-keygen that make post-quantum keys, and
+// the age-inspect of the same release, first in it: PATH itself when its own
+// do and it has age-inspect, otherwise the module's tools before it. It runs
+// go from the working directory, which must be inside this module.
 func Path() (string, error) {
 	path := os.Getenv("PATH")
-	if PQ() {
+	if _, err := exec.LookPath("age-inspect"); err == nil && PQ() {
 		return path, nil
 	}
-	dirs := make([]string, 0, 3)
-	for _, tool := range []string{"age", "age-keygen"} {
-		out, err := exec.Command("go", "tool", "-n", tool).Output() //nolint:gosec // one of the two names above
+	dirs := make([]string, 0, 4)
+	for _, tool := range []string{"age", "age-keygen", "age-inspect"} {
+		out, err := exec.Command("go", "tool", "-n", tool).Output() //nolint:gosec // one of the three names above
 		if err != nil {
 			var ee *exec.ExitError
 			if errors.As(err, &ee) {
