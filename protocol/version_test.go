@@ -7,105 +7,68 @@ import (
 	"time"
 )
 
-// A request's version is SemVer's core and an optional pre-release, exactly:
-// no "v", no build metadata, no leading zero, nothing past a uint64. A server
-// reads anything else, or nothing, as 0.0.0 (PROTOCOL.md §11.17).
-func TestARequestsVersionIsSemVerExactly(t *testing.T) {
+// A version is MAJOR.MINOR, exactly: no "v", no patch, no pre-release, no
+// leading zero, nothing past a uint64 (PROTOCOL.md §11.17).
+func TestAVersionIsMajorMinorExactly(t *testing.T) {
 	for s, want := range map[string]Version{
-		"0.1.8":                               {0, 1, 8, ""},
-		"1.0.0-rc.1":                          {1, 0, 0, "rc.1"},
-		"0.1.9-0.20261029120000-abcdef123456": {0, 1, 9, "0.20261029120000-abcdef123456"}, // a Go pseudo-version without its v
-		"1.0.0-x-y.7.z--":                     {1, 0, 0, "x-y.7.z--"},
-		"18446744073709551615.0.0":            {1<<64 - 1, 0, 0, ""},
+		"0.6":                    {0, 6},
+		"0.0":                    {0, 0},
+		"10.20":                  {10, 20},
+		"18446744073709551615.0": {1<<64 - 1, 0},
 	} {
 		got, err := ParseVersion(s)
 		if err != nil || got != want || got.String() != s {
 			t.Errorf("%q: %+v %v, written back %q", s, got, err, got.String())
 		}
-		if RequestVersion(s) != want {
-			t.Errorf("a server reads %q as %v", s, RequestVersion(s))
-		}
 	}
-	for _, s := range []string{"", "v0.1.8", "0.1", "0.1.8+dirty", "01.1.8", "0.01.8", "0.1.08", "0.1.8-", "0.1.8-01", "0.1.8-a..b",
-		"0.1.8 ", " 0.1.8", "0.1.8\n", "0.1.8-é", "18446744073709551616.0.0", "(devel)", "1.2.3.4", "0.1.8-rc_1"} {
+	for _, s := range []string{"", "1", "v1.5", "1.5.3", "0.1.0", "1.5-rc.1", "1.5.3-rc.1", "1.5+x", "01.5", "1.05", "1.5.", ".5",
+		"1.5 ", " 1.5", "1.5\n", "18446744073709551616.0", "(devel)", "0.0.0-devel"} {
 		if v, err := ParseVersion(s); err == nil {
 			t.Errorf("%q read as %v", s, v)
 		}
+	}
+}
+
+// A server reads a request's Dromas-Version by the major and minor it
+// begins with, and ignores what follows them, so a release's version and its
+// major and minor read alike; a value that does not begin with a version,
+// or none, reads as 0.0 (PROTOCOL.md §11.17).
+func TestARequestsVersionIsItsMajorAndMinor(t *testing.T) {
+	for s, want := range map[string]Version{
+		"0.6":                                 {0, 6},
+		"0.6.11":                              {0, 6},
+		"0.6.11-rc.1":                         {0, 6},
+		"0.6.0-0.20261029120000-abcdef123456": {0, 6}, // a Go pseudo-version without its v
+		"0.60.1":                              {0, 60},
+		"1.5.0+build":                         {1, 5},
+		"0.0.0-devel":                         {0, 0},
+	} {
+		if got := RequestVersion(s); got != want {
+			t.Errorf("a server reads %q as %v, want %v", s, got, want)
+		}
+	}
+	for _, s := range []string{"", "x.6", "0.x", "v0.6.11", "06.1", "0", " 0.6", "(devel)", "18446744073709551616.0.0"} {
 		if v := RequestVersion(s); v != (Version{}) {
-			t.Errorf("a server reads %q as %v, not 0.0.0", s, v)
+			t.Errorf("a server reads %q as %v, not 0.0", s, v)
 		}
 	}
 }
 
-// Versions are ordered by SemVer's precedence (§11): semver.org's own two
-// orderings, each pair of which compares as its place says, in both
-// directions.
-func TestVersionsAreInSemVersOrder(t *testing.T) {
-	for _, order := range [][]string{
-		{"1.0.0", "2.0.0", "2.1.0", "2.1.1"},
-		{"1.0.0-alpha", "1.0.0-alpha.1", "1.0.0-alpha.beta", "1.0.0-beta", "1.0.0-beta.2", "1.0.0-beta.11", "1.0.0-rc.1", "1.0.0"},
-		{"0.1.8", "0.1.9-0.20261029120000-abcdef123456", "0.1.9", "0.2.0-devel", "0.2.0"},
-		{"1.0.0-9", "1.0.0-10", "1.0.0-99999999999999999999", "1.0.0-100000000000000000000", "1.0.0-a"},
-	} {
-		for i, a := range order {
-			for j, b := range order {
-				va, vb := RequestVersion(a), RequestVersion(b)
-				if va == (Version{}) || vb == (Version{}) {
-					t.Fatalf("%q or %q does not read", a, b)
-				}
-				want := 0
-				switch {
-				case i < j:
-					want = -1
-				case i > j:
-					want = 1
-				}
-				if got := va.Compare(vb); got != want {
-					t.Errorf("%s against %s: %d, want %d", a, b, got, want)
-				}
+// Versions are ordered by major, then minor, as numbers, in both directions.
+func TestVersionsAreInOrder(t *testing.T) {
+	order := []string{"0.0", "0.1", "0.9", "0.10", "1.0", "1.2", "2.0"}
+	for i, a := range order {
+		for j, b := range order {
+			want := 0
+			switch {
+			case i < j:
+				want = -1
+			case i > j:
+				want = 1
 			}
-		}
-	}
-}
-
-// A policy writes MAJOR.MINOR, exactly.
-func TestAPolicysVersionIsMajorMinor(t *testing.T) {
-	for _, s := range []string{"1.5", "0.0", "0.1", "10.20"} {
-		if p, err := ParsePolicyVersion(s); err != nil || p.String() != s {
-			t.Errorf("%q: %v %v", s, p, err)
-		}
-	}
-	for _, s := range []string{"", "1", "v1.5", "1.5.3", "0.1.0", "1.5-rc.1", "1.5.3-rc.1", "1.5.3+x", "01.5", "1.05", "1.5.03", "1.5.", "1.5.3.4", " 1.5"} {
-		if p, err := ParsePolicyVersion(s); err == nil {
-			t.Errorf("%q read as %v", s, p)
-		}
-	}
-}
-
-// The latest version is an upgrade only where its major and minor are after
-// the client's; the client's patch and pre-release are its own (PROTOCOL.md
-// §11.17).
-func TestAnUpgradeIsALaterMinor(t *testing.T) {
-	for _, c := range []struct {
-		own, latest string
-		upgrade     bool
-	}{
-		{"1.5.2", "1.5", false},
-		{"1.5.0", "1.5", false},
-		{"1.5.9", "1.6", true},
-		{"1.5.2", "2.0", true},
-		{"1.5.2", "1.4", false},
-		{"1.6.0", "1.5", false},
-		{"1.5.0-rc.1", "1.5", false}, // a pre-release of the same minor
-		{"0.0.0-devel", "0.1", true},
-		{"2.0.0", "1.9", false},
-	} {
-		p, err := ParsePolicyVersion(c.latest)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if got := p.Upgrade(RequestVersion(c.own)); got != c.upgrade {
-			t.Errorf("%s against latest %s: upgrade %v, want %v", c.own, c.latest, got, c.upgrade)
+			if got := RequestVersion(a).Compare(RequestVersion(b)); got != want {
+				t.Errorf("%s against %s: %d, want %d", a, b, got, want)
+			}
 		}
 	}
 }
@@ -137,17 +100,15 @@ func TestAPolicyCoversItsVersions(t *testing.T) {
 		retiredOnDay1 bool
 		retiredDay16  bool
 	}{
-		{"1.1.9", day(15), day(1), true, true},       // below the floor, below 1.3 and below 1.4: the earliest
-		{"1.2.0-rc.1", day(15), day(1), false, true}, // a pre-release of the floor's minor is at the floor
-		{"1.2.0", day(15), day(1), false, true},      // at the floor
-		{"1.3.9", day(20), day(1), false, false},     // below 1.4 alone
-		{"1.4.0-rc.1", day(25), "", false, false},    // version 1.4: a pre-release is of its minor
-		{"1.4.0", day(25), "", false, false},         // version 1.4
-		{"1.4.1", day(25), "", false, false},         // version 1.4, at any patch
-		{"1.5.2", day(10), "", false, true},          // version 1.5
-		{"1.5.9-beta", day(10), "", false, true},     // version 1.5, a pre-release of a patch
-		{"1.6.7", "", day(5), false, false},          // deprecated, with no sunset
-		{"0.0.0", day(15), day(1), true, true},       // what a request with no version is read as
+		{"1.1", day(15), day(1), true, true},   // below the floor, below 1.3 and below 1.4: the earliest
+		{"1.2", day(15), day(1), false, true},  // at the floor
+		{"1.3", day(20), day(1), false, false}, // below 1.4 alone
+		{"1.4", day(25), "", false, false},     // version 1.4
+		{"1.5", day(10), "", false, true},      // version 1.5
+		{"1.6", "", day(5), false, false},      // deprecated, with no sunset
+		{"0.0", day(15), day(1), true, true},   // what a request with no version, or another form, is read as
+		{"1.5.2", day(10), "", false, true},    // version 1.5, at any patch
+		{"x.5", day(15), day(1), true, true},   // no version: 0.0
 	} {
 		v := RequestVersion(c.version)
 		at, ok := d.SunsetFor(v)
@@ -171,12 +132,12 @@ func TestAPolicyCoversItsVersions(t *testing.T) {
 	}
 	// A sunset retires a version from its date on, to the second.
 	at, _ := ParseTime(day(10))
-	if v := RequestVersion("1.5.2"); d.Retired(v, at.Add(-time.Second)) || !d.Retired(v, at) {
+	if v := RequestVersion("1.5"); d.Retired(v, at.Add(-time.Second)) || !d.Retired(v, at) {
 		t.Error("a sunset retires its version from the second of its date")
 	}
 	// With no floor and no sunset, nothing is retired.
 	if (&ServerDocument{}).Retired(Version{}, at) {
-		t.Error("an empty policy retires 0.0.0")
+		t.Error("an empty policy retires 0.0")
 	}
 }
 
