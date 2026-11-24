@@ -1446,7 +1446,7 @@ components:
       name: address
       in: path
       required: true
-      description: A mailbox's address, `d_` and 64 characters of base64url (`PROTOCOL.md` §4.2). Any other form, another form's name among them, is `400 invalid_address`.
+      description: A mailbox's address, `d_` and 64 characters of base64url (`PROTOCOL.md` §4.2). A first segment that begins with an ASCII letter and `_` and is not an address, another form's among them, is `400 invalid_address`; any other first segment is a route the server does not offer, a plain `404` or `405` (`PROTOCOL.md` §11.2).
       schema:
         $ref: '#/components/schemas/Address'
     id:
