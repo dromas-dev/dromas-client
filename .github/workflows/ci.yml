@@ -44,7 +44,10 @@ jobs:
       fail-fast: false
       matrix:
         os: ${{ fromJSON(github.event_name == 'schedule' && '["ubuntu-24.04","ubuntu-26.04","ubuntu-26.04-arm","macos-26","macos-26-intel","windows-2025","windows-11-arm"]' || '["ubuntu-24.04","ubuntu-26.04","ubuntu-26.04-arm","macos-26","windows-2025","windows-11-arm"]') }}
-    runs-on: ${{ matrix.os }}
+    # macos-26 runs on the maintainer's own Apple-silicon Mac, in a fresh macOS
+    # 26 VM per job (label dromas-macos-26), not in GitHub's hosted macOS queue;
+    # the check keeps its name, test (macos-26).
+    runs-on: ${{ matrix.os == 'macos-26' && 'dromas-macos-26' || matrix.os }}
     # Twice a run's usual length: a hang is caught sooner by scripts/check.sh's
     # timeout for one package, which prints what it waits for.
     timeout-minutes: 20
