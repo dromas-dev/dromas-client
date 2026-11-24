@@ -550,7 +550,7 @@ dr_send(){ # <link or address> [body file] → one message, posted now or not at
   dr_post "$B" "$DR/send"; local rc=$?; dr_spent; return $rc
 }
 dr_spent(){ rm -f "$DR/body.txt" "$DR/send.P" "$DR/seal.P" "$DR/seal.sig" "$DR/seal.age" "$DR/seal.query" "$DR/mailbox.json" "$DR/receipt.json"; }      # what a send wrote to post its message, gone once it is posted or refused: the body, the envelope, its seal, the mailbox it was sealed to and the server's receipt. sent/ is the record of what was sent
-dr_agehead(){ echo 1627; }      # <age recipient> → the size of an age file's header for one key of its type, mlkem768x25519, the one a prekey has: its fields are fixed-size, so it never varies
+dr_agehead(){ echo 1627; }      # <age recipient> → the size of an age file's header for one key of its type, mlkem768x25519, the one a prekey has: its fields are fixed-size, so as age writes it, it never varies
 dr_sealed(){ echo $(($(dr_agehead "$2") + 16 + $1 + 16 * ($1 > 65536 ? ($1 + 65535) / 65536 : 1))); }      # <plaintext bytes> <age recipient> → the size of the age file holding them: the header, a 16-byte nonce, and a 16-byte tag after each 64 KiB chunk
 dr_blocks(){ # <size> → the size rounded up to a whole number of blocks. A block is 1/16 of the size, rounded up to a power of two, and never under 1 KiB: 1 KiB blocks up to 16 KiB, 2 KiB up to 32 KiB, and on
   local b=1024; while [ $((16 * b)) -lt "$1" ]; do b=$((b * 2)); done; echo $((($1 + b - 1) / b * b))

@@ -678,7 +678,7 @@ A sender pads every message so that the message's ciphertext is a whole number o
   - A ciphertext that is already a whole number of blocks gets no padding.
   - The padding is not signed.
 - **Examples.** A ciphertext of 40,000 bytes has a block of 4 KiB, and is padded to 40,960 bytes. A ciphertext of 70,000 bytes has a block of 8 KiB, and is padded to 73,728 bytes.
-- **The ciphertext is what is measured.** A sender MUST refuse to send a ciphertext whose size is not a whole number of blocks. The sender computes the padding from the ciphertext's size before encrypting. For example, an age file (C2SP age) that has one native stanza and no other stanza, for a plaintext of L bytes, has this many bytes:
+- **The ciphertext is what is measured.** A sender MUST refuse to send a ciphertext whose size, apart from any stanza that a server ignores (Section 9.4), is not a whole number of blocks. The sender computes the padding from the ciphertext's size before encrypting. For example, an age file (C2SP age) that has one native stanza and no other stanza, for a plaintext of L bytes, has this many bytes:
 
       H + 16 + L + 16 × max(1, ⌈L / 65,536⌉)
 
