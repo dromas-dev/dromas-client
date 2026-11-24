@@ -12,7 +12,7 @@ import (
 // (PROTOCOL.md §11.10 step 7, §12.3 check 1). A server takes a send with exactly
 // one native stanza, of the recipient's current prekey's type, beside
 // grease, and refuses one with none, with two or more, or with a stanza of
-// another type; a reader may refuse a file without exactly one native
+// another type; a reader refuses a file without exactly one native
 // stanza, before any key agreement.
 type Stanzas struct {
 	// Native are the types of its native stanzas, those of a type a prekey
