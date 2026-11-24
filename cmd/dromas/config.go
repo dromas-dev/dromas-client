@@ -547,24 +547,25 @@ func (cfg *config) resolve(g *globals, fc *fileConfig, rel string, noMailbox boo
 		}
 	}
 
-	table := func(command, key, value string) {
-		if cfg.flagged[command] == nil {
-			cfg.flagged[command] = map[string]string{}
+	// [recv] is the one table of a command's flags.
+	recv := func(key, value string) {
+		if cfg.flagged["recv"] == nil {
+			cfg.flagged["recv"] = map[string]string{}
 		}
-		cfg.flagged[command][key] = value
-		cfg.values[strings.ReplaceAll(command, " ", ".")+"."+key] = setting{value, "file"}
+		cfg.flagged["recv"][key] = value
+		cfg.values["recv."+key] = setting{value, "file"}
 	}
 	if v := fc.Recv.Wait; v != "" {
 		if _, err := time.ParseDuration(v); err != nil {
 			return bad("recv.wait", "recv.wait: %v", err)
 		}
-		table("recv", "wait", v)
+		recv("wait", v)
 	}
 	if v := fc.Recv.DrainTime; v != "" {
 		if d, err := time.ParseDuration(v); err != nil || d <= 0 {
 			return bad("recv.drain-time", "recv.drain-time takes a duration above zero, such as 15m, and %.40q is not", v)
 		}
-		table("recv", "drain-time", v)
+		recv("drain-time", v)
 	}
 	if v := fc.Recv.Exec; v != nil {
 		if len(v) == 0 || v[0] == "" {
@@ -581,7 +582,7 @@ func (cfg *config) resolve(g *globals, fc *fileConfig, rel string, noMailbox boo
 		if d, err := time.ParseDuration(v); err != nil || d <= 0 {
 			return bad("recv.exec-timeout", "recv.exec-timeout takes a duration above zero, such as 5m, and %.40q is not", v)
 		}
-		table("recv", "exec-timeout", v)
+		recv("exec-timeout", v)
 	}
 	if v := fc.Recv.Webhook; v != "" {
 		if err := client.CheckWebhookURL(v); err != nil {
@@ -618,10 +619,10 @@ func (cfg *config) resolve(g *globals, fc *fileConfig, rel string, noMailbox boo
 		if err != nil {
 			return bad("recv.log-file", "recv.log-file: %v", err)
 		}
-		table("recv", "log-file", p)
+		recv("log-file", p)
 	}
 	if v := fc.Recv.Headers; v != nil {
-		table("recv", "headers", fmt.Sprint(*v))
+		recv("headers", fmt.Sprint(*v))
 	}
 	return nil
 }
