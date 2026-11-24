@@ -264,7 +264,7 @@ func TestPassVerifyUnder(t *testing.T) {
 			t.Errorf("%s: at the moment it runs out: %v", name, err)
 		}
 		if _, err := pass.VerifyUnder(sum, "dromas.dev", notAfter.Add(-MaxPassLifetime-time.Second)); !errors.Is(err, ErrPass) {
-			t.Errorf("%s: more than an hour ahead: %v", name, err)
+			t.Errorf("%s: more than MaxPassLifetime ahead: %v", name, err)
 		}
 		// The same statement signed by another key, in a signature that
 		// carries this certificate: the hash matches, and the signature does

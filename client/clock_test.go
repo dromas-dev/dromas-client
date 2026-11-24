@@ -39,7 +39,7 @@ func TestAMailboxWhoseClockIsOffByLessThanThePassAllows(t *testing.T) {
 		t.Skip("long: -short skips it; scripts/check.sh full and CI run it")
 	}
 	ctx := context.Background()
-	for _, off := range []time.Duration{-9 * time.Minute, -2 * time.Minute, -time.Second, time.Second, 30 * time.Second, 3 * time.Minute, 49 * time.Minute} {
+	for _, off := range []time.Duration{-9 * time.Minute, -2 * time.Minute, -time.Second, time.Second, 30 * time.Second, 3 * time.Minute, 5 * time.Minute} {
 		e := newEnv(t)
 		b, err := client.Init(ctx, t.TempDir(), e.skewed(&off))
 		if err != nil {
@@ -65,14 +65,14 @@ func TestAMailboxWhoseClockIsOffByLessThanThePassAllows(t *testing.T) {
 	}
 }
 
-// The two mailboxes at the far edges of what a server takes, 49 minutes fast and
-// 9 slow, are 58 minutes apart, and still exchange messages under certificates
-// made that moment: the hour every maker leaves is the width of that window.
+// The two mailboxes at the far edges of what a server takes a new pass from, 5
+// minutes fast and 9 slow, are 14 minutes apart, and still exchange messages under certificates
+// made that moment: the hour every maker leaves is wider than that window.
 func TestTheTwoClocksFurthestApart(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	e := newEnv(t)
-	fast, slow := 49*time.Minute, -9*time.Minute
+	fast, slow := 5*time.Minute, -9*time.Minute
 	f, err := client.Init(ctx, t.TempDir(), e.skewed(&fast))
 	if err != nil {
 		t.Fatal(err)
@@ -91,9 +91,9 @@ func TestTheTwoClocksFurthestApart(t *testing.T) {
 }
 
 // Further off than that, the server refuses the mailbox: its pass, or, more
-// than 50 minutes fast, its certificate, which a server takes once it has
-// begun PassLifetime before its own clock and sees before the pass, as
-// dromas-server answers both (#426 item 6). A refusal for a time gets the
+// than an hour fast, its certificate, which has then not begun at the
+// server's clock and which a server reads before the pass, as dromas-server
+// answers both (#426 item 6). A refusal for a time gets the
 // client's own sentence: the date on the server's answer, what this
 // machine's clock reads, and where to check the clock, which is never the
 // server. TestTheDateOnAnAnswerIsNeverAnOrder holds that no other refusal
@@ -108,6 +108,7 @@ func TestAMailboxWhoseClockIsTooFarOffIsToldSo(t *testing.T) {
 	}{
 		{-11 * time.Minute, protocol.CodePassExpired, "11m0s behind that"},
 		{-50 * time.Minute, protocol.CodePassExpired, "50m0s behind that"},
+		{6 * time.Minute, protocol.CodePassExpired, "6m0s ahead of that"},
 		{51 * time.Minute, protocol.CodePassExpired, "51m0s ahead of that"},
 		{61 * time.Minute, protocol.CodeInvalidValidityPeriod, "1h1m0s ahead of that"},
 	} {
@@ -166,10 +167,36 @@ func TestTheDateOnAnAnswerIsNeverAnOrder(t *testing.T) {
 	}
 }
 
+// A pass the server refused is never kept, so a clock past what a server
+// takes is refused at every call. A mailbox 10 minutes fast is refused, and 6
+// minutes on, when a pass it signed then would end 14 minutes after the
+// server's clock, which a server takes, it is refused again: it signs a new
+// pass, by the clock as it is.
+func TestARefusedPassIsNeverKept(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	e := newEnv(t)
+	var off time.Duration
+	b, err := client.Init(ctx, t.TempDir(), e.skewed(&off))
+	if err != nil {
+		t.Fatal(err)
+	}
+	off = 10 * time.Minute
+	for _, after := range []time.Duration{0, 6 * time.Minute} {
+		e.clock.Add(after)
+		if _, err := b.Receive(ctx); client.Code(err) != protocol.CodePassExpired {
+			t.Fatalf("a mailbox 10 minutes fast, %v on: %v", after, err)
+		}
+	}
+	// Control: with the clock right, the same mailbox drains.
+	off = 0
+	receive(t, b)
+}
+
 // A mailbox holds a pass the server still takes, and its clock then goes back.
 // A message waits for it under a certificate that has not begun by the clock as
-// it now reads: its sender's clock is 49 minutes fast, which a server takes,
-// so that certificate starts 11 minutes back. A mailbox that fetched that message
+// it now reads: its sender's clock is 5 minutes fast, which a server takes,
+// so that certificate starts 55 minutes back. A mailbox that fetched that message
 // would refuse it and ack it, and it would be gone. It does not fetch: a
 // kept pass with more left than it was signed for is not used, and the pass
 // signed in its place has run out by the server's clock. The message is
@@ -186,17 +213,17 @@ func TestAMailboxWhoseClockGoesBackFetchesNothing(t *testing.T) {
 	if res := receive(t, b); len(res.Delivered) != 0 { // the pass is in the mailbox now, with ten minutes to run
 		t.Fatal(res)
 	}
-	fast := 49 * time.Minute
+	fast := 5 * time.Minute
 	sender, err := client.Init(ctx, t.TempDir(), e.skewed(&fast))
 	if err != nil {
 		t.Fatal(err)
 	}
-	send(t, sender, b, "under a certificate that starts 11 minutes back")
+	send(t, sender, b, "under a certificate that starts 55 minutes back")
 
-	off = -12 * time.Minute
+	off = -56 * time.Minute
 	res, err := b.Receive(ctx)
-	if client.Code(err) != protocol.CodePassExpired || !strings.Contains(err.Error(), "12m0s behind that") || (res != nil && len(res.Delivered)+len(res.Refused) != 0) {
-		t.Fatalf("its clock set back 12 minutes: %+v, %v", res, err)
+	if client.Code(err) != protocol.CodePassExpired || !strings.Contains(err.Error(), "56m0s behind that") || (res != nil && len(res.Delivered)+len(res.Refused) != 0) {
+		t.Fatalf("its clock set back 56 minutes: %+v, %v", res, err)
 	}
 	// Control: at that clock the message would be refused, so the stop above is
 	// what kept it. The certificate it is signed under has not begun.

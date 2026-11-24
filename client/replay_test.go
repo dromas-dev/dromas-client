@@ -36,7 +36,7 @@ func TestAReplayIsRefusedAfterTheClockStepsBack(t *testing.T) {
 		ahead, back time.Duration // the reader's clock then, and at the replay
 		serverToo   bool          // the server's clock is moved with the reader's: a hostile server that takes a pass from a clock an honest one refuses, and refuses the renewal it would make
 	}{
-		{"50m fast at a drain the server takes, then 9m slow", protocol.TTL - 49*time.Minute, 50 * time.Minute, -9 * time.Minute, false},
+		{"5m fast at a drain the server takes, then 9m slow", protocol.TTL - 4*time.Minute, 5 * time.Minute, -9 * time.Minute, false},
 		{"40 days fast at a recv the server refuses, then right", 5 * 24 * time.Hour, 40 * 24 * time.Hour, 0, false},
 		{"62 days fast at a drain a hostile server takes, then right", 5 * 24 * time.Hour, 62 * 24 * time.Hour, 0, true},
 		{"control: never ahead", 5 * 24 * time.Hour, 0, 0, false},

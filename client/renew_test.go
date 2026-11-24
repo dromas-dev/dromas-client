@@ -530,7 +530,7 @@ func TestAFailureDatedAheadHoldsBackNoRenewal(t *testing.T) {
 		next.ServeHTTP(w, r)
 	})
 	e.clock.Add(25 * time.Hour)
-	off = 50 * time.Minute
+	off = 5 * time.Minute
 	if res := receive(t, b); res.RenewErr == nil || puts.Load() != 1 {
 		t.Fatalf("a renewal with the clock ahead: %v, %d tries", res.RenewErr, puts.Load())
 	}
@@ -550,7 +550,7 @@ func TestAFailureDatedAheadHoldsBackNoRenewal(t *testing.T) {
 func TestAnEmptyingDrainDeletesEveryRetiredPrekeyAnHourAfterTheTake(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	for _, off := range []time.Duration{0, -9 * time.Minute, 49 * time.Minute} {
+	for _, off := range []time.Duration{0, -9 * time.Minute, 5 * time.Minute} {
 		t.Run("the mailbox "+off.String()+" off", func(t *testing.T) {
 			e := newEnv(t)
 			b, err := client.Init(ctx, t.TempDir(), e.skewed(&off))

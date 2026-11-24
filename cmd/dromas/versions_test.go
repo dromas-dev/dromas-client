@@ -169,7 +169,7 @@ func TestEveryRequestNamesTheClientsVersion(t *testing.T) {
 // differ.
 func TestASunsetIsSaidAndStatusNeedsALook(t *testing.T) {
 	v := newVersioned(t)
-	v.client.Add(20 * time.Minute) // within what a server takes of a pass
+	v.client.Add(4 * time.Minute) // within what a server takes of a pass
 	at := v.server.Now().Add(30 * 24 * time.Hour)
 	v.srv.SetPolicy(protocol.ServerDocument{Sunsets: []protocol.Scheduled{{Version: "1.5", At: at.Format(protocol.TimeLayout)}}})
 	ls, status, errs := v.run("recv")

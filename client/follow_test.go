@@ -224,6 +224,41 @@ func TestFollowRetriesWhatAWaitMendsAndEndsAtWhatNoWaitDoes(t *testing.T) {
 	})
 }
 
+// A pass the server refuses for its time ends one Receive (Fatal), and in the
+// loop it is an EventRetry: the loop drains again at its pace, and goes on
+// once this machine's clock and the server's agree, as a resident recv
+// --follow must after its clock is set right.
+func TestFollowWaitsOutAPassRefusedForItsTime(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx := context.Background()
+		e := newMemEnv(t)
+		var off time.Duration
+		b := e.made(e.skewed(&off))
+		a := e.mailbox()
+		off = 10 * time.Minute
+		if _, err := b.Receive(ctx); client.Code(err) != protocol.CodePassExpired || !client.Fatal(err) {
+			t.Fatalf("one Receive 10 minutes fast: %v", err)
+		}
+		var retried []error
+		err := b.Follow(ctx, client.FollowOptions{}, func(_ context.Context, ev client.Event) error {
+			switch ev.Kind {
+			case client.EventRetry:
+				retried = append(retried, ev.Err)
+				if len(retried) == 2 {
+					off = 0 // the clock is set right
+					send(t, a, b, "after the clock was set right")
+				}
+			case client.EventDelivery:
+				return client.ErrStop
+			}
+			return nil
+		})
+		if err != nil || len(retried) != 2 || client.Code(retried[0]) != protocol.CodePassExpired || client.Code(retried[1]) != protocol.CodePassExpired {
+			t.Fatalf("Follow: %v, having retried %v", err, retried)
+		}
+	})
+}
+
 // Past the deadline a retry cannot come, so the drain's error ends the loop,
 // and it is one to retry: no Fatal.
 func TestADrainThatFailsAtTheDeadlineEndsTheLoop(t *testing.T) {
@@ -959,13 +994,13 @@ func TestAFolderNotMountedEndsTheLoopWithNothingLost(t *testing.T) {
 	}
 }
 
-// A clock three hours behind, as at a boot before a time source sets it, is a
-// refusal no wait mends: for a mailbox whose identity signs, its server refuses
-// the pass as pass_expired and dates its answer later than the clock reads;
-// under a certificate, the certificate has not begun. Either ends the loop,
-// and once the clock is right the next loop drains. The mailbox's clock and the
-// server's are two clocks.
-func TestAClockBehindEndsTheLoop(t *testing.T) {
+// A clock three hours behind, as at a boot before a time source sets it, ends
+// one Receive (Fatal): for a mailbox whose identity signs, its server refuses
+// the pass as pass_expired, and dates its answer later than the clock reads;
+// under a certificate, the certificate has not begun by the clock. The loop
+// waits either out: it drains again at its pace, and goes on once the clock is
+// right. The mailbox's clock and the server's are two clocks.
+func TestAClockBehindIsWaitedOutInTheLoop(t *testing.T) {
 	for _, working := range []bool{false, true} {
 		t.Run(fmt.Sprintf("working key %v", working), func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
@@ -984,12 +1019,22 @@ func TestAClockBehindEndsTheLoop(t *testing.T) {
 				}
 				x := mustOpen(t, b.Dir(), o)
 				client.Bounded(x)
-				if err := x.Follow(context.Background(), client.FollowOptions{}, nil); err == nil || !client.Fatal(err) || client.Transient(err) {
-					t.Fatalf("Follow with the clock behind: %v", err)
+				if _, err := x.Receive(context.Background()); !client.Fatal(err) || client.Transient(err) {
+					t.Fatalf("one Receive with the clock behind: %v", err)
 				}
-				behind.Store(false)
-				if err := x.Follow(context.Background(), oneDrain(false), nil); err != nil {
-					t.Fatalf("Follow with the clock right: %v", err)
+				var retried []error
+				err := x.Follow(context.Background(), client.FollowOptions{}, func(_ context.Context, ev client.Event) error {
+					switch {
+					case ev.Kind == client.EventRetry:
+						retried = append(retried, ev.Err)
+						behind.Store(false) // the clock is set right
+					case ev.Kind == client.EventDrained && !behind.Load():
+						return client.ErrStop
+					}
+					return nil
+				})
+				if err != nil || len(retried) != 1 || working == (client.Code(retried[0]) == protocol.CodePassExpired) {
+					t.Fatalf("Follow with the clock behind: %v, having retried %v", err, retried)
 				}
 			})
 		})

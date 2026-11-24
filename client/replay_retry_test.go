@@ -16,13 +16,14 @@ import (
 	"github.com/dromas-dev/dromas-client/protocol"
 )
 
-// Control at the hour's edge: the retry posted at W + TTL is kept by the
-// server, the reader prunes with its clock 50 minutes fast at true
-// W + 2TTL + 9m59s (an honest server takes it: the reader reads
-// W + 2TTL + 59m59s), and the retry is listed once the reader's clock is
+// At the clocks furthest apart that an honest server takes a new pass from:
+// the retry posted at W + TTL is kept by the server, the reader prunes with
+// its clock 5
+// minutes fast at true W + 2TTL + 9m59s (the reader reads
+// W + 2TTL + 14m59s), and the retry is listed once the reader's clock is
 // 9m59s slow (it reads W + 2TTL, the retry's last fresh second). The first
-// copy's line is still there: SeenFor's hour, to the second. With SeenFor
-// two seconds shorter this fails.
+// copy's line is still there: SeenFor keeps it 2TTL and the hour, more than
+// the 14m59s between those two readings.
 func TestARetryAfterAStepOfTheHour(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -69,9 +70,9 @@ func TestARetryAfterAStepOfTheHour(t *testing.T) {
 	}
 	mode = ""
 	e.clock.Add(w.Add(2*protocol.TTL + 9*time.Minute + 59*time.Second).Sub(e.clock.Now()))
-	off = 50 * time.Minute
+	off = 5 * time.Minute
 	if _, err := r.Receive(ctx); err != nil {
-		t.Fatalf("the drain 50 minutes fast: %v", err)
+		t.Fatalf("the drain 5 minutes fast: %v", err)
 	}
 	off = -(9*time.Minute + 59*time.Second)
 	id := sha256.Sum256(retry)
@@ -88,12 +89,12 @@ func TestARetryAfterAStepOfTheHour(t *testing.T) {
 // answers the mailbox read and the post each after 59s (under the client's
 // one-minute request timeout), the post 409 prekey_superseded, and keeps the
 // retry sealed again: dated 1m58s past W + TTL. The reader's clock is then
-// 50m fast at the drain that prunes and 9m59s slow a second later: passes an
+// 5m fast at the drain that prunes and 9m59s slow a second later: passes an
 // honest server takes, which the fake server checks as one does.
 func TestAStretchedRetryAtClocksAnHonestServerTakes(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	fast, slow := 50*time.Minute, -(9*time.Minute + 59*time.Second)
+	fast, slow := 5*time.Minute, -(9*time.Minute + 59*time.Second)
 	for _, c := range []struct {
 		name          string
 		stretch       bool          // the mailbox read and the post each answered after 59s, the post 409 prekey_superseded
@@ -103,11 +104,11 @@ func TestAStretchedRetryAtClocksAnHonestServerTakes(t *testing.T) {
 		refuseRenewal bool          // the renewal the pruning drain makes is refused, so the retry's key stays the one in use
 		hostile       time.Duration // the server's clock moved with the reader's at the drain that prunes: a pass an honest server refuses
 	}{
-		{"stretched, 50m fast then 9m59s slow", true, false, 10*time.Minute + time.Second, fast, slow, true, 0},
+		{"stretched, 5m fast then 9m59s slow", true, false, 10*time.Minute + time.Second, fast, slow, true, 0},
 		{"stretched, one drain 3h ahead taken by the server, then right", true, false, -2*time.Hour + 2*time.Second, 0, 0, true, 3 * time.Hour},
-		{"control: stretched, 50m fast then 9m59s slow, the renewal taken", true, false, 10*time.Minute + time.Second, fast, slow, false, 0},
-		{"control: not stretched, 50m fast then 9m59s slow", false, false, 10*time.Minute + time.Second, fast, slow, true, 0},
-		{"control: a mailbox read of 59s and no 409, 50m fast then 9m59s slow", false, true, 10*time.Minute + time.Second, fast, slow, true, 0},
+		{"control: stretched, 5m fast then 9m59s slow, the renewal taken", true, false, 10*time.Minute + time.Second, fast, slow, false, 0},
+		{"control: not stretched, 5m fast then 9m59s slow", false, false, 10*time.Minute + time.Second, fast, slow, true, 0},
+		{"control: a mailbox read of 59s and no 409, 5m fast then 9m59s slow", false, true, 10*time.Minute + time.Second, fast, slow, true, 0},
 		{"control: stretched, clocks right, read in the retry's life", true, false, time.Minute, 0, 0, true, 0},
 	} {
 		t.Run(c.name, func(t *testing.T) {

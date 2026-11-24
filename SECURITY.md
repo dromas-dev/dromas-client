@@ -79,13 +79,13 @@ Each entry is a security question that's already decided. Under the entry, where
 - A server can drop, delay, or delete a message, and no receipt reveals the loss (§15.2, §15.9; #516).
   - A server can't read, alter, or forge a message, and the sender keeps each message in `outbox/` until a server accepts it. A receipt from one client to another can be added within version 1, as an optional member of the envelope.
 - Whoever terminates TLS for a server is part of that server, and sees each pass in transit (§15.8; #586).
-  - According to the operator of dromas.dev, nginx terminates TLS on the host that runs `dromas-server`, behind a load balancer that passes TCP through, with no third party in front. A pass is valid at one server for at most an hour, and a pass can't decrypt or sign anything.
+  - According to the operator of dromas.dev, nginx terminates TLS on the host that runs `dromas-server`, behind a load balancer that passes TCP through, with no third party in front. A pass is valid at one server for at most 15 minutes, and a pass can't decrypt or sign anything.
 - The server must store each mailbox's ACL to enforce it, so an allow list reveals to the server senders that might never have written to the mailbox (§15.2; #576).
   - By default, a mailbox's ACL allows every sender except the senders that the owner blocked, and the client holds back a message from a sender that the owner hasn't allowed.
 
 **Passes, keys, and revocation**
 - A pass is a bearer credential that names no call, valid at one server until it ends or the server refuses its certificate, and it isn't bound to the request that carries it (§15.5; #570, #724).
-  - A client signs a pass to end within 10 minutes, and a server allows a pass that ends up to an hour ahead of its clock only for clocks that differ. Binding a pass to each request would give the server a signed record of who writes to whom. A stolen pass lets a thief do only what a hostile server can already do.
+  - A client signs a pass to end within 10 minutes, and a server allows a pass that ends up to 15 minutes ahead of its clock only for clocks that differ. Binding a pass to each request would give the server a signed record of who writes to whom. A stolen pass lets a thief do only what a hostile server can already do.
 - A server can withhold a revocation from a reader that hasn't seen the revocation, and the protocol has no key transparency (§15.6; #572, #311).
   - A reader keeps every revocation that it has seen, and a record that the owner hands over out of band settles the question. Key transparency can be added within version 1.
 - A thief can use a stolen working key to sign messages that every reader accepts, through any server, until the key's certificate expires, at most 45 days and an hour after the certificate starts (§15.5; #716).
@@ -108,7 +108,7 @@ Each entry is a security question that's already decided. Under the entry, where
 - If a mailbox loses its state, or restores an older copy of its state, a server can deliver a message again that the mailbox already accepted (§15.9; #784).
   - A replay works only within the message's TTL, and keying work by `from` and `msg_id` makes a repeat harmless.
 - A client never sets its clock from a server, so a clock that steps or jumps is the mailbox's own fault, and the design accepts the cost (§15.7; #831).
-  - If a mailbox's clock is off by more than the hour of clock skew that `PROTOCOL.md` §3.4 allows, the server rejects its pass before the mailbox fetches, prunes, or deletes anything.
+  - If a mailbox's clock is more than 5 minutes ahead of its server's clock, or 10 minutes or more behind it, the server rejects each new pass that the mailbox signs before the mailbox fetches, prunes, or deletes anything (`PROTOCOL.md` §8).
 - A reader acknowledges a message that it rejects on a time check, so a message is refused and never delivered if, by the reader's clock, its certificate hasn't started or its `sent_at` is more than an hour ahead (§15.7; #44).
   - Whoever makes a certificate dates it an hour back, so only a clock that's already wrong produces such a message. The reader keeps the rejected message in `refused/`, together with the clock reading that the reader used to judge it.
 

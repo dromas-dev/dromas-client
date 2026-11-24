@@ -29,20 +29,23 @@ const (
 	// PassLifetime is how long a client makes a pass good for.
 	PassLifetime = 10 * time.Minute
 	// MaxPassLifetime is the longest a pass may still have to run when a
-	// server takes it. It is longer than PassLifetime so that a client whose
-	// clock runs fast is not refused.
-	MaxPassLifetime = time.Hour
-	// MaxSkew is how far apart two clocks can be with everything here still
-	// working: an hour. The pass sets it. A mailbox is taken by a server while its
-	// clock is less than PassLifetime slow and no more than MaxPassLifetime
-	// less PassLifetime fast, by the server's, and any two such clocks are
-	// less than MaxPassLifetime apart. Every check is exact at the verifier's
-	// own clock, and whoever makes a time-limited thing leaves this much room:
-	// a certificate starts MaxSkew before it is made (NewCertificate), a
-	// server takes a prekey that ends up to MaxSkew past PrekeyLifetime
-	// (MaxPrekeyLifetime), and a reader takes a sent_at up to MaxSkew ahead
-	// (OpenEnvelope). PROTOCOL.md §3.4.
-	MaxSkew = MaxPassLifetime
+	// server takes it: PassLifetime and the pass's own 5 minutes for clocks
+	// that differ (PROTOCOL.md §8). So a server takes a new pass from a
+	// mailbox while its clock is less than PassLifetime slow and no more than
+	// MaxPassLifetime less PassLifetime fast, by the server's, and a pass kept
+	// from earlier while its clock is less than MaxPassLifetime fast: any two
+	// clocks a server takes a pass from are less than MaxPassLifetime and
+	// PassLifetime apart.
+	MaxPassLifetime = PassLifetime + 5*time.Minute
+	// MaxSkew is the skew allowance, an hour, that whoever makes a
+	// time-limited thing other than a pass leaves for clocks that differ;
+	// every check is exact at the verifier's own clock. A certificate starts
+	// MaxSkew before it is made (NewCertificate), a server takes a prekey
+	// that ends up to MaxSkew past PrekeyLifetime (MaxPrekeyLifetime), and a
+	// reader takes a sent_at up to MaxSkew ahead (OpenEnvelope). It is more
+	// than MaxPassLifetime and PassLifetime together, so it covers any two
+	// clocks a server takes a pass from. PROTOCOL.md §3.4.
+	MaxSkew = time.Hour
 )
 
 // Every pass error wraps one of these. ErrPass: it is not a pass of this mailbox

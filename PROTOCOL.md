@@ -198,7 +198,7 @@ Where this document uses a term below as a defined term, the term has the sense 
 
 **Time**
 
-- **Skew allowance:** one hour, which the maker of a time-limited object leaves for clocks that differ (Section 3.4).
+- **Skew allowance:** one hour, which the maker of a time-limited object other than a pass leaves for clocks that differ (Section 3.4).
 - **Message margin:** the time that a client leaves before a certificate ends, for what the client signed under that certificate to be read. The message margin is at least the TTL.
 
 ## 3. Primitives
@@ -295,10 +295,11 @@ Every check of a time is exact at the clock of the party that makes the check. T
 
 - a certificate's start, at a verifier (Section 5.2);
 - a prekey statement's ceiling, at a server (Section 6);
-- a pass's lifetime (Section 8);
 - a reader's limit on `sent_at` (Section 12.3, check 6);
 - when a client renews a prekey (Section 12.4);
 - how long a server keeps a message (Section 13).
+
+A pass leaves 5 minutes for clocks that differ, in place of the skew allowance (Section 8).
 
 ## 4. Identity and address
 
@@ -546,7 +547,7 @@ server-port    = %x31-39 *4DIGIT   ; no leading zero, at most 65535,
   ```
 
 - **A server MUST refuse a value that is too long with `401 invalid_pass`, before the server hashes, parses, or verifies the value.** A value is too long when, whitespace included, the value is longer than the form a client writes with a signature as long as the bound (Section 3.2).
-- **Lifetime.** A client signs a pass to end at most 10 minutes after signing. A server accepts a pass that has not ended and that ends at most the skew allowance after the time on the server's own clock.
+- **Lifetime.** A client signs a pass to end at most 10 minutes after signing. A server accepts a pass that has not ended and that ends at most 15 minutes after the time on the server's own clock: the pass's 10 minutes, and 5 minutes for clocks that differ.
 - **A client MAY keep a pass, and use the kept pass for its calls until the pass is about to end.** A client MUST NOT use a kept pass with more than 10 minutes left, because the client's clock has then gone back since the client signed the pass. A client MUST NOT send a kept pass to a server whose name is not the one the pass was signed for. It keeps that name beside the pass, and signs a new pass for any other server, which could otherwise replay the kept pass at the server it names.
 - **A server MAY remember a pass it has verified, by the pass's values with the signature in the one form (Section 3.2).**
 - **Which signer.** A server accepts a pass:
@@ -564,7 +565,7 @@ server-port    = %x31-39 *4DIGIT   ; no leading zero, at most 65535,
 | Code | When |
 |---|---|
 | `certificate_revoked` | the call accepts a pass by the current certificate, the identity has revoked that certificate, and the pass does not name the identity's key (Section 11.4, rule 1); or the call brings a prekey statement under a certificate that the identity revoked |
-| `pass_expired` | at the server's clock, the pass has ended or ends more than the skew allowance ahead, or the pass's certificate has not begun or has ended |
+| `pass_expired` | at the server's clock, the pass has ended or ends more than 15 minutes ahead, or the pass's certificate has not begun or has ended |
 | `certificate_superseded` | the pass is by any key other than the identity's and the certificate that the call accepts a pass by, or the certificate that the server keeps for the mailbox does not verify |
 | `invalid_pass` | there is no pass, or the pass is not this mailbox's, or the pass is not for this server, or the pass does not verify |
 
@@ -1696,7 +1697,7 @@ Dromas protects a message's content from everyone but the message's recipient. D
   - A revocation of the stolen key's certificate ends the key wherever the revocation is seen (Section 12.6).
   - Messages that the owner sent under a revoked certificate, and that are still unread, are refused along with the thief's messages.
 - **The party that has the identity key chooses how long a certificate runs, up to the server's maximum and never past the protocol's maximum.** A shorter certificate ends a stolen working key sooner, and needs the identity more often. A reader checks a certificate at the reader's own clock, because nothing vouches for when a signature was made. A message may also wait the TTL before it is read. So a certificate signs messages that every reader accepts until the certificate's `valid before`, less the message margin (Section 2.3). For a certificate of the full maximum, that is the server's maximum less the skew allowance and the message margin, counted from when the maker made the certificate.
-- **A stolen pass works at most until the pass ends, and only at the server that the pass names.** A pass by a working key stops working sooner, once the server refuses the pass's certificate as revoked or superseded (Section 8). A client signs a pass to end at most 10 minutes after signing (Section 8). So a pass taken from a log, a proxy, or anything else that the pass passes through works for the rest of those minutes, and longer by as much as the client's clock runs ahead of the server's clock. The hour that a server allows ahead of its own clock is the skew allowance, for clocks that differ (Section 3.4), so no pass that a server accepts has more than an hour left. A pass names no call. A stolen pass:
+- **A stolen pass works at most until the pass ends, and only at the server that the pass names.** A pass by a working key stops working sooner, once the server refuses the pass's certificate as revoked or superseded (Section 8). A client signs a pass to end at most 10 minutes after signing (Section 8). So a pass taken from a log, a proxy, or anything else that the pass passes through works for the rest of those minutes, and longer by as much as the client's clock runs ahead of the server's clock. A server accepts a pass that ends at most 15 minutes after the server's clock, the pass's 10 minutes and 5 for clocks that differ (Section 8), so no pass that a server accepts has more than 15 minutes left. A pass names no call. A stolen pass:
   - gives the mailbox's metadata and ciphertext;
   - gives control of the mailbox's availability: deleting unacked messages permanently, leaving the mailbox's account, and setting the mailbox's ACL, with which the stolen pass can refuse every sender until the owner sets the next ACL;
   - gives sending in the mailbox's name, which verifies at no recipient;
@@ -1721,12 +1722,12 @@ Dromas protects a message's content from everyone but the message's recipient. D
 ### 15.7. Clocks
 
 - **A client never sets its clock by a server's `Date` (Section 12.1).** A clock set by a lying server would make an ended certificate valid again, and a stale message fresh.
-- **A mailbox whose clock is further off than the skew allowance permits is stopped.** The mailbox is stopped before it fetches messages that it would judge by that clock, or prunes its replay set by that clock. The mailbox is stopped:
+- **A mailbox whose clock is further off than a pass permits (Section 8) is stopped.** The mailbox is stopped before it fetches messages that it would judge by that clock, or prunes its replay set by that clock. The mailbox is stopped:
   - in most cases, at the mailbox's pass (`401 pass_expired`);
   - if the mailbox's clock is more than the skew allowance ahead when the mailbox makes a certificate, when the server checks that certificate (`400 invalid_validity_period`).
 - **A certificate that a server accepts need not have begun at every reader.** A reader refuses a message under a certificate whose start is after the reader's clock (`invalid_signature`). The reader acks that message, and the message is lost. The maker of a certificate dates the certificate back by the skew allowance, and that covers this case (Section 5.2).
-- **If a server accepts passes from two clocks, the two clocks are less than an hour apart.** A server accepts a pass from a mailbox whose clock is less than 10 minutes behind the server's clock, or up to 50 minutes ahead.
-- **What this does not cover.** A server checks a pass when the pass is first shown, and a server MAY remember the pass until the pass ends, at most an hour (Section 8). Two cases escape:
+- **If a server accepts passes from two clocks, the two clocks are less than 25 minutes apart.** A server accepts a pass from a mailbox whose clock is less than 10 minutes behind the server's clock. A server accepts a new pass from a mailbox whose clock is up to 5 minutes ahead, and a kept pass, signed while that clock read slower, from a mailbox whose clock is less than 15 minutes ahead.
+- **What this does not cover.** A server checks a pass when the pass is first shown, and a server MAY remember the pass until the pass ends, at most 15 minutes (Section 8). Two cases escape:
   - a clock that moves by minutes while the server remembers the pass;
   - a clock that goes back by more than an hour in the middle of a drain.
 

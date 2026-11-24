@@ -45,7 +45,11 @@ refusal: a revocation, no mailbox at this address with its registration refused,
 a mailbox in another format, a missing folder of the mailbox, as on an unmounted
 volume, this machine's clock behind, or any other refusal by the server or by
 this client. A service manager leaves such a service failed until its owner
-fixes the cause and starts it again. Exit status 1 is any other failure.
+fixes the cause and starts it again. Exit status 1 is any other failure. Under
+--follow or --wait, a refusal for this machine's clock, a pass that the server
+refuses for its time or a certificate that has not begun by this machine's
+clock, is a wait instead: recv says so on stderr ("waiting") and tries again
+until the two clocks agree or the wait ends.
 
 With --exec, recv runs a program for each message delivered to inbox/, with the
 message's "message" line on stdin, as recv prints it without --headers. --exec
