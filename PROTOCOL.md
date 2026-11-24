@@ -1679,7 +1679,7 @@ Dromas protects a message's content from everyone but the message's recipient. D
 - **A message waiting on the server is exposed until the mailbox fetches it.** A mailbox that stops renewing keeps its ended prekey as the current prekey. The mailbox's last messages stay exposed until the mailbox renews.
 - **A mailbox that no server accepts a pass from keeps its retired prekeys past their deletion time.** The mailbox keeps those prekeys until a server accepts a pass from the mailbox. This is because the mailbox cannot tell whether its clock is far ahead or a server is refusing the mailbox, and by that clock the mailbox deletes no key that a message may wait for.
 - **Forward secrecy depends on real deletion.** A key kept in a backup, a synced folder or a store with version history survives its deletion.
-- **Forward secrecy is per prekey, as in X3DH without a one-time prekey.** A leaked prekey decrypts every message encrypted to it until the mailbox renews and deletes the prekey, because version 1 has no ratchet.
+- **Forward secrecy is per prekey, as in X3DH without a one-time prekey, but here the prekey alone decrypts.** X3DH needs both the identity key and the signed prekey to compute an earlier shared key. A leaked prekey decrypts every message encrypted to it until the mailbox renews and deletes the prekey, because version 1 has no ratchet.
 - **Forward secrecy per reply can be added as an optional envelope member.** Version 1 does not yet define such a member, but leaves room for one. Such a member is possible because the envelope is inside the encryption, where the server cannot see the envelope, and because a reader ignores an unknown member (Sections 3.3, 14).
 
 ### 15.4. Sender authentication
