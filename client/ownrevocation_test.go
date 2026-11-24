@@ -25,9 +25,8 @@ import (
 
 // What a mailbox does with its own revocations: a renewal asks for them every
 // time, a mailbox that holds its own revocation of its address signs nothing
-// more, a certificate it revoked signs no message, the remedy reads once and
-// goes on past a server it cannot use, and a clock far ahead deletes no key
-// that a message waits for.
+// more, a certificate it revoked signs no message, and the remedy reads once
+// and goes on past a server it cannot use.
 
 // ownRevocation signs a revocation of a's certificates through serial T with
 // its identity.
@@ -685,38 +684,6 @@ func TestASendInTheRemedysWindowWaitsForTheRenewal(t *testing.T) {
 	}
 	if res := receive(t, reader); len(res.Delivered) != 1 || len(res.Refused) != 0 {
 		t.Errorf("its reader delivered %d and refused %d", len(res.Delivered), len(res.Refused))
-	}
-}
-
-// A clock far ahead is stopped at its pass, and deletes no key that a message
-// waits for: here the message was sealed to a prekey retired since, and the
-// drain at a clock 70 days ahead is refused before its list.
-func TestAFastClockDeletesNoKeyAMessageWaitsFor(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	e := newWorkEnv(t)
-	a, b := e.mailbox(), e.mailbox()
-	send(t, a, b, "sealed to the prekey about to retire")
-	e.clock.Add(2 * time.Second)
-	if _, err := b.Rekey(ctx); err != nil {
-		t.Fatal(err)
-	}
-	keys, _ := filepath.Glob(filepath.Join(b.Dir(), "keys", "prekeys", "*.agekey"))
-	off := 70 * 24 * time.Hour
-	fast, err := client.Open(b.Dir(), e.skewed(&off))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := fast.Receive(ctx); err == nil {
-		t.Fatal("a drain at a clock 70 days ahead went through")
-	}
-	if after, _ := filepath.Glob(filepath.Join(b.Dir(), "keys", "prekeys", "*.agekey")); len(after) < len(keys) {
-		t.Fatalf("%d prekeys before the drain at a fast clock, %d after", len(keys), len(after))
-	}
-	off = 0
-	res, err := fast.Receive(ctx)
-	if err != nil || len(res.Delivered) != 1 || len(res.Refused) != 0 {
-		t.Errorf("once the clock is right: %v, delivered %d, refused %d", err, len(res.Delivered), len(res.Refused))
 	}
 }
 

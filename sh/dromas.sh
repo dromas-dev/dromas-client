@@ -616,17 +616,17 @@ dr_sent(){ # <address> → sent/<address>.<msg_id>.json, one line, {"envelope":�
 # recipe: receive
 dr_recv(){ # drains the mailbox, a page at a time, up to a drain's limits. ACCEPT → inbox/ and a message line on stdout. REFUSED → refused/, never delivered, and a refused line on stdout. Both are acked
   dr_held || { dr_lock dr_recv "$@"; return; }
-  DR_LISTED=; dr_drain; local rc=$?; [ -z "$DR_LISTED" ] || dr_prune "$DR_LISTED"; return $rc      # keys deleted only once the server has answered the list, by the clock read then: a clock far ahead is stopped at its pass (PROTOCOL.md §12.4)
+  dr_drain; local rc=$? at; at=$(dr_now) && dr_prune "$at"; return $rc      # prekeys, current or retired, deleted by this machine's clock, whether or not the server answered: a server that refuses the mailbox cannot keep them (PROTOCOL.md §12.4, §15.3)
 }
 dr_drain(){ # lists the oldest page, fetches and acks it, and lists again while total_count says more remain. Stops at a transient error or a fault of this mailbox, leaving the rest on the server for the next drain. And at a number of messages and of lists (below): a server that lists messages without end costs one run that much
-  local B n i id k=0 lists=0; B=$(cat "$DR/address") || return 1
+  local B n i id k=0 lists=0 at; B=$(cat "$DR/address") || return 1
   dr_finished || { dr_done $?; return 1; }
   dr_matched || return      # nothing listed, fetched or acked on records that do not match prekeys/
   rm -f "$DR/asked"      # the senders this drain has asked the server about: one lookup each
   while :; do
     [ $((lists += 1)) -le 100 ] || { dr_out more --arg detail "this run stopped at the most one drain takes: run recv again for the rest, which is still on the server"; return 0; }
     dr_owner GET "/v1/$B/messages" > "$DR/list.json" || { dr_own; return 1; }
-    [ "$lists" -gt 1 ] || { DR_LISTED=$(dr_now) && dr_forget "$DR_LISTED"; } || return 1      # the replay set pruned only once the server has answered the list, by the clock read then: a clock far off is stopped at its pass first. DR_LISTED tells dr_recv the same reading for the keys
+    [ "$lists" -gt 1 ] || { at=$(dr_now) && dr_forget "$at"; } || return 1      # the replay set pruned only once the server has answered the list, by the clock read then: a clock far off is stopped at its pass first
     dr_shape "$DR/list.json" list && n=$(jq -r '.messages | length' "$DR/list.json") || { dr_err "the server's list of messages is not one this client reads: the messages stay on the server"; return 1; }
     for ((i = 0; i < n; i++)); do
       id=$(jq -r --argjson i "$i" '.messages[$i].id | strings | select(test("\\A[0-9a-f]{64}\\z"))' "$DR/list.json") && dr_hex "$id" || continue      # tested in jq: $(…) drops trailing LFs and every NUL
@@ -812,7 +812,7 @@ dr_renew(){ # → what dr_rekey does, the lock held. A serial is signed ONCE
     [ "$s" -ge "$p" ] || dr_refuse "rollback: the server serves this mailbox's prekey serial $s, before serial $p, which this mailbox published" || return 1
   fi
   t=$(ls "$DR/prekeys" | sed -n 's/\.agekey$//p; s/\.txt\.sig$//p' | sort -n | tail -n 1); new=1      # s is the highest number this mailbox knows of, its own and the server's, and the new statement goes above it under the same signer (PROTOCOL.md §5.3). t is the highest number this mailbox began a prekey at
-  if [ "${t:-0}" -gt "$s" ]; then s=$t; new=; [ ! -s "$DR/prekeys/$s.txt.sig" ] || { na=$(dr_time "$(sed -n 6p "$DR/prekeys/$s.txt")") && [ "$na" -gt "$(dr_now)" ] && u=$(dr_time "$(cat "$DR/prekeys/$s.made" 2> /dev/null)") && [ "$u" -le "$(dr_now)" ] && w=$(dr_lifetime 2> /dev/null) && [ $((na - u)) -le "$w" ]; } || new=1; fi      # a number an earlier run took, and that nothing has passed since, is kept. Signed and never seen published: sent again AS IT IS until it expires, then a new number, and so is one made while the clock read ahead of where it reads now, which a server may not take until the clock catches up. Signed again, the same key would get 8 more days from a server that keeps what it refuses. Never signed: its key is used
+  if [ "${t:-0}" -gt "$s" ]; then s=$t; new=; [ ! -s "$DR/prekeys/$s.txt.sig" ] || { [ -s "$DR/prekeys/$s.agekey" ] && na=$(dr_time "$(sed -n 6p "$DR/prekeys/$s.txt")") && [ "$na" -gt "$(dr_now)" ] && u=$(dr_time "$(cat "$DR/prekeys/$s.made" 2> /dev/null)") && [ "$u" -le "$(dr_now)" ] && w=$(dr_lifetime 2> /dev/null) && [ $((na - u)) -le "$w" ]; } || new=1; fi      # a number an earlier run took, and that nothing has passed since, is kept. Signed and never seen published: sent again AS IT IS until it expires, then a new number, and so is one made while the clock read ahead of where it reads now, which a server may not take until the clock catches up, and one whose key is gone (dr_prune), which nobody could read. Signed again, the same key would get 8 more days from a server that keeps what it refuses. Never signed: its key is used
   if [ -n "$new" ]; then [ "$s" -lt 9007199254740991 ] || dr_refuse "this mailbox's prekey serial is the highest there is, so no later statement can be made: the address cannot renew" || return 1; t=$(dr_now); s=$((t > s ? t : s + 1)); fi      # a new number: this machine's clock, in seconds, or one above the highest this mailbox knows of when the clock gives nothing higher. A mailbox restored from its identity knows only what the server shows: by the clock, its statement is above every one made before, on whatever machine
   [ -s "$DR/prekeys/$s.txt.sig" ] || rm -f "$DR/prekeys/$s.txt" "$DR/prekeys/$s.made"; dr_prekey "$s" || return 1
   if [ -n "$gone" ]; then u="/v1/$A"; w='{identity:$i}'; else u="/v1/$A/prekey"; w='{}'; fi      # a registration is the identity document, then what a new prekey carries
@@ -822,11 +822,11 @@ dr_renew(){ # → what dr_rekey does, the lock held. A serial is signed ONCE
   dr_keeppass || return 1
   at=$(dr_now) && dr_prune "$at" && dr_out prekey --argjson serial "$s" --arg not_after "$(sed -n 6p "$DR/prekeys/$s.txt")"      # by the clock read once the server took the renewal
 }
-dr_prune(){ # <Unix time, read once a server answered> → deletes every retired prekey past its deletion time by that reading of this machine's clock: its not_after + the 7 days a message is kept. dr_recv gives the reading once its list was answered, dr_renew the one once the renewal was taken. After that, a message encrypted to it is unrecoverable. (The Go client also deletes them sooner.)
-  local f n top na; top=$(ls "$DR/prekeys" | sed -n 's/\.agekey$//p' | sort -n | tail -n 1); [ -n "$top" ] || return 0
+dr_prune(){ # <Unix time> → deletes the key of every prekey, current or retired, past its deletion time by that reading of this machine's clock: its not_after + the 7 days a message is kept. Its statement stays, which the next renewal reads. dr_recv gives the reading after its drain, whether or not the server answered, dr_renew the one once the renewal was taken. After that, a message encrypted to it is unrecoverable. A clock far ahead deletes early (PROTOCOL.md §15.7). (The Go client also deletes retired ones sooner.)
+  local f n na
   for f in "$DR"/prekeys/*.txt; do
     [ -e "$f" ] || continue
-    n=$(basename "$f" .txt); [ "$n" -lt "$top" ] || continue      # never the newest
+    n=$(basename "$f" .txt)
     na=$(dr_time "$(sed -n 6p "$f")") || continue
     [ "$1" -lt $((na + 7*86400)) ] || rm -f "$DR/prekeys/$n.agekey"
   done

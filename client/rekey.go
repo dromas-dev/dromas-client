@@ -916,7 +916,7 @@ func (b *Mailbox) removePrekey(n uint64) error {
 }
 
 // finishGoing finishes each removal a crash left: a record marked going, whose
-// deletion an answered call already decided.
+// deletion was already decided.
 func (b *Mailbox) finishGoing() error {
 	signed, err := b.prekeys()
 	if err != nil {
@@ -936,15 +936,18 @@ func (b *Mailbox) finishGoing() error {
 	return nil
 }
 
-// prune deletes every retired prekey, and every key a renewal passed over,
-// whose deletion time has come by at, the clock read once a server answered:
-// its not_after plus protocol.TTL. Every message encrypted to it arrived by its
-// not_after and has expired by then; after this, those messages are
-// unrecoverable from the mailbox's keys. It keeps the newest this mailbox
-// holds, and the one it published last, which is not retired: its statement
-// and its working key sign the mailbox's passes until a renewal is taken. A
-// drain's list answered, and a renewal taken, each run it: a clock far ahead
-// is stopped at its pass, and the zero time, no answer, deletes nothing.
+// prune deletes every prekey, current or retired, and every key a renewal
+// passed over, whose deletion time has come by at, a reading of this
+// machine's clock: its not_after plus protocol.TTL. Every message encrypted to
+// it arrived by its not_after and has expired by then; after this, those
+// messages are unrecoverable from the mailbox's keys. Of the newest this
+// mailbox holds, and the one it published last, only the key goes: their
+// statements and working keys sign the mailbox's passes and its next renewal,
+// and go once a renewal is taken (lostPrekeys reads such a key as deleted,
+// not lost). Every Receive runs it, whether or not the server answered, and
+// so does a renewal taken: a server that refuses the mailbox cannot keep a
+// prekey on its disk, and a clock far ahead deletes early (PROTOCOL.md §15.7).
+// The zero time deletes nothing.
 // It first finishes a removal a crash left. A key the state file adopted is a
 // retired prekey of the renewal above it, which init --restore makes at once,
 // and goes by that renewal's deletion time: what was sealed to it reached the
@@ -978,18 +981,18 @@ func (b *Mailbox) prune(at time.Time) error {
 	if err != nil {
 		return err
 	}
-	for _, n := range signed[:len(signed)-1] {
-		if n == cur {
-			continue
-		}
+	for _, n := range signed {
 		p, err := b.prekeyStatement(n)
-		if err != nil {
+		if err != nil || at.Before(p.NotAfter.Add(protocol.TTL)) {
 			continue
 		}
-		if !at.Before(p.NotAfter.Add(protocol.TTL)) {
-			if err := b.removePrekey(n); err != nil {
-				return err
-			}
+		if n == cur || n == signed[len(signed)-1] {
+			err = removeIfExists(b.path("prekeys", strconv.FormatUint(n, 10)+".agekey"))
+		} else {
+			err = b.removePrekey(n)
+		}
+		if err != nil {
+			return err
 		}
 	}
 	return nil

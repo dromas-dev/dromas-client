@@ -89,6 +89,18 @@ func TestAReplayIsRefusedAfterTheClockStepsBack(t *testing.T) {
 			id := sha256.Sum256(kept)
 			e.srv.Inject(r.Address(), hex.EncodeToString(id[:]), kept)
 			res, err2 := r.Receive(ctx)
+			// A clock far ahead deleted the current prekey's key by that clock
+			// (PROTOCOL.md §15.7): once the clock is right, recv says the key
+			// is missing, until its owner renews, which forgets it.
+			if err2 != nil && strings.Contains(err2.Error(), "state file records prekey") {
+				if _, err := r.Rekey(ctx); err != nil {
+					t.Fatal(err)
+				}
+				res, err2 = r.Receive(ctx)
+			}
+			if err2 != nil {
+				t.Fatalf("the drain while ahead: %v; the replay: %v", client.Code(err), err2)
+			}
 			t.Logf("the drain while ahead: %v; the replay: delivered %d, refused %v, %v", client.Code(err), len(res.Delivered), res.Refused, err2)
 			if len(res.Delivered) != 0 || err2 != nil {
 				t.Error("a message already delivered was delivered again, or the replay was not judged")

@@ -6,12 +6,14 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/dromas-dev/dromas-client/client"
+	"github.com/dromas-dev/dromas-client/internal/fakeserver"
 	"github.com/dromas-dev/dromas-client/protocol"
 )
 
@@ -346,57 +348,75 @@ func TestARenewalKeptFromARefusedAttemptLeavesTheHour(t *testing.T) {
 	}
 }
 
-// jumpAtFetch sets a mailbox's clock off by `by` once the first message it
-// fetches has arrived: a clock that moves during a drain.
-type jumpAtFetch struct {
-	off *time.Duration
-	by  time.Duration
-}
-
-func (j jumpAtFetch) RoundTrip(r *http.Request) (*http.Response, error) {
-	resp, err := http.DefaultTransport.RoundTrip(r)
-	if r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/messages/") {
-		*j.off = j.by
-	}
-	return resp, err
-}
-
-// A clock that jumps 70 days ahead during a drain, after the server answered
-// its list, deletes no prekey: keys are deleted by the clock as it read when
-// the server took the drain's pass, and never by a later reading no server
-// has seen (PROTOCOL.md §12.4). The message waiting for the retired key is
-// delivered once the clock is right.
-func TestAClockThatJumpsDuringADrainDeletesNoKey(t *testing.T) {
+// Every prekey, retired or current, goes at the first recv at or past its
+// deletion time by the mailbox's own clock, at a server that refuses every
+// call too, with a 503 or by refusing every pass: a server cannot keep forward
+// secrecy off by refusing the mailbox (PROTOCOL.md §12.4, §15.3). A minute
+// before its time each stays. Of the current one only the key goes: its
+// statement stays, recv and status read the key as deleted, not lost, and the
+// first renewal the server takes makes a new key.
+func TestEveryPrekeyGoesByTheMailboxsClockAtAServerThatRefusesEveryCall(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	e := newEnv(t)
-	a, b := e.mailbox(), e.mailbox()
-	send(t, a, b, "first, sealed to the prekey about to retire")
-	send(t, a, b, "second, sealed to it too")
-	e.clock.Add(2 * time.Second)
+	b := e.mailbox()
+	retired := numberOf(t, b)
+	e.clock.Add(time.Hour)
 	if _, err := b.Rekey(ctx); err != nil {
 		t.Fatal(err)
 	}
-	keys, _ := filepath.Glob(filepath.Join(b.Dir(), "keys", "prekeys", "*.agekey"))
-	var off time.Duration
-	o := e.skewed(&off)
-	o.HTTPClient = &http.Client{Transport: jumpAtFetch{&off, 70 * 24 * time.Hour}}
-	jumpy, err := client.Open(b.Dir(), o)
-	if err != nil {
+	cur := numberOf(t, b)
+	deletion := func(n uint64) time.Time {
+		t.Helper()
+		notAfter, err := time.Parse(protocol.TimeLayout, strings.Split(string(statement(t, b, n, ".txt")), "\n")[5])
+		if err != nil {
+			t.Fatal(err)
+		}
+		return notAfter.Add(protocol.TTL)
+	}
+	retiredAt, curAt := deletion(retired), deletion(cur)
+	e.srv.SetMiddle(func(w http.ResponseWriter, _ *http.Request, _ http.Handler) {
+		http.Error(w, "down", http.StatusServiceUnavailable)
+	})
+	drain := func(at time.Time) {
+		t.Helper()
+		e.clock.Add(at.Sub(e.clock.Now()))
+		if _, err := b.Receive(ctx); err == nil || strings.Contains(err.Error(), "state file records") {
+			t.Fatalf("a drain at %s at a server that refuses every call: %v", at.Format(time.DateTime), err)
+		}
+	}
+	drain(retiredAt.Add(-time.Minute))
+	if !exists(prekeyFile(b, retired, ".agekey")) {
+		t.Fatal("the retired prekey went a minute before its deletion time")
+	}
+	drain(retiredAt.Add(time.Minute))
+	if exists(prekeyFile(b, retired, ".agekey")) || !exists(prekeyFile(b, cur, ".agekey")) {
+		t.Fatalf("past the retired prekey's deletion time: it is kept %v, the current one %v", exists(prekeyFile(b, retired, ".agekey")), exists(prekeyFile(b, cur, ".agekey")))
+	}
+	e.srv.SetMiddle(func(w http.ResponseWriter, _ *http.Request, _ http.Handler) {
+		fakeserver.WriteJSON(w, http.StatusUnauthorized, protocol.Problem{Type: protocol.CodeInvalidPass.TypeURI(), Status: http.StatusUnauthorized, Code: protocol.CodeInvalidPass})
+	})
+	drain(curAt.Add(-time.Minute))
+	if !exists(prekeyFile(b, cur, ".agekey")) {
+		t.Fatal("the current prekey went a minute before its deletion time")
+	}
+	drain(curAt.Add(time.Minute))
+	if exists(prekeyFile(b, cur, ".agekey")) || !slices.Contains(client.Statements(t, b), cur) {
+		t.Fatalf("past the current prekey's deletion time: its key is kept %v, its statement %v", exists(prekeyFile(b, cur, ".agekey")), slices.Contains(client.Statements(t, b), cur))
+	}
+	if st, err := b.Status(ctx); err != nil || strings.Contains(strings.Join(st.Attention, "\n"), "state file records") {
+		t.Fatalf("status once the current key went: %v, %q", err, st.Attention)
+	}
+	e.srv.SetMiddle(nil)
+	if _, err := b.Receive(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := jumpy.Receive(ctx); err == nil {
-		t.Fatal("a drain whose clock jumped 70 days went through")
-	}
-	if after, _ := filepath.Glob(filepath.Join(b.Dir(), "keys", "prekeys", "*.agekey")); len(after) < len(keys) {
-		t.Fatalf("%d prekeys before a drain whose clock jumped, %d after", len(keys), len(after))
-	}
-	right, err := client.Open(b.Dir(), e.opts())
-	if err != nil {
+	e.clock.Add(time.Hour + time.Second)
+	if _, err := b.Receive(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if res, err := right.Receive(ctx); err != nil || len(res.Delivered) != 2 {
-		t.Errorf("once the clock is right: %+v, %v", res, err)
+	if n := numberOf(t, b); n == cur || !exists(prekeyFile(b, n, ".agekey")) || slices.Contains(client.Statements(t, b), cur) {
+		t.Errorf("once the server takes a renewal: prekey %d after %d, its key kept %v, the old statement kept %v", n, cur, exists(prekeyFile(b, n, ".agekey")), slices.Contains(client.Statements(t, b), cur))
 	}
 }
 
@@ -423,19 +443,14 @@ func TestADrainDeletesARetiredKeyPastItsDeletionTime(t *testing.T) {
 	}
 }
 
-// A prekey past its deletion time by the mailbox's clock, at a time no server
-// has confirmed, is said in status and stays on disk (PROTOCOL.md §12.4,
-// §15.3): by a clock far ahead, which the clock's coming back ends, and by a
-// right clock at a server that refuses every pass, which a pass accepted ends.
+// A prekey past its deletion time by the mailbox's clock, its key still on
+// disk, is said in status until a recv deletes it, whether or not its server
+// answers (PROTOCOL.md §12.4, §15.3).
 func TestAPrekeyPastItsDeletionTimeWithNoServerConfirmingItIsSaid(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	e := newEnv(t)
-	off := time.Duration(0)
-	b, err := client.Init(ctx, t.TempDir(), e.skewed(&off))
-	if err != nil {
-		t.Fatal(err)
-	}
+	b := e.mailbox()
 	e.clock.Add(2 * time.Second)
 	if _, err := b.Rekey(ctx); err != nil {
 		t.Fatal(err)
@@ -448,56 +463,31 @@ func TestAPrekeyPastItsDeletionTimeWithNoServerConfirmingItIsSaid(t *testing.T) 
 		}
 		return strings.Contains(strings.Join(st.Attention, "\n"), "past their deletion time")
 	}
-	keys := func() int {
-		t.Helper()
-		found, err := filepath.Glob(filepath.Join(b.Dir(), "keys", "prekeys", "*.agekey"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		return len(found)
-	}
-	held := keys()
 	past := protocol.PrekeyLifetime + protocol.TTL + 2*time.Hour
 	if said() {
 		t.Fatal("said of a mailbox whose prekeys are all within their time")
 	}
-
-	off = protocol.PrekeyLifetime + protocol.TTL - time.Minute
+	e.clock.Add(protocol.PrekeyLifetime + protocol.TTL - time.Minute)
 	if said() {
 		t.Fatal("said a minute before any prekey's deletion time")
 	}
-
-	// The mailbox's clock alone runs ahead: the server refuses its pass.
-	off = past
+	e.clock.Add(past - (protocol.PrekeyLifetime + protocol.TTL - time.Minute))
 	if !said() {
-		t.Fatal("a clock past the deletion time, unconfirmed, is not said")
+		t.Fatal("a prekey past its deletion time is not said")
 	}
-	if _, err := b.Receive(ctx); err == nil {
-		t.Fatal("a drain at a clock far ahead went through")
-	}
-	if !said() || keys() < held {
-		t.Fatalf("after a refused drain: said %v, %d prekeys of %d", said(), keys(), held)
-	}
-	off = 0
-	if said() || keys() < held {
-		t.Fatalf("the clock back: said %v, %d prekeys of %d", said(), keys(), held)
-	}
-
-	// Both clocks are right, and the server refuses every call.
-	e.clock.Add(past)
 	e.srv.SetMiddle(func(w http.ResponseWriter, _ *http.Request, _ http.Handler) {
 		http.Error(w, "down", http.StatusServiceUnavailable)
 	})
 	if _, err := b.Receive(ctx); err == nil {
 		t.Fatal("a drain at a server that refuses every call went through")
 	}
-	if !said() || keys() < held {
-		t.Fatalf("a server refusing every call: said %v, %d prekeys of %d", said(), keys(), held)
-	}
-
-	// A server accepts the pass, and then the renewal, which a failed one
-	// tries again an hour after it: the time is confirmed.
 	e.srv.SetMiddle(nil)
+	if said() {
+		st, _ := b.Status(ctx)
+		t.Fatalf("still said once a recv ran: %q", st.Attention)
+	}
+	// A server takes the renewal again, which a failed one tries an hour
+	// after it.
 	if _, err := b.Receive(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -505,13 +495,9 @@ func TestAPrekeyPastItsDeletionTimeWithNoServerConfirmingItIsSaid(t *testing.T) 
 	if _, err := b.Receive(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if said() {
-		st, _ := b.Status(ctx)
-		t.Fatalf("still said once a server confirmed the time: %q", st.Attention)
-	}
 
-	// A mailbox that keeps its own revocation is finished: no server will
-	// confirm a time for it, and status says what it is instead.
+	// A mailbox that keeps its own revocation is finished: its key past its
+	// deletion time is not said, and status says what it is instead.
 	rec, err := b.Revocation(ctx)
 	if err != nil {
 		t.Fatal(err)

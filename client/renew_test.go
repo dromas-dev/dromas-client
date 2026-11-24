@@ -817,9 +817,9 @@ func TestAFailedRenewalIsSentAgainUnchanged(t *testing.T) {
 // protocol.PrekeyLifetime after it was signed, whatever the server does. When
 // a statement it holds expires, the mailbox signs a new key at the next
 // serial, and deletes a passed-over key protocol.TTL after its not_after, as
-// it does any retired one, by the date of a pass a server took. The prekey it
-// published last, whose deletion time comes while every renewal fails, is not
-// retired: its statement and working key go on signing the mailbox's passes.
+// it does any retired one, by its own clock. Of the prekey it published last,
+// whose deletion time comes while every renewal fails, only the key goes: its
+// statement and working key go on signing the mailbox's passes.
 func TestAServerThatFailsEveryRenewalGetsEachKeyOnce(t *testing.T) {
 	t.Parallel()
 	e := newWorkEnv(t)
@@ -897,12 +897,10 @@ func TestAServerThatFailsEveryRenewalGetsEachKeyOnce(t *testing.T) {
 	if _, err := a.Resolve(context.Background(), b.Address()); err == nil || !strings.Contains(err.Error(), "has ended") {
 		t.Fatalf("a sender given the first key's statement on day %d: %v", days, err)
 	}
-	// A key whose deletion time came after the last pass a server took from
-	// the mailbox, on the day before its certificate ended, is kept: a
-	// mailbox deletes by its clock only what a server's answer dated by that
-	// clock lets it (PROTOCOL.md §12.4), and this mailbox cannot tell a lost
-	// pass from a clock far ahead. One whose deletion time came before that
-	// pass went then.
+	// Every key whose deletion time has come by the mailbox's clock is gone,
+	// those whose time came after the last pass a server took from the
+	// mailbox, on the day before its certificate ended, among them: a mailbox
+	// deletes a prekey by its own clock, answered or not (PROTOCOL.md §12.4).
 	stem := func(l lease) string {
 		return filepath.Join(b.Dir(), "keys", "prekeys", strconv.FormatUint(l.p.Serial, 10))
 	}
@@ -911,13 +909,13 @@ func TestAServerThatFailsEveryRenewalGetsEachKeyOnce(t *testing.T) {
 	for _, key := range order {
 		l := byKey[key]
 		gone := l.p.NotAfter.Add(protocol.TTL)
-		switch {
-		case !gone.After(lastPass) && exists(stem(l)+".agekey"):
-			t.Errorf("serial %d outlived its deletion time, %s, by a pass a server took on %s", l.p.Serial, gone.Format(time.DateTime), lastPass.Format(time.DateTime))
-		case gone.After(lastPass) && !gone.After(e.clock.Now()):
-			if !exists(stem(l) + ".agekey") {
-				t.Errorf("serial %d was deleted by a clock no server has taken a pass dated by since %s", l.p.Serial, lastPass.Format(time.DateTime))
-			}
+		if gone.After(e.clock.Now()) {
+			continue
+		}
+		if exists(stem(l) + ".agekey") {
+			t.Errorf("serial %d outlived its deletion time, %s, by the mailbox's clock, %s", l.p.Serial, gone.Format(time.DateTime), e.clock.Now().Format(time.DateTime))
+		}
+		if gone.After(lastPass) {
 			waiting = append(waiting, l)
 		}
 	}
@@ -925,7 +923,7 @@ func TestAServerThatFailsEveryRenewalGetsEachKeyOnce(t *testing.T) {
 		t.Fatal("no key's deletion time came between the last pass taken and now: the test shows nothing")
 	}
 	// The first time a server takes one again, here the waiting renewal
-	// (recv tries it again within the hour), they go, with their statements.
+	// (recv tries it again within the hour), their statements are gone too.
 	// The key in service and every one a message may still wait for are held.
 	e.srv.SetMiddle(nil)
 	if _, err := b.Rekey(context.Background()); err != nil {
@@ -933,7 +931,7 @@ func TestAServerThatFailsEveryRenewalGetsEachKeyOnce(t *testing.T) {
 	}
 	for _, l := range waiting {
 		if exists(stem(l)+".agekey") || has(b, "prekeys/"+strconv.FormatUint(l.p.Serial, 10)+".txt.sig") {
-			t.Errorf("serial %d, a passed-over key, outlived its not_after + protocol.TTL once a server took a pass again", l.p.Serial)
+			t.Errorf("serial %d, a passed-over key, outlived its not_after + protocol.TTL", l.p.Serial)
 		}
 	}
 	for _, key := range order {

@@ -692,23 +692,10 @@ func TestScriptAsksBeforeItPosts(t *testing.T) {
 	}
 }
 
-// A mailbox's own revocations: a clock far ahead deletes no key that a
-// message waits for; a mailbox that holds its own revocation of its address
-// signs nothing more.
+// A mailbox that holds its own revocation of its address signs nothing more.
 func TestScriptUnderItsOwnRevocations(t *testing.T) {
 	w := newWorld(t)
-	s1, s2, s3, s4 := w.mailbox(), w.mailbox(), w.mailbox(), w.mailbox()
-	s1.mustSend(s4, "sealed to a prekey about to retire")
-	time.Sleep(time.Second)
-	s4.must("dr_rekey")
-	keys := func() int { k, _ := filepath.Glob(s4.file("prekeys/*.agekey")); return len(k) }
-	k0 := keys()
-	if d := (at{s4, 70 * 24 * time.Hour}).recv(); d.rc == 0 || keys() != k0 {
-		t.Errorf("a drain at a clock 70 days ahead: %v, %d keys then %d", d, k0, keys())
-	}
-	if d := s4.recv(); !slices.Equal(d.bodies(), []string{"sealed to a prekey about to retire"}) {
-		t.Errorf("the message sealed to the retired prekey, once the clock is right: %v", d)
-	}
+	s2, s3 := w.mailbox(), w.mailbox()
 	s2.revoke()
 	n := len(w.srv.Requests())
 	if r := s2.send(s3.addr.String(), "from a revoked address"); r.rc == 0 || !strings.Contains(r.err, "REVOKED: this mailbox's own address is revoked") || !s2.bare() {

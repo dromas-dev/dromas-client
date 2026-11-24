@@ -708,9 +708,9 @@ func TestARemovalKilledAtEachStepFinishesAtTheNextPrune(t *testing.T) {
 	}
 }
 
-// A prune with no reading a server took finishes no removal a crash left: a key
-// is deleted only by a reading a server took (prune). The marked prekey stays
-// until a prune by a reading, here a renewal's, finishes its removal.
+// A prune with no reading of the clock, the zero time, finishes no removal a
+// crash left (prune). The marked prekey stays until a prune by a reading, here
+// a renewal's, finishes its removal.
 func TestAPruneWithNoReadingFinishesNoRemoval(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
