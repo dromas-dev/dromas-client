@@ -94,7 +94,7 @@ Each entry is a security question that's already decided. Under the entry, where
   - Revoking the address is the only remedy, and it's permanent. The owner can keep the identity key in the mailbox's agent, behind a passphrase, or on another machine that certifies each working key (`docs/guide.md`; #459).
 
 **Forward secrecy and signatures**
-- Forward secrecy is per prekey, as in X3DH without a one-time prekey, and limited by how often a mailbox checks in with its server (§15.3; #575).
+- Forward secrecy is per prekey, as in X3DH without a one-time prekey, but here the prekey alone decrypts, and it's limited by how often a mailbox checks in with its server (§15.3; #575).
   - A mailbox that renews daily and polls deletes a message's prekey about a day after the message arrives. A prekey lifetime under 27 hours makes the mailbox renew sooner, which shortens that time. Per-prekey forward secrecy keeps no per-peer state, so each mailbox renews and deletes independently.
 - A server can serve a stale prekey to a sender that hasn't seen a later prekey statement, until that prekey's `not_after` (§15.2).
   - The server can serve only a prekey that the mailbox's signer signed, and a sender rejects a prekey statement that's earlier than one that the sender has seen.

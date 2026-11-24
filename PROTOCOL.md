@@ -215,7 +215,7 @@ Where this document uses a term below as a defined term, the term has the sense 
 | OpenSSH security key | the identity key of types `sk-ecdsa-sha2-nistp256@openssh.com` and `sk-ssh-ed25519@openssh.com`: the key's wire form, and what its signature covers | OpenSSH `PROTOCOL.u2f`, read 2026-11-23 |
 | SSHSIG | every signature other than a certificate's own: the signer's signature over SHA-512 of the message, in a namespace | OpenSSH 10.6p1 `PROTOCOL.sshsig` |
 | SSH public key text | `<key type> <base64 of the wire key>` | RFC 4253 §6.6, RFC 8709, RFC 5656 |
-| OpenSSH certificate | the certificate of a working key, with the certificate's own signature | draft-ietf-sshm-cert-01 |
+| OpenSSH certificate | the certificate of a working key, with the certificate's own signature | draft-ietf-sshm-cert-03 |
 | SHA-384 | the address | FIPS 180-4 |
 | SHA-256 | a message id; the hash of a prekey statement that a send names (Section 11.10); in what a security key signs, the hash of the application and of the signed bytes | FIPS 180-4 |
 | UUID | an envelope's `msg_id` | RFC 9562 |
@@ -395,7 +395,7 @@ A certificate is an OpenSSH user certificate. A verifier MUST check every row of
 | Key id | exactly `dromas-cert-v1` |
 | Principals | exactly one: the mailbox's address |
 | Validity | `valid after` ≤ now < `valid before`, at the verifier's clock, in whole seconds; each at or before `9999-12-31T23:59:59Z`; and `valid before` less `valid after` at most the protocol's maximum |
-| Critical options | none. A verifier MUST refuse a certificate with any critical option (draft-ietf-sshm-cert-01 §2.1.1) |
+| Critical options | none. A verifier MUST refuse a certificate with any critical option (draft-ietf-sshm-cert-03 §2.1.1) |
 | Extensions | none. A verifier MUST refuse a certificate with any extension |
 | Reserved | empty |
 | Nonce | exactly 32 bytes |
@@ -678,7 +678,7 @@ A sender pads every message so that the message's ciphertext is a whole number o
   - A ciphertext that is already a whole number of blocks gets no padding.
   - The padding is not signed.
 - **Examples.** A ciphertext of 40,000 bytes has a block of 4 KiB, and is padded to 40,960 bytes. A ciphertext of 70,000 bytes has a block of 8 KiB, and is padded to 73,728 bytes.
-- **The ciphertext is what is measured.** A sender MUST refuse to send a ciphertext whose size is not a whole number of blocks. The sender computes the padding from the ciphertext's size before encrypting. For example, an age file (C2SP age) that has one native stanza and no other stanza, for a plaintext of L bytes, has this many bytes:
+- **The ciphertext is what is measured.** A sender MUST refuse to send a ciphertext whose size, apart from any stanza that a server ignores (Section 9.4), is not a whole number of blocks. The sender computes the padding from the ciphertext's size before encrypting. For example, an age file (C2SP age) that has one native stanza and no other stanza, for a plaintext of L bytes, has this many bytes:
 
       H + 16 + L + 16 × max(1, ⌈L / 65,536⌉)
 
@@ -801,6 +801,7 @@ A revocation record carries an identity's revocations, and the record proves its
   - A list, a fetch, a `HEAD` and an ack check the call again first. Where the change ended the call's pass, the server answers the call as it answers a fresh call, such as with `401` or `410`. It answers `409` only where its second read meets a change too.
   - A renewal, an ACL, a revocation, an adopt and a leave answer `409` at once. A send is answered as a fresh send is where its recipient or its sender no longer stands, and `409` otherwise.
   - A registration answers that case in its own way (Section 11.7, step 8), and an ack whose message another call deleted answers `404` (Section 11.13).
+- **The first segment under `/v1/`.** A first path segment that begins with an ASCII letter and `_` names an address. `d_` is the one address form (Section 4.2). A server answers `400 invalid_address` to such a segment of another form, and to one that is not an `address`. Any other first segment is a route that the server does not offer. No route of this protocol has a first segment whose second character is `_`.
 - **Unknown routes.** A server answers an unknown route with the router's plain `404` or `405`, which has no code. A retired version comes first (Section 11.4, rule 0): the server answers a request under `/v1/` whose version is retired with `410 client_version_unsupported` on every path but the document's, an unknown route included. A server MAY answer a path that is not in its clean form with a redirect to the clean form, ahead of every check of Section 11.4. A path is not in its clean form when the path has a `.` or `..` segment or two `/` in a row, or is `/v1` or `/to` without its last `/`. A client reads that answer as no answer (Section 11.1). The body of that answer may be of any type. Past a limit, the server answers an unknown route `429 rate_limited`, as for any call. A client reads a plain `404` or `405` by the status alone, as a route that the server does not offer. A client reads a `404` with a code as that code, and a `404` with a code the client does not know as a plain `404` (Section 11.3).
 - **A server answers `408 request_timeout` to a request whose body does not arrive in time.**
 - **A server that cannot complete a request, or is not ready to answer, answers `503 unavailable` with `Retry-After`.** The server sends this answer instead of a wrong answer. A client treats any other `5xx` as the same failure, but with no wait given.
@@ -828,7 +829,7 @@ This table gives each code's meaning, and how a client acts on the code:
 | Status | Code | Meaning |
 |---|---|---|
 | 400 | `invalid_request` | a request body that is not a JSON text Section 3.3 accepts; a member or query parameter, named in `param`, that is missing, unknown, repeated, or has a value the call does not accept, including a byte member that is not base64 in base64's one encoding (Section 2.2); a send's body whose age header does not parse (Section 11.10, step 4) |
-| 400 | `invalid_address` | a path address that is not an `address` (Section 4.2) |
+| 400 | `invalid_address` | a first path segment under `/v1/` that begins with an ASCII letter and `_`, and is not an `address` (Sections 4.2, 11.2) |
 | 400 | `identity_mismatch` | an identity document that does not hash to the address, or that does not have the form Section 4.1 gives |
 | 400 | `unsupported_key_type` | an identity key type that this protocol does not define, or that this server does not register; `key_types` lists the types the server registers |
 | 400 | `invalid_key` | an identity key that fails its type's key checks; a prekey statement or certificate that is malformed or badly signed |
@@ -1678,7 +1679,7 @@ Dromas protects a message's content from everyone but the message's recipient. D
 - **A message waiting on the server is exposed until the mailbox fetches it.** A mailbox that stops renewing keeps its ended prekey as the current prekey. The mailbox's last messages stay exposed until the mailbox renews.
 - **A mailbox that no server accepts a pass from keeps its retired prekeys past their deletion time.** The mailbox keeps those prekeys until a server accepts a pass from the mailbox. This is because the mailbox cannot tell whether its clock is far ahead or a server is refusing the mailbox, and by that clock the mailbox deletes no key that a message may wait for.
 - **Forward secrecy depends on real deletion.** A key kept in a backup, a synced folder or a store with version history survives its deletion.
-- **Forward secrecy is per prekey, as in X3DH without a one-time prekey.** A leaked prekey decrypts every message encrypted to it until the mailbox renews and deletes the prekey, because version 1 has no ratchet.
+- **Forward secrecy is per prekey, as in X3DH without a one-time prekey, but here the prekey alone decrypts.** X3DH needs both the identity key and the signed prekey to compute an earlier shared key. A leaked prekey decrypts every message encrypted to it until the mailbox renews and deletes the prekey, because version 1 has no ratchet.
 - **Forward secrecy per reply can be added as an optional envelope member.** Version 1 does not yet define such a member, but leaves room for one. Such a member is possible because the envelope is inside the encryption, where the server cannot see the envelope, and because a reader ignores an unknown member (Sections 3.3, 14).
 
 ### 15.4. Sender authentication
@@ -1818,7 +1819,7 @@ Dromas protects a message's content from everyone but the message's recipient. D
 - **[age]** C2SP, "age", v1.1.0, read 2026-11-02, <https://c2sp.org/age@v1.1.0>.
 - **[BIP 173]** Wuille, P. and G. Maxwell, "Base32 address format for native v0-16 witness outputs", BIP 173, March 2017, <https://github.com/bitcoin/bips/blob/master/bip-0173.mediawiki>.
 - **[draft-ietf-hpke-pq-03]** Barnes, R. and D. Connolly, "Post-Quantum and Post-Quantum/Traditional Hybrid Algorithms for HPKE", Work in Progress, Internet-Draft, draft-ietf-hpke-pq-03, 6 November 2025, <https://datatracker.ietf.org/doc/html/draft-ietf-hpke-pq-03>.
-- **[draft-ietf-sshm-cert-01]** Miller, D., "SSH Certificate Format", Work in Progress, Internet-Draft, draft-ietf-sshm-cert-01, 14 June 2026, <https://datatracker.ietf.org/doc/html/draft-ietf-sshm-cert-01>.
+- **[draft-ietf-sshm-cert-03]** Miller, D., "SSH Certificate Format", Work in Progress, Internet-Draft, draft-ietf-sshm-cert-03, 17 November 2026, <https://datatracker.ietf.org/doc/html/draft-ietf-sshm-cert-03>.
 - **[FIPS 180-4]** National Institute of Standards and Technology, "Secure Hash Standard (SHS)", FIPS PUB 180-4, DOI 10.6028/NIST.FIPS.180-4, August 2015, <https://csrc.nist.gov/pubs/fips/180-4/upd1/final>.
 - **[FIPS 186-5]** National Institute of Standards and Technology, "Digital Signature Standard (DSS)", FIPS PUB 186-5, DOI 10.6028/NIST.FIPS.186-5, February 2023, <https://csrc.nist.gov/pubs/fips/186-5/final>.
 - **[PROTOCOL.sshsig]** OpenSSH, "PROTOCOL.sshsig", OpenSSH 10.6p1, <https://github.com/openssh/openssh-portable/blob/V_10_6_P1/PROTOCOL.sshsig>.

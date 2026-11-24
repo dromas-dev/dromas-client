@@ -29,8 +29,9 @@ const (
 	ageNonce = 16
 	ageChunk = 64 << 10
 	ageTag   = 16
-	// The header's size for one recipient of the post-quantum type. It never
-	// varies: its fields are fixed-size values in unpadded base64.
+	// The header's size for one recipient of the post-quantum type. As age
+	// writes it, it never varies: its fields are fixed-size values in
+	// unpadded base64.
 	ageHeaderPostQuantum = 1627
 )
 

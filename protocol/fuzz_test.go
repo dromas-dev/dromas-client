@@ -533,7 +533,7 @@ func edwardsKeyFault(key ssh.PublicKey) string {
 
 // signedBytes is what a certificate's signature is over: the certificate
 // written without its signature, as the format lays it out
-// (draft-ietf-sshm-cert-01 §2.1), read apart from the library's check.
+// (draft-ietf-sshm-cert-03 §2.1), read apart from the library's check.
 func signedBytes(cert *ssh.Certificate) []byte {
 	c := *cert
 	c.Signature = nil
