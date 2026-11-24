@@ -302,6 +302,8 @@ The first renewal after a restore, the one in step 2, can print a `prekey_not_ma
 
 Without `allowed` and `blocked`, the first renewal that `recv` makes replaces the server's access control list (ACL) with an open one. A sender that you blocked then reaches `held/` again until you restore the lists.
 
+A restored mailbox can't decrypt a message that's sealed to a prekey that it doesn't have: any prekey, after a restore without `prekeys/`, or a prekey that the mailbox made after the backup. `recv` refuses each such message as `decrypt_error` and acknowledges it, so the server deletes it. `refused/` keeps its ciphertext, which no key that the mailbox keeps can open, and nothing in it names the sender (`PROTOCOL.md` §15.4).
+
 ### Restore required
 
 The mailbox stops with `restore_required` when `prekeys/` holds a prekey that `state` doesn't name. This happens when `state` is lost and `prekeys/` isn't, or when you restore `state` from a copy older than the last prekey renewal and keep `prekeys/`. Until you run `dromas init --restore`, the mailbox doesn't receive, send, deliver, or renew anything. `dromas init --restore` adopts the prekeys in `prekeys/` and then renews.

@@ -606,6 +606,7 @@ lowhexdig = DIGIT / %x61-66   ; HEXDIG in lowercase
 
 - **An empty string in `subject`, `in_reply_to` or `supersedes` is the same as the member left out.** A writer leaves out `subject`, `in_reply_to` or `supersedes` when the member's value would be an empty string.
 - **A sender MUST refuse an `in_reply_to` or `supersedes` that is not a `msg_id`.** A reader checks only that each is a string.
+- **`in_reply_to` is the sender's claim.** The sender signs `in_reply_to` with the rest of the envelope, but nothing ties it to a message that exists. A reader takes it as what the sender says the message replies to.
 - **A sender MUST write `group` with at least two addresses, `from` and `to` among them, each address once, in ascending byte order of the addresses' text.**
 - **A reader reads `group` in these steps:**
   1. A value that is not an array of addresses is malformed, as any member of the wrong type is (Section 12.3, check 6).
@@ -1350,7 +1351,7 @@ A client drains its mailbox: it lists (Section 11.11), fetches the message of ea
 
 **The checks, in this order.** Each check but check 9 names the code it refuses with. A client MUST NOT accept a message that does not clear every check.
 
-1. **Check 1, decryption.** The reader decrypts the file, trying every retained prekey (`decrypt_error`). A reader MAY refuse a file without exactly one native stanza as `decrypt_error`, before any key agreement. No server accepts such a file as a send (Section 11.10, step 7).
+1. **Check 1, decryption.** The reader decrypts the file, trying every retained prekey (`decrypt_error`). A reader MUST refuse a file without exactly one native stanza as `decrypt_error`, before any key agreement. No server accepts such a file as a send (Section 11.10, step 7).
 2. **Check 2, layout.** The plaintext has the layout of Section 9.2: the envelope on line 1, then a signature block from line 2 to the first END line, followed by LF (`malformed_message`).
 3. **Check 3, JSON.** The envelope is one JSON object, read by Section 3.3's rules for a JSON text, the rule on types aside, and the envelope's body meets the same rules (`invalid_envelope`). Check 6 reads the types of the envelope's members. The client passes the body on unchanged.
 4. **Check 4, identity.** The sender's identity document comes from the envelope's `identity`.
@@ -1695,19 +1696,19 @@ Dromas protects a message's content from everyone but the message's recipient. D
   - A revocation of the stolen key's certificate ends the key wherever the revocation is seen (Section 12.6).
   - Messages that the owner sent under a revoked certificate, and that are still unread, are refused along with the thief's messages.
 - **The party that has the identity key chooses how long a certificate runs, up to the server's maximum and never past the protocol's maximum.** A shorter certificate ends a stolen working key sooner, and needs the identity more often. A reader checks a certificate at the reader's own clock, because nothing vouches for when a signature was made. A message may also wait the TTL before it is read. So a certificate signs messages that every reader accepts until the certificate's `valid before`, less the message margin (Section 2.3). For a certificate of the full maximum, that is the server's maximum less the skew allowance and the message margin, counted from when the maker made the certificate.
-- **A stolen pass works only for the time that the pass has left, at most an hour, and only at the server that the pass names.** A stolen pass:
+- **A stolen pass works until the pass ends, and only at the server that the pass names.** A client signs a pass to end at most 10 minutes after signing (Section 8). So a pass taken from a log, a proxy, or anything else that the pass passes through works for the rest of those minutes, and longer by as much as the client's clock runs ahead of the server's clock. The hour that a server allows ahead of its own clock is the skew allowance, for clocks that differ (Section 3.4), so no pass that a server accepts has more than an hour left. A pass names no call: a stolen pass carries every call that the mailbox makes as itself. So a stolen pass:
   - gives the mailbox's metadata and ciphertext;
   - gives control of the mailbox's availability: deleting unacked messages permanently, leaving the mailbox's account, and setting the mailbox's ACL, with which the stolen pass can refuse every sender until the owner sets the next ACL;
   - gives sending in the mailbox's name, which verifies at no recipient;
   - never gives plaintext, signs no message and no prekey statement, and cannot revoke the address.
 
-  All of this is within a hostile server's powers (Section 15.2), at the one server that the pass names. So a pass lasts at most an hour.
+  All of this is within a hostile server's powers (Section 15.2), at the one server that the pass names, until the pass ends.
 - **A pass is not bound to the request that carries the pass.** A binding of the pass to each request, such as an HTTP message signature (RFC 9421) or a proof of possession (RFC 9449), costs one of these properties:
   - A signature over a send would cover the recipient and the ciphertext. A hostile server would then keep a signed record of who wrote to whom, which Section 15.2 rules out.
   - A signature over an ack or an ACL has the same cost, because a message id is the ciphertext's hash and an ACL names the mailbox's peers.
   - A binding to the TLS connection (RFC 9266) needs the TLS session's exporter where the server checks the pass. The party that terminates TLS can be a process other than the one that checks the pass.
 
-  So the pass is bounded by at most an hour and its one server, and a stolen pass gives only what a hostile server can do (Section 15.2).
+  So the pass is bounded by its end and its one server, and a stolen pass gives only what a hostile server can do (Section 15.2).
 - **A stolen prekey decrypts every message encrypted to it, until the mailbox renews.** A sender that has seen no later prekey statement can still be served the old statement until the old statement's `not_after`. A shorter prekey lifetime (Section 12.4) narrows that time, for a mailbox that renews often.
 
 ### 15.6. Revocation's limits
@@ -1754,6 +1755,7 @@ Dromas protects a message's content from everyone but the message's recipient. D
 
 ### 15.9. Addresses, messages, and availability
 
+- **A mailbox is one durable state with one writer.** What a mailbox holds against a hostile server is in that state: the replay set (Section 12.3, checks 8 and 9), the identities that the mailbox pinned (Section 12.3), the revocations that the mailbox kept (Section 12.5), and the mailbox's prekeys (Section 12.4). The state outlives every process that runs the mailbox. So more concurrency is more mailboxes, each with its own identity and address. The bullets below state what a second writer costs, and what a state lost or put back from an older copy costs.
 - **An address is a send capability.** Keeping an address private is the first defence against unwanted messages. Sending to a mailbox hands that mailbox the sender's address, so the mailbox can write back.
 - **Authentic is not safe.** A signed message from a compromised or prompt-injected sender is genuine. Messages are data, never instructions: a verified signature proves who sent a message, not whether to obey the message. A mailbox's defence at the server is the mailbox's ACL, whose allow list names the senders that the mailbox accepts.
 - **An open mailbox can be filled to its caps, and its intake budget spent (Section 11.10, step 8).** One verified sender within the sender's own limits can do this, and so can enough verified identities. This delays the messages of the mailbox's other senders.
@@ -1762,7 +1764,7 @@ Dromas protects a message's content from everyone but the message's recipient. D
 - **A reader that bounds its drains limits a hostile server's cost to that reader.** Messages from senders that a server made up fail to decrypt or verify, and leave no pin. A sender that a server made with the server's own keys is a real sender, at an address that nobody gave the reader.
 - **Silent drops are undetectable, because the protocol has no receipt from the recipient.** A sender's repeat post (Section 15.8) gets the server's word, which proves no delivery.
 - **A message is sent again as the same envelope (Section 12.2).** A new message would carry a new `msg_id`, and a reader that acts on messages would act twice. A post whose answer is lost costs a send. In that case the server stored the message, and the next post is a new ciphertext that the server stores and counts again. The reader acks the second copy and does not deliver the second copy while the reader's replay set holds the first (Section 12.3, check 9).
-- **Two copies of a mailbox that both run fail as one mailbox.** A machine that runs beside the mailbox needs a mailbox of its own, with its own identity and address. Two copies of a mailbox keep two replay sets and two sets of prekeys, and each copy renews and deletes without the other. So one copy delivers again a message that the other copy delivered, and one copy still has a prekey that the other copy retired. A mailbox restored from its identity alone replaces the mailbox that it restores (Section 12.4). A mailbox restored from an older backup cannot tell a later prekey statement of its own from a thief's.
+- **Two copies of a mailbox that both run fail as one mailbox.** Two copies of a mailbox keep two replay sets and two sets of prekeys, and each copy renews and deletes without the other. So one copy delivers again a message that the other copy delivered, and one copy still has a prekey that the other copy retired. A mailbox restored from its identity alone replaces the mailbox that it restores (Section 12.4). A mailbox restored from an older backup cannot tell a later prekey statement of its own from a thief's.
 - **A mailbox that loses its replay set, or puts back an older copy of the replay set, has failed.** After that failure, a server can deliver again a message that the mailbox accepted before the loss.
   - An honest server still holds each message that the mailbox had not acked at the loss. A hostile server can keep any message and serve it again, until the reader stops accepting its `sent_at`, at most a TTL after it.
   - The mailbox's kept prekeys open that message, and the replay set that the mailbox now keeps does not record the message.
@@ -1776,7 +1778,7 @@ Dromas protects a message's content from everyone but the message's recipient. D
 
 - **Content is protected against harvest-now-decrypt-later, because every prekey is post-quantum.** Against a quantum computer, that protection rests on ML-KEM-768 and SHA3-256 [X-Wing].
 - **Future content, not only authenticity, rests on the classical signature until a mailbox uses a post-quantum signature type.** An active adversary with a quantum computer signs prekey statements in the mailbox's name, and senders encrypt to those prekey statements.
-- **Signatures are classical: Ed25519 or P-256, a security key's included.** A forgery needs a quantum computer at signing time. The transferable audit trail stays valid until such a computer exists. A post-quantum signature key would be added as an identity key type inside v1 (Section 14). A mailbox that moves to such a key gets a new address.
+- **Signatures are classical: Ed25519 or P-256, a security key's included.** A forgery needs a quantum computer at signing time. The transferable audit trail stays valid until such a computer exists. A post-quantum signature key would be added as an identity key type inside v1 (Section 14). A mailbox that moves to such a key gets a new address, because an address commits to one identity key (Section 4.2), and every peer learns the new address as it learned the old one (Section 15.1).
 - **The TLS connections are separate.** Each TLS connection is protected as its endpoints negotiate.
 
 ## 16. Test vectors
@@ -1838,7 +1840,7 @@ Dromas protects a message's content from everyone but the message's recipient. D
 <!-- vale on -->
 ## Appendix A. Where `ssh-keygen` differs (informative)
 
-`ssh-keygen -Y verify` checks a signature, but does not define one. So a client built on the tool checks a signature against Section 3.2 itself. The tool accepts these forms, which Section 3.2 refuses:
+`ssh-keygen -Y verify` checks a signature, but does not define one. So a client built on the tool checks a signature against Section 3.2 itself. Acceptance by the stock tools is not sufficient: a message that `age` decrypts and whose signature `ssh-keygen -Y verify` accepts is not thereby a message that a reader accepts, because a reader makes every check of Sections 3.2 and 12.3. The tool accepts these forms, which Section 3.2 refuses:
 
 - a BEGIN line ending in CRLF;
 - whitespace anywhere in the base64;
