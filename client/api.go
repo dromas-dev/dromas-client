@@ -127,10 +127,11 @@ func (b *Mailbox) exchange(ctx context.Context, method, path string, in any, hdr
 	for k, v := range hdr {
 		req.Header[k] = v
 	}
-	// Every request names this client's version (PROTOCOL.md §11.17), and
-	// names the implementation and its release in User-Agent (RFC 9110
-	// §10.1.5), which a server reads to turn away one faulty release.
-	req.Header.Set(protocol.VersionHeader, b.version)
+	// Every request names the version of the protocol this client implements,
+	// its release's major and minor (PROTOCOL.md §11.17), and names the
+	// implementation and its release in User-Agent (RFC 9110 §10.1.5), which a
+	// server reads to turn away one faulty release.
+	req.Header.Set(protocol.VersionHeader, protocol.RequestVersion(b.version).String())
 	req.Header.Set("User-Agent", "dromas/"+b.version)
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType)

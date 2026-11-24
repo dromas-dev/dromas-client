@@ -209,14 +209,14 @@ func (e *APIError) words() string {
 	return "an answer this client does not know"
 }
 
-// MinVersion is the min_version a client_version_unsupported carries, only where it is
-// a policy's version (protocol.ParsePolicyVersion): a value of any other
-// form is none, and a client shows none of it.
+// MinVersion is the min_version a client_version_unsupported carries, only
+// where it is a version (protocol.ParseVersion): a value of any other form is
+// none, and a client shows none of it.
 func MinVersion(p *protocol.Problem) (string, bool) {
 	if p.Code != protocol.CodeClientVersionUnsupported || p.MinVersion == "" {
 		return "", false
 	}
-	if _, err := protocol.ParsePolicyVersion(p.MinVersion); err != nil {
+	if _, err := protocol.ParseVersion(p.MinVersion); err != nil {
 		return "", false
 	}
 	return p.MinVersion, true

@@ -7,8 +7,9 @@ import (
 	"github.com/dromas-dev/dromas-client/protocol"
 )
 
-// scriptVersion is the version the script names in every request.
-const scriptVersion = "0.6.0"
+// scriptVersion is the version of the protocol the script names in every
+// request.
+const scriptVersion = "0.6"
 
 // The script names its version in every request (PROTOCOL.md §11.17), and a
 // 410 client_version_unsupported is said in the script's words, with

@@ -199,8 +199,8 @@ type Problem struct {
 	// param.
 	Member string `json:"param,omitempty"`
 	// MinVersion is the lowest version a server that retired the request's
-	// takes, where it sets a floor (client_version_unsupported): a policy's version
-	// (ParsePolicyVersion), which a client shows only once it has that form.
+	// takes, where it sets a floor (client_version_unsupported): a version
+	// (ParseVersion), which a client shows only once it has that form.
 	MinVersion string `json:"min_version,omitempty"`
 	// Record is the revocation record of the address a 410 mailbox_revoked names,
 	// which the read of a mailbox always carries, and any other call's where its

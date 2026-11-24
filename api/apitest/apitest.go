@@ -296,12 +296,12 @@ func delaySeconds(v string) bool {
 }
 
 // floor reports whether v is a client_version_unsupported's min_version: none,
-// or a policy's version (PROTOCOL.md §11.17).
+// or a version (PROTOCOL.md §11.17).
 func floor(v string) bool {
 	if v == "" {
 		return true
 	}
-	_, err := protocol.ParsePolicyVersion(v)
+	_, err := protocol.ParseVersion(v)
 	return err == nil
 }
 
