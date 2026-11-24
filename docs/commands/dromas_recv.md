@@ -77,10 +77,10 @@ recv then continues with the next message, and exits with status 3 at its end.
 
 Nothing runs that message's program again until dromas inbox retry-failed, after
 which recv --exec runs it at its next start, with the program it names: a recv
-already running does not. A process killed
-before a program's tries end runs that program again when recv --exec next
-starts, so the program runs at least once for each message and may run twice: it
-should use the "id" as the message's name.
+already running does not. A process killed before a program's tries end runs
+that program again when recv --exec next starts, so the program runs at least
+once for each message and may run twice: it should use the "id" as the
+message's name.
 
 With --webhook, recv posts each message delivered to inbox/ to the URL, beside
 --exec's program or alone: the message's "message" line is the body, as JSON,
@@ -108,9 +108,9 @@ asks, up to 5m0s. Each failed attempt prints a
 retry-failed or clear-failed takes it, and recv exits with status 3. Nothing
 posts that message again until dromas inbox retry-failed, after which recv
 --webhook posts it at its next start, or, already running, after its next drain
-that delivers a message, signed and with its header as any post. A process killed before a message's tries end
-posts it again when recv --webhook next starts, so the endpoint should use
-webhook-id or the "id" as the message's name.
+that delivers a message, signed and with its header as any post. A process
+killed before a message's tries end posts it again when recv --webhook next
+starts, so the endpoint should use webhook-id or the "id" as the message's name.
 
 ```
 dromas recv [flags] [-- <argument>...]
