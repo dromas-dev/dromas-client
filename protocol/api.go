@@ -210,13 +210,9 @@ type Receipt struct {
 // oldest first, and the count of every live message (PROTOCOL.md §11.11).
 // The poll interval is no member: every 200 and 304 of a list carries it in
 // Retry-After.
-//
-// NextCursor is no member of the protocol, and is neither read nor written:
-// dromas-server's build alone names it.
 type MessageList struct {
-	Count      int64         `json:"total_count"`
-	Messages   []MessageInfo `json:"messages"`
-	NextCursor *string       `json:"-"`
+	Count    int64         `json:"total_count"`
+	Messages []MessageInfo `json:"messages"`
 }
 
 // Wait reads a list's wait, the long poll's seconds: delay-seconds, digits
@@ -242,18 +238,6 @@ type MessageInfo struct {
 	Size       int64  `json:"size"`
 	ReceivedAt string `json:"received_at"`
 	ExpiresAt  string `json:"expires_at"`
-}
-
-// cursorGrammar is one or more of base64url's alphabet.
-var cursorGrammar = regexp.MustCompile(`\A[A-Za-z0-9_-]+\z`)
-
-// CheckCursor checks that s is one or more of A-Z, a-z, 0-9, - and _. No
-// call of the protocol takes a cursor: dromas-server's build alone names it.
-func CheckCursor(s string) error {
-	if !cursorGrammar.MatchString(s) {
-		return errors.New("the cursor is not one or more of A-Z, a-z, 0-9, - and _")
-	}
-	return nil
 }
 
 // messageIDGrammar is a message id as a list names it: the SHA-256 of the

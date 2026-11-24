@@ -160,20 +160,6 @@ func TestParseSendQuery(t *testing.T) {
 	}
 }
 
-// CheckCursor takes one or more of base64url's alphabet, and nothing else.
-func TestCheckCursor(t *testing.T) {
-	for _, c := range []string{"A", "AZaz09-_", "MTc5MjAwMDAwMA"} {
-		if CheckCursor(c) != nil {
-			t.Errorf("%q refused", c)
-		}
-	}
-	for _, c := range []string{"", "a/b", "a%2Fb", "a+b", "a=", "a b", "a&b", "a\nb", "é"} {
-		if CheckCursor(c) == nil {
-			t.Errorf("%q taken", c)
-		}
-	}
-}
-
 // What every reader refuses is said in fixed words: none of the text they
 // refuse is quoted.
 func TestAJSONRefusalQuotesNothing(t *testing.T) {
