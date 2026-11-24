@@ -225,7 +225,6 @@ func MinVersion(p *protocol.Problem) (string, bool) {
 // quotaWords say what each limit a rate_limited names has counted.
 var quotaWords = map[protocol.Quota]string{
 	protocol.QuotaPolls:                  "the mailbox has polled as often as the server takes for now",
-	protocol.QuotaPages:                  "the mailbox has listed as many pages after the first as the server takes for now",
 	protocol.QuotaCalls:                  "the mailbox has made as many calls as the server takes for now",
 	protocol.QuotaSends:                  "the mailbox has sent as many messages as the server takes for now",
 	protocol.QuotaRenewals:               "the mailbox has renewed its prekey as many times as the server takes for now",

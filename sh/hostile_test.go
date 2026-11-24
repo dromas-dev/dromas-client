@@ -86,10 +86,9 @@ func TestScriptRefusesInItsOwnWords(t *testing.T) {
 	if len(b.files("peers")) != p0 {
 		t.Errorf("peers/ grew: %q", b.files("peers"))
 	}
-	// A server that always has another page.
+	// A server whose count always says more remain.
 	w.answering(http.MethodGet, "/messages", func(rw http.ResponseWriter, _ *httptest.ResponseRecorder) {
-		c := "1"
-		fakeserver.WriteList(rw, protocol.MessageList{Messages: []protocol.MessageInfo{}, NextCursor: &c})
+		fakeserver.WriteList(rw, protocol.MessageList{Count: 1, Messages: []protocol.MessageInfo{}})
 	})
 	n = len(w.srv.Requests())
 	d = b.recv()
@@ -100,10 +99,10 @@ func TestScriptRefusesInItsOwnWords(t *testing.T) {
 		}
 	}
 	if d.rc != 0 || lists != 100 || !strings.Contains(d.said, "stopped at the most one drain takes") {
-		t.Errorf("a server that always has another page: %d lists, %v", lists, d)
+		t.Errorf("a server whose count always says more remain: %d lists, %v", lists, d)
 	}
 	// A fetch a byte short of the size its list gives, or a byte past it; a
-	// list whose cursor is not URL-safe.
+	// list whose count is not an integer.
 	a.mustSend(b, "whole or not at all")
 	q0 = len(b.files("refused"))
 	for _, c := range []struct {
@@ -116,12 +115,11 @@ func TestScriptRefusesInItsOwnWords(t *testing.T) {
 		{"a fetch a byte past", "", "not the [0-9]* bytes of ciphertext its list gives", func(rw http.ResponseWriter, rec *httptest.ResponseRecorder) {
 			fakeserver.WriteCiphertext(rw, append(rec.Body.Bytes(), 'x'))
 		}},
-		{"a list whose cursor is not URL-safe", "/messages", "list of messages is not one this client reads", func(rw http.ResponseWriter, rec *httptest.ResponseRecorder) {
+		{"a list whose count is not an integer", "/messages", "list of messages is not one this client reads", func(rw http.ResponseWriter, rec *httptest.ResponseRecorder) {
 			var l protocol.MessageList
 			_ = protocol.Unmarshal(rec.Body.Bytes(), &l)
-			c := "a/b"
-			l.NextCursor = &c
-			fakeserver.WriteList(rw, l)
+			rw.Header().Set("Retry-After", fakeserver.PollInterval)
+			fakeserver.WriteJSON(rw, http.StatusOK, map[string]any{"total_count": "1", "messages": l.Messages})
 		}},
 	} {
 		if c.suffix == "" {

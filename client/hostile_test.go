@@ -229,7 +229,7 @@ func TestMadeUpSendersLeaveNothingInPeers(t *testing.T) {
 	}
 }
 
-// One drain handles a bounded amount of messages and of list pages, whatever the
+// One drain handles a bounded amount of messages and of lists, whatever the
 // server lists, and says so: the rest stays on the server for the next one.
 // A drain that stopped at a limit did not empty the mailbox, so it deletes no
 // retired prekey.
@@ -263,23 +263,22 @@ func TestADrainIsBounded(t *testing.T) {
 			t.Fatalf("the next drain delivered %d, more %v", len(res.Delivered), res.More)
 		}
 	})
-	t.Run("pages", func(t *testing.T) {
+	t.Run("lists", func(t *testing.T) {
 		e := newEnv(t)
 		b := e.mailbox()
 		client.SetDrainLimits(t, 1000, 1<<30, 7)
 		lists := 0
-		next := "again"
 		e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, h http.Handler) {
 			if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/messages") {
 				lists++
-				fakeserver.WriteList(w, protocol.MessageList{Count: 1, Messages: []protocol.MessageInfo{}, NextCursor: &next})
+				fakeserver.WriteList(w, protocol.MessageList{Count: 1, Messages: []protocol.MessageInfo{}})
 				return
 			}
 			h.ServeHTTP(w, r)
 		})
 		res, err := b.Receive(ctx)
 		if err != nil || !res.More || lists != 7 {
-			t.Fatalf("a server that always has another page: %v, more %v, %d lists", err, res.More, lists)
+			t.Fatalf("a server whose count always says more remain: %v, more %v, %d lists", err, res.More, lists)
 		}
 	})
 	t.Run("keeps retired prekeys", func(t *testing.T) {
@@ -573,47 +572,6 @@ func TestAFetchOfTheLargestCiphertextIsRead(t *testing.T) {
 	res := receive(t, b)
 	if !served || len(res.Refused) != 1 || res.Refused[0].Code != client.RefusedDecryptError || res.Refused[0].ID != id {
 		t.Fatalf("a fetch of %d bytes, served %v: %+v", protocol.MaxCiphertext, served, res)
-	}
-}
-
-// A list's cursor is one or more of A-Z, a-z, 0-9, - and _, and the next
-// list's query carries it as it is, with no If-None-Match beside it. Any
-// other cursor makes the list no answer: the drain stops, with nothing
-// fetched.
-func TestAListsCursorIsURLSafe(t *testing.T) {
-	t.Parallel()
-	const cursor = "AZaz09-_"
-	for _, c := range []struct {
-		cursor string
-		taken  bool
-	}{{cursor, true}, {"a/b", false}, {"a%2Fb", false}, {"a b", false}, {"", false}} {
-		e := newEnv(t)
-		a, b := e.mailbox(), e.mailbox()
-		send(t, a, b, "after the first page")
-		var queries []string
-		fetched := false
-		e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
-			if r.Method == http.MethodGet && r.URL.Path == mailboxPath(b)+"/messages" {
-				if r.Header.Get("If-None-Match") != "" {
-					t.Error("a list asked with If-None-Match")
-				}
-				queries = append(queries, r.URL.RawQuery)
-				if len(queries) == 1 {
-					fakeserver.WriteList(w, protocol.MessageList{Count: 1, Messages: []protocol.MessageInfo{}, NextCursor: &c.cursor})
-					return
-				}
-				r.URL.RawQuery = "" // the operator answers its own cursor with the mailbox's messages
-			}
-			fetched = fetched || r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, mailboxPath(b)+"/messages/")
-			next.ServeHTTP(w, r)
-		})
-		res, err := b.Receive(context.Background())
-		switch {
-		case c.taken && (err != nil || len(res.Delivered) != 1 || len(queries) != 2 || queries[1] != "cursor="+cursor):
-			t.Errorf("%q: %v, delivered %d, asked %q", c.cursor, err, len(res.Delivered), queries)
-		case !c.taken && (err == nil || len(queries) != 1 || fetched || e.srv.Count(b.Address()) != 1):
-			t.Errorf("%q: taken: %v, asked %q, fetched %v", c.cursor, err, queries, fetched)
-		}
 	}
 }
 

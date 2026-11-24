@@ -217,10 +217,11 @@ func TestScriptDeletesARetiredPrekey(t *testing.T) {
 	}
 }
 
-// A drain follows every page; a pass the server refuses is replaced on the
-// way; a command waits for the lock and leaves none behind when killed; a
-// fault in the mailbox itself stops the drain with nothing judged or acked.
-func TestScriptDrainsEveryPageAndHoldsTheLock(t *testing.T) {
+// A drain lists again until the mailbox is empty; a pass the server refuses
+// is replaced on the way; a command waits for the lock and leaves none
+// behind when killed; a fault in the mailbox itself stops the drain with
+// nothing judged or acked.
+func TestScriptDrainsTheMailboxAndHoldsTheLock(t *testing.T) {
 	w := newWorld(t)
 	a, b := w.mailbox(), w.mailbox()
 	for i := 1; i <= 3; i++ {
@@ -238,15 +239,15 @@ func TestScriptDrainsEveryPageAndHoldsTheLock(t *testing.T) {
 	w.srv.SetPage(2)
 	n := len(w.srv.Requests())
 	d := b.recv()
-	cursors := 0
+	lists := 0
 	for _, r := range w.srv.Requests()[n:] {
-		if r.Method == http.MethodGet && strings.HasSuffix(r.Path, "/messages") && strings.HasPrefix(r.Query, "cursor=") {
-			cursors++
+		if r.Method == http.MethodGet && strings.HasSuffix(r.Path, "/messages") && r.Query == "" {
+			lists++
 		}
 	}
 	w.honest()
-	if !slices.Equal(d.bodies(), []string{"page 1", "page 2", "page 3"}) || w.srv.Count(b.addr) != 0 || cursors != 1 || b.read("pass") == old || !refusedOnce.Load() {
-		t.Errorf("pages of 2: %v, %d held, %d pages after the first, the refused pass replaced %v", d, w.srv.Count(b.addr), cursors, b.read("pass") != old)
+	if !slices.Equal(d.bodies(), []string{"page 1", "page 2", "page 3"}) || w.srv.Count(b.addr) != 0 || lists != 3 || b.read("pass") == old || !refusedOnce.Load() {
+		t.Errorf("pages of 2: %v, %d held, %d lists, the refused pass replaced %v", d, w.srv.Count(b.addr), lists, b.read("pass") != old)
 	}
 	w.srv.SetPage(50)
 	if err := os.Mkdir(b.file("lock"), 0o700); err != nil {

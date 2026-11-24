@@ -883,19 +883,13 @@ paths:
       operationId: listMessages
       summary: List the mailbox's messages
       description: |
-        One page of the mailbox's messages (`PROTOCOL.md` §11.11). An empty mailbox is
-        `{"total_count":0,"messages":[],"next_cursor":null}`.
+        The oldest page of the mailbox's messages (`PROTOCOL.md` §11.11). An empty mailbox is
+        `{"total_count":0,"messages":[]}`.
       parameters:
-        - name: cursor
-          in: query
-          required: false
-          description: The `next_cursor` of the page before (`PROTOCOL.md` §11.11).
-          schema:
-            $ref: '#/components/schemas/Cursor'
         - name: wait
           in: query
           required: false
-          description: How long, in seconds, a first page whose `If-None-Match` would be `304` may be held for a change, at most the server's own time (`PROTOCOL.md` §11.11). Never with `cursor`.
+          description: How long, in seconds, a list whose `If-None-Match` would be `304` may be held for a change, at most the server's own time (`PROTOCOL.md` §11.11).
           schema:
             $ref: '#/components/schemas/Wait'
         - name: If-Match
@@ -907,12 +901,12 @@ paths:
         - name: If-None-Match
           in: header
           required: false
-          description: RFC 9110 §13.1.2's `If-None-Match`, naming the `ETag` of a first page this mailbox was answered, evaluated as `PROTOCOL.md` §11.2 and §11.11 say. A false one is `304`.
+          description: RFC 9110 §13.1.2's `If-None-Match`, naming the `ETag` of a list this mailbox was answered, evaluated as `PROTOCOL.md` §11.2 and §11.11 say. A false one is `304`.
           schema:
             type: string
       responses:
         '200':
-          description: One page of the mailbox's messages.
+          description: The oldest page of the mailbox's messages.
           headers:
             Date:
               $ref: '#/components/headers/Date'
@@ -937,7 +931,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/MessageList'
         '304':
-          description: The first page is unchanged since the `ETag` the poll sent back, at the end of its `wait` where it carried one, or the `If-None-Match` is `*`, which names any page, a page after the first among them, and it has no content (RFC 9110 §15.4.5).
+          description: The page is unchanged since the `ETag` the poll sent back, at the end of its `wait` where it carried one, or the `If-None-Match` is `*`, which names any page, and it has no content (RFC 9110 §15.4.5).
           headers:
             Date:
               $ref: '#/components/headers/Date'
@@ -950,7 +944,7 @@ paths:
             Retry-After:
               $ref: '#/components/headers/PollInterval'
             ETag:
-              description: A first page's tag, the one the poll sent back (`PROTOCOL.md` §11.11, §12.3). A page after the first has none.
+              description: The page's tag, the one the poll sent back (`PROTOCOL.md` §11.11, §12.3).
               required: false
               schema:
                 type: string
@@ -979,12 +973,6 @@ paths:
         The `GET` beside it, answered without content (RFC 9110 §9.3.2;
         `PROTOCOL.md` §11.2, §11.11).
       parameters:
-        - name: cursor
-          in: query
-          required: false
-          description: As on the `GET`.
-          schema:
-            $ref: '#/components/schemas/Cursor'
         - name: wait
           in: query
           required: false
@@ -1005,7 +993,7 @@ paths:
             type: string
       responses:
         '200':
-          description: One page of the mailbox's messages, without content.
+          description: The oldest page of the mailbox's messages, without content.
           headers:
             Date:
               $ref: '#/components/headers/Date'
@@ -1521,7 +1509,7 @@ components:
         type: string
         pattern: '^[0-9]+$'
     ETag:
-      description: A first page's entity tag (RFC 9110 §8.8.3), opaque; a page after the first has none (`PROTOCOL.md` §11.11).
+      description: A list's entity tag (RFC 9110 §8.8.3), opaque (`PROTOCOL.md` §11.11).
       required: false
       schema:
         type: string
@@ -2243,10 +2231,6 @@ components:
       description: The lowercase hex SHA-256 of a prekey statement's bytes (`PROTOCOL.md` §11.10).
       type: string
       pattern: '^[0-9a-f]{64}$'
-    Cursor:
-      description: A list's cursor, opaque and URL-safe (`PROTOCOL.md` §11.11).
-      type: string
-      pattern: '^[A-Za-z0-9_-]+$'
     Wait:
       description: A long poll's wait, delay-seconds in digits alone (`PROTOCOL.md` §11.11).
       type: string
@@ -2265,21 +2249,16 @@ components:
           $ref: '#/components/schemas/Time'
     MessageList:
       type: object
-      required: [total_count, messages, next_cursor]
+      required: [total_count, messages]
       properties:
         total_count:
           description: Every live message in the mailbox.
           $ref: '#/components/schemas/Integer'
         messages:
-          description: One page, oldest first by `received_at`.
+          description: The oldest page, oldest first by `received_at`.
           type: array
           items:
             $ref: '#/components/schemas/MessageInfo'
-        next_cursor:
-          description: The next page's cursor; null on the last page (`PROTOCOL.md` §11.11).
-          anyOf:
-            - $ref: '#/components/schemas/Cursor'
-            - type: 'null'
     MessageInfo:
       type: object
       required: [id, size, received_at, expires_at]
@@ -2450,7 +2429,7 @@ components:
         quota_id:
           description: '`rate_limited`: which limit, from this closed set (`PROTOCOL.md` §11.5). A limit of a server''s own outside it names none.'
           type: [string, 'null']
-          enum: [polls, pages, calls, sends, renewals, certificates, certificate_revocations, registrations, registrations_range, misses, misses_range, sends_before_pass, sends_before_pass_range, requests, requests_range, null]
+          enum: [polls, calls, sends, renewals, certificates, certificate_revocations, registrations, registrations_range, misses, misses_range, sends_before_pass, sends_before_pass_range, requests, requests_range, null]
         subject:
           description: '`rate_limited`: whom the limit counted the call against, the mailbox or the IP address it came from (`PROTOCOL.md` §11.5).'
           type: [string, 'null']
@@ -2546,7 +2525,7 @@ components:
             required: [quota_id]
             properties:
               quota_id:
-                enum: [polls, pages, calls, sends, renewals, certificates, certificate_revocations]
+                enum: [polls, calls, sends, renewals, certificates, certificate_revocations]
           then:
             properties:
               subject:

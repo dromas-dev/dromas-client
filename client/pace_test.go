@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -59,12 +60,67 @@ func TestAPacedDrainStopsAndResumes(t *testing.T) {
 	}
 }
 
-// Only a paced fetch stops a drain quietly. Any other 429 met in a drain, one
-// to the read of a sender's revocations among them, is an error, and the
-// messages stay on the server: such a refusal says nothing of them, and
-// a drain that ended quietly on it would hide that a sender went unchecked
-// (#116).
-func TestOnlyAPacedFetchEndsADrainQuietly(t *testing.T) {
+// A drain lists the oldest page, fetches and acks it, and lists again while
+// the list's total_count says messages remain, every list with no query
+// (PROTOCOL.md §11.11, §12.3). A 429 for the mailbox's polls on a list after
+// the drain's first is the server pacing the drain, as a paced fetch is: the
+// drain stops there with no error, and the next drain takes the rest. On the
+// drain's first list, it is an error.
+func TestADrainListsAgainWhileMessagesRemain(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	a, b := e.mailbox(), e.mailbox()
+	for _, body := range []string{"1", "2", "3", "4", "5"} {
+		send(t, a, b, body)
+	}
+	e.srv.SetPage(2)
+	var mu sync.Mutex
+	lists, refuse := 0, 0
+	var queries []string
+	e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
+		if r.Method == http.MethodGet && r.URL.Path == mailboxPath(b)+"/messages" {
+			mu.Lock()
+			lists++
+			queries = append(queries, r.URL.RawQuery)
+			refused := lists == refuse
+			mu.Unlock()
+			if refused {
+				w.Header().Set("Content-Type", protocol.ProblemContentType)
+				w.Header().Set("Retry-After", "90")
+				w.WriteHeader(http.StatusTooManyRequests)
+				_ = json.NewEncoder(w).Encode(protocol.Problem{Type: protocol.CodeRateLimited.TypeURI(), Title: "Rate limited", Status: http.StatusTooManyRequests, Code: protocol.CodeRateLimited, QuotaID: protocol.QuotaPolls, Subject: protocol.SubjectMailbox})
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
+	refuseAt := func(n int) { mu.Lock(); refuse = n; mu.Unlock() }
+	refuseAt(1)
+	if _, err := b.Receive(context.Background()); err == nil || e.srv.Count(b.Address()) != 5 {
+		t.Fatalf("the polls quota's 429 on a drain's first list: %v, %d held", err, e.srv.Count(b.Address()))
+	}
+	refuseAt(4)
+	res := receive(t, b)
+	if len(res.Delivered) != 4 || !res.More || res.Paced != 90*time.Second || e.srv.Count(b.Address()) != 1 {
+		t.Fatalf("the polls quota's 429 on the drain's third list: delivered %d, more %v, paced %s, %d held", len(res.Delivered), res.More, res.Paced, e.srv.Count(b.Address()))
+	}
+	if res := receive(t, b); len(res.Delivered) != 1 || res.More || res.Paced != 0 || e.srv.Count(b.Address()) != 0 {
+		t.Fatalf("the drain after it: delivered %d, more %v, paced %s", len(res.Delivered), res.More, res.Paced)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if lists != 5 || slices.ContainsFunc(queries, func(q string) bool { return q != "" }) {
+		t.Errorf("%d lists, asked %q: want 5, none with a query", lists, queries)
+	}
+}
+
+// Only a paced fetch, or a paced list after the drain's first
+// (TestADrainListsAgainWhileMessagesRemain), stops a drain quietly. Any
+// other 429 met in a drain, one to the read of a sender's revocations among
+// them, is an error, and the messages stay on the server: such a refusal
+// says nothing of them, and a drain that ended quietly on it would hide that
+// a sender went unchecked (#116).
+func TestOnlyPacingEndsADrainQuietly(t *testing.T) {
 	t.Parallel()
 	fetch := func(r *http.Request) bool {
 		return r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/messages/")
@@ -117,7 +173,7 @@ func TestAWaitTheServerAsksForIsAtMostADay(t *testing.T) {
 		if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/messages") {
 			w.Header().Set("Content-Type", "application/json")
 			w.Header().Set("Retry-After", huge)
-			_, _ = w.Write([]byte(`{"total_count":0,"messages":[],"next_cursor":null}`))
+			_, _ = w.Write([]byte(`{"total_count":0,"messages":[]}`))
 			return
 		}
 		next.ServeHTTP(w, r)

@@ -367,7 +367,7 @@ func (h *holding) turn(ctx context.Context, wait time.Duration) (bool, error) {
 
 // Hold holds the mailbox's list for up to wait, or the mailbox's own wait if that
 // is shorter (DefaultHold, or what its drops taught it): the server answers
-// once the mailbox's first page changes, or at the wait with nothing new. It
+// once the mailbox's list changes, or at the wait with nothing new. It
 // first waits its turn (one a minute on average), and where the turn comes
 // past the wait, it waits the wait out and holds nothing. It then holds the
 // mailbox's lock only to read its tag and its pass, never through the hold, so

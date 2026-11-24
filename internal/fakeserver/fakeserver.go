@@ -1,7 +1,7 @@
 // Package fakeserver is an in-memory dromas server for the client's tests:
 // honest, and just enough of the API for a client to register, renew its
-// prekey, send, list page by page, fetch and ack, each call carrying its
-// mailbox's pass. It is NOT the dromas.dev server, and checks little of what
+// prekey, send, list, fetch and ack, each call carrying its mailbox's pass.
+// It is NOT the dromas.dev server, and checks little of what
 // that server checks. Like every server it keeps and serves a revocation of
 // any address, with a mailbox here or none (PROTOCOL.md §11.15), and holds a
 // certificate to the revocation of the address's certificates it keeps
@@ -107,7 +107,7 @@ type held struct {
 type message struct {
 	ciphertext []byte
 	receivedAt time.Time
-	seq        int // its place in the mailbox: a list's cursor is the last one it gave
+	seq        int // its place in the mailbox, which orders a list
 }
 
 // New starts a server on the clock now, on a loopback port, stopped when the
@@ -991,47 +991,32 @@ func (s *Server) owner(h func(http.ResponseWriter, *http.Request, *mailbox)) htt
 	}
 }
 
-// listQuery reads a list's query: none, a cursor this server made, or a
-// wait, each once and never both. It writes the refusal, naming the
-// parameter, and reports false if not.
-func listQuery(w http.ResponseWriter, r *http.Request) (after int, wait time.Duration, ok bool) {
+// listQuery reads a list's query: none, or a wait, once. It writes the
+// refusal, naming the parameter, and reports false if not.
+func listQuery(w http.ResponseWriter, r *http.Request) (wait time.Duration, ok bool) {
 	if r.URL.RawQuery == "" {
-		return 0, 0, true
+		return 0, true
 	}
 	q, err := url.ParseQuery(r.URL.RawQuery)
 	for name, v := range q {
-		if name != "cursor" && name != "wait" || len(v) != 1 {
-			problem(w, protocol.CodeInvalidRequest, "a list takes a cursor or a wait, once", func(p *protocol.Problem) { p.Member = name })
-			return 0, 0, false
+		if name != "wait" || len(v) != 1 {
+			problem(w, protocol.CodeInvalidRequest, "a list takes a wait, once", func(p *protocol.Problem) { p.Member = name })
+			return 0, false
 		}
 	}
 	if err != nil {
-		problem(w, protocol.CodeInvalidRequest, "not a query", func(p *protocol.Problem) { p.Member = "cursor" })
-		return 0, 0, false
+		problem(w, protocol.CodeInvalidRequest, "not a query", func(p *protocol.Problem) { p.Member = "wait" })
+		return 0, false
 	}
-	if v, ok := q["wait"]; ok {
-		n, err := protocol.Wait(v[0])
-		if err != nil || len(q) > 1 {
-			problem(w, protocol.CodeInvalidRequest, "a wait is digits, on the first page", func(p *protocol.Problem) { p.Member = "wait" })
-			return 0, 0, false
-		}
-		held := MaxHold
-		if n < uint64(MaxHold/time.Second) {
-			held = time.Duration(n) * time.Second
-		}
-		return 0, held, true
+	n, err := protocol.Wait(q["wait"][0])
+	if err != nil {
+		problem(w, protocol.CodeInvalidRequest, "a wait is digits", func(p *protocol.Problem) { p.Member = "wait" })
+		return 0, false
 	}
-	c := q["cursor"]
-	if protocol.CheckCursor(c[0]) != nil {
-		problem(w, protocol.CodeInvalidRequest, "not a cursor", func(p *protocol.Problem) { p.Member = "cursor" })
-		return 0, 0, false
+	if n < uint64(MaxHold/time.Second) {
+		return time.Duration(n) * time.Second, true
 	}
-	after, err = strconv.Atoi(c[0])
-	if err != nil || after < 1 || strconv.Itoa(after) != c[0] {
-		problem(w, protocol.CodeInvalidRequest, "not a cursor this server made", func(p *protocol.Problem) { p.Member = "cursor" })
-		return 0, 0, false
-	}
-	return after, 0, true
+	return MaxHold, true
 }
 
 // MaxHold is the longest a fake server holds a list, unless SetHold says
@@ -1061,21 +1046,19 @@ func (b *mailbox) woken() <-chan struct{} {
 	return b.wake
 }
 
-// list answers with a page of the messages after the cursor, oldest first
-// (PROTOCOL.md §11.11). A first page has an ETag, the SHA-256 of its JSON, and
-// is 412 to an If-Match that is false and 304 to an If-None-Match that names
-// it, each read as a server reads one (protocol.IfMatch,
-// protocol.IfNoneMatch); a page after it carries none, so only an If-Match
-// of * is true of it, and it is never 304.
+// list answers with a page of the oldest messages (PROTOCOL.md §11.11). It
+// has an ETag, the SHA-256 of its JSON, and is 412 to an If-Match that is
+// false and 304 to an If-None-Match that names it, each read as a server
+// reads one (protocol.IfMatch, protocol.IfNoneMatch).
 func (s *Server) list(w http.ResponseWriter, r *http.Request, b *mailbox) {
-	after, wait, ok := listQuery(w, r)
+	wait, ok := listQuery(w, r)
 	if !ok {
 		return
 	}
 	until := time.Now().Add(min(wait, s.hold))
 	again := true
 	for again && r.Context().Err() == nil {
-		again = s.listed(w, r, b, after, time.Until(until))
+		again = s.listed(w, r, b, time.Until(until))
 	}
 }
 
@@ -1083,33 +1066,18 @@ func (s *Server) list(w http.ResponseWriter, r *http.Request, b *mailbox) {
 // page is the one If-None-Match names and left is time still to hold it:
 // it has then waited for the mailbox's next change or for left to pass, with
 // the server's lock let go meanwhile, and the list is to be answered again.
-func (s *Server) listed(w http.ResponseWriter, r *http.Request, b *mailbox, after int, left time.Duration) bool {
+func (s *Server) listed(w http.ResponseWriter, r *http.Request, b *mailbox, left time.Duration) bool {
 	var ms []*message
 	ids := map[*message]string{}
 	for id, m := range b.messages {
-		if m.seq > after {
-			ms = append(ms, m)
-			ids[m] = id
-		}
+		ms = append(ms, m)
+		ids[m] = id
 	}
 	slices.SortFunc(ms, func(x, y *message) int { return x.seq - y.seq })
 	l := protocol.MessageList{Count: int64(len(b.messages)), Messages: []protocol.MessageInfo{}}
-	for i, m := range ms {
-		if i == s.page {
-			c := strconv.Itoa(ms[i-1].seq)
-			l.NextCursor = &c
-			break
-		}
+	for _, m := range ms[:min(len(ms), s.page)] {
 		l.Messages = append(l.Messages, protocol.MessageInfo{ID: ids[m], Size: int64(len(m.ciphertext)),
 			ReceivedAt: formatTime(m.receivedAt), ExpiresAt: formatTime(m.receivedAt.Add(protocol.Retention))})
-	}
-	if after > 0 {
-		if !protocol.IfMatch(r.Header.Values("If-Match"), "") {
-			problem(w, protocol.CodePreconditionFailed, "the If-Match is false")
-			return false
-		}
-		WriteList(w, l)
-		return false
 	}
 	body, _ := json.Marshal(l)
 	sum := sha256.Sum256(body)

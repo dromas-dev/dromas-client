@@ -160,10 +160,8 @@ Where this document uses a term below as a defined term, the term has the sense 
 - **Renewal**, **renew:** publishing a new prekey statement, either by `PUT /v1/<A>/prekey` (Section 11.9) or, when the server has forgotten the mailbox, as a registration (Section 12.4).
 - **Identical retry:** a registration or a renewal whose prekey statement and signature are byte for byte the ones that the server keeps as current. In a registration, the identity document is also byte for byte the one that the server keeps (Sections 11.7, step 5; 11.9).
 - **Send:** `POST /v1/<B>/messages` (Section 11.10). A send's **receipt** is the send's `201` answer, or the `200` answer of the send's dedupe (Section 11.10, step 6).
-- **List:** `GET /v1/<B>/messages`, which answers one page of a mailbox's messages (Section 11.11).
-- **Poll:** a list without a cursor, or a list that carries a cursor but is not a continuation (Section 11.11).
-- **Continuation:** a list that meets the three conditions of Section 11.11.
-- **Long poll:** a list of the first page whose answer the server delays (Section 11.11).
+- **List**, **poll:** `GET /v1/<B>/messages`, which answers the oldest page of a mailbox's messages (Section 11.11).
+- **Long poll:** a list whose answer the server delays (Section 11.11).
 - **Fetch:** `GET /v1/<B>/messages/<id>` (Section 11.12).
 - **Fetch budget:** the budget that a mailbox's fetches of messages spend (Section 11.12).
 - **Intake budget:** the number of messages that a mailbox accepts from all senders together (Section 11.10, step 8).
@@ -781,17 +779,17 @@ A revocation record carries an identity's revocations, and the record proves its
   | Call | Parameters |
   |---|---|
   | a send (Section 11.10) | `prekey_sha256` |
-  | a list (Section 11.11) | `cursor`, `wait` |
+  | a list (Section 11.11) | `wait` |
 
 - **`Date`.** Every answer under `/v1/` carries `Date`. The server sets the field by the clock that the server's checks read.
 - **No caching.** Every answer of a route under `/v1/` carries `Cache-Control: no-store` (RFC 9111 §5.2.2.5).
 - **Compression.** A server MUST NOT compress an answer (Section 15.8).
 - **`HEAD`.** A server answers `HEAD` on every route that answers `GET` (RFC 9110 §9.1, §9.3.2).
-  - A `HEAD` changes nothing. A `HEAD` spends no cursor, hands out no cursor, and spends none of the fetch budget.
+  - A `HEAD` changes nothing. A `HEAD` spends none of the fetch budget.
   - Section 11.5 gives what a `HEAD` spends.
 - **Preconditions.** Preconditions are those of RFC 9110 §13. A server evaluates `If-Match` and `If-None-Match` on every call (§13.1.1, §13.1.2), at the point §13.2.1 gives, in the order §13.2.2 gives. Dromas narrows the preconditions in these ways:
   - **Normal request checks.** A call's normal request checks (§13.2.1) are the match of the call's route and method, the call's pass where the call accepts one, and the read of the call's target. A registration's pass and a renewal's pass are by the signer of the prekey statement that the call brings, or by the identity (Sections 8; 11.7, step 7; 11.9). Therefore every check of that prekey statement is one of the call's normal request checks.
-  - **Only a lookup (Section 11.8), a list's first page (Section 11.11) and an ACL (Section 11.14) carry an `ETag`.**
+  - **Only a lookup (Section 11.8), a list (Section 11.11) and an ACL (Section 11.14) carry an `ETag`.**
   - **A server answers a false `If-Match` with `412 precondition_failed`, and never with a `2xx` as for a change that appears already applied (§13.1.1).**
   - **A false precondition comes after the refusals from the server's record of the mailbox, and before a `200` from that record** (Sections 11.7, 11.9, 11.15).
   - **A value of `If-Match` or `If-None-Match` matches nothing if the value has any form other than `*` alone or a list of entity-tags.** A list with `*` among its tags is such a form.
@@ -814,7 +812,7 @@ A revocation record carries an identity's revocations, and the record proves its
   - A client ignores a code that the client does not know, a code under another status, and a code with another `type`.
   - The client does not act on such a code, and shows none of the code. The client shows only the status.
   - A client treats a body as no answer when a member of the body is not of the member's type (Section 3.3).
-- **A client MUST NOT show `detail`, `hint`, `title`, or any other text a server sent (a status line, a header or trailer line, a `Location`, a list's cursor in a path).** These texts are the server's words, meant for a person who reads the body.
+- **A client MUST NOT show `detail`, `hint`, `title`, or any other text a server sent (a status line, a header or trailer line, a `Location`).** These texts are the server's words, meant for a person who reads the body.
   - A client states a code's meaning in its own words, with the members it has checked against their types.
   - A client shows a string member only after the client has checked that the member is a value the client knows.
   - When a client cannot read a call's answer, the client names the call by the call's method and path, and never by the call's query.
@@ -886,7 +884,7 @@ A server chooses which refusal it answers first, except where this specification
 
 A server chooses what it limits and by how much. No limit's value is part of the protocol, and a server may add limits. A client meets a limit as a `429` answer (RFC 6585 §4) with `Retry-After`. The client waits for the `Retry-After` time and then retries, unless the code says otherwise. Every server keeps these promises:
 
-- **A drain of a full mailbox always completes.** The `pages` budget lets a server answer every list page of a full mailbox. The server may pace the drain's fetches, with each `429 fetch_rate_limited` saying when to go on, but never stops the fetches permanently.
+- **A drain of a full mailbox always completes.** The server may pace the drain's lists and fetches, with each `429` saying when to go on, but never stops them permanently.
 - **Only three things spend a mailbox's counts:** a call that carries the mailbox's pass, a message sent to the mailbox, and a revocation of certificates that the mailbox's identity publishes through a higher revocation serial. Only calls from an IP address spend that IP address's counts.
 - **A server counts the identity's acts apart from the counts that a working key can spend** (Section 15.5):
   - The server counts a renewal by a signer of higher rank than the current signer apart from a renewal by the current signer (Section 11.9). That renewal spends `certificates` and no `calls`.
@@ -922,7 +920,6 @@ The `subject` column of the table below gives the exceptions. A registration is 
 | `quota_id` | `subject` | Counts |
 |---|---|---|
 | `polls` | `mailbox` | the mailbox's polls (Section 11.11), including polls answered `304` or `412` |
-| `pages` | `mailbox` | the mailbox's continuations, with the quota sized so that a full mailbox always drains |
 | `calls` | `mailbox` | the mailbox's other calls that carry the mailbox's pass, including a send, a renewal by the current signer and an identical retry of the mailbox's registration or renewal |
 | `sends` | `mailbox` | the mailbox's sends, a number a day, counted only for sends that carried the mailbox's pass |
 | `renewals` | `mailbox` | the mailbox's renewals by the current signer, a number a day |
@@ -1106,40 +1103,25 @@ The server checks the steps below. Only step 9 stores anything.
 
 ### 11.11. List
 
-`GET /v1/<B>/messages` carries the mailbox's pass → `200` with `total_count`, `messages` and `next_cursor`, and `Retry-After`.
+`GET /v1/<B>/messages` carries the mailbox's pass → `200` with `total_count` and `messages`, and `Retry-After`.
 
-- **`total_count`:** the number of live messages in the mailbox, every page's together.
-- **`messages`:** one page of list entries, oldest first by `received_at`. Each list entry has the message id in `id`, `size` (the length of the message's ciphertext, Section 11.10), `received_at` and `expires_at`. A list entry has nothing about the sender.
-- **`next_cursor`:** null after the last page. For an empty mailbox, the answer is `{"total_count":0,"messages":[],"next_cursor":null}`.
-- **A cursor is opaque (AEP-158).** A cursor has the form `cursor`. The next list carries the cursor unchanged, as `?cursor=`.
-
-  ```abnf
-  cursor = 1*( ALPHA / DIGIT / "-" / "_" )
-  ```
-
+- **`total_count`:** the number of live messages in the mailbox. For an empty mailbox, the answer is `{"total_count":0,"messages":[]}`.
+- **`messages`:** one page of list entries, the mailbox's oldest, oldest first by `received_at`. Each list entry has the message id in `id`, `size` (the length of the message's ciphertext, Section 11.10), `received_at` and `expires_at`. A list entry has nothing about the sender.
 - **On every `200` and `304` of a list, `Retry-After` is the server's poll interval, in seconds.**
-- **A first page carries an `ETag`.** The `ETag` is a strong validator of the page's body. The `ETag` changes whenever a message enters or leaves the page or the count. A page after the first carries no `ETag`.
+- **A list carries an `ETag`.** The `ETag` is a strong validator of the page's body. The `ETag` changes whenever a message enters or leaves the page or the count.
 - **A mailbox that polls faster than its `polls` budget gets `429`, never `304`** (Section 11.5).
-- **A list with a cursor is a continuation only if the list meets all three of these conditions:**
-  - the list is a `GET` whose preconditions are true;
-  - the mailbox stores messages after the cursor;
-  - the cursor is the `next_cursor` that the server last handed the mailbox.
-
-  A continuation spends `pages`. Only a `GET` answered `200` uses up the cursor it carries and gets the next cursor. After a false precondition, a refusal or a `HEAD`, the mailbox still has the cursor it had. The server still answers a list with any other cursor that the server can read. The server counts that list as a poll. If the mailbox stores no message after that cursor, the page is empty.
 - **The server checks:**
 
   | Check | Otherwise |
   |---|---|
   | `<B>` is an address | `400 invalid_address` |
-  | the only parameters are `cursor` and `wait`, each at most once | `400 invalid_request`, naming the parameter |
-  | `cursor` matches the ABNF rule `cursor`, and the server can read it as a cursor it makes | `400 invalid_request`, naming `cursor` |
+  | the only parameter is `wait`, at most once | `400 invalid_request`, naming the parameter |
   | `wait` is delay-seconds, digits alone | `400 invalid_request`, naming `wait` |
-  | a list does not carry both `cursor` and `wait` | `400 invalid_request`, naming either one |
 
-- **A first page MAY be a long poll:**
-  - A list without a cursor MAY carry `wait`, a number of seconds.
+- **A list MAY be a long poll:**
+  - A list MAY carry `wait`, a number of seconds.
   - Where such a list's `If-None-Match` would make the answer `304`, the server waits to answer.
-  - When the first page's tag no longer matches the `If-None-Match`, the server answers the page as it answers any list.
+  - When the page's tag no longer matches the `If-None-Match`, the server answers the page as it answers any list.
   - When the wait has passed, the server answers the `304`.
   - A server MAY hold a wait past a message's expiry; the answer at the wait's end is the page as it then stands, the expired message gone from it.
   - A server makes a long poll wait at most a time that the server chooses. That time is not part of the protocol.
@@ -1369,7 +1351,7 @@ A server lists at most 64 deprecations, 64 sunsets, and 64 capabilities. A clien
 
 ### 12.3. Receiving
 
-A client drains every page of its list (Section 11.11) and fetches the message of each list entry (Section 11.12), but one that the verdict below lets it ack without a fetch:
+A client drains its mailbox: it lists (Section 11.11), fetches the message of each list entry (Section 11.12), but one that the verdict below lets it ack without a fetch, and, once it has acked the page, lists again while the list's `total_count` is more than the page held:
 
 - **The client accepts only a body of the listed `size`, and reads at most one byte past it.** An answer whose body has another length is malformed, and the client judges nothing and acks nothing on that answer.
 - **A fetch that resumes a cut fetch by range (Section 11.12) is checked as a whole.** The client checks the bytes kept and the range together against the listed `size` and the message id (check 8), as for a body read whole.
@@ -1433,7 +1415,6 @@ A client drains every page of its list (Section 11.11) and fetches the message o
 - **A `304` whose `ETag`, compared weakly, is not the tag the poll sent is no answer.** The drain stops.
 - **A `304` to a list that sent no `If-None-Match` is malformed.**
 - **A client treats a list's answer as no answer in any of these cases:**
-  - the answer's cursor does not have the form Section 11.11 gives;
   - a list entry's `id` does not have the form `message-id` (Section 11.10);
   - a list entry's `size` is over the largest ciphertext (Section 11.10).
 
@@ -1654,7 +1635,7 @@ Dromas protects a message's content from everyone but the message's recipient. D
   - act as a mailbox toward itself;
   - refuse every pass from a mailbox, which keeps the mailbox's prekeys on the mailbox's disk for as long as the server refuses (Section 15.3);
   - accept messages that a mailbox's ACL refuses, which the mailbox's client still judges, or refuse messages that the ACL admits, which the server could drop anyway;
-  - write anything in an error's words, which a client never shows, or in a receipt, an account id or a cursor, which a client checks against the value's form before using the value (Section 11.3);
+  - write anything in an error's words, which a client never shows, or in a receipt or an account id, which a client checks against the value's form before using the value (Section 11.3);
   - answer a lookup `304`, which holds a sender on an answer the server served before; the server can already serve that answer's bytes again, and the sender checks the kept answer at every post (Section 12.2);
   - serve altered instructions to an agent that runs anything it is served.
 - **Against a client that verifies and gates, a hostile server cannot:**
@@ -1926,7 +1907,6 @@ bech32-hrp-char            = %x21-40 / %x5B-7E   ; printable ASCII but A-Z
 BWS                        = <BWS, see [RFC 9110], Section 5.6.3>
 capability-name            = %x61-7A *63( %x61-7A / DIGIT / "_" )
 content-range-206          = "bytes" SP range-number "-" range-number "/" range-number
-cursor                     = 1*( ALPHA / DIGIT / "-" / "_" )
 dns-char                   = %x61-7A / DIGIT
 dns-label                  = dns-char [ *61( dns-char / "-" ) dns-char ]
 dns-name                   = dns-label *( "." dns-label )   ; at most 253 characters

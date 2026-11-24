@@ -1036,8 +1036,9 @@ func TestADrainMendedPartWaySaysWhatItsFirstPassDelivered(t *testing.T) {
 	e.srv.SetPage(1)
 	list := "/v1/" + b.Address().String() + "/messages"
 	var refused atomic.Bool
+	var lists atomic.Int32
 	e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
-		if r.Method == http.MethodGet && r.URL.Path == list && r.URL.Query().Get("cursor") != "" && refused.CompareAndSwap(false, true) {
+		if r.Method == http.MethodGet && r.URL.Path == list && lists.Add(1) == 2 && refused.CompareAndSwap(false, true) {
 			forge.Refuse(w, protocol.CodeMailboxNotFound)
 			return
 		}

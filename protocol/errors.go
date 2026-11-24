@@ -22,7 +22,7 @@ type Code string
 // to it (TestCodeNames).
 const (
 	// 400
-	CodeInvalidRequest             Code = "invalid_request"               // not JSON, a missing, unknown or ill-formed field (a byte field not base64 among them), a bad cursor, a send's body whose age header does not parse
+	CodeInvalidRequest             Code = "invalid_request"               // not JSON, a missing, unknown or ill-formed field (a byte field not base64 among them), a send's body whose age header does not parse
 	CodeInvalidAddress             Code = "invalid_address"               // not "d_" and 64 characters of base64url
 	CodeIdentityMismatch           Code = "identity_mismatch"             // the identity does not hash to the address, or breaks its grammar
 	CodeInvalidKey                 Code = "invalid_key"                   // an identity key, certificate or prekey statement that is malformed or does not verify
@@ -239,7 +239,6 @@ type Quota string
 // The quotas, by whom each is counted against.
 const (
 	QuotaPolls                  Quota = "polls"                   // a mailbox's polls
-	QuotaPages                  Quota = "pages"                   // a mailbox's list pages after the first
 	QuotaCalls                  Quota = "calls"                   // a mailbox's calls with its pass that no other limit counts
 	QuotaSends                  Quota = "sends"                   // a mailbox's sends, a number a day
 	QuotaRenewals               Quota = "renewals"                // a mailbox's renewals under its current certificate, a number a day
@@ -256,6 +255,10 @@ const (
 	QuotaRequestsRange        Quota = "requests_range"          // the same, from an IPv6 /48
 )
 
+// QuotaPages is no quota of the protocol, and Known reports false of it:
+// dromas-server's build alone names it.
+const QuotaPages Quota = "pages"
+
 // Subject is whom a rate_limited was counted against (subject).
 type Subject string
 
@@ -267,7 +270,6 @@ const (
 
 var quotas = map[Quota]Subject{
 	QuotaPolls:                  SubjectMailbox,
-	QuotaPages:                  SubjectMailbox,
 	QuotaCalls:                  SubjectMailbox,
 	QuotaSends:                  SubjectMailbox,
 	QuotaRenewals:               SubjectMailbox,
