@@ -247,7 +247,7 @@ const (
 
 	QuotaRegistrations        Quota = "registrations"           // registrations from an IP address: an IPv4 address or an IPv6 /64
 	QuotaRegistrationsRange   Quota = "registrations_range"     // registrations from an IPv6 /48
-	QuotaMisses               Quota = "misses"                  // calls from an IP address that named no mailbox or carried nothing that verified
+	QuotaMisses               Quota = "misses"                  // calls from an IP address whose lookup or read found no mailbox, or whose Authorization or prekey statement does not read
 	QuotaMissesRange          Quota = "misses_range"            // the same, from an IPv6 /48
 	QuotaSendsBeforePass      Quota = "sends_before_pass"       // sends from an IP address, counted before their pass is read
 	QuotaSendsBeforePassRange Quota = "sends_before_pass_range" // the same, from an IPv6 /48

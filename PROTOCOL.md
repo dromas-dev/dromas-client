@@ -927,7 +927,7 @@ The `subject` column of the table below gives the exceptions. A registration is 
 | `certificate_revocations` | `mailbox` | each revocation of certificates that the mailbox's identity publishes through a higher revocation serial, a number a day |
 | `registrations` | `ip` | registrations from an IPv4 address or IPv6 /64, and each call that a server counts as a registration (Section 11.15) |
 | `registrations_range` | `ip` | the same, from an IPv6 /48 |
-| `misses` | `ip` | calls that named no mailbox, or that carried nothing that verified |
+| `misses` | `ip` | calls whose lookup or read found no mailbox, or whose `Authorization` value or prekey statement cannot be read |
 | `misses_range` | `ip` | the same, from an IPv6 /48 |
 | `sends_before_pass` | `ip` | sends, counted before the server reads their pass |
 | `sends_before_pass_range` | `ip` | the same, from an IPv6 /48 |
@@ -1240,7 +1240,7 @@ A mailbox may belong to one account at its server. The protocol fixes how a mail
   version-number = "0" / %x31-39 *DIGIT
   ```
 
-  - The server reads the `policy-version` that the value begins with, and ignores whatever follows it.
+  - The server reads the `policy-version` that the value begins with, when the value's end or a character other than a digit follows it, and ignores whatever follows: `0.6.11-rc.1` reads as `0.6`, and `1.05` begins with no `policy-version`.
   - The server reads a request without the field, or with a value that does not begin with a `policy-version`, as version `0.0`.
 - **A server sets its own version policy.** The policy has four parts:
   - a **version floor**;

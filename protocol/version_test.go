@@ -40,6 +40,8 @@ func TestARequestsVersionIsItsMajorAndMinor(t *testing.T) {
 		"0.6.11-rc.1":                         {0, 6},
 		"0.6.0-0.20261029120000-abcdef123456": {0, 6}, // a Go pseudo-version without its v
 		"0.60.1":                              {0, 60},
+		"1.50":                                {1, 50},
+		"0.6x":                                {0, 6},
 		"1.5.0+build":                         {1, 5},
 		"0.0.0-devel":                         {0, 0},
 	} {
@@ -47,7 +49,7 @@ func TestARequestsVersionIsItsMajorAndMinor(t *testing.T) {
 			t.Errorf("a server reads %q as %v, want %v", s, got, want)
 		}
 	}
-	for _, s := range []string{"", "x.6", "0.x", "v0.6.11", "06.1", "0", " 0.6", "(devel)", "18446744073709551616.0.0"} {
+	for _, s := range []string{"", "x.6", "0.x", "v0.6.11", "06.1", "0", " 0.6", "(devel)", "18446744073709551616.0.0", "1.05", "1.00", "0.06", "1.05.1"} {
 		if v := RequestVersion(s); v != (Version{}) {
 			t.Errorf("a server reads %q as %v, not 0.0", s, v)
 		}

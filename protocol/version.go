@@ -33,10 +33,10 @@ type Version struct {
 }
 
 // versionGrammar is a version: two numbers with no leading zero
-// (PROTOCOL.md §11.17). A request's Dromas-Version is read by its leading
-// match, the rest ignored ([RequestVersion]); everything else is held to it
-// whole.
-var versionGrammar = regexp.MustCompile(`\A(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)`)
+// (PROTOCOL.md §11.17), then the value's end or a character that is not a
+// digit. A request's Dromas-Version is read by its leading version, the rest
+// ignored ([RequestVersion]); everything else is held to it whole.
+var versionGrammar = regexp.MustCompile(`\A(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:[^0-9]|\z)`)
 
 // errVersion is a value that is not a version. Its words never quote the
 // value, which may be a server's or a caller's.
@@ -54,9 +54,11 @@ func ParseVersion(s string) (Version, error) {
 }
 
 // RequestVersion is the version a server reads a request's Dromas-Version
-// as: the major and minor it begins with, whatever follows them, so 0.6,
-// 0.6.11 and 0.6.11-rc.1 read alike; or 0.0, for a request without the field
-// or with a value that does not begin with a version (PROTOCOL.md §11.17). A
+// as: the major and minor it begins with, ended by the value's end or a
+// character that is not a digit, whatever follows them, so 0.6, 0.6.11 and
+// 0.6.11-rc.1 read alike; or 0.0, for a request without the field or with a
+// value that does not begin with a version, 1.05 among them (PROTOCOL.md
+// §11.17). A
 // value given twice is the caller's to join or refuse: this reads one.
 func RequestVersion(s string) Version {
 	v, _, err := leadingVersion(s)
@@ -80,7 +82,7 @@ func leadingVersion(s string) (Version, int, error) {
 	if v.Minor, err = strconv.ParseUint(m[2], 10, 64); err != nil {
 		return Version{}, 0, errVersion
 	}
-	return v, len(m[0]), nil
+	return v, len(m[1]) + 1 + len(m[2]), nil
 }
 
 // String writes v as a request and a policy write it.
