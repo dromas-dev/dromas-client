@@ -194,7 +194,7 @@ Notes on some of these vectors:
 
 - `accept-signed-by-the-identity` is A's message, signed by A's identity itself at rank 0, which A's revocation of certificates doesn't cover.
 - `accept-sk-ecdsa-sender` and `accept-sk-ed25519-sender` are from mailboxes D and E, each signed by its identity, and the two `-under-a-certificate` vectors are the same messages under each one's certificate. Every client delivers them.
-- `accept-p256-working-key` is A's message to B under the certificate of A's P-256 working key, `cert/ok-working-key-p256.pub`, and is made once and kept. Every client delivers it.
+- `accept-p256-working-key` is A's message to B under the certificate of A's P-256 working key, `cert/ok-working-key-p256.pub`, and is made once and kept. A client that verifies `ecdsa-sha2-nistp256` keys delivers it. A client built on an OpenSSH without OpenSSL reads no P-256 key, so it refuses this message (PROTOCOL.md Appendix A).
 - `accept-p256-sender` is from mailbox C, signed by C's identity, and is made once and kept. `accept-p256-sender-under-a-certificate` is the same message under C's certificate. A client that verifies `ecdsa-sha2-nistp256` delivers each one. A client that doesn't verify that type refuses each one with `unsupported_key_type`.
 - `refuse-certificate-revoked` passes PROTOCOL.md §12.3 checks 1 to 6. Only the revocation of certificates refuses it.
 - In `accept-anything-after-the-signature`, a second envelope, signed by B, follows the first END line, and the reader never reads it.
