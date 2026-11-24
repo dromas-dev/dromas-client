@@ -765,3 +765,57 @@ func TestLowerASCIILowersAToZAlone(t *testing.T) {
 		}
 	}
 }
+
+// A pass under the certificate of a P-256 working key verifies with either s
+// (PROTOCOL.md §3.2), and is written back as one pass, with the lower s, as a
+// P-256 identity's is.
+func TestAP256WorkingKeysPassIsOnePassWithEitherS(t *testing.T) {
+	b := newCertMailbox(t)
+	b.work = newWorkSigner(t, IdentityP256)
+	now := time.Date(2026, 10, 12, 19, 19, 1, 0, time.UTC)
+	cert, err := NewCertificate(b.id, b.identity, b.work.PublicKey(), 7, now, testLifetime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	work, err := cert.Signer(b.work)
+	if err != nil {
+		t.Fatal(err)
+	}
+	header, _, err := NewPass(work, b.id.Address(), "dromas.example", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := ParsePass(header)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, s, blob := testRS(t, p.signature)
+	f := wireReader(blob[10:])
+	var fields [][]byte
+	for range 5 {
+		field, _ := f.string()
+		fields = append(fields, field)
+	}
+	sig := new(ssh.Signature)
+	if err := ssh.Unmarshal(fields[4], sig); err != nil {
+		t.Fatal(err)
+	}
+	sig.Blob = ssh.Marshal(struct{ R, S *big.Int }{r, new(big.Int).Sub(elliptic.P256().Params().N, s)})
+	fields[4] = ssh.Marshal(sig)
+	twin := binary.BigEndian.AppendUint32([]byte("SSHSIG"), 1)
+	for _, field := range fields {
+		twin = appendWireString(twin, field)
+	}
+	tp := &Pass{Address: p.Address, NotAfter: p.NotAfter, signature: Armor(twin)}
+	for _, q := range []*Pass{p, tp} {
+		if signer, err := q.Verify(b.id, "dromas.example", now); err != nil || signer.Rank() != 7 {
+			t.Fatalf("a P-256 working key's pass, its s as n − s or not: %v", err)
+		}
+	}
+	if tp.Authorization() != p.Authorization() {
+		t.Error("a P-256 working key's pass, its s as n − s, is written back as another pass")
+	}
+	if _, low, _ := testRS(t, func() []byte { q, _ := ParsePass(p.Authorization()); return q.signature }()); low.Cmp(new(big.Int).Rsh(elliptic.P256().Params().N, 1)) > 0 {
+		t.Error("a P-256 working key's pass is not written back with the lower s")
+	}
+}

@@ -178,6 +178,14 @@ func TestCertificateRules(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	p384, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p384Key, err := ssh.NewPublicKey(&p384.PublicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
 	smallOrder, err := ssh.NewPublicKey(ed25519.PublicKey(append([]byte{1}, make([]byte, 31)...)))
 	if err != nil {
 		t.Fatal(err)
@@ -237,7 +245,8 @@ func TestCertificateRules(t *testing.T) {
 		{name: "a critical option nobody defines", change: func(c *ssh.Certificate) { c.CriticalOptions = map[string]string{"nobody-defines@dromas.invalid": ""} }, want: ErrCertificate},
 		{name: "signed by another key", signer: other.identity, want: ErrCertificate},
 		{name: "the identity key as the working key", change: func(c *ssh.Certificate) { c.Key = b.identity.PublicKey() }, want: ErrCertificate},
-		{name: "a P-256 working key", change: func(c *ssh.Certificate) { c.Key = p256Key }, want: ErrCertificate},
+		{name: "a P-256 working key", change: func(c *ssh.Certificate) { c.Key = p256Key }, want: nil},
+		{name: "a P-384 working key", change: func(c *ssh.Certificate) { c.Key = p384Key }, want: ErrCertificate},
 		{name: "a small-order working key", change: func(c *ssh.Certificate) { c.Key = smallOrder }, want: ErrCertificate},
 		// Both dates are at or before 9999-12-31T23:59:59Z, so ssh-keygen's
 		// "forever" is no certificate of this protocol; and its form is refused

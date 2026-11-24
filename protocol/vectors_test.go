@@ -393,6 +393,34 @@ func TestVectorCertificates(t *testing.T) {
 	if !bytes.Equal(Armor(rewrap(t, own, re.Marshal())), read(t, "cert/bad-certifies-the-identity.sig")) || re.Serial <= held.Through {
 		t.Error("cert/bad-certifies-the-identity.sig is not the identity's own signature re-wrapped above A's revocation of certificates")
 	}
+	// C's P-256 identity certifies P-256 working keys, so a certificate of
+	// its own key is of a type it certifies, and that the key is the
+	// identity's is all that refuses it. Its signature is the identity's own
+	// under that certificate.
+	cst, csig := read(t, "cert/c-bad-certifies-the-identity.txt"), read(t, "cert/c-bad-certifies-the-identity.sig")
+	ckey := vectorCertificate(t, "cert/c-bad-certifies-the-identity.pub")
+	if cc := ckey.(*ssh.Certificate); cc.Key.Type() != c.Type() || !bytes.Equal(cc.Key.Marshal(), c.PublicKey().Marshal()) {
+		t.Error("cert/c-bad-certifies-the-identity is not a certificate of C's own key")
+	}
+	if _, err := CheckCertificate(c, ckey, now); !errors.Is(err, ErrCertificate) {
+		t.Errorf("cert/c-bad-certifies-the-identity: CheckCertificate: %v", err)
+	}
+	if _, err := VerifySigned(c, cst, csig, PrekeyNamespace(c.Address()), now); !errors.Is(err, ErrCertificate) {
+		t.Errorf("cert/c-bad-certifies-the-identity: VerifySigned: %v", err)
+	}
+	if err := sshsig.Verify(ckey, cst, armoredBlob(t, csig), PrekeyNamespace(c.Address())); err != nil {
+		t.Errorf("cert/c-bad-certifies-the-identity: control: the signature itself fails: %v", err)
+	}
+	// A's P-256 working key: its certificate, and its signature with either s
+	// (PROTOCOL.md §3.2), as for a P-256 identity.
+	if k := vectorCertificate(t, "cert/ok-working-key-p256.pub").(*ssh.Certificate).Key; k.Type() != IdentityP256 {
+		t.Errorf("cert/ok-working-key-p256 certifies a key of type %s", k.Type())
+	}
+	r1, s1, _ := testRS(t, read(t, "cert/ok-working-key-p256.sig"))
+	r2, s2, _ := testRS(t, read(t, "cert/ok-working-key-p256-the-other-s.sig"))
+	if r1.Cmp(r2) != 0 || new(big.Int).Add(s1, s2).Cmp(elliptic.P256().Params().N) != 0 {
+		t.Error("cert/ok-working-key-p256-the-other-s.sig is not A's P-256 working key's signature with s as n − s")
+	}
 }
 
 // A's revocation of its certificates runs through one below the serial of its
@@ -1157,6 +1185,7 @@ var plainVerdicts = map[string]string{
 	"refuse-from-null":                                   RefusedSenderMismatch,
 	"accept-p256-sender":                                 "",
 	"accept-p256-sender-under-a-certificate":             "",
+	"accept-p256-working-key":                            "",
 	"accept-sk-ecdsa-sender":                             "",
 	"accept-sk-ecdsa-sender-under-a-certificate":         "",
 	"accept-sk-ed25519-sender":                           "",

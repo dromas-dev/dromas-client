@@ -161,8 +161,9 @@ func TestAnIdentityOfATypeThisClientLacks(t *testing.T) {
 	}
 }
 
-// A P-256 identity certifies an Ed25519 working key, and what that key signs
-// verifies under it; a certificate another P-256 key signed does not.
+// A P-256 identity certifies an Ed25519 working key or a P-256 one, never its
+// own key, and what that key signs verifies under it; a certificate another
+// P-256 key signed does not.
 func TestAP256IdentityCertifies(t *testing.T) {
 	b, other := p256Mailbox(t), p256Mailbox(t)
 	now := time.Date(2026, 10, 13, 12, 0, 0, 0, time.UTC)
@@ -188,9 +189,13 @@ func TestAP256IdentityCertifies(t *testing.T) {
 	if _, err := NewCertificate(b.id, other.identity, b.work.PublicKey(), 3, now, testLifetime); err == nil {
 		t.Error("a certificate was made with a signer that is not the identity")
 	}
-	// A working key is an Ed25519 key, whatever its identity's type.
-	if _, err := NewCertificate(b.id, b.identity, other.identity.PublicKey(), 4, now, testLifetime); err == nil {
-		t.Error("a P-256 key was certified as a working key")
+	// A working key may be a P-256 key, whatever its identity's type, and
+	// never the identity's own.
+	if _, err := NewCertificate(b.id, b.identity, other.identity.PublicKey(), 4, now, testLifetime); err != nil {
+		t.Errorf("a P-256 key was not certified as a working key: %v", err)
+	}
+	if _, err := NewCertificate(b.id, b.identity, b.identity.PublicKey(), 4, now, testLifetime); !errors.Is(err, ErrCertificate) {
+		t.Errorf("a P-256 identity certified its own key: %v", err)
 	}
 
 	// An ECDSA signature (r, s) verifies as (r, n - s) too, and anyone who

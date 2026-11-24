@@ -309,8 +309,10 @@ func FuzzCheckCertificate(f *testing.F) {
 				t.Fatal("took a certificate whose signature is not the identity's over its bytes")
 			case bytes.Equal(cert.Key.Marshal(), id.PublicKey().Marshal()):
 				t.Fatal("took a certificate of the identity key itself")
-			case cert.Key.Type() != ssh.KeyAlgoED25519 || edwardsKeyFault(cert.Key) != "":
-				t.Fatalf("took a working key of type %s that is %s", cert.Key.Type(), edwardsKeyFault(cert.Key))
+			case cert.Key.Type() != ssh.KeyAlgoED25519 && cert.Key.Type() != ssh.KeyAlgoECDSA256:
+				t.Fatalf("took a working key of type %s", cert.Key.Type())
+			case cert.Key.Type() == ssh.KeyAlgoED25519 && edwardsKeyFault(cert.Key) != "":
+				t.Fatalf("took an Ed25519 working key that is %s", edwardsKeyFault(cert.Key))
 			case unix < cert.ValidAfter || unix >= cert.ValidBefore || cert.ValidBefore > uint64(LastDate.Unix()):
 				t.Fatalf("took a certificate from %d to %d at %d", cert.ValidAfter, cert.ValidBefore, unix)
 			}
