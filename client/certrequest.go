@@ -97,7 +97,7 @@ func (b *Mailbox) RequestCertificate(ctx context.Context) (*CertificateRequest, 
 		if err := noneAbove(highest); err != nil {
 			return nil, err
 		}
-		priv, err := newKey(protocol.WorkingKeyType(b.id.Type()))
+		priv, err := newKey(workingKeyType)
 		if err != nil {
 			return nil, err
 		}

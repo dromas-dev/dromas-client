@@ -6,6 +6,8 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"slices"
+	"strings"
 	"time"
 
 	"golang.org/x/crypto/ssh"
@@ -60,8 +62,8 @@ type Certificate struct {
 //
 // The rules: a user certificate with the key id CertificateKeyID, a serial of
 // at least 1, exactly one principal, the mailbox's address, and no critical
-// option; for a working key of the type its identity's type gives, that passes
-// that type's key checks and is not the identity key; signed by the identity
+// option; for a working key of a type its identity's type gives, that passes
+// its type's key checks and is not the identity key; signed by the identity
 // key, byte for byte; both dates at or before LastDate; running no longer than
 // MaxCertificateLifetime; begun, and not ended. It is in the one form its makers
 // write, NewCertificate and "ssh-keygen -s … -O clear": a nonce of 32 bytes,
@@ -167,22 +169,22 @@ func certificateForm(id *Identity, key ssh.PublicKey) (*ssh.Certificate, error) 
 	return cert, nil
 }
 
-// checkWorkingKey holds a certified key to the type the identity's type
-// gives its working keys (WorkingKeyType) and to that type's key checks, and
+// checkWorkingKey holds a certified key to the types the identity's type
+// gives its working keys (WorkingKeyTypes) and to its type's key checks, and
 // refuses the identity key itself: SSHSIG does not sign its signing-key field,
 // so the identity's own signature, rank 0, could otherwise be wrapped in a
 // certificate of the identity's key at a rank above a revocation (PROTOCOL.md
 // §5).
 func checkWorkingKey(id *Identity, key ssh.PublicKey) error {
-	work := WorkingKeyType(id.Type())
-	if key == nil || work == "" || key.Type() != work {
-		return fmt.Errorf("the working key is not an %s key", work)
+	types := WorkingKeyTypes(id.Type())
+	if key == nil || !slices.Contains(types, key.Type()) {
+		return fmt.Errorf("the working key is not of a type its identity certifies: %s", strings.Join(types, ", "))
 	}
 	if _, ok := key.(ssh.CryptoPublicKey); !ok {
-		return fmt.Errorf("the working key is not an %s key", work)
+		return fmt.Errorf("the working key is not of a type its identity certifies: %s", strings.Join(types, ", "))
 	}
-	if err := identityTypes[work].check(key); err != nil {
-		return fmt.Errorf("the working key fails the %s key checks: %v", work, err)
+	if err := identityTypes[key.Type()].check(key); err != nil {
+		return fmt.Errorf("the working key fails the %s key checks: %v", key.Type(), err)
 	}
 	if bytes.Equal(key.Marshal(), id.PublicKey().Marshal()) {
 		return errors.New("the working key is the identity key")

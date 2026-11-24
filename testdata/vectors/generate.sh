@@ -2,12 +2,12 @@
 # Regenerates the dromas v1 test vectors with stock tools only: bash, od, base64, fold,
 # sha256sum, ssh-keygen and openssl (dgst -sha384, base64), plus age >= 1.3 for the three ciphertexts.
 # Everything is deterministic (Ed25519 signatures are), except what is made once and kept:
-# each certificate (ssh-keygen puts a random nonce in one), each signature by C's P-256 identity (an
-# ECDSA signature differs each time it is made) and each message/*.age.
+# each certificate (ssh-keygen puts a random nonce in one), each signature by C's P-256 identity or A's P-256
+# working key (an ECDSA signature differs each time it is made) and each message/*.age.
 # Inputs are in input/: every Ed25519 key is a PUBLISHED test key of RFC 8032 (§7.1: the
 # identities of A and B are TEST 1 and TEST 2, their working keys TEST 3, TEST 1024 and
 # TEST SHA(abc); §7.2: C's working key is the first Ed25519ctx test's key), C's P-256 identity
-# is the PUBLISHED test key of RFC 6979 §A.2.5. B's and C's prekey is the PUBLISHED test identity of the
+# is the PUBLISHED test key of RFC 6979 §A.2.5, and A's P-256 working key the initiator's of RFC 5903 §8.1. B's and C's prekey is the PUBLISHED test identity of the
 # C2SP age testkit (CCTV age/internal/testkit: TestHybridIdentity), in input/b-1.pq.key, so the two messages
 # decrypt with any age that reads post-quantum keys; the other age recipients' secret keys were discarded. Every vector is judged at the
 # time in ./now, with the revocations of certificates a reader holds: A's, through THROUGH, its certificates
@@ -90,7 +90,7 @@ identity_doc() { printf 'dromas-v1\nssh-ed25519 %s\n' "$(bin "$(str "$(asc ssh-e
 p256_doc() { printf 'dromas-v1\necdsa-sha2-nistp256 %s\n' "$(bin "$(p256_wire "$@")" | b64)"; }
 
 KEYS=$(mktemp -d) # private keys live only here, and only while this runs
-cleanup() { local k; for k in a b c a-work b-work a-work-2 c-work small-work; do rm -f "$KEYS/$k" "$KEYS/$k.pub" "$KEYS/$k-cert.pub"; done; rmdir "$KEYS"; }
+cleanup() { local k; for k in a b c a-work b-work a-work-2 c-work a-work-p256 small-work; do rm -f "$KEYS/$k" "$KEYS/$k.pub" "$KEYS/$k-cert.pub"; done; rmdir "$KEYS"; }
 trap cleanup EXIT
 
 printf '%s\n' "$NOW" > now
@@ -115,6 +115,12 @@ ssh-keygen -y -f "$KEYS/c" > "$KEYS/c.pub"
 printf 'dromas-v1\n%s\n' "$(cut -d' ' -f1,2 "$KEYS/c.pub")" > c/identity.doc
 address < c/identity.doc > c/address
 C=$(cat c/address)
+
+# A's working key of type ecdsa-sha2-nistp256, which a mailbox of every identity type may certify (PROTOCOL.md §4.1).
+{ read -r scalar; read -r WPOINT; } < input/a-work-p256.p256
+openssh_p256_key "$scalar" "$WPOINT" "$KEYS/a-work-p256"
+ssh-keygen -y -f "$KEYS/a-work-p256" > "$KEYS/a-work-p256.pub"
+[ "$(cut -d' ' -f2 "$KEYS/a-work-p256.pub")" = "$(bin "$(p256_wire "04$WPOINT")" | b64)" ] || { echo "the a-work-p256 key file does not hold the RFC 5903 key" >&2; exit 1; }
 
 # A certificate: what "ssh-keygen -s" writes for a working key, made once and kept without its comment.
 cert() { # <kept file> <signing key> <certified key> <ssh-keygen options…>
@@ -242,9 +248,9 @@ pv bad-an-address-of-63-hex 'dromas-pass address="%s", not_after="%s", signature
 pv bad-not-after-not-a-time 'dromas-pass address="%s", not_after="%s", signature="%s"' "$A" 2026-13-10T00:10:00Z "$PS" # month 13, quoted, so it is read to its form
 pv bad-the-signature-with-padding-bits-set 'dromas-pass address="%s", not_after="%s", signature="%sLR=="' "$A" "$PT" "${PS:0:${#PS}-4}" # the pattern's, and no writer's: "LQ==" is that byte (RFC 4648 §3.5)
 # The longest a value may be (§8: the form a client writes with a signature of the most any identity key type
-# allows, 1004 bytes, sk-ecdsa's), made so with empty list elements, one for each byte that signature's base64 is longer
+# allows, 1101 bytes, an sk-ecdsa identity's under a P-256 working key's certificate), made so with empty list elements, one for each byte that signature's base64 is longer
 # than A's, and a byte longer.
-printf -v PC '%*s' $(( (1004 + 2) / 3 * 4 - ${#PS} )) ''
+printf -v PC '%*s' $(( (1101 + 2) / 3 * 4 - ${#PS} )) ''
 pv ok-as-long-as-a-pass-can-be 'dromas-pass address="%s", not_after="%s", signature="%s"%s' "$A" "$PT" "$PS" "${PC// /,}"
 pv bad-a-byte-longer-than-a-pass-can-be 'dromas-pass address="%s", not_after="%s", signature="%s"%s,' "$A" "$PT" "$PS" "${PC// /,}"
 
@@ -286,6 +292,15 @@ badcert bad-runs-longer-than-the-maximum a a-work $(good "$A" "$SA" "$V_LONG")  
 # And one every implementation must take, at the edge of the rule bad-not-begun is past.
 okcert() { badcert "$@"; }
 okcert ok-begins-now a a-work $(good "$A" "$SA" "$V_BEGINS_NOW")
+# A's P-256 working key, under a certificate every check passes. Its ECDSA signature is made once and kept.
+cert cert/ok-working-key-p256.pub a a-work-p256 $(good "$A")
+statement "$A" "$SA" 1 "$(cat input/a-1.pq)" "$NOT_AFTER" > cert/ok-working-key-p256.txt
+[ -e cert/ok-working-key-p256.sig ] || under a-work-p256 cert/ok-working-key-p256.pub "dromas-prekey-v1:$A" < cert/ok-working-key-p256.txt > cert/ok-working-key-p256.sig
+# C's P-256 identity certifying its own key, which is of a type its identity certifies: that the certified key is the
+# identity's is all that refuses it. Its signature is C's identity's under that certificate, made once and kept.
+cert cert/c-bad-certifies-the-identity.pub c c $(good "$C")
+statement "$C" "$SA" 1 "$(cat input/b-1.pq)" "$NOT_AFTER" > cert/c-bad-certifies-the-identity.txt
+[ -e cert/c-bad-certifies-the-identity.sig ] || under c cert/c-bad-certifies-the-identity.pub "dromas-prekey-v1:$C" < cert/c-bad-certifies-the-identity.txt > cert/c-bad-certifies-the-identity.sig
 
 # A signature has one form, the bytes ssh-keygen -Y sign writes (PROTOCOL.md §3.2): the armor with LF line ends and
 # lines of 70, version 1, sha512, an empty reserved field, no trailing NUL, an ECDSA signature's r and s each the
@@ -347,6 +362,12 @@ nminus() { # <a P-256 number, hex, as an mpint holds it> → n - it, as the mini
 }
 armor "$(restr "$X" "$o" "$(restr "$g" "$i" "$(restr "$rs" "$j" "$(nminus "$s")")")")" > sig/c-ok-the-other-s.sig
 armor "$(restr "$X" "$o" "$(restr "$g" "$i" "$(restr "$rs" 0 "00$(content "$rs" 0)")")")" > sig/c-bad-r-padded.sig
+# A's P-256 working key's signature on cert/ok-working-key-p256.txt with s as n - s, which every verifier takes too.
+X=$(blob cert/ok-working-key-p256.sig)
+o=$(skip "$X" "$(skip "$X" "$(skip "$X" "$(skip "$X" 20)")")")
+g=$(content "$X" "$o"); i=$(skip "$g" 0); rs=$(content "$g" "$i"); j=$(skip "$rs" 0); s=$(content "$rs" "$j")
+cp cert/ok-working-key-p256.pub cert/ok-working-key-p256-the-other-s.pub; cp cert/ok-working-key-p256.txt cert/ok-working-key-p256-the-other-s.txt
+armor "$(restr "$X" "$o" "$(restr "$g" "$i" "$(restr "$rs" "$j" "$(nminus "$s")")")")" > cert/ok-working-key-p256-the-other-s.sig
 # Two more, made by protocol's TestVectorsEd25519R, since they need arithmetic on the curve: sig/ok-r-small-order.sig, whose
 # R is the neutral point, and sig/bad-r-plus-order-2.sig, whose R has a point of order 2 added. OpenSSH's own Ed25519 from
 # 10.6p1 judges both the other way (PROTOCOL.md Appendix A).
@@ -635,6 +656,9 @@ sed 's/"body":"hello"/"body":"hellp"/' message/a-to-b.line > "$L"; cat "$L" "$GO
 line "$C" "$B" "$(b64 < c/identity.doc)" > "$L"; [ -e plain/accept-p256-sender.txt ] || refuse accept-p256-sender "$L" sign c "dromas-msg-v1:$B"
 head -n 1 plain/accept-p256-sender.txt | cmp -s - "$L" || { echo "plain/accept-p256-sender.txt is not C's line" >&2; exit 1; }
 refuse accept-p256-sender-under-a-certificate "$L" under c-work c/work-cert.pub "dromas-msg-v1:$B"
+# A's message to B under the certificate of A's P-256 working key, made once and kept.
+[ -e plain/accept-p256-working-key.txt ] || refuse accept-p256-working-key message/a-to-b.line under a-work-p256 cert/ok-working-key-p256.pub "dromas-msg-v1:$B"
+head -n 1 plain/accept-p256-working-key.txt | cmp -s - message/a-to-b.line || { echo "plain/accept-p256-working-key.txt is not A's line to B" >&2; exit 1; }
 line "$(address < identity/unsupported-type.doc)" "$B" "$(b64 < identity/unsupported-type.doc)" > "$L"; refuse refuse-unsupported-key-type "$L" under a-work a/work-cert.pub "dromas-msg-v1:$B"
 line "$A" "$B" "$(b64 < identity/unsupported-type.doc)" > "$L"; refuse refuse-from-is-not-the-identity-of-an-unknown-type "$L" under a-work a/work-cert.pub "dromas-msg-v1:$B"
 # Who it is from. The first is the forgery an identity member invites: A's document beside a

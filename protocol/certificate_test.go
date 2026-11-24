@@ -46,6 +46,29 @@ func newCertMailbox(t *testing.T) certMailbox {
 	return certMailbox{id: id, identity: identity, work: work}
 }
 
+// newWorkSigner is a new working key of the type ty, Ed25519 or P-256.
+func newWorkSigner(t *testing.T, ty string) ssh.Signer {
+	t.Helper()
+	var priv any
+	var err error
+	switch ty {
+	case IdentityEd25519:
+		_, priv, err = ed25519.GenerateKey(rand.Reader)
+	case IdentityP256:
+		priv, err = ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	default:
+		t.Fatalf("no working key of type %s is made here", ty)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := ssh.NewSignerFromKey(priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s
+}
+
 // testLifetime is how long a test's certificates run: the reference server's
 // default maximum, 45 days and the hour, which a client asks for, and
 // MaxCertificateLifetime, the most any verifier takes.
@@ -155,6 +178,14 @@ func TestCertificateRules(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	p384, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p384Key, err := ssh.NewPublicKey(&p384.PublicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
 	smallOrder, err := ssh.NewPublicKey(ed25519.PublicKey(append([]byte{1}, make([]byte, 31)...)))
 	if err != nil {
 		t.Fatal(err)
@@ -214,7 +245,8 @@ func TestCertificateRules(t *testing.T) {
 		{name: "a critical option nobody defines", change: func(c *ssh.Certificate) { c.CriticalOptions = map[string]string{"nobody-defines@dromas.invalid": ""} }, want: ErrCertificate},
 		{name: "signed by another key", signer: other.identity, want: ErrCertificate},
 		{name: "the identity key as the working key", change: func(c *ssh.Certificate) { c.Key = b.identity.PublicKey() }, want: ErrCertificate},
-		{name: "a P-256 working key", change: func(c *ssh.Certificate) { c.Key = p256Key }, want: ErrCertificate},
+		{name: "a P-256 working key", change: func(c *ssh.Certificate) { c.Key = p256Key }, want: nil},
+		{name: "a P-384 working key", change: func(c *ssh.Certificate) { c.Key = p384Key }, want: ErrCertificate},
 		{name: "a small-order working key", change: func(c *ssh.Certificate) { c.Key = smallOrder }, want: ErrCertificate},
 		// Both dates are at or before 9999-12-31T23:59:59Z, so ssh-keygen's
 		// "forever" is no certificate of this protocol; and its form is refused

@@ -107,16 +107,16 @@ const (
 )
 
 // A defined type: the checks its key must pass beyond being a key of that
-// type in its one encoding, and the type of the working keys an identity of
-// that type certifies (WorkingKeyType). Its document's form is the one every
+// type in its one encoding, and the types of the working keys an identity of
+// that type certifies (WorkingKeyTypes). Its document's form is the one every
 // type shares (identityForm), with the key in its one encoding: the base64 of
 // the wire key as it is written back once parsed (PROTOCOL.md §4.1). Ed25519's
-// is 91 bytes, P-256's 171, sk-ssh-ed25519's 138 and sk-ecdsa's 218. A
-// working key's type is itself a type defined here, and its key is held to
-// that type's checks.
+// is 91 bytes, P-256's 171, sk-ssh-ed25519's 138 and sk-ecdsa's 218. Each
+// working key type is itself a type defined here, and a working key is held
+// to its type's checks.
 var identityTypes = map[string]struct {
 	check func(ssh.PublicKey) error
-	work  string
+	work  []string
 	// optional is a type PROTOCOL.md §4.1 does not define: one a mailbox
 	// declares (§7).
 	optional bool
@@ -125,14 +125,14 @@ var identityTypes = map[string]struct {
 		check: func(k ssh.PublicKey) error {
 			return checkEd25519(k.(ssh.CryptoPublicKey).CryptoPublicKey().(ed25519.PublicKey))
 		},
-		work: IdentityEd25519,
+		work: workingKeyTypes,
 	},
 	// Its key has no check of its own: the library refuses a point off the
 	// curve, compressed, at infinity or with a coordinate not below the
 	// field's size, and that is all OpenSSH from 10.3p1 holds a point to.
 	IdentityP256: {
 		check: func(ssh.PublicKey) error { return nil },
-		work:  IdentityEd25519,
+		work:  workingKeyTypes,
 	},
 	// A security key's are its plain type's, and its application is
 	// SKApplication: its wire key is the plain key's fields, then the
@@ -144,11 +144,11 @@ var identityTypes = map[string]struct {
 			}
 			return checkEd25519(k.(ssh.CryptoPublicKey).CryptoPublicKey().(ed25519.PublicKey))
 		},
-		work: IdentityEd25519,
+		work: workingKeyTypes,
 	},
 	IdentitySKP256: {
 		check: func(k ssh.PublicKey) error { return checkApplication(k, 4) },
-		work:  IdentityEd25519,
+		work:  workingKeyTypes,
 	},
 }
 
@@ -172,10 +172,16 @@ func checkApplication(k ssh.PublicKey, fields int) error {
 	return nil
 }
 
-// WorkingKeyType returns the key type of every working key an identity of
-// key type t certifies (PROTOCOL.md §4.1, §5), and "" for a type not defined
-// here.
-func WorkingKeyType(t string) string { return identityTypes[t].work }
+// workingKeyTypes are the working key types of every identity key type of
+// PROTOCOL.md §4.1: Ed25519 and P-256, each a plain key that a key file or an
+// agent holds, P-256 among them for a key in hardware that offers no other
+// curve.
+var workingKeyTypes = []string{IdentityEd25519, IdentityP256}
+
+// WorkingKeyTypes returns the key types of the working keys an identity of
+// key type t certifies (PROTOCOL.md §4.1, §5), and none for a type not
+// defined here.
+func WorkingKeyTypes(t string) []string { return slices.Clone(identityTypes[t].work) }
 
 // Identity is a mailbox's identity: its identity document, the key in it, and the
 // address that document hashes to.

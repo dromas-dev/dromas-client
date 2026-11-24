@@ -25,12 +25,12 @@ const (
 // MaxSignature is the most bytes an armored signature may be (PROTOCOL.md
 // §3.2): the largest a mailbox of any identity key type defined here makes in
 // the one form, an sk-ecdsa identity's prekey statement under a certificate
-// whose r and s each take 33 bytes. A field that carries one counts every byte it
-// holds; in a message it is the block from the BEGIN line through the END
-// line and its line feed. Dearmor refuses a longer one before reading it, so
+// of a P-256 working key, each r and s in it taking 33 bytes. A field that
+// carries one counts every byte it holds; in a message it is the block from
+// the BEGIN line through the END line and its line feed. Dearmor refuses a longer one before reading it, so
 // every verifier here does. A key type added later whose signatures are longer
 // raises it with that type (PROTOCOL.md §14).
-const MaxSignature = 1004
+const MaxSignature = 1101
 
 // Sign signs message in namespace and returns the signature armored
 // byte-for-byte as "ssh-keygen -Y sign" writes it.

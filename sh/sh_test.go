@@ -130,6 +130,13 @@ func reads(ty string) bool {
 	return false
 }
 
+// readsSigner reports whether the local ssh-keygen reads every key of a
+// signer of an identity of type ty: the identity's, and under a certificate
+// the working key's too.
+func readsSigner(ty string, s *protocol.Signer) bool {
+	return reads(ty) && (s.Identity() || reads(s.Certificate().WorkingKey().Type()))
+}
+
 // p256 reports whether the local ssh-keygen reads a P-256 key.
 func p256() bool { return reads(protocol.IdentityP256) }
 
@@ -447,6 +454,10 @@ func TestVectorsCertificate(t *testing.T) {
 			t.Logf("%s: %s reads no %s key, so the script refuses every certificate of mailbox %s: a known variance (PROTOCOL.md Appendix A)", name, sshBuild(), vectorMailboxes()[mailbox], mailbox)
 			continue
 		}
+		if strings.HasPrefix(string(mustReadFile(strings.TrimSuffix(sig, ".sig")+".pub")), "ecdsa-sha2-nistp256-cert-v01@openssh.com ") && !p256() {
+			t.Logf("%s: %s reads no P-256 key, so the script refuses a certificate of a P-256 working key: a known variance (PROTOCOL.md Appendix A)", name, sshBuild())
+			continue
+		}
 		addr, doc := identity(t, mailbox)
 		want, wantExit := verdict(mailbox, sig)
 		if strings.HasPrefix(strings.TrimPrefix(name, mailbox+"-"), "ok-") != (wantExit == 0) {
@@ -470,6 +481,9 @@ func TestVectorsCertificate(t *testing.T) {
 	// them; and a security key's certificate signed without user presence, or
 	// with a webauthn signature.
 	controls := []string{"bad-extensions", "bad-reserved-field", "bad-nonce-of-16-bytes", "bad-key-id", "bad-serial-zero", "bad-certifies-the-identity", "bad-critical-option"}
+	if readsMailbox("c") {
+		controls = append(controls, "c-bad-certifies-the-identity")
+	}
 	for _, m := range []string{"d", "e"} {
 		if readsMailbox(m) {
 			for _, n := range []string{m + "-bad-no-user-presence", m + "-bad-webauthn", m + "-bad-working-key-a-security-key"} {
@@ -1065,7 +1079,7 @@ func TestVectorsPlain(t *testing.T) {
 		out, err := bash(t, scratch(t), setNow+held(t, "a")+fmt.Sprintf(`cp %s "$DR/msg.T" && A=$(dr_open %s "$DR/msg") || { echo "$A"; exit 1; }
 c=$(dr_rank "$DR/msg.sig" "$DR/msg.doc" "$A") || exit 3; dr_certrevoked "$A" "$c"; case $? in 0) echo "certificate_revoked: revoked"; exit 1 ;; 3) exit 3 ;; esac
 echo "$A"; dr_line "$DR/msg.P"`, abs(t, f), b))
-		if gerr == nil && err != nil && !reads(signed.Sender.Type()) {
+		if gerr == nil && err != nil && !readsSigner(signed.Sender.Type(), signed.Signer) {
 			t.Logf("%s: %s reads no %s key, so the script refuses such a sender: a known variance (PROTOCOL.md Appendix A)", name, sshBuild(), signed.Sender.Type())
 			codes["delivered"]++
 			continue
@@ -1085,7 +1099,7 @@ echo "$A"; dr_line "$DR/msg.P"`, abs(t, f), b))
 			codes[refusal]++
 			continue
 		}
-		if err != nil && !reads(signed.Sender.Type()) {
+		if err != nil && !readsSigner(signed.Sender.Type(), signed.Signer) {
 			t.Logf("%s: %s reads no %s key, so the script refuses such a sender: a known variance (PROTOCOL.md Appendix A)", name, sshBuild(), signed.Sender.Type())
 			codes["delivered"]++
 			continue

@@ -316,8 +316,10 @@ func TestVectorCertificates(t *testing.T) {
 			continue
 		}
 		signer, err := VerifySigned(a, st, read(t, "cert/"+name+".sig"), PrekeyNamespace(a.Address()), now)
-		if err != nil || Admits(held, signer) != nil {
-			t.Errorf("%s: VerifySigned: %v, with A's revocation of certificates held: %v", name, err, Admits(held, signer))
+		if err != nil {
+			t.Errorf("%s: VerifySigned: %v", name, err)
+		} else if err := Admits(held, signer); err != nil {
+			t.Errorf("%s: with A's revocation of certificates held: %v", name, err)
 		}
 		if p, signer, err := VerifyPrekey(a, st, read(t, "cert/"+name+".sig"), now); err != nil || p.Rank != signer.Rank() {
 			t.Errorf("%s: VerifyPrekey: %v", name, err)
@@ -392,6 +394,34 @@ func TestVectorCertificates(t *testing.T) {
 	re := vectorCertificate(t, "cert/bad-certifies-the-identity.pub").(*ssh.Certificate)
 	if !bytes.Equal(Armor(rewrap(t, own, re.Marshal())), read(t, "cert/bad-certifies-the-identity.sig")) || re.Serial <= held.Through {
 		t.Error("cert/bad-certifies-the-identity.sig is not the identity's own signature re-wrapped above A's revocation of certificates")
+	}
+	// C's P-256 identity certifies P-256 working keys, so a certificate of
+	// its own key is of a type it certifies, and that the key is the
+	// identity's is all that refuses it. Its signature is the identity's own
+	// under that certificate.
+	cst, csig := read(t, "cert/c-bad-certifies-the-identity.txt"), read(t, "cert/c-bad-certifies-the-identity.sig")
+	ckey := vectorCertificate(t, "cert/c-bad-certifies-the-identity.pub")
+	if cc := ckey.(*ssh.Certificate); cc.Key.Type() != c.Type() || !bytes.Equal(cc.Key.Marshal(), c.PublicKey().Marshal()) {
+		t.Error("cert/c-bad-certifies-the-identity is not a certificate of C's own key")
+	}
+	if _, err := CheckCertificate(c, ckey, now); !errors.Is(err, ErrCertificate) {
+		t.Errorf("cert/c-bad-certifies-the-identity: CheckCertificate: %v", err)
+	}
+	if _, err := VerifySigned(c, cst, csig, PrekeyNamespace(c.Address()), now); !errors.Is(err, ErrCertificate) {
+		t.Errorf("cert/c-bad-certifies-the-identity: VerifySigned: %v", err)
+	}
+	if err := sshsig.Verify(ckey, cst, armoredBlob(t, csig), PrekeyNamespace(c.Address())); err != nil {
+		t.Errorf("cert/c-bad-certifies-the-identity: control: the signature itself fails: %v", err)
+	}
+	// A's P-256 working key: its certificate, and its signature with either s
+	// (PROTOCOL.md §3.2), as for a P-256 identity.
+	if k := vectorCertificate(t, "cert/ok-working-key-p256.pub").(*ssh.Certificate).Key; k.Type() != IdentityP256 {
+		t.Errorf("cert/ok-working-key-p256 certifies a key of type %s", k.Type())
+	}
+	r1, s1, _ := testRS(t, read(t, "cert/ok-working-key-p256.sig"))
+	r2, s2, _ := testRS(t, read(t, "cert/ok-working-key-p256-the-other-s.sig"))
+	if r1.Cmp(r2) != 0 || new(big.Int).Add(s1, s2).Cmp(elliptic.P256().Params().N) != 0 {
+		t.Error("cert/ok-working-key-p256-the-other-s.sig is not A's P-256 working key's signature with s as n − s")
 	}
 }
 
@@ -938,8 +968,8 @@ func TestEveryOtherFormOfASignatureIsRefused(t *testing.T) {
 
 // MaxSignature is the largest signature a mailbox of any identity key type
 // makes in the one form (PROTOCOL.md §3.2). The largest is made here: in every
-// namespace the protocol signs in, by the identity and by a working key under
-// a certificate as NewCertificate makes it, each ECDSA signature's r and s
+// namespace the protocol signs in, by the identity and by a working key of
+// each type under a certificate as NewCertificate makes it, each ECDSA signature's r and s
 // written in the most bytes the one form gives them, 33.
 func TestMaxSignatureIsTheLargestSignatureInTheOneForm(t *testing.T) {
 	now := vectorNow(t)
@@ -953,20 +983,24 @@ func TestMaxSignatureIsTheLargestSignatureInTheOneForm(t *testing.T) {
 			t.Fatalf("%s has no mailbox to sign with here", ty)
 		}
 		b := m(t)
-		cert, err := NewCertificate(b.id, b.identity, b.work.PublicKey(), MaxSerial, now, testLifetime)
-		if err != nil {
-			t.Fatal(err)
-		}
-		work, err := cert.Signer(b.work)
-		if err != nil {
-			t.Fatal(err)
-		}
 		// What each signer signs (PROTOCOL.md §5): the identity, everything;
-		// a working key, statements, passes and messages.
-		for signer, namespaces := range map[ssh.Signer][]func(Address) string{
+		// a working key of each type, statements, passes and messages.
+		signers := map[ssh.Signer][]func(Address) string{
 			b.identity: {PrekeyNamespace, PassNamespace, MessageNamespace, RevokeNamespace, RevokedCertsNamespace},
-			work:       {PrekeyNamespace, PassNamespace, MessageNamespace},
-		} {
+		}
+		for _, wt := range WorkingKeyTypes(ty) {
+			w := newWorkSigner(t, wt)
+			cert, err := NewCertificate(b.id, b.identity, w.PublicKey(), MaxSerial, now, testLifetime)
+			if err != nil {
+				t.Fatal(err)
+			}
+			work, err := cert.Signer(w)
+			if err != nil {
+				t.Fatal(err)
+			}
+			signers[work] = []func(Address) string{PrekeyNamespace, PassNamespace, MessageNamespace}
+		}
+		for signer, namespaces := range signers {
 			for _, ns := range namespaces {
 				sig, err := Sign(signer, []byte("a statement"), ns(b.id.Address()))
 				if err != nil {
@@ -1153,6 +1187,7 @@ var plainVerdicts = map[string]string{
 	"refuse-from-null":                                   RefusedSenderMismatch,
 	"accept-p256-sender":                                 "",
 	"accept-p256-sender-under-a-certificate":             "",
+	"accept-p256-working-key":                            "",
 	"accept-sk-ecdsa-sender":                             "",
 	"accept-sk-ecdsa-sender-under-a-certificate":         "",
 	"accept-sk-ed25519-sender":                           "",

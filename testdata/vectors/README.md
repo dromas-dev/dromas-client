@@ -19,6 +19,7 @@ A reader accepts each identity's own signature on a statement, a pass, or a mess
 - **Mailbox C's identity** is of type `ecdsa-sha2-nistp256`. It's the test key of RFC 6979 §A.2.5. The `input/c.p256` file holds the private scalar, and then the public point as x and y, in hex.
 - **Mailbox D's identity** is of type `sk-ecdsa-sha2-nistp256@openssh.com`, for the application `ssh:`. It's the P-256 test key of RFC 9500 §2.3, `testECCP256`. The `input/d.p256` file holds it as `input/c.p256` holds C's.
 - **Mailbox E's identity** is of type `sk-ssh-ed25519@openssh.com`, for the application `ssh:`. It's the key of the RFC 8032 §7.3 tests, in `input/e.ed25519`.
+- **A's P-256 working key** is of type `ecdsa-sha2-nistp256`. It's the initiator's key of RFC 5903 §8.1. The `input/a-work-p256.p256` file holds it as `input/c.p256` holds C's.
 - **D's and E's working key** is one key, the key of the last Ed25519ctx test of RFC 8032 §7.2, in `input/d-work.ed25519`.
 - **The prekey of B and C** is the published test identity of the C2SP age testkit (CCTV `age/internal/testkit`). `input/b-1.pq.key` is its `TestHybridIdentity`, so each message here decrypts with any age implementation that supports post-quantum keys, such as `age` 1.3 or later.
 - **The other age recipients in `input/`** are public keys whose secret keys were discarded.
@@ -92,9 +93,15 @@ Certificates of D's and E's, with the same three files as `cert/bad-*`, each sta
 
 - `d-bad-no-user-presence` and `e-bad-no-user-presence`: the identity's signature on the certificate has flags without user presence.
 - `d-bad-webauthn`: the identity's signature on the certificate is a `webauthn-sk-ecdsa-sha2-nistp256@openssh.com` signature. Go's `x/crypto/ssh` doesn't parse such a certificate. Such a signature carries the base64 of what it signs, so every signature under the certificate is longer than the bound (PROTOCOL.md §3.2), and a reader refuses it before it reads the certificate.
-- `e-bad-working-key-a-security-key`: the certified key is D's and E's working key written as a security key, of type `sk-ssh-ed25519@openssh.com`, where a working key is `ssh-ed25519`. That security key signed the signature under it.
+- `e-bad-working-key-a-security-key`: the certified key is D's and E's working key written as a security key, of type `sk-ssh-ed25519@openssh.com`, where a working key is `ssh-ed25519` or `ecdsa-sha2-nistp256`. That security key signed the signature under it.
 
 **Expected result:** every vector is refused for its mailbox. `ssh-keygen -Y verify` accepts all four.
+
+### `cert/c-bad-certifies-the-identity`
+
+C's identity certifies its own key, of type `ecdsa-sha2-nistp256`, a type that C's identity certifies. The statement is C's, in C's namespace, and the signature is C's identity's own under the certificate. Both are made once and kept.
+
+**Expected result:** refused for mailbox C, since the certified key is the identity key (PROTOCOL.md §5.2). `ssh-keygen -Y verify` accepts it.
 
 ### `revoke/bad-*.sig`
 
@@ -149,7 +156,11 @@ A signature in its one valid form and in other forms (PROTOCOL.md §3.2):
 
 A certificate at the edge of a rule, and a signature made under it, with the same files as `cert/bad-*`.
 
-**Expected result:** accepted when the reader holds A's revocation of certificates. `ok-begins-now` begins at `now`. `bad-not-begun` begins one second later.
+- `ok-begins-now` begins at `now`. `bad-not-begun` begins one second later.
+- `ok-working-key-p256` certifies A's P-256 working key, which made the signature. The signature is made once and kept.
+- `ok-working-key-p256-the-other-s` is the same certificate and statement, with the signature's s written as n − s, which ECDSA verifies as well (PROTOCOL.md §3.2).
+
+**Expected result:** accepted when the reader holds A's revocation of certificates.
 
 ### `message/`
 
@@ -183,6 +194,7 @@ Notes on some of these vectors:
 
 - `accept-signed-by-the-identity` is A's message, signed by A's identity itself at rank 0, which A's revocation of certificates doesn't cover.
 - `accept-sk-ecdsa-sender` and `accept-sk-ed25519-sender` are from mailboxes D and E, each signed by its identity, and the two `-under-a-certificate` vectors are the same messages under each one's certificate. Every client delivers them.
+- `accept-p256-working-key` is A's message to B under the certificate of A's P-256 working key, `cert/ok-working-key-p256.pub`, and is made once and kept. A client that verifies `ecdsa-sha2-nistp256` keys delivers it. A client built on an OpenSSH without OpenSSL reads no P-256 key, so it refuses this message (PROTOCOL.md Appendix A).
 - `accept-p256-sender` is from mailbox C, signed by C's identity, and is made once and kept. `accept-p256-sender-under-a-certificate` is the same message under C's certificate. A client that verifies `ecdsa-sha2-nistp256` delivers each one. A client that doesn't verify that type refuses each one with `unsupported_key_type`.
 - `refuse-certificate-revoked` passes PROTOCOL.md §12.3 checks 1 to 6. Only the revocation of certificates refuses it.
 - In `accept-anything-after-the-signature`, a second envelope, signed by B, follows the first END line, and the reader never reads it.
@@ -357,7 +369,7 @@ The `ok` vectors: an empty object, null members beside a revocation (a null memb
 
 ## Determinism
 
-Ed25519 signatures are deterministic, so an implementation that signs these statements with these keys, under these certificates, must produce byte-identical `.sig` files. A certificate is made once and kept, because `ssh-keygen` puts a random nonce in each certificate. Each signature by C's P-256 identity and each `message/*.age` file are also made once and kept, because `ssh-keygen`'s ECDSA and age encryption are randomized. D's ECDSA signatures are deterministic (RFC 6979), and a certificate of D's or E's has a nonce made from its name, so D's and E's files regenerate byte for byte. Everything else regenerates byte for byte too.
+Ed25519 signatures are deterministic, so an implementation that signs these statements with these keys, under these certificates, must produce byte-identical `.sig` files. A certificate is made once and kept, because `ssh-keygen` puts a random nonce in each certificate. Each signature by C's P-256 identity or by A's P-256 working key, and each `message/*.age` file, are also made once and kept, because `ssh-keygen`'s ECDSA and age encryption are randomized. D's ECDSA signatures are deterministic (RFC 6979), and a certificate of D's or E's has a nonce made from its name, so D's and E's files regenerate byte for byte. Everything else regenerates byte for byte too.
 
 ## Tools that check the vectors
 

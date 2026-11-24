@@ -264,9 +264,9 @@ dr_idcheck(){ # <identity document> [address] → 0 only for a two-line document
     sk-ecdsa-sha2-nistp256@openssh.com) [ ${#w} -eq 254 ] && [ "${w: -16}" = 000000047373683a ] ;;
   esac
 }
-dr_blob(){ # <signature file> → the SSHSIG blob it armors, in hex, only for armour in its one form, the bytes ssh-keygen -Y sign and the Go client write (PROTOCOL.md §3.2), and at most 1004 bytes, the bound on a signature (PROTOCOL.md §3.2): the BEGIN line, the base64 of the blob in its one encoding in lines of 70 characters, the END line, each ending in LF, and nothing before or after. The file is compared, as bytes, with the armour written back from the blob it holds, as the Go client's Dearmor compares it: any other form, CRLF, whitespace or a NUL among them, is refused. 1 for anything else
+dr_blob(){ # <signature file> → the SSHSIG blob it armors, in hex, only for armour in its one form, the bytes ssh-keygen -Y sign and the Go client write (PROTOCOL.md §3.2), and at most 1101 bytes, the bound on a signature (PROTOCOL.md §3.2): the BEGIN line, the base64 of the blob in its one encoding in lines of 70 characters, the END line, each ending in LF, and nothing before or after. The file is compared, as bytes, with the armour written back from the blob it holds, as the Go client's Dearmor compares it: any other form, CRLF, whitespace or a NUL among them, is refused. 1 for anything else
   local t h
-  [ "$(wc -c < "$1")" -le 1004 ] || return 1
+  [ "$(wc -c < "$1")" -le 1101 ] || return 1
   t=$(sed '1d;$d' "$1" | tr -d '\n')      # what lies between the first line and the last, read as text: whatever it drops or a file holds besides, the comparison below refuses
   [[ $t =~ ^[A-Za-z0-9+/]+={0,2}$ ]] && h=$(printf %s "$t" | base64 -d 2> /dev/null | od -An -v -tx1 | tr -d ' \n') && [ -n "$h" ] || return 1
   [ "$(printf %s "$t" | base64 -d | base64 | tr -d '\n')" = "$t" ] || return 1      # the base64 in its one encoding: padded, and the unused bits of the last character zero
@@ -298,11 +298,14 @@ dr_sshsig(){ # <signature file> → 0 only for a signature dr_blob reads whose b
   dr_str && k=$v && dr_str && ns=$v && dr_str && [ -z "$v" ] && dr_str && [ "$v" = "$(dr_asc sha512)" ] && dr_str && dr_sigform "$v" && [ "$o" -eq "${#x}" ]      # the signing key, the namespace, reserved, the hash, the signature: and nothing after
 }
 dr_cert(){ # <signature> <identity document> <address> → "<serial> <valid after> <valid before>", as Unix times, for the certificate the signature carries, only if it is in its one form (below, PROTOCOL.md §5.2) and names that identity as its signer. Its fields are read from its bytes, in order: ssh-keygen -Y verify takes a certificate with a critical option, an extension or bytes in its reserved field, and checks no key id. Whether the identity's signature on it is good, and whether it holds now, are dr_signed's
-  local x o=20 l v k ns n a b      # x: the bytes being read, in hex; o: how far into them; v: the field just read
+  local x o=20 l v k ns n a b t      # x: the bytes being read, in hex; o: how far into them; v: the field just read
   dr_sshsig "$1" || return 1; x=$k; o=0      # the signing key: here, the certificate
-  dr_str && [ "$v" = "$(dr_asc ssh-ed25519-cert-v01@openssh.com)" ] || return 1      # a certificate for an Ed25519 key
-  dr_str && [ ${#v} -eq 64 ] || return 1      # the nonce: 32 bytes, as every maker writes one
-  dr_str && k=$v && dr_keycheck "$k" || return 1      # the working key, held to the identity's own key checks
+  dr_str && t=$v && dr_str && [ ${#v} -eq 64 ] || return 1      # the certificate's type, then the nonce: 32 bytes, as every maker writes one
+  case $t in      # the working key, of a type every identity certifies (PROTOCOL.md §4.1), in k as its wire key: an Ed25519 key held to that type's key checks, or a P-256 key of curve nistp256 and an uncompressed point, which ssh-keygen -Y verify holds to the curve
+    "$(dr_asc ssh-ed25519-cert-v01@openssh.com)") dr_str && dr_keycheck "$v" && k=0000000b$(dr_asc ssh-ed25519)00000020$v || return 1 ;;
+    "$(dr_asc ecdsa-sha2-nistp256-cert-v01@openssh.com)") dr_str && [ "$v" = "$(dr_asc nistp256)" ] && dr_str && [[ $v =~ ^04[0-9a-f]{128}$ ]] && k=00000013$(dr_asc ecdsa-sha2-nistp256)00000008$(dr_asc nistp256)00000041$v || return 1 ;;
+    *) return 1 ;;
+  esac
   dr_u64 && n=$v && [ "$n" -ge 1 ] && [ "$n" -le 9007199254740991 ] || return 1      # the serial: from 1 to 2^53 - 1, as a prekey's
   [ "${x:o:8}" = 00000001 ] || return 1; o=$((o + 8))      # a user certificate
   dr_str && [ "$v" = "$(dr_asc dromas-cert-v1)" ] || return 1      # the key id
@@ -310,7 +313,7 @@ dr_cert(){ # <signature> <identity document> <address> → "<serial> <valid afte
   dr_u64 && a=$v && dr_u64 && b=$v && [ "$a" -le 253402300799 ] && [ "$b" -le 253402300799 ] && [ $((b - a)) -le 3891600 ] || return 1      # valid after, valid before: each at or before 9999-12-31T23:59:59Z, so forever is refused for its form, never as not begun or not ended, and running at most 45 days and an hour (3891600 seconds), the Go client's protocol.MaxCertificateLifetime
   dr_str && [ -z "$v" ] || return 1      # no critical option: one a verifier does not know is refused, and none is known here
   dr_str && [ -z "$v" ] && dr_str && [ -z "$v" ] || return 1      # no extension, and an empty reserved field
-  dr_str && [ "$v" = "$(dr_idkey "$2")" ] && [ "$v" != "0000000b$(dr_asc ssh-ed25519)00000020$k" ] || return 1      # signed by the identity's key, byte for byte, which is never the key certified: SSHSIG signs no signing key, so the identity's own signature on a statement, rank 0, wrapped in a certificate of the identity's key above N, would otherwise rank at that certificate's serial, above the statements under certificates it stands below (PROTOCOL.md §5.2)
+  dr_str && [ "$v" = "$(dr_idkey "$2")" ] && [ "$v" != "$k" ] || return 1      # signed by the identity's key, byte for byte, which is never the key certified: SSHSIG signs no signing key, so the identity's own signature on a statement, rank 0, wrapped in a certificate of the identity's key above N, would otherwise rank at that certificate's serial, above the statements under certificates it stands below (PROTOCOL.md §5.2)
   dr_str && dr_sigform "$v" && [ "$o" -eq "${#x}" ] || return 1      # the identity's signature on it, in its one form, and nothing after
   echo "$n $a $b"
 }
