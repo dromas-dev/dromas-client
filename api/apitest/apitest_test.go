@@ -171,6 +171,35 @@ func TestARouteTheDescriptionLacksTakesOnlyALimitsOwn429(t *testing.T) {
 	}
 }
 
+// A first segment under /v1/ that does not begin with an ASCII letter and "_"
+// names no address, so it is a route the server does not offer, answered as
+// the router answers one, though the template /v1/{address} matches it
+// (PROTOCOL.md §11.2). A segment that begins so is an address's, and a plain
+// 404 there is reported.
+func TestAFirstSegmentThatNamesNoAddressIsARouteTheDescriptionLacks(t *testing.T) {
+	for _, c := range []struct {
+		path string
+		ok   bool
+	}{
+		{"/v1/nope", true},
+		{"/v1/nope/messages", true},
+		{"/v1/x", true},
+		{"/v1/9_" + strings.Repeat("a", 64), true},
+		{"/v1/__", true},
+		{"/v1/d_short", false},
+		{"/v1/x_" + strings.Repeat("a", 64), false},
+	} {
+		r := &reported{TB: t}
+		h := apitest.Handler(r, http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			http.NotFound(w, req)
+		}))
+		h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, c.path, nil))
+		if got := len(r.errs) == 0; got != c.ok {
+			t.Errorf("GET %s answered the router's 404: taken %v, want %v (%q)", c.path, got, c.ok, r.errs)
+		}
+	}
+}
+
 // A retired version comes before routing (PROTOCOL.md §11.4 rule 0), so a route
 // under /v1/ the description lacks is answered 410 client_version_unsupported,
 // with a floor of a policy's form where it names one. Any other 410 there is

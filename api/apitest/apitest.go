@@ -10,7 +10,8 @@
 //   - every number in a JSON answer, or in a JSON request answered 2xx, is an
 //     integer written in digits alone (PROTOCOL.md §3.3), where the schema
 //     takes 1.0 and 1e0;
-//   - a route the description lacks gets the router's plain 404 or 405, a
+//   - a route the description lacks, a first segment under /v1/ that names
+//     no address among them, gets the router's plain 404 or 405, a
 //     503 while the server is not ready, or a limit's 429 as PROTOCOL.md §11.2
 //     gives it to any call: rate_limited, with a Retry-After in seconds;
 //   - a path that is not in its clean form gets those checks, or a redirect
@@ -180,7 +181,7 @@ func check(t testing.TB, v validator.Validator, r *http.Request, body *tee, rec 
 		})
 		ok = len(errs) == 0
 	}
-	if !ok && missing(errs) {
+	if !ok && (missing(errs) || noAddress(r.URL.Path)) {
 		// No such route: the router's plain answer, a server that is not
 		// ready, which answers 503 to everything under /v1/, a retired
 		// version's 410, which comes before routing under /v1/, or a limit's
@@ -254,6 +255,20 @@ func missing(errs []*errors.ValidationError) bool {
 		}
 	}
 	return false
+}
+
+// noAddress reports whether a path under /v1/ has a first segment there that
+// does not begin with an ASCII letter and "_": no address, so a route the
+// server does not offer (PROTOCOL.md §11.2), though the description's
+// template /v1/{address} matches it.
+func noAddress(p string) bool {
+	rest, ok := strings.CutPrefix(p, protocol.DocumentPath)
+	seg, _, _ := strings.Cut(rest, "/")
+	if !ok || seg == "" {
+		return false
+	}
+	letter := 'a' <= seg[0] && seg[0] <= 'z' || 'A' <= seg[0] && seg[0] <= 'Z'
+	return len(seg) < 2 || !letter || seg[1] != '_'
 }
 
 // notClean reports whether a path is not in its clean form, as PROTOCOL.md
