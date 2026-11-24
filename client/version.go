@@ -8,11 +8,13 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/mod/semver"
+
 	"github.com/dromas-dev/dromas-client/protocol"
 )
 
 // Module is this client's module path: the version of it a binary was built
-// with is the version every request names ([Version]).
+// with is the release it names ([Version]).
 const Module = "github.com/dromas-dev/dromas-client"
 
 // DevelVersion is the version a build that records none names: a build of
@@ -29,18 +31,19 @@ const DevelVersion = "0.0.0-devel"
 // [Version] reads, and the version the dromas command prints.
 var LinkedVersion string
 
-// Version is the version this binary names in every request's
-// Dromas-Version (PROTOCOL.md §11.17): the version of Module in its build
-// information (runtime/debug), the binary's own module's where Module is the
-// one built (the dromas command), or the one it depends on otherwise (a
-// program that imports this library), without its "v" and without build
-// metadata (Go's "+dirty", "+incompatible"). A Go pseudo-version is then a
-// SemVer pre-release of the patch after the release it follows. A build that
-// records none of these is DevelVersion. [LinkedVersion], where it is set,
-// comes before all of them.
+// Version is the release this binary names in every request's User-Agent:
+// the version of Module in its build information (runtime/debug), the
+// binary's own module's where Module is the one built (the dromas command),
+// or the one it depends on otherwise (a program that imports this library),
+// without its "v" and without build metadata (Go's "+dirty",
+// "+incompatible"). A build that records none of these is DevelVersion.
+// [LinkedVersion], where it is set, comes before all of them. Its major and
+// minor are the version of the protocol it implements, which every request
+// names in Dromas-Version (PROTOCOL.md §11.17): a Go pseudo-version, a
+// pre-release of the patch after the release it follows, has that release's.
 func Version() string {
 	if LinkedVersion != "" {
-		return asRequestVersion(LinkedVersion)
+		return asRelease(LinkedVersion)
 	}
 	bi, ok := debug.ReadBuildInfo()
 	if !ok {
@@ -60,18 +63,17 @@ func Version() string {
 			}
 		}
 	}
-	return asRequestVersion(v)
+	return asRelease(v)
 }
 
-// asRequestVersion is a Go module version as a request names it: its "v"
-// and its build metadata taken off, or DevelVersion for one that is then not
-// a version of the request's form, "(devel)" and "" among them.
-func asRequestVersion(v string) string {
-	v, _, _ = strings.Cut(strings.TrimPrefix(v, "v"), "+")
-	if _, err := protocol.ParseVersion(v); err != nil {
+// asRelease is a Go module version as this client names it: its "v" and its
+// build metadata taken off, or DevelVersion for one that is not a version
+// with or without its "v" (semver.IsValid), "(devel)" and "" among them.
+func asRelease(v string) string {
+	if v = "v" + strings.TrimPrefix(v, "v"); !semver.IsValid(v) {
 		return DevelVersion
 	}
-	return v
+	return strings.TrimPrefix(strings.TrimSuffix(v, semver.Build(v)), "v")
 }
 
 // Versions is what the answers a command met said of this client's version
@@ -119,7 +121,7 @@ func (v *Versions) Deprecation() (time.Time, bool) {
 
 // Upgrade is the latest version the server's document names, where the
 // command read it and it is an upgrade for this client
-// ([protocol.PolicyVersion.Upgrade]), and false otherwise: the document is
+// (its major and minor are after this client's), and false otherwise: the document is
 // read at most once a day, so this is said at most once a day.
 func (v *Versions) Upgrade() (string, bool) {
 	v.mu.Lock()
@@ -251,14 +253,12 @@ func (b *Mailbox) readDocument(ctx context.Context) {
 }
 
 // upgrade reports whether latest, a server's latest_version, is an upgrade
-// for a client of version own; a value of another form is none.
+// for a client of release own: its major and minor are after own's
+// (PROTOCOL.md §11.17). A value of another form is none, and a client
+// released before its server names that release has none.
 func upgrade(latest, own string) bool {
-	p, err := protocol.ParsePolicyVersion(latest)
-	if err != nil {
-		return false
-	}
-	v, err := protocol.ParseVersion(own)
-	return err == nil && p.Upgrade(v)
+	p, err := protocol.ParseVersion(latest)
+	return err == nil && p.Compare(protocol.RequestVersion(own)) > 0
 }
 
 // versionsAttention is what status says of versions, from what the mailbox's

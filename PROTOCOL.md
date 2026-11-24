@@ -927,7 +927,7 @@ The `subject` column of the table below gives the exceptions. A registration is 
 | `certificate_revocations` | `mailbox` | each revocation of certificates that the mailbox's identity publishes through a higher revocation serial, a number a day |
 | `registrations` | `ip` | registrations from an IPv4 address or IPv6 /64, and each call that a server counts as a registration (Section 11.15) |
 | `registrations_range` | `ip` | the same, from an IPv6 /48 |
-| `misses` | `ip` | calls that named no mailbox, or that carried nothing that verified |
+| `misses` | `ip` | calls whose lookup or read found no mailbox, or whose `Authorization` value or prekey statement cannot be read |
 | `misses_range` | `ip` | the same, from an IPv6 /48 |
 | `sends_before_pass` | `ip` | sends, counted before the server reads their pass |
 | `sends_before_pass_range` | `ip` | the same, from an IPv6 /48 |
@@ -1233,35 +1233,26 @@ A mailbox may belong to one account at its server. The protocol fixes how a mail
 
 ### 11.17. Versions
 
-- **Every request names the version of the client that makes the request, in `Dromas-Version`.** The value is the version of the client's release, written as SemVer 2.0.0 writes one ([SemVer] §2, §9), with no build metadata. The value has the form `dromas-version-value`: a major, a minor and a patch, and an optional pre-release.
+- **Every request names the version of the protocol that the client implements, in `Dromas-Version`.** The value has the form `policy-version`: a major and a minor. A major of `0` marks a version before version 1 is declared. The client's own release goes in `User-Agent` (RFC 9110 §10.1.5), outside the protocol.
 
   ```abnf
-  dromas-version-value = version-number "." version-number "." version-number
-                         [ "-" pre-release ]
+  policy-version = version-number "." version-number
   version-number = "0" / %x31-39 *DIGIT
-  pre-release    = pre-release-id *( "." pre-release-id )
-  pre-release-id = version-number
-                 / *DIGIT ( ALPHA / "-" ) *( ALPHA / DIGIT / "-" )
   ```
 
-  - A client's major and minor are those of the protocol the client implements. A major of `0` marks a release made before version 1 is declared.
-  - The server reads a request without the field, or with a value of another form, as version `0.0.0`.
+  - The server reads the `policy-version` that the value begins with, when the value's end or a character other than a digit follows it, and ignores whatever follows: `0.6.11-rc.1` reads as `0.6`, and `1.05` begins with no `policy-version`.
+  - The server reads a request without the field, or with a value that does not begin with a `policy-version`, as version `0.0`.
 - **A server sets its own version policy.** The policy has four parts:
   - a **version floor**;
   - the server's **deprecations**: the versions that the server deems deprecated from a date;
   - the server's **sunsets**: the versions that the server has scheduled to stop accepting;
   - the **latest version** the server names, if the server names one.
 
-  A version in the policy has the form `policy-version`: a major and a minor.
+  A version in the policy has the form `policy-version`. Versions are ordered by major, then minor.
 
-  ```abnf
-  policy-version = version-number "." version-number
-  ```
-
-  - **A policy compares the major and minor of a request's version, and nothing else.** The patch and the pre-release are the client's own, so a server compares neither.
   - A deprecation or a sunset is a date and one of:
-    - `below` a version, which covers every version whose major and minor come before that version's major and minor;
-    - `version` a version, which covers every version whose major and minor are that version's.
+    - `below` a version, which covers every version before that version;
+    - `version` a version, which covers that version.
 
   A server MUST NOT set a policy under which an answer's `Sunset` would be earlier than its `Deprecation` (RFC 9745 §4).
 - **`Deprecation`.** An answer under `/v1/` carries `Deprecation` (RFC 9745 §2.1) when a deprecation covers the request's version. The field's date is the earliest date among the deprecations that cover the version.
@@ -1272,7 +1263,7 @@ A mailbox may belong to one account at its server. The protocol fixes how a mail
 - **A retired version.** The server answers `410 client_version_unsupported` to a request whose version is below the version floor, or is covered by a sunset whose date has passed at the server's clock. Where the server sets a version floor, the answer carries `min_version`. Section 11.4, rule 0, places this refusal first. The server accepts a request for the server's document at every version.
 - **A client may read `Deprecation` and `Sunset` on any answer, and reads nothing more of them.** A `Deprecation` value in a form other than RFC 9745 §2.1's counts as absent, and so does a `Sunset` value in a form other than RFC 8594 §3's. A client shows neither field as the server's words (Section 11.3).
 - **A client chooses how often the client gets the server's document (Section 11.18).**
-- **`latest_version` is compared with the major and minor of a client's own version.**
+- **A client compares `latest_version` with the version of the protocol that the client implements.**
 
 ### 11.18. The server's document
 
@@ -1827,7 +1818,6 @@ Dromas protects a message's content from everyone but the message's recipient. D
 - **[RFC 9457]** Nottingham, M., Wilde, E., and S. Dalal, "Problem Details for HTTP APIs", RFC 9457, DOI 10.17487/RFC9457, July 2023, <https://www.rfc-editor.org/info/rfc9457/>.
 - **[RFC 9562]** Davis, K., Peabody, B., and P. Leach, "Universally Unique IDentifiers (UUIDs)", RFC 9562, DOI 10.17487/RFC9562, May 2024, <https://www.rfc-editor.org/info/rfc9562/>.
 - **[RFC 9745]** Dalal, S. and E. Wilde, "The Deprecation HTTP Response Header Field", RFC 9745, DOI 10.17487/RFC9745, March 2025, <https://www.rfc-editor.org/info/rfc9745/>.
-- **[SemVer]** Preston-Werner, T., "Semantic Versioning 2.0.0", <https://semver.org/spec/v2.0.0.html>.
 
 ### 17.2. Informative References
 
@@ -1912,8 +1902,6 @@ dns-label                  = dns-char [ *61( dns-char / "-" ) dns-char ]
 dns-name                   = dns-label *( "." dns-label )   ; at most 253 characters
 domain                     = domain-label 1*( "." domain-label )
 domain-label               = ( ALPHA / DIGIT ) [ *61( ALPHA / DIGIT / "-" ) ( ALPHA / DIGIT ) ]
-dromas-version-value       = version-number "." version-number "." version-number
-                             [ "-" pre-release ]
 envelope-line              = 1*( %x00-09 / %x0B-FF ) LF   ; the envelope (Section 9.1)
 full-date                  = <full-date, see [RFC 3339], Section 5.6>
 identity-document          = %s"dromas-v1" LF key-type SP base64-nonempty LF
@@ -1946,9 +1934,6 @@ pass-scheme                = "dromas-pass"
 pass-statement             = %s"dromas-pass-v1" LF address LF server-name LF time LF
 plaintext                  = envelope-line ssh-signature padding
 policy-version             = version-number "." version-number
-pre-release                = pre-release-id *( "." pre-release-id )
-pre-release-id             = version-number
-                             / *DIGIT ( ALPHA / "-" ) *( ALPHA / DIGIT / "-" )
 prekey-namespace           = %s"dromas-prekey-v1:" address
 prekey-statement           = %s"dromas-prekey-v1" LF address LF rank LF serial LF
                              age-recipient LF time LF

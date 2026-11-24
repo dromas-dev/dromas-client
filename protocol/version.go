@@ -9,14 +9,13 @@ import (
 	"regexp"
 	"slices"
 	"strconv"
-	"strings"
 	"time"
 )
 
-// The header fields of versions (PROTOCOL.md §11.17): every request names its
-// client's version in VersionHeader, an answer to a version a deprecation
-// covers carries DeprecationHeader (RFC 9745), and one to a version a sunset
-// covers SunsetHeader (RFC 8594).
+// The header fields of versions (PROTOCOL.md §11.17): every request names the
+// version of the protocol its client implements in VersionHeader, an answer
+// to a version a deprecation covers carries DeprecationHeader (RFC 9745), and
+// one to a version a sunset covers SunsetHeader (RFC 8594).
 const (
 	VersionHeader     = "Dromas-Version"
 	DeprecationHeader = "Deprecation"
@@ -26,165 +25,74 @@ const (
 // DocumentPath is the server's document, GET /v1/ (PROTOCOL.md §11.18).
 const DocumentPath = "/v1/"
 
-// Version is a client's version as a request names it (PROTOCOL.md §11.17):
-// SemVer 2.0.0's MAJOR.MINOR.PATCH and an optional pre-release, with no "v"
-// and no build metadata. Go's pseudo-versions, with the "v" taken off, are
-// such versions: pre-releases of the patch after the release they follow.
+// Version is a version of the protocol, MAJOR.MINOR (PROTOCOL.md §11.17):
+// the version every request names in Dromas-Version, the one its client
+// implements, and each version a server's policy names.
 type Version struct {
-	Major, Minor, Patch uint64
-	// Pre is the pre-release, without its hyphen: "" for a release.
-	Pre string
+	Major, Minor uint64
 }
 
-// versionGrammar is SemVer 2.0.0's version core and pre-release (§2, §9; the
-// grammar of semver.org's BNF): numbers with no leading zero, and each
-// pre-release identifier alphanumeric with hyphens, a numeric one with no
-// leading zero.
-var versionGrammar = regexp.MustCompile(`\A(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-((?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*))?\z`)
+// versionGrammar is a version: two numbers with no leading zero
+// (PROTOCOL.md §11.17), then the value's end or a character that is not a
+// digit. A request's Dromas-Version is read by its leading version, the rest
+// ignored ([RequestVersion]); everything else is held to it whole.
+var versionGrammar = regexp.MustCompile(`\A(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:[^0-9]|\z)`)
 
-// policyGrammar is a version as a policy writes one: MAJOR.MINOR
-// (PROTOCOL.md §11.17).
-var policyGrammar = regexp.MustCompile(`\A(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\z`)
-
-// errVersion is a value that is not a version of its form. Its words never
-// quote the value, which may be a server's or a caller's.
+// errVersion is a value that is not a version. Its words never quote the
+// value, which may be a server's or a caller's.
 var errVersion = errors.New("not a version of its form")
 
-// ParseVersion reads s as a request's version: SemVer's MAJOR.MINOR.PATCH and
-// an optional pre-release, exactly. Anything else, a "v" before it or build
-// metadata after it included, or a number past a uint64, is an error.
+// ParseVersion reads s as a version, MAJOR.MINOR, exactly. Anything else, a
+// "v" before it or a patch after it included, or a number past a uint64, is
+// an error.
 func ParseVersion(s string) (Version, error) {
-	m := versionGrammar.FindStringSubmatch(s)
-	if m == nil {
+	v, n, err := leadingVersion(s)
+	if err != nil || n != len(s) {
 		return Version{}, errVersion
 	}
-	var v Version
-	var err error
-	for i, n := range []*uint64{&v.Major, &v.Minor, &v.Patch} {
-		if *n, err = strconv.ParseUint(m[i+1], 10, 64); err != nil {
-			return Version{}, errVersion
-		}
-	}
-	v.Pre = m[4]
 	return v, nil
 }
 
 // RequestVersion is the version a server reads a request's Dromas-Version
-// as: the value's, or 0.0.0 for a request without the field or with a value
-// of another form (PROTOCOL.md §11.17). A value given twice is the caller's
-// to join or refuse: this reads one.
+// as: the major and minor it begins with, ended by the value's end or a
+// character that is not a digit, whatever follows them, so 0.6, 0.6.11 and
+// 0.6.11-rc.1 read alike; or 0.0, for a request without the field or with a
+// value that does not begin with a version, 1.05 among them (PROTOCOL.md
+// §11.17). A
+// value given twice is the caller's to join or refuse: this reads one.
 func RequestVersion(s string) Version {
-	v, err := ParseVersion(s)
+	v, _, err := leadingVersion(s)
 	if err != nil {
 		return Version{}
 	}
 	return v
 }
 
-// String writes v as a request names it.
-func (v Version) String() string {
-	s := fmt.Sprintf("%d.%d.%d", v.Major, v.Minor, v.Patch)
-	if v.Pre != "" {
-		s += "-" + v.Pre
-	}
-	return s
-}
-
-// Compare orders v and w by SemVer's precedence (§11): -1 when v is before
-// w, 0 when they have the same, 1 when v is after. A pre-release is before
-// its release; pre-releases compare identifier by identifier, numeric ones
-// as numbers and before alphanumeric ones, which compare in ASCII order, and
-// a shorter list of equal identifiers is before a longer.
-func (v Version) Compare(w Version) int {
-	if c := cmp.Or(cmp.Compare(v.Major, w.Major), cmp.Compare(v.Minor, w.Minor), cmp.Compare(v.Patch, w.Patch)); c != 0 {
-		return c
-	}
-	switch {
-	case v.Pre == w.Pre:
-		return 0
-	case v.Pre == "":
-		return 1
-	case w.Pre == "":
-		return -1
-	}
-	a, b := strings.Split(v.Pre, "."), strings.Split(w.Pre, ".")
-	for i := 0; i < len(a) && i < len(b); i++ {
-		if c := compareIdentifiers(a[i], b[i]); c != 0 {
-			return c
-		}
-	}
-	return cmp.Compare(len(a), len(b))
-}
-
-// compareIdentifiers orders two pre-release identifiers (SemVer §11.4).
-func compareIdentifiers(a, b string) int {
-	an, aerr := strconv.ParseUint(a, 10, 64)
-	bn, berr := strconv.ParseUint(b, 10, 64)
-	aNum, bNum := numeric(a), numeric(b)
-	switch {
-	case aNum && bNum:
-		if aerr == nil && berr == nil {
-			return cmp.Compare(an, bn)
-		}
-		// Past a uint64: a longer one, with no leading zero, is larger.
-		return cmp.Or(cmp.Compare(len(a), len(b)), strings.Compare(a, b))
-	case aNum:
-		return -1
-	case bNum:
-		return 1
-	}
-	return strings.Compare(a, b)
-}
-
-// numeric reports whether a pre-release identifier is digits alone.
-func numeric(s string) bool { return s != "" && strings.Trim(s, "0123456789") == "" }
-
-// PolicyVersion is a version as a server's policy writes one: MAJOR.MINOR
-// (PROTOCOL.md §11.17), in a floor, a deprecation, a sunset or the latest
-// version a server names. A policy compares a client's major and minor alone:
-// the patch and any pre-release are the client's own.
-type PolicyVersion struct {
-	Major, Minor uint64
-}
-
-// ParsePolicyVersion reads s as a policy's version, exactly.
-func ParsePolicyVersion(s string) (PolicyVersion, error) {
-	m := policyGrammar.FindStringSubmatch(s)
+// leadingVersion is the version s begins with, and its length.
+func leadingVersion(s string) (Version, int, error) {
+	m := versionGrammar.FindStringSubmatch(s)
 	if m == nil {
-		return PolicyVersion{}, errVersion
+		return Version{}, 0, errVersion
 	}
-	var p PolicyVersion
+	var v Version
 	var err error
-	if p.Major, err = strconv.ParseUint(m[1], 10, 64); err != nil {
-		return PolicyVersion{}, errVersion
+	if v.Major, err = strconv.ParseUint(m[1], 10, 64); err != nil {
+		return Version{}, 0, errVersion
 	}
-	if p.Minor, err = strconv.ParseUint(m[2], 10, 64); err != nil {
-		return PolicyVersion{}, errVersion
+	if v.Minor, err = strconv.ParseUint(m[2], 10, 64); err != nil {
+		return Version{}, 0, errVersion
 	}
-	return p, nil
+	return v, len(m[1]) + 1 + len(m[2]), nil
 }
 
-// String writes p as the policy writes it.
-func (p PolicyVersion) String() string { return fmt.Sprintf("%d.%d", p.Major, p.Minor) }
+// String writes v as a request and a policy write it.
+func (v Version) String() string { return fmt.Sprintf("%d.%d", v.Major, v.Minor) }
 
-// compare orders v's major and minor against p's.
-func (p PolicyVersion) compare(v Version) int {
-	return cmp.Or(cmp.Compare(v.Major, p.Major), cmp.Compare(v.Minor, p.Minor))
+// Compare orders v and w by major, then minor: -1 when v is before w, 0 when
+// they are the same, 1 when v is after.
+func (v Version) Compare(w Version) int {
+	return cmp.Or(cmp.Compare(v.Major, w.Major), cmp.Compare(v.Minor, w.Minor))
 }
-
-// Below reports whether v's major and minor are before p's, as a floor and a
-// sunset's below cover a version.
-func (p PolicyVersion) Below(v Version) bool { return p.compare(v) < 0 }
-
-// Names reports whether v's major and minor are p's own, as a sunset's
-// version covers a version: every patch and pre-release of that minor.
-func (p PolicyVersion) Names(v Version) bool { return p.compare(v) == 0 }
-
-// Upgrade reports whether p, the latest version a server names, is an upgrade
-// for a client of version v (PROTOCOL.md §11.17): v's major and minor are
-// before p's. A v at or after p is none: a client may be released before its
-// server names that release.
-func (p PolicyVersion) Upgrade(v Version) bool { return p.Below(v) }
 
 // The most deprecations, sunsets and capabilities a server's document lists,
 // and a reader reads (PROTOCOL.md §11.18): past any, a document breaks its
@@ -240,9 +148,8 @@ var implementationText = regexp.MustCompile(`\A[\x21-\x7e]{1,128}\z`)
 // Scheduled is a deprecation or a sunset of versions, and its date: a
 // deprecation, a date from which the server deems them deprecated (RFC
 // 9745), and a sunset, the date it stops taking them (RFC 8594). It covers
-// every version whose major and minor come before Below's, or every version Version names
-// ([PolicyVersion.Names]); exactly one of the two is set. At is its date, a
-// time (PROTOCOL.md §2.2).
+// every version before Below, or the version Version names; exactly one of
+// the two is set. At is its date, a time (PROTOCOL.md §2.2).
 type Scheduled struct {
 	Below   string `json:"below,omitempty"`
 	Version string `json:"version,omitempty"`
@@ -254,7 +161,7 @@ type Capability struct {
 	Name string `json:"name"`
 }
 
-// Check holds d to its form: each version a policy's, each deprecation and
+// Check holds d to its form: each version of its form, each deprecation and
 // sunset with exactly one of below and version and its date a time, each
 // capability's name of its form, the implementation's members of theirs,
 // and no more than MaxDeprecations,
@@ -264,7 +171,7 @@ type Capability struct {
 func (d *ServerDocument) Check() error {
 	for name, v := range map[string]string{"min_version": d.MinVersion, "latest_version": d.LatestVersion} {
 		if v != "" {
-			if _, err := ParsePolicyVersion(v); err != nil {
+			if _, err := ParseVersion(v); err != nil {
 				return &memberError{name: name, known: true}
 			}
 		}
@@ -284,7 +191,7 @@ func (d *ServerDocument) Check() error {
 	// each such version and the one just below it stand for every version.
 	for _, s := range append(slices.Clone(d.Deprecations), d.Sunsets...) {
 		p, _, _ := s.parse()
-		at := []Version{{Major: p.Major, Minor: p.Minor}}
+		at := []Version{p}
 		switch {
 		case p.Minor > 0:
 			at = append(at, Version{Major: p.Major, Minor: p.Minor - 1})
@@ -325,21 +232,21 @@ func (d *ServerDocument) Check() error {
 
 // parse is s's version, as below or as version, and its date, or the member
 // that breaks its form.
-func (s Scheduled) parse() (PolicyVersion, time.Time, error) {
+func (s Scheduled) parse() (Version, time.Time, error) {
 	if (s.Below == "") == (s.Version == "") {
-		return PolicyVersion{}, time.Time{}, &memberError{name: "below", known: true}
+		return Version{}, time.Time{}, &memberError{name: "below", known: true}
 	}
 	name, v := "below", s.Below
 	if s.Version != "" {
 		name, v = "version", s.Version
 	}
-	p, err := ParsePolicyVersion(v)
+	p, err := ParseVersion(v)
 	if err != nil {
-		return PolicyVersion{}, time.Time{}, &memberError{name: name, known: true}
+		return Version{}, time.Time{}, &memberError{name: name, known: true}
 	}
 	at, err := ParseTime(s.At)
 	if err != nil {
-		return PolicyVersion{}, time.Time{}, &memberError{name: "effective_at", known: true}
+		return Version{}, time.Time{}, &memberError{name: "effective_at", known: true}
 	}
 	return p, at, nil
 }
@@ -352,9 +259,9 @@ func (s Scheduled) Covers(v Version) bool {
 	case err != nil:
 		return false
 	case s.Below != "":
-		return p.Below(v)
+		return v.Compare(p) < 0
 	}
-	return p.Names(v)
+	return v == p
 }
 
 // SunsetFor is the date an answer to a request of version v carries in
@@ -390,7 +297,7 @@ func earliest(list []Scheduled, v Version) (time.Time, bool) {
 // sunset that covers it has its date at or before now (PROTOCOL.md §11.17).
 func (d *ServerDocument) Retired(v Version, now time.Time) bool {
 	if d.MinVersion != "" {
-		if p, err := ParsePolicyVersion(d.MinVersion); err == nil && p.Below(v) {
+		if p, err := ParseVersion(d.MinVersion); err == nil && v.Compare(p) < 0 {
 			return true
 		}
 	}

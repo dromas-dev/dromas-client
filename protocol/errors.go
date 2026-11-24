@@ -199,8 +199,8 @@ type Problem struct {
 	// param.
 	Member string `json:"param,omitempty"`
 	// MinVersion is the lowest version a server that retired the request's
-	// takes, where it sets a floor (client_version_unsupported): a policy's version
-	// (ParsePolicyVersion), which a client shows only once it has that form.
+	// takes, where it sets a floor (client_version_unsupported): a version
+	// (ParseVersion), which a client shows only once it has that form.
 	MinVersion string `json:"min_version,omitempty"`
 	// Record is the revocation record of the address a 410 mailbox_revoked names,
 	// which the read of a mailbox always carries, and any other call's where its
@@ -247,7 +247,7 @@ const (
 
 	QuotaRegistrations        Quota = "registrations"           // registrations from an IP address: an IPv4 address or an IPv6 /64
 	QuotaRegistrationsRange   Quota = "registrations_range"     // registrations from an IPv6 /48
-	QuotaMisses               Quota = "misses"                  // calls from an IP address that named no mailbox or carried nothing that verified
+	QuotaMisses               Quota = "misses"                  // calls from an IP address whose lookup or read found no mailbox, or whose Authorization or prekey statement does not read
 	QuotaMissesRange          Quota = "misses_range"            // the same, from an IPv6 /48
 	QuotaSendsBeforePass      Quota = "sends_before_pass"       // sends from an IP address, counted before their pass is read
 	QuotaSendsBeforePassRange Quota = "sends_before_pass_range" // the same, from an IPv6 /48

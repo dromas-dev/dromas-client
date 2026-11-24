@@ -1427,7 +1427,7 @@ components:
       name: Dromas-Version
       in: header
       required: false
-      description: The version of the client that makes the request, SemVer's `MAJOR.MINOR.PATCH` and an optional pre-release, with no `v` and no build metadata (`PROTOCOL.md` §11.17). Every client sends it; a request without it, or with a value of another form, is read as `0.0.0`.
+      description: The version of the protocol that the client implements, `MAJOR.MINOR`, with no `v` (`PROTOCOL.md` §11.17); the client's release goes in `User-Agent`. Every client sends it. A server reads the major and minor that the value begins with, followed by its end or a character other than a digit, and ignores what follows them; a request without it, or with a value that does not begin with a major and minor, is read as `0.0`.
       schema:
         type: string
     address:

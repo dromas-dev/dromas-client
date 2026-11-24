@@ -209,14 +209,14 @@ func (e *APIError) words() string {
 	return "an answer this client does not know"
 }
 
-// MinVersion is the min_version a client_version_unsupported carries, only where it is
-// a policy's version (protocol.ParsePolicyVersion): a value of any other
-// form is none, and a client shows none of it.
+// MinVersion is the min_version a client_version_unsupported carries, only
+// where it is a version (protocol.ParseVersion): a value of any other form is
+// none, and a client shows none of it.
 func MinVersion(p *protocol.Problem) (string, bool) {
 	if p.Code != protocol.CodeClientVersionUnsupported || p.MinVersion == "" {
 		return "", false
 	}
-	if _, err := protocol.ParsePolicyVersion(p.MinVersion); err != nil {
+	if _, err := protocol.ParseVersion(p.MinVersion); err != nil {
 		return "", false
 	}
 	return p.MinVersion, true
@@ -232,8 +232,8 @@ var quotaWords = map[protocol.Quota]string{
 	protocol.QuotaCertificateRevocations: "the mailbox's identity has raised its revocation of certificates as many times as the server takes for now",
 	protocol.QuotaRegistrations:          "as many mailboxes have been registered from this machine's IP address as the server takes for now",
 	protocol.QuotaRegistrationsRange:     "as many mailboxes have been registered from this machine's IPv6 /48 as the server takes for now",
-	protocol.QuotaMisses:                 "this machine's IP address has made as many calls that named no mailbox or carried nothing that verified as the server takes for now",
-	protocol.QuotaMissesRange:            "this machine's IPv6 /48 has made as many calls that named no mailbox or carried nothing that verified as the server takes for now",
+	protocol.QuotaMisses:                 "this machine's IP address has made as many calls that found no mailbox or carried a pass or statement that does not read as the server takes for now",
+	protocol.QuotaMissesRange:            "this machine's IPv6 /48 has made as many calls that found no mailbox or carried a pass or statement that does not read as the server takes for now",
 	protocol.QuotaSendsBeforePass:        "this machine's IP address has made as many sends as the server takes for now",
 	protocol.QuotaSendsBeforePassRange:   "this machine's IPv6 /48 has made as many sends as the server takes for now",
 	protocol.QuotaRequests:               "this machine's IP address has made as many requests as the server takes for now",
