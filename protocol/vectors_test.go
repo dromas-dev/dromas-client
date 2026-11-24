@@ -938,8 +938,8 @@ func TestEveryOtherFormOfASignatureIsRefused(t *testing.T) {
 
 // MaxSignature is the largest signature a mailbox of any identity key type
 // makes in the one form (PROTOCOL.md §3.2). The largest is made here: in every
-// namespace the protocol signs in, by the identity and by a working key under
-// a certificate as NewCertificate makes it, each ECDSA signature's r and s
+// namespace the protocol signs in, by the identity and by a working key of
+// each type under a certificate as NewCertificate makes it, each ECDSA signature's r and s
 // written in the most bytes the one form gives them, 33.
 func TestMaxSignatureIsTheLargestSignatureInTheOneForm(t *testing.T) {
 	now := vectorNow(t)
@@ -953,20 +953,24 @@ func TestMaxSignatureIsTheLargestSignatureInTheOneForm(t *testing.T) {
 			t.Fatalf("%s has no mailbox to sign with here", ty)
 		}
 		b := m(t)
-		cert, err := NewCertificate(b.id, b.identity, b.work.PublicKey(), MaxSerial, now, testLifetime)
-		if err != nil {
-			t.Fatal(err)
-		}
-		work, err := cert.Signer(b.work)
-		if err != nil {
-			t.Fatal(err)
-		}
 		// What each signer signs (PROTOCOL.md §5): the identity, everything;
-		// a working key, statements, passes and messages.
-		for signer, namespaces := range map[ssh.Signer][]func(Address) string{
+		// a working key of each type, statements, passes and messages.
+		signers := map[ssh.Signer][]func(Address) string{
 			b.identity: {PrekeyNamespace, PassNamespace, MessageNamespace, RevokeNamespace, RevokedCertsNamespace},
-			work:       {PrekeyNamespace, PassNamespace, MessageNamespace},
-		} {
+		}
+		for _, wt := range WorkingKeyTypes(ty) {
+			w := newWorkSigner(t, wt)
+			cert, err := NewCertificate(b.id, b.identity, w.PublicKey(), MaxSerial, now, testLifetime)
+			if err != nil {
+				t.Fatal(err)
+			}
+			work, err := cert.Signer(w)
+			if err != nil {
+				t.Fatal(err)
+			}
+			signers[work] = []func(Address) string{PrekeyNamespace, PassNamespace, MessageNamespace}
+		}
+		for signer, namespaces := range signers {
 			for _, ns := range namespaces {
 				sig, err := Sign(signer, []byte("a statement"), ns(b.id.Address()))
 				if err != nil {

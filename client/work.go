@@ -50,7 +50,7 @@ func (b *Mailbox) makeWork(n uint64, lifetime time.Duration) (*sign.Work, *proto
 	if err := makeDir(b.path("work")); err != nil {
 		return nil, nil, err
 	}
-	priv, err := newKey(protocol.WorkingKeyType(b.id.Type()))
+	priv, err := newKey(workingKeyType)
 	if err != nil {
 		return nil, nil, err
 	}

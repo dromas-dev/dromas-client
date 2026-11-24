@@ -956,8 +956,13 @@ func there[T any](b *Mailbox, f func() (T, error)) func() (T, error) {
 // runs as any other; only a security key makes one.
 func MadeIdentityTypes() []string { return []string{protocol.IdentityEd25519, protocol.IdentityP256} }
 
+// workingKeyType is the type of every working key this client makes:
+// Ed25519, a type every identity key type of PROTOCOL.md §4.1 certifies
+// (protocol.WorkingKeyTypes).
+const workingKeyType = protocol.IdentityEd25519
+
 // newKey makes a new private key of the SSH key type t: an identity key, or a
-// working key of the type its identity's type gives (protocol.WorkingKeyType).
+// working key (workingKeyType).
 func newKey(t string) (crypto.Signer, error) {
 	switch t {
 	case protocol.IdentityEd25519:

@@ -208,8 +208,8 @@ Where this document uses a term below as a defined term, the term has the sense 
 | Name | Role | Specification |
 |---|---|---|
 | age v1 | encryption to a prekey: `mlkem768x25519`, the hybrid ML-KEM-768 + X25519 recipient | C2SP age v1.1.0, read 2026-11-02, whose KEM is MLKEM768-X25519 from draft-ietf-hpke-pq-03 |
-| Ed25519 | the identity key of types `ssh-ed25519` and `sk-ssh-ed25519@openssh.com`; the working key of an identity of every type of Section 4.1 | RFC 8032 |
-| ECDSA P-256 | the identity key of types `ecdsa-sha2-nistp256` and `sk-ecdsa-sha2-nistp256@openssh.com` | FIPS 186-5, RFC 5656 |
+| Ed25519 | the identity key of types `ssh-ed25519` and `sk-ssh-ed25519@openssh.com`; a working key of type `ssh-ed25519` | RFC 8032 |
+| ECDSA P-256 | the identity key of types `ecdsa-sha2-nistp256` and `sk-ecdsa-sha2-nistp256@openssh.com`; a working key of type `ecdsa-sha2-nistp256` | FIPS 186-5, RFC 5656 |
 | OpenSSH security key | the identity key of types `sk-ecdsa-sha2-nistp256@openssh.com` and `sk-ssh-ed25519@openssh.com`: the key's wire form, and what its signature covers | OpenSSH `PROTOCOL.u2f`, read 2026-11-23 |
 | SSHSIG | every signature other than a certificate's own: the signer's signature over SHA-512 of the message, in a namespace | OpenSSH 10.6p1 `PROTOCOL.sshsig` |
 | SSH public key text | `<key type> <base64 of the wire key>` | RFC 4253 §6.6, RFC 8709, RFC 5656 |
@@ -265,7 +265,7 @@ signature-groups = *16( 4base64-char ) ( 4base64-char / base64-final )
   - an integer with an unneeded leading zero byte.
 - **ECDSA's two values of s.** If (r, s) is a P-256 signature, (r, n − s) is also a P-256 signature, where n is the group's order (FIPS 186-5), a security key's included. Each of the two is a signature in the one form. A verifier MUST accept both, and a signer may write either. Anyone who has seen one of the two can write the other (Section 5.2). An Ed25519 signature has no second form.
 - **User presence.** A verifier MUST refuse a security key's signature whose flags lack user presence, bit `0x01` (`PROTOCOL.u2f`), in an SSHSIG and on a certificate. The verifier reads no other bit of the flags, and never reads the counter (Section 15.4).
-- **A bound on size.** A signature is at most 1,004 bytes. That bound is the longest signature in the one form that a mailbox of a key type of Section 4.1 can make, with the mailbox's identity or with a working key under a certificate as `ssh-keygen -s` makes one. The longest is an `sk-ecdsa-sha2-nistp256@openssh.com` identity's prekey statement under a certificate, with the identity's r and s on the certificate each in 33 bytes. Every verifier MUST refuse a longer signature before reading the signature. In a message, the bound limits the signature block, from the block's BEGIN line through the LF after the block's END line (Section 9.2). A key type added later whose signatures are longer raises the bound with that type (Section 14).
+- **A bound on size.** A signature is at most 1,101 bytes. That bound is the longest signature in the one form that a mailbox of a key type of Section 4.1 can make, with the mailbox's identity or with a working key of either type under a certificate as `ssh-keygen -s` makes one. The longest is an `sk-ecdsa-sha2-nistp256@openssh.com` identity's prekey statement under a certificate of an `ecdsa-sha2-nistp256` working key, with each r and s in the signature, the identity's on the certificate and the working key's, in 33 bytes. Every verifier MUST refuse a longer signature before reading the signature. In a message, the bound limits the signature block, from the block's BEGIN line through the LF after the block's END line (Section 9.2). A key type added later whose signatures are longer raises the bound with that type (Section 14).
 - **Ed25519's S.** In an SSHSIG and on a certificate, an Ed25519 signature's S is below the group order L (RFC 8032 §5.1.7), a security key's included.
 - **The Ed25519 equation.** The equation is RFC 8032 §5.1.7's without the cofactor, `[S]B = R + [k]A'`, compared as encodings. So a verifier accepts a neutral R, and refuses R with a point of small order added.
 
@@ -315,15 +315,15 @@ A key of a type this section defines MUST be in that type's one encoding, and MU
 
 | Key type | Document | What fixes its one encoding | Key checks | Working key |
 |---|---|---|---|---|
-| `ssh-ed25519` | 91 bytes | the key's length, 32 (RFC 8709 §4) | a canonical point, not of small order | `ssh-ed25519` |
-| `ecdsa-sha2-nistp256` | 171 bytes | the curve's name, `nistp256`, and an uncompressed point: on the curve, not the point at infinity, each coordinate below the field's size | none | `ssh-ed25519` |
-| `sk-ecdsa-sha2-nistp256@openssh.com` | 218 bytes | the `ecdsa-sha2-nistp256` row's, then the application, exactly `ssh:` | none | `ssh-ed25519` |
-| `sk-ssh-ed25519@openssh.com` | 138 bytes | the `ssh-ed25519` row's, then the application, exactly `ssh:` | a canonical point, not of small order | `ssh-ed25519` |
+| `ssh-ed25519` | 91 bytes | the key's length, 32 (RFC 8709 §4) | a canonical point, not of small order | `ssh-ed25519`, `ecdsa-sha2-nistp256` |
+| `ecdsa-sha2-nistp256` | 171 bytes | the curve's name, `nistp256`, and an uncompressed point: on the curve, not the point at infinity, each coordinate below the field's size | none | `ssh-ed25519`, `ecdsa-sha2-nistp256` |
+| `sk-ecdsa-sha2-nistp256@openssh.com` | 218 bytes | the `ecdsa-sha2-nistp256` row's, then the application, exactly `ssh:` | none | `ssh-ed25519`, `ecdsa-sha2-nistp256` |
+| `sk-ssh-ed25519@openssh.com` | 138 bytes | the `ssh-ed25519` row's, then the application, exactly `ssh:` | a canonical point, not of small order | `ssh-ed25519`, `ecdsa-sha2-nistp256` |
 
 - **Every client MUST verify every key type this section defines.**
 - **The two security-key types are OpenSSH's (`PROTOCOL.u2f`).** The wire key is `str(type) ‖ str("nistp256") ‖ str(Q) ‖ str(application)` or `str(type) ‖ str(A) ‖ str(application)`, with Q the uncompressed point and A the 32-byte key. A reader MUST refuse any application other than exactly the 4 bytes `ssh:`, a NUL after them included, as a key that fails its key checks. The key carries no attestation, so nothing in the key shows that an authenticator holds it (Section 15.4).
 - **A key type defined after this version is OPTIONAL (Section 14).** Each client decides whether to verify such a type, and each server decides whether to register such a type (Section 11.7). Only a mailbox whose client verifies an optional type can write to a mailbox of that type, or hear from one (Section 7). This version defines no optional type.
-- **Working key.** The table's Working key column gives the type of every working key that an identity of the row's type certifies (Section 5). A key type defined later states its own working key type.
+- **Working key.** The table's Working key column gives the types of the working keys that an identity of the row's type certifies (Section 5). A key type defined later states its own working key types.
 - **The form is the same for every key type, defined here or not.** An identity document has the form `identity-document`. In that form, `key-type` is a key type's name as RFC 4251 §6 writes one. The base64 is of an SSH wire key that begins with that same name.
 
   ```abnf
@@ -388,7 +388,7 @@ A certificate is an OpenSSH user certificate. A verifier MUST check every row of
 | Field | Rule |
 |---|---|
 | Type | a user certificate |
-| Certified key | the working key: of the type that Section 4.1's table gives for the identity's type, in that type's one encoding and meeting its key checks, and never the identity key |
+| Certified key | the working key: of a type that Section 4.1's table gives for the identity's type, in that type's one encoding and meeting its key checks, and never the identity key |
 | Serial | the certificate serial, a serial (Section 2.2) |
 | Key id | exactly `dromas-cert-v1` |
 | Principals | exactly one: the mailbox's address |
@@ -416,7 +416,7 @@ A certificate is an OpenSSH user certificate. A verifier MUST check every row of
     So a certificate serial is always above the address's revocation serial.
   - A verifier MUST NOT read a certificate serial as a time, or bound a certificate serial by the verifier's clock. Of two certificate serials, the higher one ranks higher.
   - Two certificates of one identity can share a certificate serial. A verifier that meets both accepts either one, and keeps only their shared certificate serial.
-- **Nothing may depend on a P-256 identity's signature having one set of bytes, a security key's included.** Anyone who has seen (r, s) can write (r, n − s) (Section 3.2). This is true of a certificate that the identity made, and of the prekey statements, passes, and messages that the identity signs.
+- **Nothing may depend on a P-256 signature having one set of bytes, a security key's included.** Anyone who has seen (r, s) can write (r, n − s) (Section 3.2). This is true of a certificate that a P-256 identity made, and of the prekey statements, passes, and messages that a P-256 identity or a P-256 working key signs.
 
 ### 5.3. Order
 
@@ -1671,7 +1671,7 @@ Dromas protects a message's content from everyone but the message's recipient. D
 - **A message that a mailbox cannot decrypt has no sender at all.** The server keeps no sender (Section 13). So a mailbox restored without its prekeys cannot learn whom to ask to send the message again.
 - **A reader decrypts before it verifies.** Until the signature is checked, the reader handles bytes that nobody vouched for: first age's, then the envelope's. By design, age accepts files from anyone, and a reader acks a refused message whatever the reason for the refusal, so neither the server nor the sender learns which check failed. The one exception is check 7's read of a sender's revocations, which tells the server which senders the reader has verified (Section 15.8). Each part of the plaintext has one place, and nothing is searched for (Section 9.2).
 - **A security key's signature proves that its authenticator claimed a user was present, and nothing more (Section 3.2).** The key and its signatures carry no attestation (`PROTOCOL.u2f`), so a verifier has no evidence that an authenticator holds the key at all: a key in software makes the same signatures. A verifier reads neither the counter nor any flag but user presence. The cost of the rule: a security key enrolled to sign without a touch (`ssh-keygen -O no-touch-required`) cannot be an identity, since each of its signatures lacks the flag.
-- **A security key's point may also be a working key of type `ssh-ed25519`.** A certified key is compared with the identity key byte for byte (Section 5.2), and the two wire keys differ in their type, so an `sk-ssh-ed25519@openssh.com` identity can certify the plain key of its own point. The two types sign different bytes (Section 3.2).
+- **A security key's point may also be a working key of the security key's plain type.** A certified key is compared with the identity key byte for byte (Section 5.2), and the two wire keys differ in their type, so an `sk-ssh-ed25519@openssh.com` identity can certify the `ssh-ed25519` key of its own point, and an `sk-ecdsa-sha2-nistp256@openssh.com` identity the `ecdsa-sha2-nistp256` key of its own point. The two types sign different bytes (Section 3.2).
 - **A verifier accepts both (r, s) and (r, n − s) as a P-256 signature, and nothing depends on a signature having one set of bytes (Section 3.2).** A message's id is the ciphertext's hash, and a send names a prekey statement by the hash of the statement alone (Section 11.10).
 - **Encryption with age to a public key authenticates nobody.** Only the signature inside makes a message the sender's. The padding after the signature is unsigned, and is never read.
 - **A malformed identity document is evidence of tampering, and so is an identity document that does not hash to the address.** A well-formed identity document of a key type that a reader does not verify is not evidence of tampering (Section 4.1).

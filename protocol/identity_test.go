@@ -239,20 +239,26 @@ func TestAP256IdentityCertifies(t *testing.T) {
 	}
 }
 
-// Every identity type names the type of the working keys it certifies, and
-// that type is one defined here, whose key checks a working key is held to
-// (PROTOCOL.md §4.1, §5). The list is the package's own.
-func TestEveryIdentityTypeNamesADefinedWorkingKeyType(t *testing.T) {
+// Every identity type names the types of the working keys it certifies, each
+// one defined here, whose key checks a working key is held to, and the
+// client's own among them (PROTOCOL.md §4.1, §5). The list is the package's
+// own.
+func TestEveryIdentityTypeNamesDefinedWorkingKeyTypes(t *testing.T) {
 	for _, ty := range IdentityTypes() {
-		work := WorkingKeyType(ty)
-		if _, defined := identityTypes[work]; !defined {
-			t.Errorf("%s names %q as its working key's type, which is not defined here", ty, work)
+		works := WorkingKeyTypes(ty)
+		if !slices.Contains(works, IdentityEd25519) {
+			t.Errorf("%s certifies no Ed25519 working key, the type a client makes: %q", ty, works)
+		}
+		for _, work := range works {
+			if _, defined := identityTypes[work]; !defined {
+				t.Errorf("%s names %q as a working key's type, which is not defined here", ty, work)
+			}
 		}
 	}
 	if len(IdentityTypes()) != len(identityTypes) {
 		t.Errorf("IdentityTypes lists %d types and identityTypes defines %d", len(IdentityTypes()), len(identityTypes))
 	}
-	if WorkingKeyType("no-such-key-type@dromas.invalid") != "" {
+	if len(WorkingKeyTypes("no-such-key-type@dromas.invalid")) != 0 {
 		t.Error("a key type not defined here names a working key's type")
 	}
 }
@@ -282,9 +288,9 @@ func TestADeclarationNamesOnlyOptionalTypes(t *testing.T) {
 	order := identityOrder
 	identityTypes[opt] = struct {
 		check    func(ssh.PublicKey) error
-		work     string
+		work     []string
 		optional bool
-	}{work: IdentityEd25519, optional: true}
+	}{work: workingKeyTypes, optional: true}
 	identityOrder = append(slices.Clone(order), opt)
 	t.Cleanup(func() {
 		delete(identityTypes, opt)
