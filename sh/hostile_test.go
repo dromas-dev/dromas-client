@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"filippo.io/age"
+	"filippo.io/age/armor"
 
 	"github.com/dromas-dev/dromas-client/internal/fakeserver"
 	"github.com/dromas-dev/dromas-client/protocol"
@@ -278,12 +280,69 @@ func prekeyOf(w *world, b *shMailbox) []byte {
 
 // A file without exactly one native recipient stanza is refused as
 // decrypt_error before age is given any prekey: here the mailbox's own stanza
-// twice, and a stranger's before it, either of which age alone decrypts. A
-// file of one is delivered (PROTOCOL.md §12.3 check 1; the Go client's
+// twice, and a stranger's before it, either of which age alone decrypts. So
+// is a file in age's armour, which age -d also decrypts, and the Go client
+// does not read (PROTOCOL.md §9.4). A file of one stanza is delivered
+// (PROTOCOL.md §12.3 check 1; the Go client's
 // TestNoKeyAgreementBeforeTheStanzasAreCounted).
 func TestScriptCountsTheStanzasBeforeItDecrypts(t *testing.T) {
 	w := newWorld(t)
 	p, q := w.mailbox(), w.mailbox()
+	own, seal := sealer(t, w, p, q)
+	stranger, err := age.GenerateHybridIdentity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, c := range []struct {
+		name     string
+		armoured bool
+		to       []age.Recipient
+	}{
+		{"the mailbox's stanza twice", false, []age.Recipient{own, own}},
+		{"a stranger's stanza, then the mailbox's", false, []age.Recipient{stranger.Recipient(), own}},
+		{"the mailbox's one stanza, in age's armour", true, []age.Recipient{own}},
+	} {
+		w.put(q, "", seal(fmt.Sprintf("00000000-0000-4000-8000-00000000010%d", i), c.name, c.armoured, c.to...))
+		if d := q.recv(); len(d.messages) != 0 || d.refused("decrypt_error") != 1 || w.srv.Count(q.addr) != 0 {
+			t.Errorf("%s: %v", c.name, d)
+		}
+	}
+	w.put(q, "", seal("00000000-0000-4000-8000-000000000109", "one stanza", false, own))
+	if d := q.recv(); !slices.Equal(d.bodies(), []string{"one stanza"}) {
+		t.Errorf("a file of the mailbox's one stanza: %v", d)
+	}
+}
+
+// An age-inspect that does not run, missing or killed, is a fault of the
+// mailbox: the drain stops with the message on the server, unjudged and
+// unacked, as for a prekey file age cannot read, and the next drain with
+// the tool delivers it.
+func TestScriptStopsWhereAgeInspectDoesNotRun(t *testing.T) {
+	w := newWorld(t)
+	p, q := w.mailbox(), w.mailbox()
+	own, seal := sealer(t, w, p, q)
+	w.put(q, "", seal("00000000-0000-4000-8000-000000000110", "kept", false, own))
+	for _, c := range []struct{ name, stub string }{
+		{"not found", "exit 127"},
+		{"killed", "kill -KILL $$"},
+	} {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "age-inspect"), []byte("#!/bin/sh\n"+c.stub+"\n"), 0o700); err != nil { //nolint:gosec // a test's own stub
+			t.Fatal(err)
+		}
+		if d := q.recv("PATH=" + dir + ":$PATH "); d.rc == 0 || len(d.messages) != 0 || d.refused("decrypt_error") != 0 || w.srv.Count(q.addr) != 1 || len(q.files("refused")) != 0 {
+			t.Errorf("an age-inspect %s: %v", c.name, d)
+		}
+	}
+	if d := q.recv(); !slices.Equal(d.bodies(), []string{"kept"}) || w.srv.Count(q.addr) != 0 {
+		t.Errorf("the next drain, with age-inspect: %v", d)
+	}
+}
+
+// sealer is q's prekey recipient as the server holds it, and a function that
+// seals p's signed message to the recipients given, in age's armour or not.
+func sealer(t *testing.T, w *world, p, q *shMailbox) (age.Recipient, func(msgID, body string, armoured bool, to ...age.Recipient) []byte) {
+	t.Helper()
 	st, _ := w.srv.Prekey(q.addr)
 	pk, err := protocol.ParsePrekey(st)
 	if err != nil {
@@ -293,40 +352,31 @@ func TestScriptCountsTheStanzasBeforeItDecrypts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	stranger, err := age.GenerateHybridIdentity()
-	if err != nil {
-		t.Fatal(err)
-	}
-	seal := func(msgID, body string, to ...age.Recipient) []byte {
+	return own, func(msgID, body string, armoured bool, to ...age.Recipient) []byte {
 		t.Helper()
 		l := p.line(q.addr, msgID, body, 0)
 		var ct bytes.Buffer
-		aw, err := age.Encrypt(&ct, to...)
+		var out io.Writer = &ct
+		var aw io.WriteCloser
+		if armoured {
+			aw = armor.NewWriter(&ct)
+			out = aw
+		}
+		ew, err := age.Encrypt(out, to...)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := aw.Write(slices.Concat(l, p.sign(q.addr, l))); err != nil {
+		if _, err := ew.Write(slices.Concat(l, p.sign(q.addr, l))); err != nil {
 			t.Fatal(err)
 		}
-		if err := aw.Close(); err != nil {
+		if err := ew.Close(); err != nil {
 			t.Fatal(err)
+		}
+		if aw != nil {
+			if err := aw.Close(); err != nil {
+				t.Fatal(err)
+			}
 		}
 		return ct.Bytes()
-	}
-	for i, c := range []struct {
-		name string
-		to   []age.Recipient
-	}{
-		{"the mailbox's stanza twice", []age.Recipient{own, own}},
-		{"a stranger's stanza, then the mailbox's", []age.Recipient{stranger.Recipient(), own}},
-	} {
-		w.put(q, "", seal(fmt.Sprintf("00000000-0000-4000-8000-00000000010%d", i), c.name, c.to...))
-		if d := q.recv(); len(d.messages) != 0 || d.refused("decrypt_error") != 1 || w.srv.Count(q.addr) != 0 {
-			t.Errorf("%s: %v", c.name, d)
-		}
-	}
-	w.put(q, "", seal("00000000-0000-4000-8000-000000000109", "one stanza", own))
-	if d := q.recv(); !slices.Equal(d.bodies(), []string{"one stanza"}) {
-		t.Errorf("a file of the mailbox's one stanza: %v", d)
 	}
 }

@@ -84,7 +84,7 @@ Each entry is a security question that's already decided. Under the entry, where
   - By default, a mailbox's ACL allows every sender except the senders that the owner blocked, and the client holds back a message from a sender that the owner hasn't allowed.
 
 **Passes, keys, and revocation**
-- A pass is a bearer credential for every call of its mailbox, valid at one server until it ends, and it isn't bound to the request that carries it (§15.5; #570, #724).
+- A pass is a bearer credential that names no call, valid at one server until it ends or the server refuses its certificate, and it isn't bound to the request that carries it (§15.5; #570, #724).
   - A client signs a pass to end within 10 minutes, and a server allows a pass that ends up to an hour ahead of its clock only for clocks that differ. Binding a pass to each request would give the server a signed record of who writes to whom. A stolen pass lets a thief do only what a hostile server can already do.
 - A server can withhold a revocation from a reader that hasn't seen the revocation, and the protocol has no key transparency (§15.6; #572, #311).
   - A reader keeps every revocation that it has seen, and a record that the owner hands over out of band settles the question. Key transparency can be added within version 1.

@@ -639,7 +639,7 @@ dr_drain(){ # lists the oldest page, fetches and acks it, and lists again while 
 }
 dr_one(){ # <me> <id> <its list entry> → 0 once the message is judged and its verdict is on disk; 1 on a transient error or a fault of this mailbox, so it is not acked. The fetch answers the ciphertext alone, of the size the list gives; when it came, on the server's word, is the list entry's, and who sent it is its signature's: a from the entry carries is never read
   local B=$1 id=$2 m="$DR/msg" A why rc h z
-  rm -f "$m.json" "$m.age" "$m.sig" "$m.P" "$m.T" "$m.doc"
+  rm -f "$m.json" "$m.age" "$m.ins" "$m.sig" "$m.P" "$m.T" "$m.doc"
   cp "$3" "$m.json" && z=$(jq -r '.size // 0' "$m.json") || return 1      # an integer from 0 to 16 MiB, the protocol's largest ciphertext, or null, which is 0 (dr_shape's list; PROTOCOL.md §11.10)
   if dr_owner GET "/v1/$B/messages/$id" "" --max-filesize $((z > 0 ? z : 1)) > "$m.age"; then :      # no more than the list says it holds, and every size up to 16 MiB, the protocol's largest ciphertext, which every reader takes; the list's form holds the size to it (dr_shape; PROTOCOL.md §11.10, §12.3)
   elif [ "$(dr_code)" = message_not_found ]; then return 0      # already gone
@@ -667,8 +667,13 @@ dr_judge(){ # <me> <message stem> → 0 only if EVERY check passes, in this orde
     age-keygen -y "$k" > /dev/null 2>&1 || { echo "cannot read the prekey key $k"; return 3; }
     ids+=(-i "$k"); done      # a key file age cannot read is a fault of this mailbox, which stops the drain: never a message refused for it
   [ ${#ids[@]} -gt 0 ] || { echo "this mailbox has no prekeys"; return 3; }
-  age-inspect --json < "$m.age" 2> /dev/null | jq -e '[.stanza_types[] | select(. == "mlkem768x25519")] | length == 1' > /dev/null ||      # the stanzas counted as age reads them, before age is given any prekey: a file of many costs a reader a key agreement for each, with each prekey (PROTOCOL.md §12.3 check 1)
-    { echo "decrypt_error: it is not encrypted to exactly one recipient of a prekey's type, as every server takes a send: nothing was decrypted"; return 1; }
+  age-inspect --json < "$m.age" > "$m.ins" 2> /dev/null; case $? in 0) ;;      # the stanzas counted as age reads them, before age is given any prekey: a file of many costs a reader a key agreement for each, with each prekey (PROTOCOL.md §12.3 check 1)
+    1) echo "decrypt_error: age does not read it as an age file: nothing was decrypted"; return 1 ;;      # age-inspect's one refusal of a file
+    *) echo "age-inspect, which counts a message's stanzas, did not run"; return 3 ;; esac      # missing, not executable or killed: a fault of this mailbox, which stops the drain, never a message refused for it
+  case $(jq -r 'if .armor != false then "armoured" elif [.stanza_types[] | select(. == "mlkem768x25519")] | length != 1 then "stanzas" else "one" end' "$m.ins" 2> /dev/null) in one) ;;
+    armoured) echo "decrypt_error: it is age's armoured text, not the binary format that every server takes as a send: nothing was decrypted"; return 1 ;;      # age -d would take it, and the Go client reads the binary format alone (PROTOCOL.md §9.4)
+    stanzas) echo "decrypt_error: it is not encrypted to exactly one recipient of a prekey's type, as every server takes a send: nothing was decrypted"; return 1 ;;
+    *) echo "cannot read what age-inspect printed"; return 3 ;; esac
   age -d "${ids[@]}" < "$m.age" > "$m.T" 2> /dev/null || { echo "decrypt_error: it does not decrypt with this mailbox's prekeys"; return 1; }
   A=$(dr_open "$B" "$m") || { echo "$A"; return 1; }      # the sender, proved by what was decrypted
   t=$(dr_time "$(jq -r .sent_at "$m.P")") || { echo "cannot read the sent_at of what was decrypted"; return 3; }
