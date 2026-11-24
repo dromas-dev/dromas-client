@@ -255,10 +255,6 @@ const (
 	QuotaRequestsRange        Quota = "requests_range"          // the same, from an IPv6 /48
 )
 
-// QuotaPages is no quota of the protocol, and Known reports false of it:
-// dromas-server's build alone names it.
-const QuotaPages Quota = "pages"
-
 // Subject is whom a rate_limited was counted against (subject).
 type Subject string
 
