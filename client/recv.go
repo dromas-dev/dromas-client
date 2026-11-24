@@ -114,8 +114,8 @@ type Result struct {
 	// ([NotMade]).
 	NotMade *NotMade
 	// listedAt is the clock read once the server answered the drain's first
-	// list, and zero until it has: keys are deleted and the replay set pruned
-	// only by it.
+	// list, and zero until it has: retired prekeys are deleted early, and the
+	// replay set pruned, only by it.
 	listedAt time.Time
 	// owing is each handling the drain records a message it lands in inbox/ as
 	// owed, in the transaction that records it seen ([Mailbox.Follow]).
@@ -154,9 +154,9 @@ func (r *Result) Again() time.Duration {
 // then deletes the retired prekeys no message can still need (see
 // [Mailbox.dropRetired]): every one, once its list was taken more than an
 // hour after the server took the current prekey, and all but the newest
-// where the mailbox does not know when it did. And once the server has answered
-// the drain's list, the prekeys whose deletion time has come by the clock read
-// then go too.
+// where the mailbox does not know when it did. And every prekey whose
+// deletion time has come by this machine's clock goes, current or retired,
+// whether or not the server answered (of the current one, its key alone).
 //
 // A mailbox that holds its own revocation receives nothing.
 func (b *Mailbox) Receive(ctx context.Context) (*Result, error) {
@@ -229,19 +229,19 @@ func (b *Mailbox) receive(ctx context.Context, owing []records) (*Result, error)
 	} else {
 		res.NotMade = nm
 	}
-	// Deleted only once the server has answered the list, by the clock read
-	// then: a clock far ahead is stopped at its pass (PROTOCOL.md §12.4).
-	if !res.listedAt.IsZero() {
-		// Only a drain that emptied the mailbox may delete retired prekeys
-		// early; and it leaves no message a partial could be of.
-		if err == nil && !res.More {
-			if err = b.dropRetired(res.listedAt); err == nil {
-				err = b.dropPartials()
-			}
+	// Only a drain that emptied the mailbox may delete retired prekeys early,
+	// by the clock read once the server answered its list; and it leaves no
+	// message a partial could be of.
+	if !res.listedAt.IsZero() && err == nil && !res.More {
+		if err = b.dropRetired(res.listedAt); err == nil {
+			err = b.dropPartials()
 		}
-		if e := b.prune(res.listedAt); err == nil {
-			err = e
-		}
+	}
+	// At its deletion time every prekey, current or retired, goes by this
+	// machine's clock, whether or not the server answered: a server that
+	// refuses the mailbox cannot keep it (PROTOCOL.md §12.4, §15.3).
+	if e := b.prune(b.now()); err == nil {
+		err = e
 	}
 	if own, ok := b.ownLifetime(); ok {
 		res.receiveWithin = RecvWithin(own)
@@ -964,7 +964,8 @@ func (b *Mailbox) prekeyKept() error {
 }
 
 // lostPrekeys is the serial of every prekey the state file records with no mark
-// that it is going, whose key file is not there, lowest first.
+// that it is going, whose key file is not there before its deletion time by
+// this machine's clock, lowest first.
 func (b *Mailbox) lostPrekeys() (lost []uint64, err error) {
 	err = b.view(func(s store) error {
 		return s.each(bucketPrekeys, func(k, raw []byte) error {
@@ -976,9 +977,14 @@ func (b *Mailbox) lostPrekeys() (lost []uint64, err error) {
 			if err := protocol.Unmarshal(raw, &rec); err != nil {
 				return fmt.Errorf("the mailbox's state file keeps no statement of prekey %d it can read: %w", n, err)
 			}
-			if !rec.Going && !exists(b.path("prekeys", strconv.FormatUint(n, 10)+".agekey")) {
-				lost = append(lost, n)
+			if rec.Going || exists(b.path("prekeys", strconv.FormatUint(n, 10)+".agekey")) {
+				return nil
 			}
+			// A key past its deletion time is one prune deleted, not one lost.
+			if p, err := protocol.ParsePrekey(rec.Statement); err == nil && !b.now().Before(p.NotAfter.Add(protocol.TTL)) {
+				return nil
+			}
+			lost = append(lost, n)
 			return nil
 		})
 	})

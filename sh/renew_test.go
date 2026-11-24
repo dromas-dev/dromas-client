@@ -201,19 +201,76 @@ func TestScriptDeletesARetiredPrekey(t *testing.T) {
 		t.Error("a message to the deleted key still decrypts with the mailbox's keys")
 	}
 	held := b.read(fmt.Sprintf("prekeys/%d.txt", b2))
-	b.dated(b2, time.Now().Add(-protocol.TTL-24*time.Hour))
+	b.dated(b2, time.Now().Add(-protocol.TTL+time.Minute))
 	b.must(fmt.Sprintf("dr_prune %d", time.Now().Unix()))
 	if !b.has(fmt.Sprintf("prekeys/%d.agekey", b2)) {
-		t.Error("dr_prune deleted the newest key")
+		t.Error("dr_prune deleted the current key a minute before its deletion time")
 	}
 	writeFile(t, b.file(fmt.Sprintf("prekeys/%d.txt", b2)), []byte(held))
-	// dr_recv prunes, by the reading at which the server answered its list.
+	// dr_recv prunes by this machine's clock.
 	p := w.mailbox()
 	p1 := p.newest()
 	p.must("dr_rekey")
 	p.dated(p1, time.Now().Add(-protocol.TTL-24*time.Hour))
 	if d := p.recv(); d.rc != 0 || p.has(fmt.Sprintf("prekeys/%d.agekey", p1)) || !p.has(fmt.Sprintf("prekeys/%d.agekey", p.newest())) {
 		t.Errorf("dr_recv did not delete a retired key past its deletion time: %v, %q", d, p.files("prekeys"))
+	}
+	// And at a server that refuses every call, the current key too: a server
+	// cannot keep a key on disk by refusing the mailbox (PROTOCOL.md §12.4,
+	// §15.3). The current statement stays, and the next renewal the server
+	// takes makes a new key.
+	q := w.mailbox()
+	q1 := q.newest()
+	q.must("dr_rekey")
+	q2 := q.newest()
+	q.dated(q1, time.Now().Add(-protocol.TTL-24*time.Hour))
+	q.dated(q2, time.Now().Add(-protocol.TTL-24*time.Hour))
+	w.srv.SetMiddle(func(rw http.ResponseWriter, _ *http.Request, _ http.Handler) {
+		http.Error(rw, "down", http.StatusServiceUnavailable)
+	})
+	if d := q.recv(); d.rc == 0 || q.has(fmt.Sprintf("prekeys/%d.agekey", q1)) || q.has(fmt.Sprintf("prekeys/%d.agekey", q2)) || !q.has(fmt.Sprintf("prekeys/%d.txt", q2)) {
+		t.Errorf("dr_recv at a server that refuses every call: %v, %q", d, q.files("prekeys"))
+	}
+	w.honest()
+	q.must("dr_rekey")
+	if q3 := q.newest(); q3 == q2 || !q.has(fmt.Sprintf("prekeys/%d.agekey", q3)) {
+		t.Errorf("the renewal once the server takes one: %q", q.files("prekeys"))
+	}
+	if d := q.recv(); d.rc != 0 {
+		t.Errorf("dr_recv after the renewal: %v", d)
+	}
+}
+
+// A statement signed and never seen published, whose key a prune by a clock
+// far ahead deleted, is spent: the next renewal makes a new prekey, and never
+// sends a statement whose key nobody holds (PROTOCOL.md §12.4).
+func TestScriptRenewsPastAStatementWhoseKeyIsGone(t *testing.T) {
+	w := newWorld(t)
+	q := w.mailbox()
+	w.srv.SetMiddle(func(rw http.ResponseWriter, r *http.Request, next http.Handler) {
+		if r.Method == http.MethodPut && strings.HasSuffix(r.URL.Path, "/prekey") {
+			http.Error(rw, "down", http.StatusServiceUnavailable)
+			return
+		}
+		next.ServeHTTP(rw, r)
+	})
+	if r := q.sh("dr_rekey"); r.rc == 0 {
+		t.Fatalf("a renewal the server refused: %v", r)
+	}
+	w.honest()
+	left := q.newest()
+	if !q.has(fmt.Sprintf("prekeys/%d.txt.sig", left)) || !q.has(fmt.Sprintf("prekeys/%d.agekey", left)) {
+		t.Fatalf("control: no statement left signed and unpublished: %q", q.files("prekeys"))
+	}
+	q.must(fmt.Sprintf("dr_prune %d", time.Now().Add(30*24*time.Hour).Unix()))
+	if q.has(fmt.Sprintf("prekeys/%d.agekey", left)) {
+		t.Fatalf("dr_prune by a clock far ahead kept the key: %q", q.files("prekeys"))
+	}
+	q.must("dr_rekey")
+	st, _ := w.srv.Prekey(q.addr)
+	p, err := protocol.ParsePrekey(st)
+	if err != nil || p.Serial == left || !q.has(fmt.Sprintf("prekeys/%d.agekey", p.Serial)) {
+		t.Errorf("the renewal once the key went: published %v (%v), the statement left %d, prekeys/ %q", p, err, left, q.files("prekeys"))
 	}
 }
 
