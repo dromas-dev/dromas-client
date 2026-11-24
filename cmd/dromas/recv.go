@@ -324,7 +324,7 @@ func (r *recvRun) callback(ctx context.Context, id string, l []byte) error {
 		if permanent || try == execTries {
 			r.gaveUp.Store(true)
 			r.print(line("exec_failed", "id", id, "attempts", try, "detail",
-				"the callback has no try left: inbox/ keeps the message, nothing tries it again, and dromas status lists it until dromas inbox clear-failed"))
+				"the callback has no try left: inbox/ keeps the message, and dromas status lists it until dromas inbox retry-failed has the next recv --exec run it again, or dromas inbox clear-failed"))
 			return client.ErrGaveUp
 		}
 		select {

@@ -100,14 +100,6 @@ type fileConfig struct {
 		WebhookHead string   `toml:"webhook-header-file"`
 		WebhookKey  string   `toml:"webhook-secret-file"`
 	} `toml:"recv"`
-	Inbox struct {
-		List struct {
-			Headers *bool `toml:"headers"`
-		} `toml:"list"`
-		Show struct {
-			Headers *bool `toml:"headers"`
-		} `toml:"show"`
-	} `toml:"inbox"`
 }
 
 // setting is one setting as this run resolved it, and where it came from.
@@ -555,24 +547,25 @@ func (cfg *config) resolve(g *globals, fc *fileConfig, rel string, noMailbox boo
 		}
 	}
 
-	table := func(command, key, value string) {
-		if cfg.flagged[command] == nil {
-			cfg.flagged[command] = map[string]string{}
+	// [recv] is the one table of a command's flags.
+	recv := func(key, value string) {
+		if cfg.flagged["recv"] == nil {
+			cfg.flagged["recv"] = map[string]string{}
 		}
-		cfg.flagged[command][key] = value
-		cfg.values[strings.ReplaceAll(command, " ", ".")+"."+key] = setting{value, "file"}
+		cfg.flagged["recv"][key] = value
+		cfg.values["recv."+key] = setting{value, "file"}
 	}
 	if v := fc.Recv.Wait; v != "" {
 		if _, err := time.ParseDuration(v); err != nil {
 			return bad("recv.wait", "recv.wait: %v", err)
 		}
-		table("recv", "wait", v)
+		recv("wait", v)
 	}
 	if v := fc.Recv.DrainTime; v != "" {
 		if d, err := time.ParseDuration(v); err != nil || d <= 0 {
 			return bad("recv.drain-time", "recv.drain-time takes a duration above zero, such as 15m, and %.40q is not", v)
 		}
-		table("recv", "drain-time", v)
+		recv("drain-time", v)
 	}
 	if v := fc.Recv.Exec; v != nil {
 		if len(v) == 0 || v[0] == "" {
@@ -589,7 +582,7 @@ func (cfg *config) resolve(g *globals, fc *fileConfig, rel string, noMailbox boo
 		if d, err := time.ParseDuration(v); err != nil || d <= 0 {
 			return bad("recv.exec-timeout", "recv.exec-timeout takes a duration above zero, such as 5m, and %.40q is not", v)
 		}
-		table("recv", "exec-timeout", v)
+		recv("exec-timeout", v)
 	}
 	if v := fc.Recv.Webhook; v != "" {
 		if err := client.CheckWebhookURL(v); err != nil {
@@ -626,16 +619,11 @@ func (cfg *config) resolve(g *globals, fc *fileConfig, rel string, noMailbox boo
 		if err != nil {
 			return bad("recv.log-file", "recv.log-file: %v", err)
 		}
-		table("recv", "log-file", p)
+		recv("log-file", p)
 	}
-	headers := func(command string, v *bool) {
-		if v != nil {
-			table(command, "headers", fmt.Sprint(*v))
-		}
+	if v := fc.Recv.Headers; v != nil {
+		recv("headers", fmt.Sprint(*v))
 	}
-	headers("recv", fc.Recv.Headers)
-	headers("inbox list", fc.Inbox.List.Headers)
-	headers("inbox show", fc.Inbox.Show.Headers)
 	return nil
 }
 
@@ -713,7 +701,7 @@ func templateFor(profile string, g *globals) string {
 	mail := first(g.mailDir, join(base, "mail"))
 	identity := first(g.identityFile, join(base, "identity"))
 	keysDir := join(state, "dromas", profile, "keys")
-	if useLocal && !filepath.IsAbs(os.Getenv("XDG_STATE_HOME")) {
+	if g.baseDir != "" || useLocal && !filepath.IsAbs(os.Getenv("XDG_STATE_HOME")) {
 		keysDir = join(base, "keys")
 	}
 	keys := first(g.rotatingKeysDir, keysDir)

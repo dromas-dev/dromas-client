@@ -381,7 +381,7 @@ func TestInboxClearFailedClearsEveryCallbackThatGaveUpUntilTheNext(t *testing.T)
 	status(3, ids...)
 	cleared(2)
 	status(0)
-	if stdout, code := run("inbox list"); code != 0 || len(ofType(t, stdout, "message")) != 2 {
+	if stdout, code := run("inbox list"); code != 0 || len(ofType(t, stdout, "message_headers")) != 2 {
 		t.Fatalf("inbox list after clear-failed: exit %d, %s", code, stdout)
 	}
 	cleared(0)
@@ -394,6 +394,56 @@ func TestInboxClearFailedClearsEveryCallbackThatGaveUpUntilTheNext(t *testing.T)
 	status(3, fmt.Sprint(again[0]["id"]))
 	cleared(1)
 	status(0)
+}
+
+// dromas inbox retry-failed takes no id, prints one "failed_retried" line
+// with the count, and the next recv --exec runs the program again for each
+// message whose callback gave up, which status then lists neither as given up
+// nor as pending.
+func TestInboxRetryFailedHasTheNextRecvRunEachCallbackThatGaveUp(t *testing.T) {
+	c := newCallback(t)
+	ctx := context.Background()
+	run := func(command string, args ...string) (string, int) {
+		t.Helper()
+		var out bytes.Buffer
+		err := do(ctx, command, args, strings.NewReader(""), &out, io.Discard)
+		return out.String(), report(err, io.Discard)
+	}
+	retried := func(want int) {
+		t.Helper()
+		stdout, code := run("inbox retry-failed")
+		ls := printed(t, stdout)
+		if code != 0 || len(ls) != 1 || ls[0]["type"] != "failed_retried" || ls[0]["count"] != jsonInt(want) || len(ls[0]) != 2 {
+			t.Fatalf("inbox retry-failed: exit %d, %s; want one failed_retried line of count %d", code, stdout, want)
+		}
+	}
+	c.send("fails", "fails too")
+	stdout, _, err := c.recv(ctx, append([]string{"--wait", "0s"}, c.exec("exit", "100")...)...)
+	if code := report(err, io.Discard); code != 3 || len(ofType(t, stdout, "exec_failed")) != 2 {
+		t.Fatalf("recv: exit %d, %s", code, stdout)
+	}
+	ran := strings.Count(c.recorded(), "\n")
+	id := fmt.Sprint(ofType(t, stdout, "exec_failed")[0]["id"])
+	if _, code := run("inbox retry-failed", id); code != 2 {
+		t.Fatalf("inbox retry-failed <id>: exit %d, want 2: it takes no id", code)
+	}
+	retried(2)
+	if st, err := c.b.Status(ctx); err != nil || len(st.GaveUp) != 0 || st.Owed != 2 {
+		t.Fatalf("status after retry-failed: %+v, %v; want the 2 pending", st, err)
+	}
+	if got := strings.Count(c.recorded(), "\n"); got != ran {
+		t.Fatalf("retry-failed ran the callback itself: %d runs, want %d", got, ran)
+	}
+	if _, _, err := c.recv(ctx, append([]string{"--wait", "0s"}, c.exec("exit", "0")...)...); err != nil {
+		t.Fatalf("the next recv: %v", err)
+	}
+	if got := strings.Count(c.recorded(), "\n"); got != ran+2 {
+		t.Fatalf("%d runs of the callback after the next recv, want %d: one more for each message", got, ran+2)
+	}
+	if st, err := c.b.Status(ctx); err != nil || len(st.GaveUp) != 0 || st.Owed != 0 || len(st.Attention) != 0 {
+		t.Fatalf("status after the next recv: %+v, %v", st, err)
+	}
+	retried(0)
 }
 
 // Exit status 100 says failed for good: no more tries.

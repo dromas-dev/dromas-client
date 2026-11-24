@@ -1,23 +1,23 @@
 ## dromas inbox list
 
-list the messages in inbox/, one JSON line each
+list the messages in inbox/, one headers line each
 
 ### Synopsis
 
-Print a "message" line for each message in inbox/, oldest first by sent_at, as
-recv printed it: the messages recv delivered that nobody has deleted since. A
-file there that is not a message to this mailbox is left out, and dromas inbox
-show names it.
+Print a "message_headers" line for each message in inbox/, oldest first by
+sent_at, as recv --headers prints it: the messages recv delivered that nobody
+has deleted since, with none of the text their senders chose. dromas inbox
+show \<id> prints a message's "message" line. A file there that is not a
+message to this mailbox is left out, and dromas inbox show names it.
 
 ```
-dromas inbox list [flags]
+dromas inbox list
 ```
 
 ### Options
 
 ```
-      --headers[=true|false]   print each message's checked fields and its body's size, without its body or subject, as recv --headers does
-      --help[=true|false]      print this help, and run nothing
+      --help[=true|false]   print this help, and run nothing
 ```
 
 ### Options inherited from parent commands
@@ -44,5 +44,5 @@ dromas inbox list [flags]
 
 ### SEE ALSO
 
-* [dromas inbox](dromas_inbox.md)	 - messages recv delivered: list, show, clear-failed
+* [dromas inbox](dromas_inbox.md)	 - messages recv delivered: list, show, retry-failed, clear-failed
 

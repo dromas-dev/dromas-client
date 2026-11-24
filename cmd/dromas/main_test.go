@@ -1470,8 +1470,8 @@ func TestRecvHeadersAndShow(t *testing.T) {
 
 // A line that names a peer carries the mailbox's own name for it as "alias",
 // beside the address and never in its place, and only where the mailbox named
-// it; inbox list prints a line for each message inbox/ keeps, oldest first,
-// each as recv printed it.
+// it; inbox list prints a headers line for each message inbox/ keeps, oldest
+// first, without its body, and inbox show prints each as recv printed it.
 func TestLinesNameAPeerByItsAliasAndInboxListsWhatItKeeps(t *testing.T) {
 	ctx := context.Background()
 	srv := fakeserver.New(t, time.Now)
@@ -1525,15 +1525,23 @@ func TestLinesNameAPeerByItsAliasAndInboxListsWhatItKeeps(t *testing.T) {
 	from := func(l map[string]any) any { env, _ := l["envelope"].(map[string]any); return env["from"] }
 	recvd, ls := run("recv")
 	named(ls, "message", from)
-	// The same lines, each byte for byte as recv printed it. Two sent in one
-	// second may be listed in another order than recv's: their files can
-	// share a modification time (Windows' clock), and the list then orders
-	// them by id.
-	shown, ls := run("inbox list")
-	named(ls, "message", from)
-	sorted := func(s string) []string { l := strings.Split(strings.TrimSpace(s), "\n"); slices.Sort(l); return l }
-	if !slices.Equal(sorted(shown), sorted(recvd)) {
-		t.Errorf("inbox list printed\n%s\nrecv printed\n%s", shown, recvd)
+	// A headers line for each, and inbox show prints each line byte for byte
+	// as recv printed it. Two sent in one second may be listed in another
+	// order than recv's: their files can share a modification time (Windows'
+	// clock), and the list then orders them by id.
+	listed, ls := run("inbox list")
+	named(ls, "message_headers", from)
+	if strings.Contains(listed, "hello") {
+		t.Errorf("inbox list printed a body: %s", listed)
+	}
+	var shown []string
+	for _, l := range ls {
+		s, _ := run("inbox show", l["id"].(string))
+		shown = append(shown, strings.TrimSpace(s))
+	}
+	sorted := func(l []string) []string { slices.Sort(l); return l }
+	if want := strings.Split(strings.TrimSpace(recvd), "\n"); !slices.Equal(sorted(shown), sorted(want)) {
+		t.Errorf("inbox show printed\n%s\nrecv printed\n%s", shown, recvd)
 	}
 	for i := 1; i < len(ls); i++ {
 		if a, b := from(ls[i-1]), from(ls[i]); a == nil || b == nil {
@@ -1543,8 +1551,6 @@ func TestLinesNameAPeerByItsAliasAndInboxListsWhatItKeeps(t *testing.T) {
 			t.Errorf("inbox list is not oldest first: %s before %s", p, q)
 		}
 	}
-	_, ls = run("inbox list", "--headers")
-	named(ls, "message_headers", from)
 	_, ls = run("peer", "list", "--allowed")
 	named(ls, "allowed", func(l map[string]any) any { return l["address"] })
 	_, ls = run("send", "alice")

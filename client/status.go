@@ -93,7 +93,8 @@ type Status struct {
 	// them.
 	Owed int `json:"exec_pending,omitempty"`
 	// GaveUp names every message whose handling gave up ([ErrGaveUp]), which
-	// nothing tries again, until [Mailbox.ClearFailed] clears every one.
+	// nothing tries again, until [Mailbox.RetryFailed] or [Mailbox.ClearFailed]
+	// takes every one.
 	GaveUp []string `json:"exec_failed,omitempty"`
 	// WebhookOwed and WebhookGaveUp are Owed and GaveUp of the webhook's
 	// handling, where recv --webhook runs one ([FollowOptions.Webhook]).
@@ -267,13 +268,13 @@ func (b *Mailbox) status() (*Status, error) {
 		return nil, err
 	}
 	if len(s.GaveUp) > 0 {
-		s.Attention = append(s.Attention, fmt.Sprintf("%d whose callback gave up, which nothing tries again (%s): dromas inbox show <id> | <program> hands one to a program by hand, and dromas inbox clear-failed clears this for every one", len(s.GaveUp), strings.Join(s.GaveUp, ", ")))
+		s.Attention = append(s.Attention, fmt.Sprintf("%d whose callback gave up (%s): dromas inbox retry-failed has the next recv --exec run each again, and dromas inbox clear-failed clears this for every one", len(s.GaveUp), strings.Join(s.GaveUp, ", ")))
 	}
 	if s.WebhookOwed, s.WebhookGaveUp, err = b.owedCounts(webhookRecords); err != nil {
 		return nil, err
 	}
 	if len(s.WebhookGaveUp) > 0 {
-		s.Attention = append(s.Attention, fmt.Sprintf("%d whose webhook gave up, which nothing posts again (%s): dromas inbox show <id> | curl --data-binary @- <url> posts one by hand, and dromas inbox clear-failed clears this for every one", len(s.WebhookGaveUp), strings.Join(s.WebhookGaveUp, ", ")))
+		s.Attention = append(s.Attention, fmt.Sprintf("%d whose webhook gave up (%s): dromas inbox retry-failed has the next recv --webhook post each again, and dromas inbox clear-failed clears this for every one", len(s.WebhookGaveUp), strings.Join(s.WebhookGaveUp, ", ")))
 	}
 	s.Attention = append(s.Attention, b.versionsAttention()...)
 	if s.Outbox > 0 {
