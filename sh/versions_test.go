@@ -32,7 +32,7 @@ func TestTheScriptNamesItsVersion(t *testing.T) {
 	w.srv.SetPolicy(protocol.ServerDocument{MinVersion: "0.7"})
 	r := b.sh("bash " + script + " recv")
 	if r.rc == 0 || !strings.Contains(r.err, `"status":410,"code":"client_version_unsupported","min_version":"0.7"`) ||
-		!strings.Contains(r.err, "this server no longer takes this client's version, 0.6.0: upgrade this client; the oldest it takes is 0.7") {
+		!strings.Contains(r.err, "this server no longer takes this client's version, 0.6: upgrade this client; the oldest it takes is 0.7") {
 		t.Fatalf("recv at a server that retired its version: %v", r)
 	}
 }

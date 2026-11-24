@@ -10,9 +10,9 @@
 #
 # The build context holds .git, so go build stamps each binary with the
 # module's version from the repository (Go 1.24: the tag at a tagged commit,
-# a pseudo-version after it), and every request names that version in
-# Dromas-Version (client.Version). Without it a binary names 0.0.0-devel,
-# which any server's version floor refuses. A checkout needs its tags for the
+# a pseudo-version after it), and every request names its major and minor in
+# Dromas-Version (client.Version). Without it a binary names 0.0.0-devel, and
+# 0.0 in Dromas-Version, which any server's version floor refuses. A checkout needs its tags for the
 # pseudo-version to follow the last release (docker-publish.yml).
 FROM --platform=$BUILDPLATFORM golang:1.27.4-trixie@sha256:f18c3d73a184fb0582828510722e723b63a93f7188d11dd223d9be6f6880e65d AS build
 WORKDIR /src
