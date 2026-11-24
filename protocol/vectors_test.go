@@ -316,8 +316,10 @@ func TestVectorCertificates(t *testing.T) {
 			continue
 		}
 		signer, err := VerifySigned(a, st, read(t, "cert/"+name+".sig"), PrekeyNamespace(a.Address()), now)
-		if err != nil || Admits(held, signer) != nil {
-			t.Errorf("%s: VerifySigned: %v, with A's revocation of certificates held: %v", name, err, Admits(held, signer))
+		if err != nil {
+			t.Errorf("%s: VerifySigned: %v", name, err)
+		} else if err := Admits(held, signer); err != nil {
+			t.Errorf("%s: with A's revocation of certificates held: %v", name, err)
 		}
 		if p, signer, err := VerifyPrekey(a, st, read(t, "cert/"+name+".sig"), now); err != nil || p.Rank != signer.Rank() {
 			t.Errorf("%s: VerifyPrekey: %v", name, err)
