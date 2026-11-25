@@ -6,31 +6,29 @@ Each design decision of Dromas beside the standards and deployed systems that ma
 - **Part 1** sets Dromas beside whole systems. **Part 2** sets each decision on the wire or in the security model beside its precedents. **Part 3** does the same for the reference server's own build choices, which are no part of the protocol. A client's own behaviour (its command line, files, output, lock) carries its precedent in the doc comment of its code.
 - **Each decision is one block of one shape,** after the Rust RFC template's *Prior art* and *Rationale and alternatives*, PEP 1's *Rejected Ideas* and MADR's *Considered Options* (read 2026-11-25: [Rust RFC template](https://github.com/rust-lang/rfcs/blob/master/0000-template.md), [PEP 1](https://peps.python.org/pep-0001/), [MADR](https://adr.github.io/madr/)): **Ours**, one sentence and its section; **Prior art**, the systems that make the decision; **Where ours differs**, one line each, with its reason; **Rejected**, one line each. The heading names the decision, and other files cite it by name: `PRECEDENTS.md` § Clocks.
 - **A block defends a decision and does nothing else:** no account of how it was reached, no restatement of the spec, no explanation of a standard.
-- **Every claim about another system says how it is known:** `read <date>` with its source, `measured <date>`, or `review 2026-10-10`, the design reviews of that day, whose sources are in § Sources. A claim not read at a primary source is not written. A quotation is its source's words.
+- **Every claim about another system says how it is known:** `read <date>` with its source, or `measured <date>`. A claim not read at a primary source is not written. A quotation is its source's words.
 - **A precedent is industry practice:** a major public API, a published standard, or a widely deployed protocol. This is the one place a comparison is kept. If a row is wrong, an issue is welcome.
 
 ---
 
 ## Part 1: Dromas beside whole systems
 
-| System | Identity and keys | Encryption | Forward secrecy, post-compromise, post-quantum | Sender authentication | Hidden from the server |
-|---|---|---|---|---|---|
-| **Signal** | Phone number or username; identity key from Signal's directory | PQXDH, Double Ratchet, SPQR's ML-KEM-768 ratchet | yes, yes, yes | Implicit; deniable | Contents; the sender (sealed sender) |
-| **WhatsApp** | Signal's, plus key transparency (AKD) | Signal protocol | yes, yes, not documented | Implicit; deniable | Contents |
-| **iMessage** | Device keys under a Contact Key Verification account key | PQ3: Kyber-1024, then a Kyber-768 ratchet | yes, yes, yes | Every message signed by a P-256 device key | Contents |
-| **Proton Mail** | Email address; Proton serves keys and stores private keys under the password | OpenPGP | no, no, opt-in | OpenPGP signatures, which others can check | Body and attachments, not subject or addresses |
-| **MLS** (RFC 9420) | Credentials sign one-time KeyPackages, but for a reusable "last resort" one | TreeKEM groups | yes, yes, by suite | Signatures inside the group | Contents; the sender within the group |
-| **SimpleX** | No user identifiers: one-way queues whose addresses are capabilities | Double Ratchet + sntrup761, NaCl per queue | yes, yes, yes | Implicit; deniable | Contents, sender, recipient, their link |
-| **Nostr** (NIP-17) | A secp256k1 key is the identity | NIP-44; a signed seal in an ephemeral-key gift wrap | no, no, no | A signature inside the encryption | Contents; the sender |
-| **Noise one-way X** (rev 34) | None: "up to the application" (Noise §14) | `e, es, s, ss`, then AEAD | sender compromise only, no, no | Static-static DH: recipient-only, open to key-compromise impersonation, deniable | Contents; the sender's static key |
-| **Dromas** | The address is the identity's hash; no directory | age: ML-KEM-768 + X25519 | bounded by how often a mailbox checks in, or, where `prekeys/` is backed up, by the backup's retention; no; yes | Ed25519 or P-256 inside the encryption, naming the recipient; others can check it | Contents only |
-
-*(review 2026-10-10; § Sources.)*
+| System | Identity and keys | Encryption | Forward secrecy, post-compromise, post-quantum | Sender authentication | Hidden from the server | Source |
+|---|---|---|---|---|---|---|
+| **Signal** | Phone number or username; identity key from Signal's directory, checked by key transparency | PQXDH, Double Ratchet, SPQR's ML-KEM-768 ratchet | yes, yes, yes | Implicit; deniable | Contents; the sender (sealed sender) | [usernames](https://signal.org/blog/phone-number-privacy-usernames/), [key verification](https://signal.org/blog/automatic-key-verification/), [PQXDH](https://signal.org/docs/specifications/pqxdh/) §4.4, [SPQR](https://signal.org/blog/spqr/), [sealed sender](https://signal.org/blog/sealed-sender/), read 2026-11-25 |
+| **WhatsApp** | Signal's, plus key transparency (AKD) | Signal protocol | yes, yes, not documented | Implicit: an HMAC under a key both ends hold | Contents | [whitepaper](https://www.whatsapp.com/security/WhatsApp-Security-Whitepaper.pdf) version 10, [AKD](https://engineering.fb.com/2023/04/13/security/whatsapp-key-transparency/), read 2026-11-25 |
+| **iMessage** | Device keys from Apple's directory; Contact Key Verification, by opt-in, adds an account key and key transparency | PQ3: Kyber-1024, then a Kyber-768 ratchet | yes, yes, yes | Every message signed by a P-256 device key | Contents | [PQ3](https://security.apple.com/blog/imessage-pq3/), [Contact Key Verification](https://security.apple.com/blog/imessage-contact-key-verification/), read 2026-11-25 |
+| **Proton Mail** | Email address; Proton serves keys, checked by key transparency, and stores private keys under the password | OpenPGP | no, no, opt-in | OpenPGP signatures, which others can check | Body and attachments, not subject or addresses | [security](https://proton.me/mail/security), [private keys](https://proton.me/blog/email-password), [forward secrecy upcoming](https://proton.me/blog/openpgp-crypto-refresh), [post-quantum](https://proton.me/blog/introducing-post-quantum-encryption), [what is encrypted](https://proton.me/support/what-is-encrypted-within-protonmail), read 2026-11-25 |
+| **MLS** (RFC 9420) | A credential binds a signature key, which signs KeyPackages used once, but for a reusable "last resort" one | A ratchet tree per group | yes, yes, only by a draft's ML-KEM suites | Signatures inside the group | Contents; the sender within the group | [RFC 9420](https://www.rfc-editor.org/rfc/rfc9420) §5.3, §10, §16.8; [IANA](https://www.iana.org/assignments/mls/), [`draft-ietf-mls-pq-ciphersuites`](https://datatracker.ietf.org/doc/draft-ietf-mls-pq-ciphersuites/), read 2026-11-25 |
+| **SimpleX** | No user identifiers: pairwise identifiers of one-way queues | Double Ratchet + sntrup761, NaCl per queue | yes, yes, yes in direct chats | Implicit; deniable | Contents, sender, recipient, their link | [README](https://github.com/simplex-chat/simplex-chat), [v5.6](https://simplex.chat/blog/20240314-simplex-chat-v5-6-quantum-resistance-signal-double-ratchet-algorithm.html), [v5.7](https://simplex.chat/blog/20240426-simplex-legally-binding-transparency-v5-7-better-user-experience.html), read 2026-11-25 |
+| **Nostr** (NIP-17) | A secp256k1 key is the identity | NIP-44; a signed seal in an ephemeral-key gift wrap | no, no, no | A signature inside the encryption | Contents; the sender | [NIP-17](https://github.com/nostr-protocol/nips/blob/master/17.md), [NIP-44](https://github.com/nostr-protocol/nips/blob/master/44.md), read 2026-11-25 |
+| **Noise one-way X** (rev 34) | None: "up to the application" (§14) | `e, es, s, ss`, then AEAD | sender compromise only, no, no | Static-static DH: only the recipient checks it, and its key forges it (§7.7) | Contents; the sender's static key (§7.8) | [Noise](https://noiseprotocol.org/noise.html), read 2026-11-25 |
+| **Dromas** | The address is the identity's hash; no directory | age: ML-KEM-768 + X25519 | bounded by how often a mailbox checks in, or, where `prekeys/` is backed up, by the backup's retention; no; yes | Ed25519 or P-256 inside the encryption, naming the recipient; others can check it | Contents only | `PROTOCOL.md` |
 
 | Where Dromas stands | Beside whom |
 |---|---|
-| Getting the right key | Level with key-as-identity systems (Nostr, did:key, Tor onion addresses); directory messengers serve keys and add safety numbers or key transparency. A renewed prekey or working key never moves the address (§15.10) |
-| Sender authentication | Provable to others, as iMessage's; Signal, WhatsApp, SimpleX and Noise's one-way patterns are deniable. The server holds no signature (§ Signed payload) |
+| Getting the right key | Level with key-as-identity systems (Nostr, [did:key](https://w3c-ccg.github.io/did-key-spec/), [Tor onion addresses](https://spec.torproject.org/rend-spec/encoding-onion-addresses.html), read 2026-11-25); directory messengers serve keys and add safety numbers or key transparency. A renewed prekey or working key never moves the address (§15.10) |
+| Sender authentication | Provable to others, as iMessage's; in Signal, WhatsApp, SimpleX and Noise's one-way patterns the recipient can forge what authenticates a message. The server holds no signature (§ Signed payload) |
 | Forward secrecy | Behind the ratchets, and behind X3DH's one-time prekeys for a first message; level with X3DH without one, which depends "on the signed prekey's lifetime" ([X3DH](https://signal.org/docs/specifications/x3dh/) §4.7, read 2026-11-12); ahead of PGP and Noise's one-way patterns |
 | Metadata | Behind Signal, SimpleX and Nostr: the server sees who sends, at the send, and keeps no sender once a message is stored |
 
@@ -55,7 +53,7 @@ Each design decision of Dromas beside the standards and deployed systems that ma
 - An unknown parameter is refused, where VAPID ignores one: an addition is a new scheme (§14). So is a quoted-pair, which no value needs ([RFC 9110](https://www.rfc-editor.org/rfc/rfc9110) §5.6.4, read 2026-10-20).
 
 **Rejected:**
-- A server-issued bearer token: issued, stored, rotated, and good until replaced when it leaks (review 2026-10-10).
+- A server-issued bearer token: any holder can use it, so its lifetime "MUST be limited", and the server issues, stores and reissues it ([RFC 6750](https://www.rfc-editor.org/rfc/rfc6750) §1.2, §5.2, read 2026-11-25).
 - A signature over each request (SigV4, RFC 9421, DPoP; read 2026-10-18): on a send, a proof for the server of who sent what to whom (§15.5).
 
 ### Working keys
@@ -106,14 +104,14 @@ Each design decision of Dromas beside the standards and deployed systems that ma
 
 **Where ours differs:**
 - git's layout, a fixed overhead, where base64 members make the envelope a third larger.
-- The recipient is signed, which git does not need: it stops a recipient passing a message on, the flaw of this order that Davis (review 2026-10-10) and age's author ([words.filippo.io](https://words.filippo.io/dispatches/age-authentication/), read 2026-10-13) name. The namespace names no domain, against `ssh-keygen(1)`'s advice of `NAMESPACE@YOUR.DOMAIN` (`ssh-keygen.1` at openssh-portable `325d965d`, read 2026-10-17): an identity belongs to no server (§11.15).
+- The recipient is signed, which git does not need: it stops a recipient passing a message on, the flaw of this order ("surreptitious forwarding") that Davis ([USENIX 2001](https://www.usenix.org/legacy/publications/library/proceedings/usenix01/davis.html), read 2026-11-25) and age's author ([words.filippo.io](https://words.filippo.io/dispatches/age-authentication/), read 2026-10-13) name. The namespace names no domain, against `ssh-keygen(1)`'s advice of `NAMESPACE@YOUR.DOMAIN` (`ssh-keygen.1` at openssh-portable `325d965d`, read 2026-10-17): an identity belongs to no server (§11.15).
 - One signature, verified on the line exactly as decrypted: the rules gitsign (GHSA-7rmh-48mx-2vwc), GitLab (issue 407252) and git before 2.20 broke (read 2026-10-13).
 - No sender is kept at rest (§13, §15.8), as Signal's subpoena answers hold only "the date and time a user registered" and the last connection ([signal.org/bigbrother](https://signal.org/bigbrother/), read 2026-11-25); but no sealed sender, since the limits and the ACL count the sender's pass.
 
 **Rejected:**
-- Deniable, shared-key authentication, as Signal's (review 2026-10-10): a bot acting on a message needs a sender others can check.
-- HPKE's Auth mode and Noise's one-way X and K: a leaked recipient key forges any sender, and no stock tool runs them (review 2026-10-10).
-- A signature over re-serialized JSON: JWS's and XML-DSig's canonicalization lesson (review 2026-10-10).
+- Deniable, shared-key authentication, as Signal's ([PQXDH](https://signal.org/docs/specifications/pqxdh/) §4.4, [Double Ratchet](https://signal.org/docs/specifications/doubleratchet/) revision 4, read 2026-11-25): a bot acting on a message needs a sender others can check.
+- HPKE's Auth mode and Noise's one-way X and K: a leaked recipient key forges a sender to that recipient ([RFC 9180](https://www.rfc-editor.org/rfc/rfc9180) §9.1.1, [Noise](https://noiseprotocol.org/noise.html) §7.7, read 2026-11-25).
+- A signature over re-serialized JSON: JWS signs the encoded bytes ([RFC 7515](https://www.rfc-editor.org/rfc/rfc7515) §5.1), and XML-DSig's canonicalization lets the verifier and the application read different content ([XML Signature Best Practices](https://www.w3.org/TR/xmldsig-bestpractices/) §2.2.1, read 2026-11-25).
 
 ### Clocks
 
@@ -287,12 +285,12 @@ Each design decision of Dromas beside the standards and deployed systems that ma
 | System | What it does | Source |
 |---|---|---|
 | Signal | A signed prekey plus one-time prekeys | [X3DH](https://signal.org/docs/specifications/x3dh/) §4.7, read 2026-11-12 |
-| TUF | Mandatory expiry; versions that only rise | review 2026-10-10 |
+| TUF | Mandatory expiry; versions that never fall | [TUF](https://theupdateframework.github.io/specification/latest/) 1.0.37 §4.3, read 2026-11-25 |
 | Let's Encrypt | Six-day certificates by opt-in | [Let's Encrypt](https://letsencrypt.org/2025/01/16/6-day-and-ip-certs/), read 2026-10-18 |
 | DTLS | An epoch, then sequence numbers per epoch | [RFC 9147](https://www.rfc-editor.org/rfc/rfc9147) §4.2, read 2026-10-13 |
 
 **Where ours differs:**
-- Separate keys for signing and encryption, as libsodium recommends (review 2026-10-10): the prekey is renewed under a fixed identity.
+- Separate keys for signing and encryption, as libsodium recommends ([libsodium](https://doc.libsodium.org/advanced/ed25519-curve25519), read 2026-11-25): the prekey is renewed under a fixed identity.
 
 **Rejected:**
 - One-time prekeys: a pool of keys for each recipient at the server.
@@ -575,14 +573,3 @@ Each design decision of Dromas beside the standards and deployed systems that ma
 - A take is checked and written in one step of the store, so sends in flight at once on several processes cannot all pass on one token.
 - A failed call falls back to the process's own count, not to no limit, as Envoy's falls back to none.
 - Nothing is on disk: a bucket's time can give a send's moment, and the messages table keeps each `received_at` beside its recipient, so a copy at rest could pair a sender with a recipient (§13).
-
----
-
-## Sources
-
-For the claims marked `review 2026-10-10`.
-
-- [Signal SPQR](https://signal.org/blog/spqr/) · [WhatsApp key transparency](https://engineering.fb.com/2023/04/13/security/whatsapp-key-transparency/) · [iMessage PQ3](https://security.apple.com/blog/imessage-pq3/) · [Contact Key Verification](https://security.apple.com/blog/imessage-contact-key-verification/)
-- [Proton encryption](https://proton.me/support/proton-mail-encryption-explained) · [Proton private keys under the password](https://proton.me/blog/email-password) · [Proton post-quantum](https://proton.me/blog/introducing-post-quantum-encryption) · [RFC 9420](https://www.rfc-editor.org/rfc/rfc9420) · [SimpleX v5.6](https://simplex.chat/blog/20240314-simplex-chat-v5-6-quantum-resistance-signal-double-ratchet-algorithm.html) · [NIP-17](https://github.com/nostr-protocol/nips/blob/master/17.md)
-- [Noise rev 34](https://noiseprotocol.org/noise.html) · [libsodium, Ed25519 to Curve25519](https://doc.libsodium.org/advanced/ed25519-curve25519) · [TUF](https://theupdateframework.github.io/specification/latest/) · [RFC 6750](https://www.rfc-editor.org/rfc/rfc6750)
-- Davis, "Defective Sign & Encrypt in S/MIME, PKCS#7, MOSS, PEM, PGP, and XML," USENIX 2001
