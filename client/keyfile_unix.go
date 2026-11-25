@@ -60,11 +60,15 @@ func checkPrivateFileAs(path string, me int) error {
 // checkKeptDir refuses a directory of the mailbox's (judgedDirs) where another
 // user owns it or others can write it: whoever can write there can put in or
 // rename a file the mailbox takes as its owner's (#717). OpenSSH's safe_path
-// (misc.c), behind sshd's StrictModes, judges each directory from a key's own
+// (misc.c at master fa4b2a8, read 2026-11-22), behind sshd's StrictModes, judges each directory from a key's own
 // up through the user's home, or up to / for a key outside the home. This
 // judges the one directory at path, and judgeFiles names each of the mailbox's;
-// none above base-dir, mail-dir, inbox-dir or rotating-keys-dir is walked (PRECEDENTS.md, Part 2,
-// § 4). Others may read it: each message in inbox-dir, held/ and outbox/ is
+// none above base-dir, mail-dir, inbox-dir or rotating-keys-dir is walked,
+// where safe_path walks up: a parent that others can write lets another user
+// swap in a directory of their own, which the owner check refuses, or move one
+// of the owner's into place, such as an old copy: a rolled-back state, a
+// failure case whose cost PROTOCOL.md §15.9 states, so it gets no guard.
+// Others may read it: each message in inbox-dir, held/ and outbox/ is
 // judged on its own (judgeKept). It judges the owner first, as
 // checkPrivateFile does.
 func checkKeptDir(path string) error { return checkKeptDirAs(path, os.Getuid()) }

@@ -21,7 +21,12 @@ import (
 // "type", says what the line is, and whose second, "time", says when the
 // client made it. Its members follow, and last, where this client has
 // something to say, "detail", in its own words: never a sender's, never a
-// server's. Help is the one thing printed as text.
+// server's. Help is the one thing printed as text. There is one form, with no
+// --json and no switch on a terminal, where clig.dev (read 2026-10-16) and
+// signal-cli (read 2026-11-24) print text unless asked: the reader is an agent
+// first, as the agent CLIs' JSON lines of typed events are for programs
+// (claude -p --output-format stream-json, codex exec --json; read 2026-10-16),
+// and a harness may run it in a pseudo-terminal.
 //
 // What a command did and what it met on the way go to stdout, messages and
 // refusals alike, so a reader of stdout alone misses nothing. Stderr carries
@@ -107,9 +112,11 @@ func typed(typ string, obj []byte) []byte {
 // envelope, the line inbox/<id>.json keeps, as its bytes are, which this
 // client built from the checked fields of the envelope. The envelope's
 // members are only ever inside "envelope", so one it gains later (PROTOCOL.md
-// §14) never meets a member of the line's own (#356; PRECEDENTS.md, Part 2,
-// § 3e). Beside it, "alias" is the mailbox's own name for the sender, when it
-// has one (names).
+// §14) never meets a member of the line's own (#356), as signal-cli's JSON
+// output nests a received message's envelope whole as "envelope"
+// (read 2026-11-24) and a Kubernetes watch event its object beside its
+// "type" (read 2026-10-22). Beside it, "alias" is the mailbox's own name
+// for the sender, when it has one (names).
 func message(d client.Delivery, n names) []byte {
 	return line("message", "id", d.ID, "alias", n.of(d.Envelope.From), "envelope", raw(d.Line))
 }

@@ -763,7 +763,10 @@ func keptLineOf(env *protocol.Envelope) ([]byte, error) {
 // control such as CSI. It escapes the interlinear annotation characters
 // U+FFF9 to U+FFFB too, because some renderers hide the text between them.
 // Escaped, each is in plain sight, and a JSON reader still gets every
-// character (PRECEDENTS.md, Part 2). dromas.sh's dr_line escapes the same set.
+// character. GitHub's MCP server deletes the same kinds before a model reads
+// them (FilterInvisibleCharacters, pkg/sanitize/sanitize.go at 25f11e629c,
+// read 2026-10-16); here they are escaped, not deleted, since the line is the
+// message's only copy once acked. dromas.sh's dr_line escapes the same set.
 func escapeUnseen(line []byte) []byte {
 	var b strings.Builder
 	for _, r := range string(line) {

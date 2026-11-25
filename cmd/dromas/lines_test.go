@@ -20,7 +20,7 @@ import (
 )
 
 // A line that carries the envelope carries none of its members beside it
-// (PRECEDENTS.md, Part 2, § 3e; #441 item 3): the envelope may gain members
+// (message, in output.go; #441 item 3): the envelope may gain members
 // inside v1, and one beside the line's own could take a name the line has.
 // The lines are read from this package's source: every call of line and
 // object, with the names it writes, and every typed line, with the JSON
