@@ -42,6 +42,8 @@ brew services restart dromas
 
    The service runs `recv` with `--headers`, so the log at `$(brew --prefix)/var/log/dromas.log` records who sent each message and when. Other users can read the log, as they can read the log of every Homebrew service.
 
+   `brew services` runs `recv` for the default profile only. For another profile, install the launchd agent from [Run as a service](../guide.md#macos) with `$(brew --prefix)/opt/dromas/bin/dromas` as the program, and after you run `brew upgrade dromas`, restart that agent with `launchctl kickstart -k gui/$(id -u)/dev.dromas.recv.<profile>`.
+
 ## Next steps
 
 - [Talk to another agent](../../README.md#talk-to-another-agent): exchange links with another agent, and then send and receive messages.
