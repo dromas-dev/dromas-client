@@ -46,7 +46,8 @@ A message that failed a check goes to refused/, never to held/.`,
 		e.group("peer", "who can write to this mailbox: allow, block, list",
 			`A message from a sender this mailbox has not allowed is held in held/ (dromas
 held list lists it), and a message from a sender it blocked is dropped. Sending
-to a mailbox, or naming it with dromas alias add, also allows it.
+to a mailbox, or naming it with dromas alias add, also allows it, and dromas
+peer allow --remove takes a sender back to unknown.
 
 The config file's [policy] table sets where a message from a sender you have not
 allowed goes, held/ or inbox/, and whose messages the server accepts: dromas
@@ -851,17 +852,44 @@ block deletes them.`,
 		})
 }
 
+// allowCmd allows a sender, and with --remove takes one out of the allowed
+// file. Each source here was read 2026-11-25. Taking an entry off an allow
+// list is a mode of the command that adds it: Pi-hole's pihole allow takes
+// "remove, delete, -d" to "Remove domain(s)" (advanced/Scripts/list.sh at
+// f7c0220), and ufw deletes a rule with "the original rule" written after
+// delete (ufw(8)). The word is remove, as firewall-cmd's --remove-source and
+// --remove-service undo --add-source and --add-service (firewall-cmd(1)),
+// ssh-keygen -R "Removes all keys belonging to the specified hostname" from
+// a known_hosts file (ssh-keygen(1), OpenBSD), and this command line's alias
+// rm and refused rm remove. It is not forget, and not a peer rm: Bluetooth's
+// Forget means "You have to connect it again" (Mac User Guide, blth1004), and
+// bluetoothctl's remove "Removes the remote device object ... including
+// cached information such as bonding information" (org.bluez.Adapter(5)), as
+// gpg --delete-keys removes the key itself and docker rm and git remote
+// remove the whole object. --remove changes the allowed file alone, and the
+// peer's pinned identity, its messages, its block and its alias stay.
 func (e *cli) allowCmd() *cobra.Command {
-	var rebuild bool
+	var rebuild, remove bool
 	c := command("allow [flags] <link, address or alias>", "deliver a sender's messages to inbox/, with what held/ keeps from it",
 		`Deliver a sender's messages to inbox/ from now on. allow moves what held/ keeps
 from that sender to inbox/, printing each message as recv does, then prints an
 "allowed" line. allow refuses a sender this mailbox blocks, or whose address it
 holds revoked, and changes nothing.
 
+--remove takes the sender out of the allowed file, so that it is unknown again,
+and prints an "allowed_removed" line: its next message is held, unless [policy]
+unknown is "inbox" in the config file. --remove calls no server. Where [policy]
+admit is "allowed" the next send, recv, allow or block sends the server the list
+without it. A block stays, and still wins. --remove refuses a sender that an alias names,
+since a name allows its peer, or that the allowed file does not list, and
+changes nothing. Sending to the sender, or naming it, allows it again.
+
 --rebuild, with no sender, adds back every address an alias names or sent/
 shows, but one this mailbox holds revoked, for an allowed file that was lost.`,
 		func(c *cobra.Command, args []string) error {
+			if rebuild && remove {
+				return wrong(c, "dromas peer allow takes --rebuild or --remove, not both")
+			}
 			if rebuild && len(args) > 0 {
 				return wrong(c, "dromas peer allow --rebuild takes no sender: it adds back every address an alias names or sent/ shows")
 			}
@@ -888,6 +916,12 @@ shows, but one this mailbox holds revoked, for an allowed file that was lost.`,
 			if err != nil {
 				return err
 			}
+			if remove {
+				if err := b.RemoveAllowed(c.Context(), a); err != nil {
+					return err
+				}
+				return e.out(line("allowed_removed", "address", a))
+			}
 			moved, err := b.Allow(c.Context(), a)
 			n := namesOf(c.Context(), b)
 			for _, d := range moved {
@@ -901,6 +935,7 @@ shows, but one this mailbox holds revoked, for an allowed file that was lost.`,
 			return e.out(line("allowed", "address", a))
 		})
 	c.Flags().BoolVar(&rebuild, "rebuild", false, "add back every address an alias names or sent/ shows, for an allowed file that was lost")
+	c.Flags().BoolVar(&remove, "remove", false, "take the sender out of the allowed file, so that its messages are held again, and call no server")
 	return c
 }
 

@@ -22,7 +22,7 @@ var mailCommands = []string{"Receive", "Hold", "Await", "Follow", "Rekey", "Rene
 
 // notMail are the commands of lockingCommands that touch no message, which run
 // on a state that does not match prekeys/.
-var notMail = []string{"Adopt", "Leave", "Resolve", "RevokeEarlier", "RequestCertificate", "Block", "SyncACL", "Ask", "KeepRevocation", "Publish", "SetAlias", "RemoveAlias", "RemoveRefused", "ClearFailed", "RetryFailed", "RebuildAllowed"}
+var notMail = []string{"Adopt", "Leave", "Resolve", "RevokeEarlier", "RequestCertificate", "Block", "SyncACL", "Ask", "KeepRevocation", "Publish", "SetAlias", "RemoveAlias", "RemoveAllowed", "RemoveRefused", "ClearFailed", "RetryFailed", "RebuildAllowed"}
 
 // signals are the states that do not match prekeys/, each made from a mailbox b
 // that has delivered a message from a, with a message of a's that the server

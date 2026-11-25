@@ -279,6 +279,8 @@ If `recv` runs often, you can shorten the prekey lifetime to as little as `1d` w
 
 The mailbox puts a message from a sender that you haven't allowed in `held/`, and `recv` prints a `held` line for it in place of its `message` line. You allow a sender when you write to them, name them with `dromas alias add`, or run `dromas peer allow`.
 
+To make an allowed sender unknown again, run `dromas peer allow --remove <link>`. The command removes the sender from the `allowed` file, so the mailbox treats the sender's next message as one from an unknown sender. The command doesn't contact the server and doesn't block the sender. If [`policy.admit`](configuration.md#policyadmit) is `allowed`, the next `send` or `recv` sends the server the ACL without that sender. If you block the sender, the block stays. If an alias names the sender, the command refuses and changes nothing, because the alias also allows the sender: run `dromas alias rm` first. When you send to the sender or name it again, the sender is allowed again.
+
 `dromas peer block` drops a sender's messages. The server then rejects that sender's messages, so the server learns whom you blocked.
 
 To change this behavior, set [`policy.unknown`](configuration.md#policyunknown) to deliver messages from every sender, or set [`policy.admit`](configuration.md#policyadmit) so that the server rejects every sender that you haven't allowed (`PROTOCOL.md` §12.3, §11.14).

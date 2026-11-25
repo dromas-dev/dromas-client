@@ -9,6 +9,14 @@ from that sender to inbox/, printing each message as recv does, then prints an
 "allowed" line. allow refuses a sender this mailbox blocks, or whose address it
 holds revoked, and changes nothing.
 
+--remove takes the sender out of the allowed file, so that it is unknown again,
+and prints an "allowed_removed" line: its next message is held, unless [policy]
+unknown is "inbox" in the config file. --remove calls no server. Where [policy]
+admit is "allowed" the next send, recv, allow or block sends the server the list
+without it. A block stays, and still wins. --remove refuses a sender that an alias names,
+since a name allows its peer, or that the allowed file does not list, and
+changes nothing. Sending to the sender, or naming it, allows it again.
+
 --rebuild, with no sender, adds back every address an alias names or sent/
 shows, but one this mailbox holds revoked, for an allowed file that was lost.
 
@@ -21,6 +29,7 @@ dromas peer allow [flags] <link, address or alias>
 ```
       --help[=true|false]      print this help, and run nothing
       --rebuild[=true|false]   add back every address an alias names or sent/ shows, for an allowed file that was lost
+      --remove[=true|false]    take the sender out of the allowed file, so that its messages are held again, and call no server
 ```
 
 ### Options inherited from parent commands

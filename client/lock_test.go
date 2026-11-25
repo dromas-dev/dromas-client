@@ -62,6 +62,11 @@ func TestEveryCommandWaitsForTheLock(t *testing.T) {
 			if err := a.SetAlias(t.Context(), "peer", peer.Address()); err != nil { // so RemoveAlias has one to remove
 				t.Fatal(err)
 			}
+			if c.name == "RemoveAllowed" { // a name allows its peer: the allowed file's line alone, for RemoveAllowed to remove
+				if err := a.RemoveAlias(t.Context(), "peer"); err != nil {
+					t.Fatal(err)
+				}
+			}
 			var waited atomic.Int32
 			told := make(chan struct{}, 1)
 			opt := e.opts()
@@ -334,6 +339,7 @@ func waits(b, c *client.Mailbox, rec *protocol.Revocations, opt client.Options) 
 		"PrekeyLifetime": func(ctx context.Context) error { _, err := b.PrekeyLifetime(ctx); return err },
 		"SetAlias":       func(ctx context.Context) error { return b.SetAlias(ctx, "carol", c.Address()) },
 		"RemoveAlias":    func(ctx context.Context) error { return b.RemoveAlias(ctx, "carol") },
+		"RemoveAllowed":  func(ctx context.Context) error { return b.RemoveAllowed(ctx, c.Address()) },
 		"KeepRevocation": func(ctx context.Context) error { _, _, err := b.KeepRevocation(ctx, rec); return err },
 		"RebuildAllowed": func(ctx context.Context) error { _, err := b.RebuildAllowed(ctx); return err },
 		"RemoveRefused":  func(ctx context.Context) error { _, err := b.RemoveRefused(ctx, nil); return err },

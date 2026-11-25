@@ -2596,6 +2596,22 @@ func TestHeldAndPeerCommands(t *testing.T) {
 	if _, _, err = cmd("peer allow", "--rebuild", a.Address().String()); err == nil {
 		t.Fatal("peer allow --rebuild with an address was taken")
 	}
+	// --remove takes a out of the allowed file and leaves the block.
+	if out, _, err = cmd("peer allow", "--remove", a.Link()); err != nil || out != `{"type":"allowed_removed","address":"`+a.Address().String()+`"}`+"\n" {
+		t.Fatalf("peer allow --remove: %v %q", err, out)
+	}
+	if out, _, err = cmd("peer list"); err != nil || out != blocked {
+		t.Fatalf("peer list after peer allow --remove: %v %q", err, out)
+	}
+	if out, _, err = cmd("peer allow", "--remove", a.Address().String()); err == nil || !strings.Contains(err.Error(), "does not list") || out != "" {
+		t.Fatalf("peer allow --remove of a sender not listed: %v %q", err, out)
+	}
+	for _, args := range [][]string{{"--remove", "--rebuild"}, {"--remove"}, {"--remove", a.Address().String(), a.Address().String()}} {
+		var usage *usageError
+		if out, _, err = cmd("peer allow", args...); !errors.As(err, &usage) || out != "" {
+			t.Fatalf("peer allow %q: %v %q", args, err, out)
+		}
+	}
 }
 
 // prekey lifetime prints the mailbox's prekey lifetime, which --prekey-lifetime
