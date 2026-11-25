@@ -299,7 +299,7 @@ func timedOut(err error) bool {
 // renewal mends whose renewal failed so ([Mailbox.Receive]), and an answer
 // about a revocation whose read for the proof failed so. A refusal no wait
 // mends is not: [Fatal] names those, a folder of the mailbox missing and a
-// clock behind among them.
+// clock off from the server's among them.
 func Transient(err error) bool {
 	var ae *APIError
 	var re *RevokedError
