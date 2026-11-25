@@ -21,8 +21,10 @@ Restart=on-failure
 RestartSec=30s
 RestartPreventExitStatus=2 4
 # Exit status 3 is done with something for the owner to look at, which
-# dromas status lists.
+# dromas status lists: a clean exit that is still started again after
+# RestartSec, as Syncthing's user unit treats its exit statuses 3 and 4.
 SuccessExitStatus=3
+RestartForceExitStatus=3
 
 [Install]
 WantedBy=default.target

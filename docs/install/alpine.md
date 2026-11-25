@@ -24,7 +24,7 @@ When a new release is published, `apk upgrade` installs it.
 
 ## Install from a package
 
-Each release includes an `.apk` package for `x86_64` and `aarch64`.
+Each release includes an `.apk` package for `x86_64` and `aarch64`. A package that you install from a release never upgrades, but one from the [apk repository](#install-from-the-apk-repository) does.
 
 1. Download the package:
 

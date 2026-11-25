@@ -6,7 +6,12 @@ On macOS and Linux, the Homebrew tap `dromas-dev/tap` builds `dromas` from the s
 brew install dromas-dev/tap/dromas
 ```
 
-After the tap adds a new release, `brew upgrade dromas` installs it.
+To install a new release, run the following commands. `brew upgrade` installs a new release of the tap only after `brew update` fetches it, and the running service keeps the old binary until it restarts:
+
+```sh
+brew update && brew upgrade dromas
+brew services restart dromas
+```
 
 ## Quickstart
 
@@ -35,7 +40,7 @@ After the tap adds a new release, `brew upgrade dromas` installs it.
    brew services start dromas
    ```
 
-   After you run `brew upgrade dromas`, run `brew services restart dromas`.
+   The service runs `recv` with `--headers`, so the log at `$(brew --prefix)/var/log/dromas.log` records who sent each message and when. Other users can read the log, as they can read the log of every Homebrew service.
 
 ## Next steps
 

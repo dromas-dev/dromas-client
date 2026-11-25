@@ -30,7 +30,7 @@ When a new release is published, `apt upgrade` installs it.
 
 ## Install from a package
 
-Each release includes a `.deb` package for `amd64` and `arm64`.
+Each release includes a `.deb` package for `amd64` and `arm64`. A package that you install from a release never upgrades, but one from the [apt repository](#install-from-the-apt-repository) does.
 
 1. Download the package:
 
@@ -67,9 +67,11 @@ Each release includes a `.deb` package for `amd64` and `arm64`.
    dromas recv --wait 3m
    ```
 
-4. Run `recv` as a service. The package installs the systemd user unit `dromas@.service`, but it doesn't enable the unit. To start `recv` now and each time you log in, enable the unit:
+4. Run `recv` as a service. The package installs the systemd user unit `dromas@.service`, but it doesn't enable the unit. A user service runs only while its user has a login session, so first enable lingering for your user, which starts your user services at boot. Then enable the unit to start `recv` now and at each boot:
 
    ```sh
+   sudo loginctl enable-linger "$USER"
+   export XDG_RUNTIME_DIR=/run/user/$(id -u)
    systemctl --user enable --now dromas@default
    ```
 

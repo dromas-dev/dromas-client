@@ -110,7 +110,14 @@ To receive messages as they arrive, run `dromas recv --follow --headers` under y
 
 The `.deb` and `.rpm` packages install a systemd user unit, `dromas@.service`, but don't enable it. The instance name is the profile, so `dromas@default` runs the default mailbox.
 
-1. If you installed a prebuilt binary, extract the unit from the archive and install it. The unit runs `/usr/bin/dromas`, and [Install a prebuilt binary](install/binaries.md) puts `dromas` at `/usr/local/bin/dromas`, so the `sed` command changes the path. If you installed `dromas` somewhere else, replace `/usr/local/bin/dromas` in the `sed` command with that path. Run these commands in the directory that contains the archive:
+1. Enable lingering for your user, so that your user services start at boot, even when you aren't logged in. A user service otherwise runs only while its user has a login session. If your shell doesn't set `XDG_RUNTIME_DIR`, set it too:
+
+   ```sh
+   sudo loginctl enable-linger "$USER"
+   export XDG_RUNTIME_DIR=/run/user/$(id -u)
+   ```
+
+2. If you installed a prebuilt binary, extract the unit from the archive and install it. The unit runs `/usr/bin/dromas`, and [Install a prebuilt binary](install/binaries.md) puts `dromas` at `/usr/local/bin/dromas`, so the `sed` command changes the path. If you installed `dromas` somewhere else, replace `/usr/local/bin/dromas` in the `sed` command with that path. Run these commands in the directory that contains the archive:
 
    ```sh
    tar -xzf dromas_*_linux_*.tar.gz packaging/systemd/dromas@.service
@@ -119,21 +126,15 @@ The `.deb` and `.rpm` packages install a systemd user unit, `dromas@.service`, b
    systemctl --user daemon-reload
    ```
 
-2. Enable the service so that it starts now and at each login. For another profile, use `dromas@<profile>`:
+3. Enable the service so that it starts now and at each boot. For another profile, use `dromas@<profile>`:
 
    ```sh
    systemctl --user enable --now dromas@default
    ```
 
-3. To start the service at boot, even when you aren't logged in, enable lingering for your user:
-
-   ```sh
-   sudo loginctl enable-linger "$USER"
-   ```
-
 To check the service, run `systemctl --user status dromas@default`. To read its log, run `journalctl --user -u dromas@default`.
 
-systemd treats exit status 0 or 3, or an exit because of `SIGHUP`, `SIGINT`, `SIGTERM`, or `SIGPIPE`, as a clean exit, and the unit doesn't restart `recv` after a clean exit. After any other exit, the unit restarts `recv` 30 seconds later, except after exit status 2 or 4, because a restart would hit the same error. Fix the cause, then run `systemctl --user restart dromas@default`.
+systemd treats exit status 0 or 3, or an exit because of `SIGHUP`, `SIGINT`, `SIGTERM`, or `SIGPIPE`, as a clean exit. The unit restarts `recv` 30 seconds after exit status 3, which means that `dromas status` lists something for you to look at, and 30 seconds after any exit that isn't clean. It doesn't restart `recv` after exit status 2 or 4, because a restart would hit the same error, or after any other clean exit. Fix the cause, then run `systemctl --user restart dromas@default`.
 
 ### Alpine Linux
 
@@ -174,7 +175,7 @@ With Homebrew:
 brew services start dromas
 ```
 
-This command runs `dromas recv --follow --headers` for the default profile at each login, and logs to `$(brew --prefix)/var/log/dromas.log`. launchd restarts `recv` after every exit, including exit status 2 and 4. After you run `brew upgrade dromas`, run `brew services restart dromas`.
+This command runs `dromas recv --follow --headers` for the default profile at each login, and logs to `$(brew --prefix)/var/log/dromas.log`. launchd restarts `recv` after every exit, including exit status 2 and 4. To install a new release, run `brew update && brew upgrade dromas`, then `brew services restart dromas`.
 
 Without Homebrew, install the launchd agent that comes in the macOS archive, `packaging/launchd/dev.dromas.recv.plist`. The agent runs `/usr/local/bin/dromas`. If you installed `dromas` somewhere else, add `-e 's|/usr/local/bin/dromas|<path>|'` to the `sed` command. Set `profile` to the mailbox's profile, and run these commands in the directory that contains the archive:
 
