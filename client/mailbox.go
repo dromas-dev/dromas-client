@@ -1358,7 +1358,7 @@ func decrypt(ct []byte, ids []age.Identity) (io.Reader, error) {
 // and any other age ignores, as it does. age tries every identity on every
 // stanza, up to 1,024, so a file of 1,024 native stanzas costs a mailbox about a
 // thousand times what an honest message does, for each prekey it keeps (#49,
-// measured; PRECEDENTS.md, Part 2, § 4), and only a server can serve one.
+// measured; PRECEDENTS.md § One recipient stanza), and only a server can serve one.
 // The stanzas are read and counted once, before anything is decrypted, by
 // protocol.ReadStanzas, the reading a server's check of a send shares. A
 // file with none is a case of its own (§11.10 step 7): errNoNative.
