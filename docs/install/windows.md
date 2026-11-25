@@ -1,16 +1,16 @@
 # Install on Windows
 
-Each release includes a zip archive for `amd64` and `arm64`.
+Each release includes a zip archive for `amd64` and `arm64`. The commands on this page name the release, `<version>`. The [releases page](https://github.com/dromas-dev/dromas-client/releases) lists every release.
 
 1. Download the zip archive:
 
    ```powershell
-   gh release download -R dromas-dev/dromas-client -p 'dromas_*_windows_amd64.zip'   # or arm64
+   Invoke-WebRequest https://github.com/dromas-dev/dromas-client/releases/download/v<version>/dromas_<version>_windows_amd64.zip -OutFile dromas_<version>_windows_amd64.zip   # or arm64
    ```
 
 2. Verify the download. For instructions, see [Verify a release](verify.md).
 
-3. Extract the archive. Replace `<version>` with the version in the filename:
+3. Extract the archive:
 
    ```powershell
    Expand-Archive dromas_<version>_windows_amd64.zip "$env:LOCALAPPDATA\Programs\dromas"
