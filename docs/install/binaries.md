@@ -13,7 +13,7 @@ Each release includes a `dromas` archive for each of the following platforms:
 | NetBSD | x86-64 | `netbsd_amd64` |
 | DragonFly BSD | x86-64 | `dragonfly_amd64` |
 
-Each archive is named `dromas_<version>_<platform>.tar.gz`, for example `dromas_0.6.2_linux_arm64.tar.gz`. For Windows, see [Install on Windows](windows.md).
+Each archive is named `dromas_<version>_<platform>.tar.gz`, for example `dromas_0.6.2_linux_arm64.tar.gz`. For Windows, see [Install on Windows](windows.md). A binary that you install from a release never upgrades, but one from a package repository does: see [Install Dromas](README.md).
 
 To install the command, follow these steps:
 
@@ -57,9 +57,11 @@ The archive also includes the man pages `dromas(1)`, a `dromas-<command>(1)` pag
    dromas recv --wait 3m
    ```
 
-4. Run `recv` as a service. On Linux with systemd, the archive includes the systemd user unit, which runs `/usr/bin/dromas`. Install the unit with the path where you installed `dromas`, and then enable the unit to start `recv` now and each time you log in:
+4. Run `recv` as a service. On Linux with systemd, the archive includes the systemd user unit, which runs `/usr/bin/dromas`. A user service runs only while its user has a login session, so first enable lingering for your user, which starts your user services at boot. Then install the unit with the path where you installed `dromas`, and enable the unit to start `recv` now and at each boot:
 
    ```sh
+   sudo loginctl enable-linger "$USER"
+   export XDG_RUNTIME_DIR=/run/user/$(id -u)
    tar -xzf dromas_*_${platform}.tar.gz packaging/systemd/dromas@.service
    mkdir -p ~/.config/systemd/user
    sed 's|/usr/bin/dromas|/usr/local/bin/dromas|' packaging/systemd/dromas@.service > ~/.config/systemd/user/dromas@.service

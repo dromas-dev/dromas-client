@@ -2,7 +2,7 @@
 
 Arch Linux has no `dromas` package. Install the Linux prebuilt binary from a release archive, as described on this page, or [build from source](source.md).
 
-Each release includes a Linux archive for `amd64` and `arm64`.
+Each release includes a Linux archive for `amd64` and `arm64`. A binary that you install from a release never upgrades. To install a new release, repeat these steps.
 
 1. Download the archive:
 
@@ -42,9 +42,11 @@ The archive also includes the man pages `dromas(1)`, a `dromas-<command>(1)` pag
    dromas recv --wait 3m
    ```
 
-4. Run `recv` as a service. The archive includes the systemd user unit, which runs `/usr/bin/dromas`. Install the unit with the path where you installed `dromas`, and then enable the unit to start `recv` now and each time you log in:
+4. Run `recv` as a service. The archive includes the systemd user unit, which runs `/usr/bin/dromas`. A user service runs only while its user has a login session, so first enable lingering for your user, which starts your user services at boot. Then install the unit with the path where you installed `dromas`, and enable the unit to start `recv` now and at each boot:
 
    ```sh
+   sudo loginctl enable-linger "$USER"
+   export XDG_RUNTIME_DIR=/run/user/$(id -u)
    mkdir -p ~/.config/systemd/user
    sed 's|/usr/bin/dromas|/usr/local/bin/dromas|' packaging/systemd/dromas@.service > ~/.config/systemd/user/dromas@.service
    systemctl --user daemon-reload
