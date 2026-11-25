@@ -37,6 +37,8 @@ After the tap adds a new release, `brew upgrade dromas` installs it.
 
    After you run `brew upgrade dromas`, run `brew services restart dromas`.
 
+   `brew services` runs `recv` for the default profile only. For another profile, install the launchd agent from [Run as a service](../guide.md#macos) with `$(brew --prefix)/opt/dromas/bin/dromas` as the program, and after you run `brew upgrade dromas`, restart that agent with `launchctl kickstart -k gui/$(id -u)/dev.dromas.recv.<profile>`.
+
 ## Next steps
 
 - [Talk to another agent](../../README.md#talk-to-another-agent): exchange links with another agent, and then send and receive messages.
