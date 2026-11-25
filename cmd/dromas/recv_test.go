@@ -7,7 +7,9 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
@@ -15,6 +17,7 @@ import (
 
 	"github.com/dromas-dev/dromas-client/client"
 	"github.com/dromas-dev/dromas-client/internal/fakeserver"
+	"github.com/dromas-dev/dromas-client/internal/forge"
 	"github.com/dromas-dev/dromas-client/protocol"
 )
 
@@ -300,4 +303,148 @@ func TestRecvEndsOnAFolderNotMounted(t *testing.T) {
 			t.Fatalf("recv %v said %q", args, d)
 		}
 	}
+}
+
+// fastMailbox is a mailbox on a server in memory, the commands' environment
+// set to it, and the options its commands run with: its clock 10 minutes
+// ahead of the server's, so the server refuses each pass it signs as
+// pass_expired (PROTOCOL.md §8).
+func fastMailbox(t *testing.T) client.Options {
+	t.Helper()
+	srv := fakeserver.NewInMemory(t, time.Now)
+	opt := client.Options{Base: srv.URL, HTTPClient: srv.Client()}
+	b, err := client.Init(context.Background(), t.TempDir(), opt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	useMailbox(t, b.Dir())
+	t.Setenv("DROMAS_SERVER_URL", srv.URL)
+	opt.Now = func() time.Time { return time.Now().Add(10 * time.Minute) }
+	return opt
+}
+
+// passWaits counts the "waiting" lines in stderr for a pass refused for its time.
+func passWaits(t *testing.T, stderr string) int {
+	t.Helper()
+	n := 0
+	for _, l := range printed(t, stderr) {
+		if l["type"] == "waiting" && l["reason"] == "server" && l["code"] == string(protocol.CodePassExpired) {
+			n++
+		}
+	}
+	return n
+}
+
+// A pass the server refuses for its time ends one recv with exit status 4 and
+// "fatal" in its "error" line. Under --follow it is a wait: recv says so on
+// stderr and tries again, with no end of its own.
+func TestRecvEndsAtAPassRefusedForItsTimeAndFollowWaitsItOut(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		opt := fastMailbox(t)
+		err := doWith(context.Background(), opt, "recv", nil, strings.NewReader(""), io.Discard, io.Discard)
+		var rep bytes.Buffer
+		st := report(err, &rep)
+		if l := printed(t, rep.String()); st != 4 || len(l) != 1 || l[0]["type"] != "error" || l[0]["fatal"] != true || l[0]["code"] != string(protocol.CodePassExpired) {
+			t.Fatalf("recv: exit %d, %s", st, rep.String())
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		var errs bytes.Buffer
+		ended := make(chan error, 1)
+		go func() {
+			ended <- doWith(ctx, opt, "recv", []string{"--follow"}, strings.NewReader(""), io.Discard, &errs)
+		}()
+		time.Sleep(10 * time.Minute)
+		synctest.Wait()
+		select {
+		case err := <-ended:
+			t.Fatalf("recv --follow ended on its own: %v %s", err, errs.String())
+		default:
+		}
+		cancel()
+		if err := <-ended; err != nil {
+			t.Fatalf("recv --follow, its context ended: %v %s", err, errs.String())
+		}
+		if passWaits(t, errs.String()) == 0 {
+			t.Fatalf("recv --follow said no wait for the pass refused: %s", errs.String())
+		}
+	})
+}
+
+// Under --wait, a pass the server refuses for its time is waited out until
+// the wait ends, and recv ends by then, with the refusal's "error" line.
+func TestRecvWaitEndsAPassRefusedForItsTimeByItsDeadline(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		opt := fastMailbox(t)
+		var errs bytes.Buffer
+		start := time.Now()
+		err := doWith(context.Background(), opt, "recv", []string{"--wait", "5m"}, strings.NewReader(""), io.Discard, &errs)
+		took := time.Since(start)
+		var rep bytes.Buffer
+		report(err, &rep)
+		l := printed(t, rep.String())
+		if took > 5*time.Minute || len(l) != 1 || l[0]["type"] != "error" || l[0]["code"] != string(protocol.CodePassExpired) {
+			t.Fatalf("recv --wait 5m ended after %v: %s", took, rep.String())
+		}
+		if passWaits(t, errs.String()) == 0 {
+			t.Fatalf("recv --wait said no wait for the pass refused: %s", errs.String())
+		}
+	})
+}
+
+// A pass refused twice as certificate_superseded, the mailbox having read
+// itself at its server between the two, is not kept: the next recv signs a
+// pass of its own.
+func TestRecvKeepsNoPassRefusedTwiceAsSuperseded(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		srv := fakeserver.NewInMemory(t, time.Now)
+		opt := client.Options{Base: srv.URL, HTTPClient: srv.Client()}
+		b, err := client.Init(context.Background(), t.TempDir(), opt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		useMailbox(t, b.Dir())
+		t.Setenv("DROMAS_SERVER_URL", srv.URL)
+		var mu sync.Mutex
+		var refused []string
+		var next string // the first pass after the refusals
+		var refuse atomic.Bool
+		refuse.Store(true)
+		srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, h http.Handler) {
+			if pass := r.Header.Get("Authorization"); pass != "" {
+				mu.Lock()
+				on := refuse.Load()
+				if on {
+					refused = append(refused, pass)
+				} else if next == "" {
+					next = pass
+				}
+				mu.Unlock()
+				if on {
+					forge.Refuse(w, protocol.CodeCertificateSuperseded)
+					return
+				}
+			}
+			h.ServeHTTP(w, r)
+		})
+		err = doWith(context.Background(), opt, "recv", nil, strings.NewReader(""), io.Discard, io.Discard)
+		var rep bytes.Buffer
+		report(err, &rep)
+		mu.Lock()
+		n := len(refused)
+		mu.Unlock()
+		if l := printed(t, rep.String()); len(l) != 1 || l[0]["code"] != string(protocol.CodeCertificateSuperseded) || n < 2 {
+			t.Fatalf("recv, every pass refused: %s, %d refused", rep.String(), n)
+		}
+		refuse.Store(false)
+		time.Sleep(2 * time.Second) // a pass signed now differs from one signed then
+		if err := doWith(context.Background(), opt, "recv", nil, strings.NewReader(""), io.Discard, io.Discard); err != nil {
+			t.Fatalf("recv after: %v", err)
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		if next == "" || slices.Contains(refused, next) {
+			t.Fatalf("recv after the refusals sent a refused pass, or none: %q", next)
+		}
+	})
 }

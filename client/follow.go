@@ -175,8 +175,10 @@ var (
 // left stays owed, and is handed over again, in order, before the next drain.
 // So is a drain refused for a clock ([clockOff]): its pass refused for its
 // time (pass_expired), or the mailbox's certificate not begun by its own
-// clock, each Fatal to one Receive. The loop goes on once this machine's
-// clock and the server's agree. A folder of the mailbox missing ends the loop as
+// clock, each Fatal to one Receive. Each such drain signs a pass again, so
+// its retry comes after the later of the error's Retry-After and the pause
+// the loop takes without one. The loop goes on once this machine's clock and the server's
+// agree. A folder of the mailbox missing ends the loop as
 // any refusal no wait mends does ([Fatal]), and what is owed stays owed for
 // the next loop. Where the retry lands past Until the error ends the loop, as any
 // other drain's error does. Follow returns that error, the handler's, ctx's
@@ -342,7 +344,9 @@ func ended(err error) error {
 }
 
 // pauseAfter is how long the loop waits before the drain after res and err:
-// for an answer about a revocation left unproven, the failed read's wait.
+// for an answer about a revocation left unproven, the failed read's wait. A
+// Retry-After on a refusal for a clock ([clockOff]) is never taken below the
+// pause the loop takes without one: each such drain signs a pass again.
 func pauseAfter(res *Result, err error) time.Duration {
 	if up := (*unproven)(nil); errors.As(err, &up) {
 		err = up.read
@@ -352,7 +356,11 @@ func pauseAfter(res *Result, err error) time.Duration {
 		pause = res.Again()
 	}
 	var ae *APIError
-	if errors.As(err, &ae) && ae.RetryAfter > 0 {
+	switch {
+	case !errors.As(err, &ae) || ae.RetryAfter <= 0:
+	case clockOff(err):
+		pause = max(pause, ae.RetryAfter)
+	default:
 		pause = ae.RetryAfter
 	}
 	return pause

@@ -259,6 +259,43 @@ func TestFollowWaitsOutAPassRefusedForItsTime(t *testing.T) {
 	})
 }
 
+// Each drain refused for a clock signs a pass again, so the loop takes a
+// server's Retry-After on pass_expired no sooner than its own pace: a server
+// that answers Retry-After: 1 does not have the mailbox sign a pass a second.
+func TestFollowTakesNoRetryAfterBelowItsPaceForAPassRefusedForItsTime(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		e := newMemEnv(t)
+		var off time.Duration
+		b := e.made(e.skewed(&off))
+		off = 10 * time.Minute
+		e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
+			next.ServeHTTP(retryAfterOf{w, "1"}, r)
+		})
+		var at []time.Time
+		err := b.Follow(context.Background(), client.FollowOptions{}, func(_ context.Context, ev client.Event) error {
+			if ev.Kind != client.EventRetry {
+				return nil
+			}
+			var ae *client.APIError
+			if client.Code(ev.Err) != protocol.CodePassExpired || !errors.As(ev.Err, &ae) || ae.RetryAfter != time.Second {
+				t.Fatalf("a retry for %v: the test does not reach the case", ev.Err)
+			}
+			if at = append(at, time.Now()); len(at) == 3 {
+				return client.ErrStop
+			}
+			return nil
+		})
+		if err != nil || len(at) != 3 {
+			t.Fatalf("Follow: %v, having retried %d times", err, len(at))
+		}
+		for i := 1; i < len(at); i++ {
+			if d := at[i].Sub(at[i-1]); d < time.Minute {
+				t.Fatalf("retry %d came %v after the one before, sooner than the loop's pace of a minute", i, d)
+			}
+		}
+	})
+}
+
 // Past the deadline a retry cannot come, so the drain's error ends the loop,
 // and it is one to retry: no Fatal.
 func TestADrainThatFailsAtTheDeadlineEndsTheLoop(t *testing.T) {

@@ -43,7 +43,7 @@ there, and leaves a file that is there as it is. Nothing rotates the file.
 Exit status 4, with "fatal" in the "error" line, means that no wait fixes the
 refusal: a revocation, no mailbox at this address with its registration refused,
 a mailbox in another format, a missing folder of the mailbox, as on an unmounted
-volume, this machine's clock behind, or any other refusal by the server or by
+volume, this machine's clock off, or any other refusal by the server or by
 this client. A service manager leaves such a service failed until its owner
 fixes the cause and starts it again. Exit status 1 is any other failure. Under
 --follow or --wait, a refusal for this machine's clock, a pass that the server

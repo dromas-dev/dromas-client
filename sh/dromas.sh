@@ -108,7 +108,7 @@ dr_owner(){ # <METHOD> <PATH> [body file] [curl args…] → dr_api as this mail
   dr_authed "$p" "$@" && return 0
   case $(dr_code) in invalid_pass | pass_expired | certificate_superseded | certificate_revoked) ;; *) return 1 ;; esac
   rm -f "$DR/pass" "$DR/pass-server"; p=$(dr_pass) && dr_authed "$p" "$@" && return 0
-  rm -f "$DR/pass" "$DR/pass-server"; dr_clock; return 1      # a refused pass is never kept: a clock too far ahead is refused at every call, never taken once the kept pass runs down
+  rm -f "$DR/pass" "$DR/pass-server"; dr_clock; return 1      # no pass is kept after the second try fails, whatever failed it: a clock too far ahead is refused at every call, never taken once the kept pass runs down
 }
 dr_look(){ # <address> → dr_api GET of a mailbox from this mailbox's server (GET /v1/<address>), with no pass: the read is public, and a server reads none on it (PROTOCOL.md §11.8)
   dr_api GET "/v1/$1"
