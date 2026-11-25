@@ -49,8 +49,10 @@ jobs:
     # the check keeps its name, test (macos-26).
     runs-on: ${{ matrix.os == 'macos-26' && 'dromas-macos-26' || matrix.os }}
     # Twice a run's usual length: a hang is caught sooner by scripts/check.sh's
-    # timeout for one package, which prints what it waits for.
-    timeout-minutes: 20
+    # timeout for one package, which prints what it waits for. The Intel Mac's
+    # usual run is the daily run's first after go.sum changes, from no Go
+    # cache, at a third of the others' speed.
+    timeout-minutes: ${{ matrix.os == 'macos-26-intel' && 40 || 20 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -153,7 +155,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: ${{ fromJSON(github.event_name == 'schedule' && '[{"name":"freebsd","version":"15.1","install":"sudo pkg install -y go bash jq"},{"name":"openbsd","version":"8.0","install":"sudo pkg_add go jq"},{"name":"netbsd","version":"11.0","install":"sudo pkgin -y install go jq bash openssh"},{"name":"dragonflybsd","version":"6.4.2","install":"sudo pkg install -y go bash jq openssh-portable"}]' || '[{"name":"freebsd","version":"15.1","install":"sudo pkg install -y go bash jq"},{"name":"openbsd","version":"8.0","install":"sudo pkg_add go jq"}]') }}
+        os: ${{ fromJSON(github.event_name == 'schedule' && '[{"name":"freebsd","version":"15.1","install":"sudo pkg install -y go bash jq"},{"name":"openbsd","version":"8.0","install":"sudo pkg_add go jq"},{"name":"netbsd","version":"11.0","install":"sudo pkgin -y install go jq bash openssh"},{"name":"dragonflybsd","version":"6.4.2","install":"sudo pkg install -y go bash jq"}]' || '[{"name":"freebsd","version":"15.1","install":"sudo pkg install -y go bash jq"},{"name":"openbsd","version":"8.0","install":"sudo pkg_add go jq"}]') }}
     name: test (${{ matrix.os.name }})
     runs-on: ubuntu-26.04
     # Twice the slowest VM's usual run, DragonFly's in the daily run, whose cold
@@ -198,11 +200,10 @@ jobs:
         # meet pkgsrc's OpenSSH: the base system's ssh-keygen certifies no
         # Ed25519 key with another (NetBSD 11.0; upstream 10.3p1 does). Before
         # it, the versioned Go package's bin: pkgsrc's go is a meta package
-        # that links no go command. On DragonFly, /usr/local/bin goes first, so
-        # they meet the openssh-portable package: the base system's (6.4.2,
-        # OpenSSH 9.1) is built without ENABLE_SK and reads no security key,
-        # which every client verifies (PROTOCOL.md §4.1); the package's
-        # default FIDO_U2F option builds it with security keys.
+        # that links no go command. On DragonFly the cross-tests meet the base
+        # system's OpenSSH, built without ENABLE_SK, which reads no security
+        # key (scripts/check.sh, the skips it allows): DPorts builds no
+        # openssh-portable package for it.
         run: |
           $INSTALL
           for d in /usr/local/bin /usr/pkg/bin /usr/pkg/go1*/bin; do if [ -d "$d" ]; then PATH=$d:$PATH; fi; done
