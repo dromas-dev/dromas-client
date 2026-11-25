@@ -362,6 +362,57 @@ func TestEachInstallPageEndsWithTheQuickstart(t *testing.T) {
 	}
 }
 
+// docs/quickstart.md copies its commands from the install pages, so each
+// line of its code blocks is a line of a page in docs/install (leading space
+// aside), and it sends to the echo mailbox at the address the code carries.
+func TestTheQuickstartsCommandsAreTheInstallPages(t *testing.T) {
+	t.Parallel()
+	link := client.DefaultBase + "/to/" + client.EchoAddress
+	dir := filepath.Join("..", "..", "docs", "install")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := map[string]bool{}
+	for _, f := range entries {
+		if !strings.HasSuffix(f.Name(), ".md") {
+			continue
+		}
+		b, err := os.ReadFile(filepath.Join(dir, f.Name())) //nolint:gosec // a page of this repo
+		if err != nil {
+			t.Fatal(err)
+		}
+		for l := range strings.SplitSeq(string(b), "\n") {
+			lines[strings.TrimSpace(l)] = true
+		}
+	}
+	b, err := os.ReadFile(filepath.Join("..", "..", "docs", "quickstart.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	n, fenced := 0, false
+	for l := range strings.SplitSeq(string(b), "\n") {
+		l = strings.TrimSpace(l)
+		switch {
+		case strings.HasPrefix(l, "```"):
+			fenced = !fenced
+		case fenced && l != "":
+			n++
+			if !lines[l] {
+				t.Errorf("docs/quickstart.md's %q is not a line of an install page", l)
+			}
+		}
+	}
+	if n < 10 {
+		t.Fatalf("read %d command lines from docs/quickstart.md: the reading is broken", n)
+	}
+	for _, want := range []string{"\necho hello | dromas send " + link + "\n", "\ndromas recv --wait 3m\n"} {
+		if !strings.Contains(string(b), want) {
+			t.Errorf("docs/quickstart.md has no line %q", strings.TrimSpace(want))
+		}
+	}
+}
+
 // docs/configuration.md has an entry, a "### `key`" heading, for each key a
 // config file may hold (fileConfig) and for no other key, gives the file
 // init writes, and names each environment variable the command reads.

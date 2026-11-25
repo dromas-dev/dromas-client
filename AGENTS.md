@@ -30,7 +30,7 @@ Each fact has one home. Put it there, and point to it from anywhere else.
 | Each security claim and what holds it; how to report a vulnerability | `SECURITY.md`. |
 | A behaviour of the client: what a command prints, its steps, retries, files, defaults | The code's doc comment or the command's help, held by a test. |
 | The manual: install, user guide, command, configuration and output references | `docs/`, shown on dromas.dev/docs/ as of the commit the site builds from. |
-| The quickstart | `README.md`. |
+| The quickstart | `docs/quickstart.md`, its commands copied from `docs/install/`. |
 | The repo's layout; a mailbox's files | `README.md` § What is here; the top of `client/doc.go`. |
 | Anything undecided or not built | An issue. Every open issue is wanted for v1; one whose outcome could change the wire is settled before v1. |
 
@@ -38,12 +38,13 @@ Each fact has one home. Put it there, and point to it from anywhere else.
 - **`PRECEDENTS.md`:** Part 1 sets Dromas beside whole systems, Part 2 each decision beside the systems that make the same one, Part 3 the reference server's own build choices. Add a block when a big decision on the wire or the security model is made; a client's own behaviour gets none, and carries its precedent in its doc comment. A block has the file's one shape (its header): the decision, its prior art, where ours differs and why, and what was rejected, one line each, defending the decision and never arguing it out. Every claim about another system says how it is known: `read <date>` with its source, or `measured <date>`; a claim not read at a primary source is not written.
 - **Pages and comments describe what is true now.** No story of a change, no "was", "since" or "used to" of this project's past, and no date except when a source was `read`, a measurement `measured`, a review made (`review`) or an outside document `dated`. Why a rule holds goes in the present tense; how it came about goes in its pull request. `TestEveryPageSaysWhatHoldsNow` fails on any other date written as `YYYY-MM-DD` in a page, a comment or a workflow, outside `PRECEDENTS.md` (its own rule, above) and `testdata/`.
 - **No judgement is written as a fact,** on a page, in a comment or in an issue: write what was measured, read at a source, or decided. Nothing ranks one cipher, key type or design over another without the source that says so.
-- **The README is the quickstart:** what a reader needs to run a mailbox safely, each command once, and pointers into `docs/`.
+- **The README is the project's front page:** what a reader needs to run a mailbox safely, each command once, and pointers into `docs/`.
   - Two lines are the maintainer's: the status line, and the line that sends a reader to the open issues. Neither gives a date for v1.
   - A limit in the README that an open issue plans to change has that issue's number beside it.
   - Who terminates TLS for dromas.dev is said in the README's § No server trust and in `SECURITY.md`, each marked as the operator's statement, and never in the status line.
-  - 🛑 **Command lines are held by tests in three repos:** here, `TestHelpAndREADMENameTheEchoMailbox` holds the echo mailbox's link in the help and the README, and `TestEachInstallPageEndsWithTheQuickstart` the install pages' quickstarts; a test in dromas-server holds its link page's command; the site's tests require every command of `llms.txt` and the front page's install terminal to be a line of the README or of a page in `docs/`, comment included. Change a command line everywhere it appears.
+  - 🛑 **Command lines are held by tests in three repos:** here, `TestHelpAndREADMENameTheEchoMailbox` holds the echo mailbox's link in the help and the README, `TestEachInstallPageEndsWithTheQuickstart` the install pages' quickstarts, and `TestTheQuickstartsCommandsAreTheInstallPages` the lines of `docs/quickstart.md` to the install pages; a test in dromas-server holds its link page's command; the site's tests require every command of `llms.txt` and the front page's install terminal to be a line of the README or of a page in `docs/`, comment included. Change a command line everywhere it appears.
 - **`docs/`:**
+  - Each line of a code block in `docs/quickstart.md` is a line of a page in `docs/install/` (`TestTheQuickstartsCommandsAreTheInstallPages`).
   - Each page of `docs/install/` except `README.md` and `verify.md` ends with a quickstart (check the install, create a mailbox, send to the echo mailbox, run `recv` as a service) and then next steps (`TestEachInstallPageEndsWithTheQuickstart`).
   - `docs/configuration.md` has an entry for every config key and every environment variable `cmd/dromas` or `client/` reads, added in the same commit as the key (`TestTheConfigurationReferenceNamesEveryKey`).
   - `docs/commands/` is generated from the command tree: `go test ./cmd/dromas -run TestTheCommandPagesAreTheHelp -update`.
