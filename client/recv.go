@@ -355,46 +355,59 @@ func (b *Mailbox) drainPages(ctx context.Context, asked *lookups, res *Result) e
 			return nil
 		}
 		var hdr http.Header
+		var list protocol.MessageList
+		// The page as the server answered it: for the first, the list a woken
+		// hold was answered with, where one was (Hold), and otherwise a list
+		// of the drain's own.
+		var answer *heldList
 		if page == 0 {
-			// The tag of the last poll that found the mailbox empty: a 304 then
-			// says it is empty still (PROTOCOL.md §12.3).
-			hdr, err = b.ifNoneMatch()
+			answer = b.holding.take()
+		}
+		notModified := false
+		if answer == nil {
+			if page == 0 {
+				// The tag of the last poll that found the mailbox empty: a 304
+				// then says it is empty still (PROTOCOL.md §12.3).
+				hdr, err = b.ifNoneMatch()
+				if err != nil {
+					return err
+				}
+			}
+			resp, err := b.ownerWith(ctx, http.MethodGet, listed, hdr, nil, &list)
+			// A list after the drain's first that the server refuses for the
+			// mailbox's polls is the server pacing the drain, as a paced fetch
+			// is (receiveOne): what is left waits on the server.
+			var api *APIError
+			if page > 0 && errors.As(err, &api) && api.Problem.Code == protocol.CodeRateLimited && api.Problem.QuotaID == protocol.QuotaPolls && api.RetryAfter > 0 {
+				res.More, res.Paced = true, api.RetryAfter
+				return nil
+			}
 			if err != nil {
+				// A server that says this mailbox is revoked, or its
+				// certificate, was held to what it shows (proved, in call).
 				return err
 			}
+			answer = &heldList{list: list, tag: resp.Header.Get("ETag"), interval: resp.Header.Get("Retry-After"), at: b.now()}
+			notModified = resp.StatusCode == http.StatusNotModified
 		}
-		var list protocol.MessageList
-		resp, err := b.ownerWith(ctx, http.MethodGet, listed, hdr, nil, &list)
-		// A list after the drain's first that the server refuses for the
-		// mailbox's polls is the server pacing the drain, as a paced fetch is
-		// (receiveOne): what is left waits on the server.
-		var api *APIError
-		if page > 0 && errors.As(err, &api) && api.Problem.Code == protocol.CodeRateLimited && api.Problem.QuotaID == protocol.QuotaPolls && api.RetryAfter > 0 {
-			res.More, res.Paced = true, api.RetryAfter
-			return nil
-		}
-		if err != nil {
-			// A server that says this mailbox is revoked, or its certificate, was
-			// held to what it shows (proved, in call).
-			return err
-		}
+		list = answer.list
 		if page == 0 {
 			// Pruned only once the server has answered the list, by the clock
 			// read then: a clock far off is stopped at its pass first
 			// (PROTOCOL.md §12.4, §15.7).
-			res.listedAt = b.now()
+			res.listedAt = answer.at
 			if err := b.pruneSeen(res.listedAt); err != nil {
 				return err
 			}
 		}
-		res.PollAfter = int64(retryAfter(resp.Header.Get("Retry-After")) / time.Second)
-		if resp.StatusCode == http.StatusNotModified {
+		res.PollAfter = int64(retryAfter(answer.interval) / time.Second)
+		if notModified {
 			// A 304 carries the tag of the page it is about (RFC 9110
 			// §15.4.5). One about another tag than the one sent says
 			// nothing of the page that tag named (RFC 9111 §4.3.4): it is
 			// no answer, and the tag goes, so the next poll asks for the
 			// page in full.
-			if !sameTag(resp.Header.Get("ETag"), hdr.Get("If-None-Match")) {
+			if !sameTag(answer.tag, hdr.Get("If-None-Match")) {
 				if err := b.update(func(s store) error { return s.del(bucketMailbox, "etag") }); err != nil {
 					return err
 				}
@@ -403,8 +416,13 @@ func (b *Mailbox) drainPages(ctx context.Context, asked *lookups, res *Result) e
 			return nil
 		}
 		if page == 0 {
-			if err := b.keepETag(&list, resp.Header.Get("ETag")); err != nil {
+			if err := b.keepETag(&list, answer.tag); err != nil {
 				return err
+			}
+			// What arrived may be followed by more: the next hold starts
+			// at once (Hold).
+			if len(list.Messages) > 0 {
+				b.holding.wake()
 			}
 		}
 		for _, m := range list.Messages {

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -326,6 +327,105 @@ func TestHoldsStartAtMostOnceAMinute(t *testing.T) {
 			if at[i] != want[i] {
 				t.Fatalf("holds started at %v, want %v", at, want)
 			}
+		}
+	})
+}
+
+// TestAHoldThatFailsAtOnceIsPacedAfterAWake: a held list that fails at once
+// is held again at the pace of holdEvery, even after a hold the server
+// answered with the list, whose next hold starts at once.
+func TestAHoldThatFailsAtOnceIsPacedAfterAWake(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		e := newMemEnv(t)
+		a, b := e.mailbox(), e.mailbox()
+		receive(t, b)
+		c := held(b, time.Hour)
+		synctest.Wait()
+		send(t, a, b, "wakes the hold")
+		if h := <-c; h == nil || !h.Changed {
+			t.Fatalf("the hold came to %+v, want changed", h)
+		}
+		receive(t, b) // the message, which leaves no tag kept
+		receive(t, b) // the list empty again, and its tag kept
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		const minutes, most = 10, 1 + 2 + 10 // the woken hold's, the burst, one a minute
+		var n atomic.Int32
+		e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
+			if !r.URL.Query().Has("wait") {
+				next.ServeHTTP(w, r)
+				return
+			}
+			if n.Add(1) > most {
+				cancel() // a loop held faster than its pace never lets the clock move
+			}
+			panic(http.ErrAbortHandler) // every hold dropped at once
+		})
+		err := b.Await(ctx, time.Now().Add(minutes*time.Minute), nil)
+		if err != nil || n.Load() > most || n.Load() < 2 {
+			t.Fatalf("Await over %d minutes of holds that fail at once: %v after %d held lists, want nil after 2 to %d", minutes, err, n.Load(), most)
+		}
+	})
+}
+
+// TestAHoldAnsweredAtOnceWithNothingNewIsPaced: a server that answers each
+// held list at once, with no message in it, is held at the pace of
+// holdEvery: only a drain that found messages starts the next hold at once.
+func TestAHoldAnsweredAtOnceWithNothingNewIsPaced(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		e := newMemEnv(t)
+		b := e.mailbox()
+		receive(t, b)
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		const minutes, most = 10, 1 + 2 + 10 // the burst, one a minute, and one at the end
+		var n atomic.Int32
+		e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
+			if r.URL.Query().Has("wait") {
+				if n.Add(1) > most {
+					cancel() // a loop held faster than its pace never lets the clock move
+				}
+				r.Header.Del("If-None-Match") // answered at once, with the page
+			}
+			next.ServeHTTP(w, r)
+		})
+		err := b.Follow(ctx, client.FollowOptions{Until: time.Now().Add(minutes * time.Minute)}, nil)
+		if err != nil || n.Load() > most || n.Load() < 2 {
+			t.Fatalf("Follow over %d minutes of holds answered at once: %v after %d held lists, want nil after 2 to %d", minutes, err, n.Load(), most)
+		}
+	})
+}
+
+// TestTheDrainAfterAWokenHoldStartsFromItsList: the list a held request is
+// answered with is the next drain's first page, so the drain fetches the
+// message with no list of its own first: one poll for a hold and its drain.
+func TestTheDrainAfterAWokenHoldStartsFromItsList(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		e := newMemEnv(t)
+		a, b := e.mailbox(), e.mailbox()
+		receive(t, b)
+		c := held(b, time.Hour)
+		synctest.Wait()
+		sent := send(t, a, b, "wakes the hold")
+		if h := <-c; h == nil || !h.Changed {
+			t.Fatalf("the hold came to %+v, want changed", h)
+		}
+		messages := "/v1/" + b.Address().String() + "/messages"
+		var mu sync.Mutex
+		var asked []string
+		e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
+			if strings.HasPrefix(r.URL.Path, messages) {
+				mu.Lock()
+				asked = append(asked, r.Method+" "+r.URL.Path)
+				mu.Unlock()
+			}
+			next.ServeHTTP(w, r)
+		})
+		if res := receive(t, b); len(res.Delivered) != 1 || res.Delivered[0].ID != sent.ID {
+			t.Fatalf("the drain after the hold delivered %+v, want the message sent", res.Delivered)
+		}
+		if want := "GET " + messages + "/" + sent.ID; len(asked) == 0 || asked[0] != want {
+			t.Fatalf("the drain after the hold asked %q, want %q first", asked, want)
 		}
 	})
 }
