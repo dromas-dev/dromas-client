@@ -647,3 +647,156 @@ func TestARestoreWithoutItsListsIsSaidAndReplacesItsServersACL(t *testing.T) {
 		})
 	}
 }
+
+// RemoveAllowed takes a sender back to unknown: its next message is held,
+// what inbox/ keeps from it stays, and every other line of the allowed file,
+// a comment among them, stays as it was. Control: before the removal, the
+// same sender's message lands in inbox/.
+func TestRemovingAnAllowedSenderHoldsItsNextMessage(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	a, b, c := e.heldMailbox(), e.heldMailbox(), e.heldMailbox()
+	send(t, b, a, "hello") // writing to a allows it
+	send(t, a, b, "the reply")
+	if res := receive(t, b); len(res.Delivered) != 1 || len(res.Held) != 0 {
+		t.Fatalf("a reply before the removal: %+v", res)
+	}
+	file := filepath.Join(b.Dir(), "allowed")
+	if err := os.WriteFile(file, []byte("# peers\n"+a.Address().String()+"\n"+c.Address().String()+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.RemoveAllowed(t.Context(), a.Address()); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+	if data, err := os.ReadFile(file); err != nil || string(data) != "# peers\n"+c.Address().String()+"\n" {
+		t.Fatalf("the allowed file after the removal: %q, %v", data, err)
+	}
+	send(t, a, b, "after the removal")
+	res := receive(t, b)
+	if len(res.Delivered) != 0 || len(res.Held) != 1 {
+		t.Fatalf("a message after the removal: %+v", res)
+	}
+	if held, err := b.HeldMessages(t.Context()); err != nil || len(held) != 1 || held[0].From != a.Address() {
+		t.Fatalf("held: %+v, %v", held, err)
+	}
+	if inbox, _ := filepath.Glob(filepath.Join(b.Dir(), "mail", "inbox", "*.json")); len(inbox) != 1 {
+		t.Fatalf("inbox/ holds %v, want the reply that landed before", inbox)
+	}
+	if err := b.RemoveAllowed(t.Context(), a.Address()); err == nil || !strings.Contains(err.Error(), "does not list") {
+		t.Fatalf("a second removal: %v", err)
+	}
+}
+
+// RemoveAllowed calls no server, under "server allowed" too, where the ACL the
+// files make changes: it is sent by the next recv, as after any change of the
+// lists. Control: Block, which tells the server, is seen making a call.
+func TestRemovingAnAllowedSenderCallsNoServer(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	e := newEnv(t)
+	opt := e.heldOpts()
+	opt.Policy.Server = client.AdmitAllowed
+	a, b, c := e.heldMailbox(), e.made(opt), e.heldMailbox()
+	send(t, b, a, "hello")
+	send(t, b, c, "hello")
+	var calls atomic.Int32
+	e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
+		calls.Add(1)
+		next.ServeHTTP(w, r)
+	})
+	if err := b.RemoveAllowed(ctx, a.Address()); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+	if n := calls.Load(); n != 0 {
+		t.Fatalf("remove made %d calls to the server", n)
+	}
+	if acl := e.srv.ACL(b.Address()); acl == nil || !acl.Allow.Has(a.Address()) {
+		t.Fatalf("the server holds %+v, want the ACL from before the removal", acl)
+	}
+	if pending, err := b.ACLPending(ctx); err != nil || !pending {
+		t.Fatalf("ACL pending: %v, %v", pending, err)
+	}
+	receive(t, b)
+	if acl := e.srv.ACL(b.Address()); acl == nil || acl.Allow.Has(a.Address()) || !acl.Allow.Has(c.Address()) {
+		t.Fatalf("the server holds %+v after the next recv", acl)
+	}
+	calls.Store(0)
+	if _, err := b.Block(ctx, c.Address()); err != nil || calls.Load() == 0 {
+		t.Fatalf("block, the control: %v, with %d calls", err, calls.Load())
+	}
+}
+
+// RemoveAllowed of a sender the mailbox blocks takes it out of the allowed
+// file and leaves the block: its messages are still dropped. Control: the
+// allowed file listed it before.
+func TestRemovingABlockedSenderKeepsTheBlock(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	e := newEnv(t)
+	a, b := e.heldMailbox(), e.heldMailbox()
+	send(t, b, a, "hello")
+	if _, err := b.Block(ctx, a.Address()); err != nil {
+		t.Fatal(err)
+	}
+	if allowed, err := b.Allowed(ctx); err != nil || !slices.Contains(allowed, a.Address()) {
+		t.Fatalf("allowed before the removal: %v, %v", allowed, err)
+	}
+	if err := b.RemoveAllowed(ctx, a.Address()); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+	allowed, err := b.Allowed(ctx)
+	if err != nil || slices.Contains(allowed, a.Address()) {
+		t.Fatalf("allowed after the removal: %v, %v", allowed, err)
+	}
+	if blocked, err := b.Blocked(ctx); err != nil || !slices.Contains(blocked, a.Address()) {
+		t.Fatalf("blocked after the removal: %v, %v", blocked, err)
+	}
+	if _, err := a.Send(ctx, b.Address(), "refused"); client.Code(err) != protocol.CodeSenderNotAllowed {
+		t.Fatalf("a send from the blocked sender: %v", err)
+	}
+	if acl := e.srv.ACL(b.Address()); acl == nil || !acl.Deny.Has(a.Address()) {
+		t.Fatalf("the server holds %+v", acl)
+	}
+}
+
+// RemoveAllowed of a sender an alias names is refused, naming the alias, and
+// changes nothing: the name and the allowed file's line stay, and the sender's
+// messages land in inbox/. Once the name is removed, the removal goes
+// through.
+func TestRemovingANamedSenderIsRefused(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	a, b := e.heldMailbox(), e.heldMailbox()
+	if err := b.SetAlias(t.Context(), "alice", a.Address()); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(b.Dir(), "allowed")
+	before, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = b.RemoveAllowed(t.Context(), a.Address())
+	if err == nil || !strings.Contains(err.Error(), "alias alice") || !strings.Contains(err.Error(), "dromas alias rm alice") {
+		t.Fatalf("remove of a named sender: %v", err)
+	}
+	if after, err := os.ReadFile(file); err != nil || string(after) != string(before) {
+		t.Fatalf("the allowed file: %q, then %q, %v", before, after, err)
+	}
+	if as, err := b.Aliases(t.Context()); err != nil || len(as) != 1 {
+		t.Fatalf("aliases: %+v, %v", as, err)
+	}
+	send(t, a, b, "from a named sender")
+	if res := receive(t, b); len(res.Delivered) != 1 || len(res.Held) != 0 {
+		t.Fatalf("a message from a named sender after the refusal: %+v", res)
+	}
+	if err := b.RemoveAlias(t.Context(), "alice"); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.RemoveAllowed(t.Context(), a.Address()); err != nil {
+		t.Fatalf("remove once the name is gone: %v", err)
+	}
+	send(t, a, b, "after both")
+	if res := receive(t, b); len(res.Delivered) != 0 || len(res.Held) != 1 {
+		t.Fatalf("a message after the name and the line are gone: %+v", res)
+	}
+}

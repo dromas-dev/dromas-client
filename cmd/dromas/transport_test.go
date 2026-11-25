@@ -257,6 +257,7 @@ func TestNoRouteOfACommandFollowsARedirect(t *testing.T) {
 	}
 	toA := func(a, _ *client.Mailbox) []string { return []string{a.Address().String()} }
 	toB := func(_, b *client.Mailbox) []string { return []string{b.Address().String()} }
+	removeA := func(a, _ *client.Mailbox) []string { return []string{"--remove", a.Address().String()} }
 	sent := func(t *testing.T, _ *fakeserver.Server, a, b *client.Mailbox) {
 		if _, err := a.Send(ctx, b.Address(), "from a"); err != nil {
 			t.Fatal(err)
@@ -323,7 +324,7 @@ func TestNoRouteOfACommandFollowsARedirect(t *testing.T) {
 		"dromas inbox clear-failed":   {{none: "it changes the state alone"}},
 		"dromas inbox retry-failed":   {{none: "it changes the state alone"}},
 		"dromas held list":            {{none: "it reads held/"}},
-		"dromas peer allow":           {{args: toA, admit: true}},
+		"dromas peer allow":           {{args: toA, admit: true}, {none: "--remove changes the allowed file alone", setup: allowed, admit: true, args: removeA}},
 		"dromas peer block":           {{args: toA}},
 		"dromas peer list":            {{none: "it reads the lists"}},
 		"dromas alias add":            {{args: func(a, _ *client.Mailbox) []string { return []string{"peer", a.Address().String()} }, admit: true}},

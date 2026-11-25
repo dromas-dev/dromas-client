@@ -6,7 +6,8 @@ who can write to this mailbox: allow, block, list
 
 A message from a sender this mailbox has not allowed is held in held/ (dromas
 held list lists it), and a message from a sender it blocked is dropped. Sending
-to a mailbox, or naming it with dromas alias add, also allows it.
+to a mailbox, or naming it with dromas alias add, also allows it, and dromas
+peer allow --remove takes a sender back to unknown.
 
 The config file's [policy] table sets where a message from a sender you have not
 allowed goes, held/ or inbox/, and whose messages the server accepts: dromas

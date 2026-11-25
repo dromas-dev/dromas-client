@@ -410,6 +410,52 @@ func (b *Mailbox) allow(a protocol.Address) ([]Delivery, error) {
 	return moved, syncDir(b.path("held"))
 }
 
+// RemoveAllowed takes a sender out of the allowed file, so that the mailbox
+// has not allowed it: its next message lands as an unknown sender's, in held/
+// unless the policy lands every sender's in inbox/. It changes that file
+// alone and calls no server. Under "server allowed" the ACL the mailbox's
+// files make then lacks the sender, and the next send, recv, allow or block
+// sends it ([Mailbox.SyncACL]), as after [Mailbox.RemoveAlias]. A block
+// stays, and still wins. A sender an alias names is refused, with nothing
+// done: a name allows its peer, so taking it out of the file would leave it
+// allowed. So is one the allowed file does not list. What held/ and inbox/
+// keep from the sender, and its pinned identity, stay.
+func (b *Mailbox) RemoveAllowed(ctx context.Context, a protocol.Address) error {
+	return b.lockedFinishedDo(ctx, func() error { return b.removeAllowed(a) })
+}
+
+func (b *Mailbox) removeAllowed(a protocol.Address) error {
+	as, err := b.aliases()
+	if err != nil {
+		return err
+	}
+	for _, n := range as {
+		if n.Address == a {
+			return refuse("alias %s names %s, and a name allows its peer, so nothing is removed: remove the name first (dromas alias rm %s)", n.Name, a, n.Name)
+		}
+	}
+	have, err := b.addresses("allowed")
+	if err != nil {
+		return err
+	}
+	if !slices.Contains(have, a) {
+		return refuse("%s does not list %s, so it is not allowed, and nothing is removed", b.path("allowed"), a)
+	}
+	data, err := os.ReadFile(b.path("allowed"))
+	if err != nil {
+		return err
+	}
+	// Every other line stays as it is, a comment among them.
+	var kept []byte
+	for l := range strings.Lines(string(data)) {
+		if x, err := protocol.ParseAddress(strings.TrimSpace(l)); err == nil && x == a {
+			continue
+		}
+		kept = append(kept, l...)
+	}
+	return writeFile(b.path("allowed"), kept)
+}
+
 // Block blocks a sender: its messages are dropped from now on, what its server
 // holds from it at the next drain among it, and its server refuses its later
 // sends; what held/ keeps from it is deleted. It returns how many held messages it deleted. Blocking
