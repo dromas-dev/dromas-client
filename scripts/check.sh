@@ -50,6 +50,12 @@ case $(uname -s) in
   OpenBSD | NetBSD | DragonFly) allowed+=(-e 'sha256sum is not installed') ;;
 esac
 case $(uname -s) in
+  # Its base system's ssh-keygen is built without security keys, and DPorts
+  # builds no openssh-portable package: the security-key vectors are held to
+  # ssh-keygen on every other runner.
+  DragonFly) allowed+=(-e 'this ssh-keygen reads no') ;;
+esac
+case $(uname -s) in
   # /dev/shm, which TestAllowingASenderCrossesFilesystems writes to, is Linux's
   # second filesystem, and that test is held there alone.
   Linux) ;;
