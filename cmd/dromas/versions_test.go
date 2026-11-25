@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/dromas-dev/dromas-client/client"
@@ -433,4 +434,121 @@ func TestTheVersionHeadersPrintNoneOfTheServersWords(t *testing.T) {
 	if status != 0 || lineOf(ls, "deprecated")["deprecated_at"] != "1970-01-01T00:00:01Z" || lineOf(ls, "sunset")["sunset_at"] != "2027-01-02T03:04:05Z" {
 		t.Fatalf("the control: exit %d, %v", status, ls)
 	}
+}
+
+// lockedBuffer is a buffer that a resident command writes while a test reads it.
+type lockedBuffer struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (l *lockedBuffer) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.Write(p)
+}
+
+func (l *lockedBuffer) String() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.String()
+}
+
+// resident runs recv --follow on a new mailbox of a client at version
+// 1.5.2 in a synctest bubble, against srv: it returns the mailbox's options,
+// its stdout, and a stop that ends it and returns its error.
+func resident(t *testing.T, srv *fakeserver.Server) (client.Options, *lockedBuffer, func() error) {
+	t.Helper()
+	linked := client.LinkedVersion
+	client.LinkedVersion = ownVersion
+	t.Cleanup(func() { client.LinkedVersion = linked })
+	opt := client.Options{Base: srv.URL, HTTPClient: srv.Client()}
+	b, err := client.Init(context.Background(), t.TempDir(), opt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	useMailbox(t, b.Dir())
+	t.Setenv("DROMAS_SERVER_URL", srv.URL)
+	ctx, cancel := context.WithCancel(context.Background())
+	out, errs := &lockedBuffer{}, &lockedBuffer{}
+	ended := make(chan error, 1)
+	go func() { ended <- doWith(ctx, opt, "recv", []string{"--follow"}, strings.NewReader(""), out, errs) }()
+	t.Cleanup(cancel)
+	return opt, out, func() error {
+		select {
+		case err := <-ended:
+			t.Fatalf("recv --follow ended on its own: %v %s", err, errs.String())
+		default:
+		}
+		cancel()
+		return <-ended
+	}
+}
+
+// A resident recv --follow reads the server's document again at each daily
+// prekey renewal, and prints upgrade_available as it first meets a later
+// version, while it runs, and once: not again at its end.
+func TestAResidentRecvSaysAnUpgradeAsItMeetsIt(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		srv := fakeserver.NewInMemory(t, time.Now)
+		_, out, stop := resident(t, srv)
+		time.Sleep(time.Minute)
+		synctest.Wait()
+		if ls := ofType(t, out.String(), "upgrade_available"); len(ls) != 0 {
+			t.Fatalf("an upgrade before the server named one: %v", ls)
+		}
+		// The server names a later minor after the process began.
+		srv.SetPolicy(protocol.ServerDocument{LatestVersion: "1.6"})
+		time.Sleep(25 * time.Hour)
+		synctest.Wait()
+		if ls := ofType(t, out.String(), "upgrade_available"); len(ls) != 1 || ls[0]["latest"] != "1.6" || ls[0]["version"] != ownVersion {
+			t.Fatalf("recv --follow a day after the server named 1.6 printed %s", out.String())
+		}
+		// The next day's read names the same: no second line, nor at the end.
+		time.Sleep(25 * time.Hour)
+		synctest.Wait()
+		if err := stop(); err != nil {
+			t.Fatal(err)
+		}
+		if ls := ofType(t, out.String(), "upgrade_available"); len(ls) != 1 {
+			t.Fatalf("recv --follow printed the upgrade %d times: %s", len(ls), out.String())
+		}
+	})
+}
+
+// A resident recv --follow prints a deprecation once, as it meets it, and
+// forgets one its server no longer sends at the next daily renewal: status
+// stops listing it.
+func TestAResidentRecvForgetsADeprecationItsServerDrops(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		srv := fakeserver.NewInMemory(t, time.Now)
+		at := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
+		srv.SetPolicy(protocol.ServerDocument{Deprecations: []protocol.Scheduled{{Below: "1.6", At: at.Format(protocol.TimeLayout)}}})
+		opt, out, stop := resident(t, srv)
+		status := func() (string, int) {
+			var sout, serrs bytes.Buffer
+			status := report(doWith(context.Background(), opt, "status", nil, strings.NewReader(""), &sout, &serrs), &serrs)
+			return attention(t, printed(t, sout.String())), status
+		}
+		time.Sleep(time.Minute)
+		synctest.Wait()
+		if ls := ofType(t, out.String(), "deprecated"); len(ls) != 1 || ls[0]["deprecated_at"] != at.Format(protocol.TimeLayout) {
+			t.Fatalf("recv --follow, deprecated, printed %s", out.String())
+		}
+		if said, s := status(); s != 3 || !strings.Contains(said, "deprecated from "+at.Format(protocol.TimeLayout)) {
+			t.Fatalf("status while deprecated: exit %d, %q", s, said)
+		}
+		srv.SetPolicy(protocol.ServerDocument{})
+		time.Sleep(25 * time.Hour)
+		synctest.Wait()
+		if said, s := status(); s != 0 || said != "" {
+			t.Fatalf("status a day after the server dropped the deprecation: exit %d, %q", s, said)
+		}
+		if err := stop(); err != nil {
+			t.Fatal(err)
+		}
+		if ls := ofType(t, out.String(), "deprecated"); len(ls) != 1 {
+			t.Fatalf("recv --follow printed the deprecation %d times: %s", len(ls), out.String())
+		}
+	})
 }

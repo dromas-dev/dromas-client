@@ -747,6 +747,8 @@ func (b *Mailbox) renewNow(ctx context.Context) (*protocol.Prekey, error) {
 			return nil, &renewalHeld{fmt.Sprintf("the renewal at %s did not go through, and recv tries it again from %s: %s", last.At, at.Add(retry).Format(protocol.TimeLayout), last.Error), last.Transient}
 		}
 	}
+	// A renewal begins a resident command's daily cycle of versions.
+	b.met.renewing()
 	p, err := b.rekey(ctx, false)
 	if p == nil && err != nil {
 		// A mailbox that holds its own revocation renews nothing again: there

@@ -284,6 +284,13 @@ func (r *recvRun) handle(ctx context.Context, ev client.Event) error {
 		r.print(line("acl_replaced", "detail", "this mailbox's server held an ACL other than the one this mailbox last sent it, which another machine of this mailbox, someone holding its pass or the server itself wrote: this mailbox sent its own in its place"))
 	case client.EventDrained:
 		r.notMade, r.aclErr, r.stale = ev.Result.NotMade, ev.Result.ACLErr, true
+		// A resident recv says what its answers said of its version as it
+		// meets it, not only at its end: it runs for weeks.
+		if r.o.follow {
+			for _, l := range r.versionLines() {
+				r.print(l)
+			}
+		}
 		switch {
 		case r.writeErr() != nil:
 			return r.writeErr()

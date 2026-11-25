@@ -95,8 +95,9 @@ func TestAForgottenMailboxRegistersAnewAtItsRenewal(t *testing.T) {
 // §13: "at any moment"): the renewal reads the mailbox once more, and where the
 // server holds no mailbox sends the same statement as its registration, by
 // prekey renew, by the renewal recv makes, whose ACL then goes again as
-// after any registration, and by the remedy's renewal, after its revocation
-// (#386). Control: a mailbox forgotten before the read, which the read's answer
+// after any registration, and after which a Mailbox that read the server's
+// document before reads it again (Versions), and by the remedy's renewal,
+// after its revocation (#386). Control: a mailbox forgotten before the read, which the read's answer
 // alone sends as a registration.
 func TestARenewalWhoseUploadMeetsAMailboxForgottenSinceItsReadRegistersIt(t *testing.T) {
 	t.Parallel()
@@ -108,7 +109,7 @@ func TestARenewalWhoseUploadMeetsAMailboxForgottenSinceItsReadRegistersIt(t *tes
 	}{
 		{"control: prekey renew of a mailbox forgotten before its read", "prekey renew", true, "GET /v1/own, GET /v1/own/revocation, PUT /v1/own +pass"},
 		{"prekey renew", "prekey renew", false, "GET /v1/own, PUT /v1/own/prekey +pass, GET /v1/own, GET /v1/own/revocation, PUT /v1/own +pass"},
-		{"recv", "recv", false, "GET /v1/own, PUT /v1/own/prekey +pass, GET /v1/own, GET /v1/own/revocation, PUT /v1/own +pass, GET /v1/own/acl +pass, PUT /v1/own/acl +pass, GET /v1/own/messages +pass"},
+		{"recv", "recv", false, "GET /v1/own, PUT /v1/own/prekey +pass, GET /v1/own, GET /v1/own/revocation, PUT /v1/own +pass, GET /v1/own/acl +pass, PUT /v1/own/acl +pass, GET /v1/own/messages +pass, GET /v1/"},
 		{"control: cert revoke-earlier of a mailbox forgotten before its read", "cert revoke-earlier", true, "GET /v1/own, GET /v1/own/revocation, PUT /v1/own/revocation, GET /v1/, PUT /v1/own +pass"},
 		{"cert revoke-earlier", "cert revoke-earlier", false, "GET /v1/own, PUT /v1/own/revocation, GET /v1/, PUT /v1/own/prekey +pass, GET /v1/own, GET /v1/own/revocation, PUT /v1/own +pass"},
 	} {
