@@ -25,6 +25,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/dromas-dev/dromas-client/client"
 	"github.com/dromas-dev/dromas-client/protocol"
@@ -89,12 +90,14 @@ Exit status:
 A command that calls the server prints "deprecated" or "sunset" when an answer
 carried either for this client's version, and once a day reads the server's
 document and prints "upgrade_available" when it names a later version of this
-client: none of them changes its exit status. recv prints a "refused" line for
-each message it refused, keeping the message in refused/, a "held" line for each
-message it held in held/, and a "dropped" line for each message from a sender
-this mailbox blocked. None of them changes recv's exit status, because any
-sender can cause them. A refusal's code comes from a closed list, and its
-wording is this client's own: a refusal never quotes a message.
+client: none of them changes its exit status. recv --follow prints each once,
+when it first sees it, and reads the document again at each daily renewal of
+the prekey. recv prints a "refused" line for each message it refused, keeping
+the message in refused/, a "held" line for each message it held in held/, and a
+"dropped" line for each message from a sender this mailbox blocked. None of
+them changes recv's exit status, because any sender can cause them. A refusal's
+code comes from a closed list, and its wording is this client's own: a refusal
+never quotes a message.
 
 To try the whole loop, send anything to dromas.dev's echo mailbox:
 ` + client.DefaultBase + protocol.LinkPath + client.EchoAddress + `
@@ -163,6 +166,11 @@ type cli struct {
 	// log is recv --log-file's file, which takes stdout's and stderr's lines
 	// (logTo), and the line the command's error is reported in (runWith).
 	log *os.File
+	// said is what the version lines last printed said (versionLines).
+	said struct {
+		deprecated, sunset time.Time
+		upgrade            string
+	}
 }
 
 func (e *cli) mailbox() (*client.Mailbox, error) {
@@ -273,30 +281,45 @@ func runWith(ctx context.Context, opt client.Options, args []string, stdin io.Re
 }
 
 // versions says, once a command is done, what its answers said of this
-// client's version (client.Versions): a "deprecated" line where one carried
-// a Deprecation, a "sunset" line where one carried a Sunset, and an
-// "upgrade_available" line where its read of the server's document, at most
-// once a day, named a later version. None changes the command's exit status,
-// and a command that called no server says none.
+// client's version that it has not said yet (versionLines). None changes the
+// command's exit status, and a command that called no server says none.
 func (e *cli) versions(err error) error {
-	v := e.opt.Versions
-	own := v.Own()
-	if at, ok := v.Deprecation(); ok {
-		if werr := e.out(line("deprecated", "version", own, "deprecated_at", at.UTC().Format(protocol.TimeLayout), "detail", client.DeprecationWords(own, at))); werr != nil && err == nil {
-			err = werr
-		}
-	}
-	if at, ok := v.Sunset(); ok {
-		if werr := e.out(line("sunset", "version", own, "sunset_at", at.UTC().Format(protocol.TimeLayout), "detail", client.SunsetWords(own, at))); werr != nil && err == nil {
-			err = werr
-		}
-	}
-	if latest, ok := v.Upgrade(); ok {
-		if werr := e.out(line("upgrade_available", "version", own, "latest", latest, "detail", client.UpgradeWords(own, latest))); werr != nil && err == nil {
+	for _, l := range e.versionLines() {
+		if werr := e.out(l); werr != nil && err == nil {
 			err = werr
 		}
 	}
 	return err
+}
+
+// versionLines are the lines of what the command's answers said of this
+// client's version (client.Versions) that the command has not printed: a
+// "deprecated" line where one carried a Deprecation, a "sunset" line where
+// one carried a Sunset, and an "upgrade_available" line where its read of the
+// server's document named a later version. A line is printed once while the
+// answers say the same; one they no longer say is forgotten, and printed
+// again if they say it again. So recv --follow, which prints them after each
+// drain, prints each when it first meets it.
+func (e *cli) versionLines() [][]byte {
+	v := e.opt.Versions
+	own := v.Own()
+	var ls [][]byte
+	if at, _ := v.Deprecation(); !at.Equal(e.said.deprecated) {
+		if e.said.deprecated = at; !at.IsZero() {
+			ls = append(ls, line("deprecated", "version", own, "deprecated_at", at.UTC().Format(protocol.TimeLayout), "detail", client.DeprecationWords(own, at)))
+		}
+	}
+	if at, _ := v.Sunset(); !at.Equal(e.said.sunset) {
+		if e.said.sunset = at; !at.IsZero() {
+			ls = append(ls, line("sunset", "version", own, "sunset_at", at.UTC().Format(protocol.TimeLayout), "detail", client.SunsetWords(own, at)))
+		}
+	}
+	if latest, _ := v.Upgrade(); latest != e.said.upgrade {
+		if e.said.upgrade = latest; latest != "" {
+			ls = append(ls, line("upgrade_available", "version", own, "latest", latest, "detail", client.UpgradeWords(own, latest)))
+		}
+	}
+	return ls
 }
 
 // The commands are listed in the order they are added, everyday ones first.

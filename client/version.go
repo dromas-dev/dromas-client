@@ -83,6 +83,13 @@ func asRelease(v string) string {
 // keeps what it met there, so whoever runs the command says it once at its
 // end. A Mailbox made with none keeps its own ([Mailbox.Versions]). It is
 // safe for concurrent use.
+//
+// A command that runs for days, a resident [Mailbox.Follow], keeps a daily
+// cycle: each prekey renewal a Receive makes after the command's first read of
+// the server's document begins it anew. The first answer after a renewal
+// begins replaces the deprecation and the sunset kept, so one the server no
+// longer sends is forgotten, and the command reads the server's document
+// again, however recently it last did.
 type Versions struct {
 	mu         sync.Mutex
 	own        string
@@ -91,6 +98,8 @@ type Versions struct {
 	sunset     time.Time
 	upgrade    string
 	read       bool // the command has read the server's document, or tried to
+	anew       bool // a renewal began: the next answer replaces deprecated and sunset
+	due        bool // a renewal began: the next read is made whenever the last was
 }
 
 // Own is the version this client names in every request.
@@ -120,9 +129,9 @@ func (v *Versions) Deprecation() (time.Time, bool) {
 }
 
 // Upgrade is the latest version the server's document names, where the
-// command read it and it is an upgrade for this client
+// command's last read of it succeeded and it is an upgrade for this client
 // (its major and minor are after this client's), and false otherwise: the document is
-// read at most once a day, so this is said at most once a day.
+// read at most once a day, and at each renewal of a resident command's cycle.
 func (v *Versions) Upgrade() (string, bool) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
@@ -133,18 +142,35 @@ func (v *Versions) Upgrade() (string, bool) {
 // answered, its Deprecation, as a Structured Field Date, and its Sunset, as
 // an HTTP-date, each where it is of that form (PROTOCOL.md §11.17); anything
 // else is none, and nothing of it is kept. Of each, the earliest the command
-// met is kept.
+// met since its cycle began (renewing) is kept.
 func (v *Versions) answer(h http.Header) {
 	dep, dok := protocol.ParseDeprecation(h.Get(protocol.DeprecationHeader))
 	sun, sok := protocol.ParseSunset(h.Get(protocol.SunsetHeader))
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	v.answered = true
+	if v.anew {
+		v.deprecated, v.sunset, v.anew = time.Time{}, time.Time{}, false
+	}
 	if dok && (v.deprecated.IsZero() || dep.Before(v.deprecated)) {
 		v.deprecated = dep
 	}
 	if sok && (v.sunset.IsZero() || sun.Before(v.sunset)) {
 		v.sunset = sun
+	}
+}
+
+// renewing begins a new cycle at a renewal of the prekey, where the command
+// has ended a cycle before, so has read the server's document or tried to
+// (Versions): the next answer replaces what earlier ones said, and the
+// document is read again at the end of the call that renews (recordVersions).
+// A command's first cycle is the command itself, so one that ends after one
+// renewal, a bare recv, is as it would be without it.
+func (v *Versions) renewing() {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if v.read {
+		v.anew, v.due, v.read = true, true, false
 	}
 }
 
@@ -213,7 +239,8 @@ func (b *Mailbox) recordVersions(ctx context.Context) {
 
 // readDocument reads the server's document, GET /v1/, where the mailbox last
 // read it a day ago or more, or never, or at a time its clock has since gone
-// back past, and keeps when it read it. Where the latest version it names is
+// back past, or where a renewal began a cycle since (Versions.renewing), and
+// keeps when it read it. Where the latest version it names is
 // an upgrade for this client, the command says so (Versions.Upgrade). It
 // reads latest_version alone: every other member, of any form, is ignored
 // (RFC 7493 §4.2). A mailbox that holds its own revocation asks nothing
@@ -222,13 +249,15 @@ func (b *Mailbox) recordVersions(ctx context.Context) {
 func (b *Mailbox) readDocument(ctx context.Context) {
 	b.met.mu.Lock()
 	b.met.read = true
+	due := b.met.due
+	b.met.due = false
 	b.met.mu.Unlock()
 	now := b.now().UTC()
 	var last []byte
 	if err := b.view(func(s store) error { last = s.get(bucketMailbox, keyDocumentRead); return nil }); err != nil {
 		return
 	}
-	if t, err := protocol.ParseTime(string(last)); err == nil && !now.Before(t) && now.Sub(t) < documentEvery {
+	if t, err := protocol.ParseTime(string(last)); err == nil && !due && !now.Before(t) && now.Sub(t) < documentEvery {
 		return
 	}
 	if b.finished() != nil {
@@ -245,11 +274,12 @@ func (b *Mailbox) readDocument(ctx context.Context) {
 	}); err != nil {
 		return
 	}
+	b.met.mu.Lock()
+	b.met.upgrade = ""
 	if upgrade(d.LatestVersion, b.version) {
-		b.met.mu.Lock()
 		b.met.upgrade = d.LatestVersion
-		b.met.mu.Unlock()
 	}
+	b.met.mu.Unlock()
 }
 
 // upgrade reports whether latest, a server's latest_version, is an upgrade
