@@ -78,6 +78,35 @@ func TestFollowGoesOnAfterEachDelivery(t *testing.T) {
 	})
 }
 
+// A loop sent a message every few seconds, past the turns its holds have at
+// once, is handed each as it arrives: a hold after one the server answered
+// with the list starts at once.
+func TestFollowHandsOverEachOfARunOfMessagesAsItArrives(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		e := newMemEnv(t)
+		a, b := e.mailbox(), e.mailbox()
+		receive(t, b)
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		events := make(chan client.Event, 64)
+		done := follow(ctx, b, client.FollowOptions{}, events)
+		for i := range 6 {
+			time.Sleep(5 * time.Second)
+			synctest.Wait()
+			body := fmt.Sprintf("message %d", i)
+			sent := time.Now()
+			send(t, a, b, body)
+			if d := nextDelivery(t, events); bodyOf(t, *d) != body || time.Since(sent) != 0 {
+				t.Fatalf("%q handed over after %s, want %q at once", bodyOf(t, *d), time.Since(sent), body)
+			}
+		}
+		cancel()
+		if err := <-done; !errors.Is(err, context.Canceled) {
+			t.Fatalf("Follow, its context ended: %v", err)
+		}
+	})
+}
+
 // The loop ends at Until, by a last drain that takes what arrived.
 func TestFollowEndsAtItsDeadline(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {

@@ -55,10 +55,15 @@ import (
 //     a second new connection after a first (heldBound). Only a connection
 //     that drops with keep-alive at its floor shortens the wait, never
 //     below MinHold: a path whose probes keep nothing alive (an HTTP
-//     proxy's timeout, which TCP's keep-alive does not reach). Holds start
-//     at most about once a minute (holdEvery), so a connection that fails
-//     at once is a minute's poll, within the poll budget (PROTOCOL.md
-//     §11.5).
+//     proxy's timeout, which TCP's keep-alive does not reach).
+//   - The pace. A hold after a drain that found messages starts at once,
+//     as a long poll answered with an update is followed at once by the
+//     next (RFC 6202 §2.1): what arrived is a delivery, more may follow it,
+//     and the server paces a mailbox that polls past its budget with a 429
+//     and its Retry-After (PROTOCOL.md §11.5), which Await waits out. Any
+//     other hold waits its turn, at most about one a minute (holdEvery), so
+//     a connection that fails at once, or a server that answers at once
+//     with nothing new, is a minute's poll, within the poll budget.
 //   - What the drops taught. Nothing tells a mailbox that a network which
 //     forgot its connections is gone, as nothing tells a host that a path
 //     MTU a loss lowered is stale, so the mailbox ages what it learned, as
@@ -72,7 +77,8 @@ import (
 const DefaultHold = 4*time.Minute + 45*time.Second
 
 // MinHold is the shortest wait a mailbox asks for, however its connections
-// drop: the poll budget covers a list a minute.
+// drop: holds that end with nothing new are then at most a list a minute,
+// which the poll budget covers.
 const MinHold = time.Minute
 
 // holdMargin is how long after its wait a held request may go unanswered
@@ -96,8 +102,9 @@ const (
 // net/http's default transport's IdleConnTimeout.
 const connectionIdle = 90 * time.Second
 
-// holdEvery and holdBurst pace the holds a mailbox starts: one a minute on
-// average, two at once.
+// holdEvery and holdBurst pace the holds a mailbox starts other than after
+// a drain that found messages: one a minute on average, two at once
+// (holding.turn).
 const (
 	holdEvery = time.Minute
 	holdBurst = 2
@@ -125,7 +132,54 @@ type holding struct {
 	keepAlive time.Duration // the keep-alive a new connection gets; none when zero
 	lastDrop  time.Time     // on the wall clock; zero when nothing is learned
 	starts    *rate.Limiter
-	http2     atomic.Bool // the connection in use speaks HTTP/2
+	// woken is set by a drain that found messages, until a hold makes its
+	// held request (asked); answered is the list the last held request was
+	// answered with, until a drain takes it as its first page (take).
+	woken    bool
+	answered *heldList
+	http2    atomic.Bool // the connection in use speaks HTTP/2
+}
+
+// heldList is the list a held request was answered with, as a drain's
+// first page reads it: the list, its ETag and Retry-After, and the
+// mailbox's clock when the answer came.
+type heldList struct {
+	list          protocol.MessageList
+	tag, interval string
+	at            time.Time
+}
+
+// answer keeps l, the list a held request was answered with, for the next
+// drain to take.
+func (h *holding) answer(l *heldList) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.answered = l
+}
+
+// take returns the list the last held request was answered with, once,
+// or nil.
+func (h *holding) take() *heldList {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	l := h.answered
+	h.answered = nil
+	return l
+}
+
+// wake has the next hold start at once, after a drain that found messages.
+func (h *holding) wake() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.woken = true
+}
+
+// asked records a hold that makes its held request, or fails before it: the
+// hold after it waits its turn, unless a drain between finds messages.
+func (h *holding) asked() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.woken = false
 }
 
 func (h *holding) current() (wait, keepAlive time.Duration) {
@@ -344,10 +398,17 @@ func Fatal(err error) bool {
 	return false
 }
 
-// turn waits for the mailbox's turn to start a hold, one a minute on average,
-// for up to wait: false is a turn later than that, whose wait it has waited
-// out instead.
+// turn waits for the mailbox's turn to start a hold, for up to wait: false is
+// a turn later than that, whose wait it has waited out instead. A hold after
+// a drain that found messages has its turn at once, and takes none from the
+// others; the others have one a minute on average.
 func (h *holding) turn(ctx context.Context, wait time.Duration) (bool, error) {
+	h.mu.Lock()
+	woken := h.woken
+	h.mu.Unlock()
+	if woken {
+		return ctx.Err() == nil, ctx.Err()
+	}
 	r := h.limiter().Reserve()
 	d := r.Delay()
 	if d >= wait {
@@ -368,8 +429,10 @@ func (h *holding) turn(ctx context.Context, wait time.Duration) (bool, error) {
 // Hold holds the mailbox's list for up to wait, or the mailbox's own wait if that
 // is shorter (DefaultHold, or what its drops taught it): the server answers
 // once the mailbox's list changes, or at the wait with nothing new. It
-// first waits its turn (one a minute on average), and where the turn comes
-// past the wait, it waits the wait out and holds nothing. It then holds the
+// first waits its turn, and where the turn comes past the wait, it waits the
+// wait out and holds nothing: a hold after a drain that found messages starts
+// at once, and any other has a turn about once a minute on average. It then
+// holds the
 // mailbox's lock only to read its tag and its pass, never through the hold, so
 // the mailbox's other commands go on meanwhile. The held request reads nothing
 // of the mailbox's state: an answer about a revocation is proved under the lock
@@ -379,6 +442,12 @@ func (h *holding) turn(ctx context.Context, wait time.Duration) (bool, error) {
 // pass again when it answers: a kept pass with no more than MinHold left past
 // passMargin is replaced (passFor), and the wait is cut to what the pass has
 // left past passMargin. Two holds at DefaultHold fit in one pass.
+//
+// The list a held request is answered with is the first page of the next
+// drain (Receive), which makes no list of its own for that page, as a long
+// poll's answer is the update (RFC 6202 §2.1). Lists are eventually
+// consistent (PROTOCOL.md §11.11), and the drain meets a message gone since
+// the answer as it meets one gone since a list of its own.
 //
 // A mailbox with no tag kept, one whose last list found messages, whose pass the
 // server refused, that the server holds no mailbox for, or whose certificate in
@@ -390,6 +459,8 @@ func (h *holding) turn(ctx context.Context, wait time.Duration) (bool, error) {
 func (b *Mailbox) Hold(ctx context.Context, wait time.Duration) (*HoldResult, error) {
 	own, _ := b.holding.current()
 	wait = min(wait, own)
+	// A list an earlier hold was answered with and no drain took is past.
+	b.holding.take()
 	if ok, err := b.holding.turn(ctx, wait); err != nil || !ok {
 		if err != nil {
 			return nil, err
@@ -412,11 +483,16 @@ func (b *Mailbox) Hold(ctx context.Context, wait time.Duration) (*HoldResult, er
 		return kept{pass, hdr.Get("If-None-Match"), b.mailboxPath("/messages"), ends}, err
 	})
 	if err != nil {
+		b.holding.asked()
 		return nil, err
 	}
+	// A hold with no tag to send asks the server nothing and leaves the pace
+	// as it is: after a drain that found messages, the hold after the next
+	// drain still starts at once.
 	if k.tag == "" {
 		return &HoldResult{Changed: true}, nil
 	}
+	b.holding.asked()
 	wait = min(wait, k.ends.Sub(b.now())-passMargin)
 	hdr := http.Header{"If-None-Match": {k.tag}, "Authorization": {k.pass}}
 	path := k.path + "?wait=" + strconv.FormatInt(int64(wait/time.Second), 10)
@@ -454,6 +530,7 @@ func (b *Mailbox) Hold(ctx context.Context, wait time.Duration) (*HoldResult, er
 	held := httptrace.WithClientTrace(context.WithValue(ctx, heldFor{}, wait+holdMargin), trace)
 	var list protocol.MessageList
 	resp, err := b.exchange(held, http.MethodGet, path, nil, hdr, &list)
+	at := b.now()
 	mu.Lock()
 	after := time.Since(start)
 	h.After = after
@@ -462,6 +539,9 @@ func (b *Mailbox) Hold(ctx context.Context, wait time.Duration) (*HoldResult, er
 	var te *transportError
 	switch {
 	case err == nil && resp.StatusCode == http.StatusNotModified && sameTag(resp.Header.Get("ETag"), k.tag):
+	case err == nil && resp.StatusCode == http.StatusOK:
+		h.Changed = true
+		b.holding.answer(&heldList{list: list, tag: resp.Header.Get("ETag"), interval: resp.Header.Get("Retry-After"), at: at})
 	case err == nil, passRefused(code(err)), renewalMends(err):
 		h.Changed = true
 	case ctx.Err() == nil && errors.As(err, &te) && after >= MinHold/2:
