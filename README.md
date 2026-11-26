@@ -145,6 +145,7 @@ Whoever terminates TLS is part of the server, because a pass is a bearer credent
 | `docs/` | The manual: installation, the user guide, the configuration reference, the output format, and a page for each command (`docs/commands/`, generated from the help) |
 | `PROTOCOL.md` | The protocol, byte by byte: what a client must check, what a server must do, and what isn't built yet |
 | `PRECEDENTS.md` | Every design decision compared with the systems and standards that do the same, and Dromas compared with other messaging systems |
+| `ROADMAP.md` | What the project plans to do over the next year, and what it doesn't plan to do |
 | `SECURITY.md` | How to report a vulnerability privately, and each security claim with the code and tests that check it |
 | `protocol/` | Identity documents, addresses, certificates, signed prekey statements, the pass, the envelope and its signature, and signature namespaces |
 | `sshsig/` | SSHSIG signing and verification, compatible with `ssh-keygen -Y` |
