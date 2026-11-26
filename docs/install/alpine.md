@@ -2,6 +2,10 @@
 
 You can install `dromas` from the apk repository at packages.dromas.dev or from the `.apk` package of a release. Run the commands that install `dromas` as root.
 
+## Supported releases
+
+Dromas supports Alpine Linux 3.22, 3.23, and 3.24. When Alpine ends its support for a release, Dromas does too.
+
 ## Install from the apk repository
 
 The [dromas-dev/packages](https://github.com/dromas-dev/packages) project builds the apt, dnf, and apk repositories at packages.dromas.dev from the releases of this repository. The dromas.dev servers host the repositories, but the keys that sign the repositories never reach those servers. A compromised server can withhold a release, but it can't forge one. Before your system trusts the signing key, read this page on GitHub and check the key against the checksum on this page.
@@ -61,7 +65,7 @@ Each release includes an `.apk` package for `x86_64` and `aarch64`. A package th
    dromas recv --wait 3m
    ```
 
-4. Run `recv` as a service. The package installs the OpenRC user service `dromas`, but it doesn't enable the service. The service requires Alpine Linux 3.22 or later.
+4. Run `recv` as a service. The package installs the OpenRC user service `dromas`, but it doesn't enable the service.
 
    As root, set up your user services to start at boot. Replace `<user>` with your username:
 

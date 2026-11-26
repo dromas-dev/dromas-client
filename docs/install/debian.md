@@ -2,6 +2,15 @@
 
 You can install `dromas` from the apt repository at packages.dromas.dev or from the `.deb` package of a release.
 
+## Supported releases
+
+Dromas supports these releases:
+
+- Debian 12 and 13
+- Ubuntu 22.04 LTS, 24.04 LTS, 26.04 LTS, and 26.10
+
+When Debian or Ubuntu ends its support for a release, Dromas does too.
+
 ## Install from the apt repository
 
 The [dromas-dev/packages](https://github.com/dromas-dev/packages) project builds the apt, dnf, and apk repositories at packages.dromas.dev from the releases of this repository. The dromas.dev servers host the repositories, but the keys that sign the repositories never reach those servers. A compromised server can withhold a release, but it can't forge one. Before your system trusts the signing key, read this page on GitHub and check the key against the checksum on this page.

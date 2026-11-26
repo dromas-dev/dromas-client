@@ -6,13 +6,16 @@ Choose the install method for your system. Every method installs the same `droma
 |---|---|
 | macOS, Linux | [Homebrew](homebrew.md) |
 | Debian, Ubuntu | [apt repository, or a `.deb` package](debian.md) |
-| Fedora, RHEL, AlmaLinux, Rocky Linux | [dnf repository, or an `.rpm` package](fedora.md) |
+| Fedora, RHEL, AlmaLinux, Rocky Linux, Amazon Linux | [dnf repository, or an `.rpm` package](fedora.md) |
 | Alpine Linux | [apk repository, or an `.apk` package](alpine.md) |
+| openSUSE, SUSE Linux Enterprise | [zypper repository, or an `.rpm` package](suse.md) |
 | Arch Linux | [Prebuilt binary](arch.md) |
 | NixOS, or any system with Nix | [Nix flake](nix.md) |
 | Windows | [Zip archive](windows.md) |
 | Linux, macOS, FreeBSD, OpenBSD, NetBSD, DragonFly BSD | [Prebuilt binary](binaries.md) |
 | Any system Go supports | [Build from source](source.md) |
+
+The pages for the package repositories name the releases of each distribution that Dromas supports, which are the releases that the distribution still supports.
 
 To check that a file you downloaded is the file that the release workflow of this repository built, see [Verify a release](verify.md).
 

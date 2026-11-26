@@ -27,6 +27,7 @@ syslog
 filesystems?
 dnf
 apk
+zypper
 typage
 testkit
 (send|lookup|fetch|retry|ssh|openssl|OpenSSL)'s
