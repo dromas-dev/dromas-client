@@ -7,10 +7,12 @@ On Fedora, RHEL, AlmaLinux, Rocky Linux, and Amazon Linux, you can install `drom
 Dromas supports these releases:
 
 - Fedora 44 and 45
-- RHEL, AlmaLinux, and Rocky Linux 8, 9, and 10
+- RHEL, AlmaLinux, and Rocky Linux 8, 9, and 10[^suse]
 - Amazon Linux 2023
 
 When a distribution ends its support for a release, Dromas does too.
+
+[^suse]: For openSUSE and SUSE Linux Enterprise, which read the same repository through zypper, see [Install on openSUSE and SUSE Linux Enterprise](suse.md).
 
 ## Install from the dnf repository
 
