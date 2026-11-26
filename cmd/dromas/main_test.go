@@ -1874,7 +1874,6 @@ func TestHelp(t *testing.T) {
 		"peer alow --rebuild": {`dromas peer has no command "alow": did you mean allow?`, "dromas peer --help"},
 		"help nosuch":         {`dromas has no command "nosuch"`, "dromas --help"},
 		"help peer nosuch":    {`dromas peer has no command "nosuch"`, "dromas peer --help"},
-		"completion":          {`dromas has no command "completion"`, "dromas --help"},
 	} {
 		out, err := ask(line)
 		var wrong *usageError
@@ -1886,6 +1885,27 @@ func TestHelp(t *testing.T) {
 	// may be named help.
 	if _, err := ask("send help"); err == nil || strings.Contains(err.Error(), "usage") {
 		t.Errorf("send help: %v", err)
+	}
+}
+
+// dromas completion writes cobra's script for each shell, which the packages
+// install, and is left out of the help, which lists what a user runs.
+func TestCompletionIsWrittenAndUnlisted(t *testing.T) {
+	ctx := context.Background()
+	useMailbox(t, t.TempDir())
+	for shell, want := range map[string]string{
+		"bash": "complete -o default -F __start_dromas dromas",
+		"zsh":  "#compdef dromas",
+		"fish": "complete -c dromas",
+	} {
+		var out bytes.Buffer
+		if err := do(ctx, "completion "+shell, nil, strings.NewReader(""), &out, io.Discard); err != nil || !strings.Contains(out.String(), want) {
+			t.Errorf("dromas completion %s: %v, want a script with %q", shell, err, want)
+		}
+	}
+	var out bytes.Buffer
+	if err := do(ctx, "--help", nil, strings.NewReader(""), &out, io.Discard); err != nil || strings.Contains(out.String(), "completion") {
+		t.Errorf("dromas --help: %v, names completion:\n%s", err, out.String())
 	}
 }
 

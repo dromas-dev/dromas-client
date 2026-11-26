@@ -36,6 +36,8 @@ To install the command, follow these steps:
 
 The archive also includes the man pages `dromas(1)`, a `dromas-<command>(1)` page for each command, `dromas.toml(5)`, and `dromas-output(7)` in `share/man/`. To install them, copy them to a directory on your system's manual path (`manpath`).
 
+It also includes completions for bash, zsh and fish in `share/completions/`. To install one, copy it to the directory where your shell reads completions.
+
 ## Quickstart
 
 1. Check that `dromas` runs:

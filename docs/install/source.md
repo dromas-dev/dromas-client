@@ -32,6 +32,8 @@ go version -m "$(command -v dromas)"
 
 4. Run `recv` as a service. To do this, run `dromas recv --follow --headers` under your service manager. For details, see [Run as a service](../guide.md#run-as-a-service).
 
+`go install` installs no shell completions. To write one, run `dromas completion bash`, `dromas completion zsh`, `dromas completion fish` or `dromas completion powershell`, and save its output where your shell reads completions.
+
 ## Next steps
 
 - [Talk to another agent](../../README.md#talk-to-another-agent): exchange links with another agent, and then send and receive messages.

@@ -19,11 +19,14 @@ gomod:
 # The man pages, from the command tree and two pages of docs/, by the
 # client's hidden gen-docs command, as GoReleaser's own release writes its man
 # page with its hidden man command. Dated by the commit (SOURCE_DATE_EPOCH),
-# so a rebuild writes the same bytes; share/ is gitignored.
+# so a rebuild writes the same bytes; share/ is gitignored. The shell
+# completions, by scripts/completions.sh, as GoReleaser's own release writes
+# its completions.
 before:
   hooks:
     - rm -rf share/man
     - env SOURCE_DATE_EPOCH={{ .CommitTimestamp }} go run ./cmd/dromas gen-docs --man-dir share/man
+    - ./scripts/completions.sh
 
 builds:
   - id: dromas
@@ -68,6 +71,9 @@ archives:
       - src: '{{ if ne .Os "windows" }}share/man/man5/*.5{{ end }}'
         info: *info
       - src: '{{ if ne .Os "windows" }}share/man/man7/*.7{{ end }}'
+        info: *info
+      # The bash, zsh and fish completions, beside the man pages.
+      - src: '{{ if ne .Os "windows" }}share/completions/*{{ end }}'
         info: *info
       # Each service template, in the archives of its systems alone
       # (docs/guide.md § Run as a service): the path is empty for any other
@@ -134,6 +140,27 @@ nfpms:
         file_info: *pkg
       - src: share/man/man7/*.7
         dst: /usr/share/man/man7/
+        file_info: *pkg
+      # The shell completions where each shell's own packages put theirs:
+      # bash-completion's and fish's directories everywhere, and zsh's
+      # vendor-completions on Debian, site-functions on Fedora and Alpine.
+      - src: share/completions/dromas.bash
+        dst: /usr/share/bash-completion/completions/dromas
+        file_info: *pkg
+      - src: share/completions/dromas.fish
+        dst: /usr/share/fish/vendor_completions.d/dromas.fish
+        file_info: *pkg
+      - src: share/completions/dromas.zsh
+        dst: /usr/share/zsh/vendor-completions/_dromas
+        packager: deb
+        file_info: *pkg
+      - src: share/completions/dromas.zsh
+        dst: /usr/share/zsh/site-functions/_dromas
+        packager: rpm
+        file_info: *pkg
+      - src: share/completions/dromas.zsh
+        dst: /usr/share/zsh/site-functions/_dromas
+        packager: apk
         file_info: *pkg
 
 # The Windows zips as a winget package, Dromas.dromas, by GoReleaser's winget
@@ -209,6 +236,7 @@ nix:
       install -Dm644 ./LICENSE $out/share/doc/dromas/LICENSE
       install -Dm644 ./README.md $out/share/doc/dromas/README.md
       installManPage ./share/man/man1/*.1 ./share/man/man5/*.5 ./share/man/man7/*.7
+      installShellCompletion ./share/completions/*
 
 checksum:
   name_template: checksums.txt
