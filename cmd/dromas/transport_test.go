@@ -322,6 +322,7 @@ func TestNoRouteOfACommandFollowsARedirect(t *testing.T) {
 		"dromas inbox list":           {{none: "it reads inbox-dir"}},
 		"dromas inbox show":           {{none: "it reads inbox-dir", setup: inboxed, args: func(_, b *client.Mailbox) []string { return []string{delivered(t, b)} }}},
 		"dromas inbox clear-failed":   {{none: "it changes the state alone"}},
+		"dromas inbox rm":             {{none: "it changes inbox/ and the state alone", args: func(*client.Mailbox, *client.Mailbox) []string { return []string{"--all"} }}},
 		"dromas inbox retry-failed":   {{none: "it changes the state alone"}},
 		"dromas held list":            {{none: "it reads held/"}},
 		"dromas peer allow":           {{args: toA, admit: true}, {none: "--remove changes the allowed file alone", setup: allowed, admit: true, args: removeA}},

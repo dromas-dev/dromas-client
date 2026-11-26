@@ -342,6 +342,7 @@ func waits(b, c *client.Mailbox, rec *protocol.Revocations, opt client.Options) 
 		"RemoveAllowed":  func(ctx context.Context) error { return b.RemoveAllowed(ctx, c.Address()) },
 		"KeepRevocation": func(ctx context.Context) error { _, _, err := b.KeepRevocation(ctx, rec); return err },
 		"RebuildAllowed": func(ctx context.Context) error { _, err := b.RebuildAllowed(ctx); return err },
+		"RemoveInbox":    func(ctx context.Context) error { _, err := b.RemoveInbox(ctx, nil); return err },
 		"RemoveRefused":  func(ctx context.Context) error { _, err := b.RemoveRefused(ctx, nil); return err },
 		"ClearFailed":    func(ctx context.Context) error { _, err := b.ClearFailed(ctx); return err },
 		"RetryFailed":    func(ctx context.Context) error { _, err := b.RetryFailed(ctx); return err },

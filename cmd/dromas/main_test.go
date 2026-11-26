@@ -1640,6 +1640,73 @@ func TestRefusedCommands(t *testing.T) {
 	}
 }
 
+// inbox rm deletes by the id inbox list prints, or --all, refusing a command
+// line that names neither, or both, or an id that is not one; an id inbox/
+// does not hold deletes nothing (#1047).
+func TestInboxRmCommand(t *testing.T) {
+	ctx := context.Background()
+	srv := fakeserver.New(t, time.Now)
+	opt := client.Options{Base: srv.URL}
+	a, err := client.Init(ctx, t.TempDir(), opt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := client.Init(ctx, t.TempDir(), opt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	allows(t, b, a)
+	for range 3 {
+		if _, err := a.Send(ctx, b.Address(), "kept"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("DROMAS_SERVER_URL", srv.URL)
+	useMailbox(t, b.Dir())
+	if err := do(ctx, "recv", nil, strings.NewReader(""), io.Discard, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	list := func() []map[string]any {
+		t.Helper()
+		var out bytes.Buffer
+		if err := do(ctx, "inbox list", nil, strings.NewReader(""), &out, io.Discard); err != nil {
+			t.Fatalf("inbox list: %v", err)
+		}
+		return printed(t, out.String())
+	}
+	ls := list()
+	if len(ls) != 3 {
+		t.Fatalf("inbox list: %d messages, want 3", len(ls))
+	}
+	first := ls[0]["id"].(string)
+	for _, args := range [][]string{nil, {"--all", first}, {"../refused/x"}} {
+		var wrong *usageError
+		if err := do(ctx, "inbox rm", args, strings.NewReader(""), io.Discard, io.Discard); !errors.As(err, &wrong) {
+			t.Errorf("inbox rm %q: %v", args, err)
+		}
+	}
+	if err := do(ctx, "inbox rm", []string{first, strings.Repeat("0", 64)}, strings.NewReader(""), io.Discard, io.Discard); err == nil {
+		t.Error("inbox rm of an id inbox/ does not hold: no error")
+	}
+	if len(list()) != 3 {
+		t.Fatal("a refused inbox rm deleted a message")
+	}
+	var out bytes.Buffer
+	if err := do(ctx, "inbox rm", []string{first}, strings.NewReader(""), &out, io.Discard); err != nil || out.String() != `{"type":"removed","id":"`+first+`"}`+"\n" {
+		t.Fatalf("inbox rm: %v %q", err, out.String())
+	}
+	if ls := list(); len(ls) != 2 || ls[0]["id"] == first || ls[1]["id"] == first {
+		t.Fatalf("after inbox rm, inbox list printed %v", ls)
+	}
+	out.Reset()
+	if err := do(ctx, "inbox rm", []string{"--all"}, strings.NewReader(""), &out, io.Discard); err != nil || typesOf(printed(t, out.String())) != "removed removed" {
+		t.Fatalf("inbox rm --all: %v %q", err, out.String())
+	}
+	if ls := list(); len(ls) != 0 {
+		t.Fatalf("after inbox rm --all, inbox list printed %v", ls)
+	}
+}
+
 // alias add names a peer for this mailbox, alias list lists the names and alias
 // rm removes one, and send takes a name where it takes a link.
 func TestAliasCommand(t *testing.T) {

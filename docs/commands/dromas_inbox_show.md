@@ -42,5 +42,5 @@ dromas inbox show <id>
 
 ### SEE ALSO
 
-* [dromas inbox](dromas_inbox.md)	 - messages recv delivered: list, show, retry-failed, clear-failed
+* [dromas inbox](dromas_inbox.md)	 - messages recv delivered: list, show, rm, retry-failed, clear-failed
 

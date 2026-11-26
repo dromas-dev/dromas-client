@@ -337,6 +337,7 @@ func lockingCommands(ctx context.Context, a, b *client.Mailbox, rec *protocol.Re
 		{"SetAlias", func() error { return a.SetAlias(ctx, "peer", b.Address()) }},
 		{"RemoveAlias", func() error { return a.RemoveAlias(ctx, "peer") }},
 		{"RemoveAllowed", func() error { return a.RemoveAllowed(ctx, b.Address()) }}, // after RemoveAlias: the allowed file still lists b
+		{"RemoveInbox", func() error { _, err := a.RemoveInbox(ctx, nil); return err }},
 		{"RemoveRefused", func() error { _, err := a.RemoveRefused(ctx, nil); return err }},
 		{"ClearFailed", func() error { _, err := a.ClearFailed(ctx); return err }},
 		{"RetryFailed", func() error { _, err := a.RetryFailed(ctx); return err }},

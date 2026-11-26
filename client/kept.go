@@ -322,6 +322,79 @@ func refusedRecordOf(s store, id string) refusedRecord {
 	return rec
 }
 
+// RemoveInbox deletes messages from inbox/ and returns the ids it deleted;
+// with no ids it deletes every message [Mailbox.Inbox] lists. With each
+// file go the records the mailbox's state keeps of that message's handling,
+// the --exec program's and the webhook's, owed or given up, so that neither
+// is handed a message that is gone and [Mailbox.Status] counts neither.
+// An id that is not one, or that inbox/ does not hold, is refused before
+// anything is deleted. A file deleted by hand leaves those records behind.
+//
+// It holds the mailbox's lock from start to end ([Mailbox.hold]), as every command
+// that writes the mailbox does.
+func (b *Mailbox) RemoveInbox(ctx context.Context, ids []string) ([]string, error) {
+	return lockedFinished(ctx, b, func() ([]string, error) {
+		if len(ids) == 0 {
+			ds, err := b.inbox()
+			if err != nil {
+				return nil, err
+			}
+			for _, d := range ds {
+				ids = append(ids, d.ID)
+			}
+		}
+		for _, id := range ids {
+			if !IsID(id) {
+				return nil, errors.New("not a message's id: 64 lowercase hex, as dromas inbox list prints it")
+			}
+			if err := b.judgeKept(b.path("inbox", id+".json")); err != nil {
+				return nil, err
+			}
+			if _, err := os.Lstat(b.path("inbox", id+".json")); err != nil {
+				return nil, fmt.Errorf("inbox/ holds no message %s: nothing is deleted", id)
+			}
+		}
+		var gone []string
+		for _, id := range slices.Compact(slices.Sorted(slices.Values(ids))) {
+			if err := os.Remove(b.path("inbox", id+".json")); err != nil {
+				return gone, err
+			}
+			if err := b.update(func(s store) error { return dropHandling(s, id) }); err != nil {
+				return gone, err
+			}
+			gone = append(gone, id)
+		}
+		return gone, nil
+	})
+}
+
+// dropHandling deletes what the mailbox's state keeps of message id's
+// handling, the --exec program's and the webhook's: each owed record that
+// names it (keyed apart, with the id as its value) and its gave-up record
+// (keyed by the id).
+func dropHandling(s store, id string) error {
+	for _, r := range []records{handlerRecords, webhookRecords} {
+		var keys []string
+		if err := s.each(r.owed, func(k, v []byte) error {
+			if string(v) == id {
+				keys = append(keys, string(k))
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+		for _, k := range keys {
+			if err := s.del(r.owed, k); err != nil {
+				return err
+			}
+		}
+		if err := s.del(r.gaveUp, id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // RemoveRefused deletes refused messages from refused/, each with what
 // the mailbox's state keeps of it, and returns the ids it deleted; with no ids it
 // deletes them all.

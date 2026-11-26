@@ -193,7 +193,7 @@ type partwayCase struct {
 // its own revocation still runs (TestAMailboxThatKeepsItsOwnRevocationSignsNothingMore):
 // none carries a pass or signs anything, so its revocation shown partway
 // through one stops nothing.
-var partwayStillRun = []string{"Ask", "KeepRevocation", "Publish", "SetAlias", "RemoveAlias", "RemoveAllowed", "RemoveRefused", "ClearFailed", "RetryFailed", "RebuildAllowed"}
+var partwayStillRun = []string{"Ask", "KeepRevocation", "Publish", "SetAlias", "RemoveAlias", "RemoveAllowed", "RemoveInbox", "RemoveRefused", "ClearFailed", "RetryFailed", "RebuildAllowed"}
 
 // Each command of lockingCommands is run by a case of partwayCases, or is
 // one a finished mailbox still runs (partwayStillRun), and never both: a new
