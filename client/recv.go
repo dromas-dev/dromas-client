@@ -431,10 +431,11 @@ func (b *Mailbox) drainPages(ctx context.Context, asked *lookups, res *Result) e
 			took := res.taken()
 			n, err := b.receiveOne(ctx, m, res, asked, who)
 			// A message taken off the list is a delivery, and more may follow
-			// it: the next hold starts at once (Hold). A message already
-			// handled, or gone, is none: a list that keeps naming it, stale or
-			// hostile, is held at the pace of any other.
-			if page == 0 && res.taken() > took {
+			// it: the next hold starts at once (Hold). Any other message of the
+			// list, gone, already seen, refused or a duplicate, is fetched
+			// again while a list names it: a list that keeps naming one, stale
+			// or hostile, is held at the pace of any other.
+			if res.taken() > took {
 				b.holding.woke(true)
 			}
 			// A server that paces how much a mailbox takes out stops the drain
@@ -462,10 +463,11 @@ func (b *Mailbox) drainPages(ctx context.Context, asked *lookups, res *Result) e
 	}
 }
 
-// taken is how many messages r took off the list: fetched and judged,
-// whatever the verdict.
+// taken is how many messages r took off the list: delivered, held or
+// blocked, each recorded as seen, so that a list that names it again is
+// answered with an ack and no fetch.
 func (r *Result) taken() int {
-	return len(r.Delivered) + len(r.Held) + len(r.Blocked) + len(r.Duplicates) + len(r.Refused)
+	return len(r.Delivered) + len(r.Held) + len(r.Blocked)
 }
 
 // pacedError is the server pacing a drain, as the answer to a fetch says

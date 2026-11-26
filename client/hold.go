@@ -63,8 +63,9 @@ import (
 //     with a 429 and its Retry-After (PROTOCOL.md §11.5), which Await waits
 //     out. Any other hold waits its turn, at most about one a minute
 //     (holdEvery), so a connection that fails at once, a server that answers
-//     at once with nothing new, or a list that keeps naming a message
-//     already handled or gone, is a minute's poll, within the poll budget.
+//     at once with nothing new, or a list that keeps naming a message the
+//     mailbox doesn't take (gone, already seen, refused or a duplicate), is a
+//     minute's poll, within the poll budget.
 //   - What the drops taught. Nothing tells a mailbox that a network which
 //     forgot its connections is gone, as nothing tells a host that a path
 //     MTU a loss lowered is stale, so the mailbox ages what it learned, as
@@ -134,9 +135,9 @@ type holding struct {
 	lastDrop  time.Time     // on the wall clock; zero when nothing is learned
 	starts    *rate.Limiter
 	// woken is set by a drain that took messages, until a hold makes its
-	// held request (asked) or a drain lists messages and takes none (woke);
-	// answered is the list the last held request was
-	// answered with, until a drain takes it as its first page (take).
+	// held request (asked) or a drain lists messages and takes none (woke).
+	// answered is the list the last held request was answered with, until a
+	// drain takes it as its first page (take).
 	woken    bool
 	answered *heldList
 	http2    atomic.Bool // the connection in use speaks HTTP/2
@@ -169,11 +170,11 @@ func (h *holding) take() *heldList {
 	return l
 }
 
-// woke records what a drain took off a first page that listed messages
-// (drainPages): the next hold starts at once after one it took messages off,
-// and waits its turn after one it took none off, whose messages were all
-// handled already or gone. A first page with no message leaves the pace as
-// it is.
+// woke records what a drain took off its list (drainPages): the next hold
+// starts at once after a drain that delivered, held or blocked a message,
+// and waits its turn after one whose first page listed messages and that
+// took none of them, each gone, already seen, refused or a duplicate. A
+// first page with no message leaves the pace as it is.
 func (h *holding) woke(took bool) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
