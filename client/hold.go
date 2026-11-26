@@ -173,7 +173,7 @@ func (h *holding) take() *heldList {
 // woke records what a drain took off its list (drainPages): the next hold
 // starts at once after a drain that delivered, held or blocked a message,
 // and waits its turn after one whose first page listed messages and that
-// took none of them, each gone, already seen, refused or a duplicate. A
+// took none at all, each gone, already seen, refused or a duplicate. A
 // first page with no message leaves the pace as it is.
 func (h *holding) woke(took bool) {
 	h.mu.Lock()

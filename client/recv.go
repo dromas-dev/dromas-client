@@ -432,9 +432,9 @@ func (b *Mailbox) drainPages(ctx context.Context, asked *lookups, res *Result) e
 			n, err := b.receiveOne(ctx, m, res, asked, who)
 			// A message taken off the list is a delivery, and more may follow
 			// it: the next hold starts at once (Hold). Any other message of the
-			// list, gone, already seen, refused or a duplicate, is fetched
-			// again while a list names it: a list that keeps naming one, stale
-			// or hostile, is held at the pace of any other.
+			// list, gone, already seen, refused or a duplicate, is acked or
+			// fetched again while a list names it: a list that keeps naming
+			// one, stale or hostile, is held at the pace of any other.
 			if res.taken() > took {
 				b.holding.woke(true)
 			}
