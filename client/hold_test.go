@@ -396,6 +396,72 @@ func TestAHoldAnsweredAtOnceWithNothingNewIsPaced(t *testing.T) {
 	})
 }
 
+// followNamingAMessageItCannotTake runs b's Follow for ten minutes against
+// a server whose list keeps naming one message that b cannot take, as serve
+// answers its fetches and acks, and returns how many lists b's drains made.
+// More than most cuts it short: a loop that polls faster than its pace
+// never lets the clock move.
+func followNamingAMessageItCannotTake(t *testing.T, most int32, serve func(w http.ResponseWriter, r *http.Request, next http.Handler) bool) int32 {
+	t.Helper()
+	var n atomic.Int32
+	synctest.Test(t, func(t *testing.T) {
+		e := newMemEnv(t)
+		a, b := e.mailbox(), e.mailbox()
+		receive(t, b)
+		send(t, a, b, "listed, and never taken")
+		messages := "/v1/" + b.Address().String() + "/messages"
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
+			if r.Method == http.MethodGet && r.URL.Path == messages && !r.URL.Query().Has("wait") && n.Add(1) > most {
+				cancel()
+			}
+			if strings.HasPrefix(r.URL.Path, messages+"/") && serve(w, r, next) {
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+		if err := b.Follow(ctx, client.FollowOptions{Until: time.Now().Add(10 * time.Minute)}, nil); err != nil && ctx.Err() == nil {
+			t.Fatal(err)
+		}
+	})
+	return n.Load()
+}
+
+// TestAListOfAMessageThatIsGoneIsPaced: a list that keeps naming a message
+// whose every fetch is message_not_found takes nothing off it, so it does not
+// start the next hold at once: Follow lists at the pace of holdEvery.
+func TestAListOfAMessageThatIsGoneIsPaced(t *testing.T) {
+	const most = 1 + 2 + 10 // the first drain's, the burst, one a minute
+	n := followNamingAMessageItCannotTake(t, most, func(w http.ResponseWriter, r *http.Request, _ http.Handler) bool {
+		if r.Method != http.MethodGet {
+			return false
+		}
+		forge.Refuse(w, protocol.CodeMessageNotFound)
+		return true
+	})
+	if n > most || n < 2 {
+		t.Fatalf("Follow over 10 minutes of a list naming a message that is gone listed %d times, want 2 to %d", n, most)
+	}
+}
+
+// TestAListThatStillNamesAnAckedMessageIsPaced: a list that goes on naming a
+// message after its ack (lists are eventually consistent, PROTOCOL.md §11.11)
+// wakes only the hold after the drain that took it.
+func TestAListThatStillNamesAnAckedMessageIsPaced(t *testing.T) {
+	const most = 2 + 2 + 10 // the drain that took it and the woken one after, the burst, one a minute
+	n := followNamingAMessageItCannotTake(t, most, func(w http.ResponseWriter, r *http.Request, _ http.Handler) bool {
+		if r.Method != http.MethodDelete {
+			return false
+		}
+		w.WriteHeader(http.StatusNoContent) // acked, and listed still
+		return true
+	})
+	if n > most || n < 2 {
+		t.Fatalf("Follow over 10 minutes of a list that still names an acked message listed %d times, want 2 to %d", n, most)
+	}
+}
+
 // TestTheDrainAfterAWokenHoldStartsFromItsList: the list a held request is
 // answered with is the next drain's first page, so the drain fetches the
 // message with no list of its own first: one poll for a hold and its drain.
