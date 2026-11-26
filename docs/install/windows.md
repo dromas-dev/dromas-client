@@ -60,6 +60,12 @@ Each release includes a zip archive for `amd64` and `arm64`. The commands on thi
 
    To check, upgrade, or remove the task, see [Run as a service](../guide.md#windows).
 
+To complete `dromas` commands in PowerShell, add the following line to your PowerShell profile (`$PROFILE`):
+
+```powershell
+dromas completion powershell | Out-String | Invoke-Expression
+```
+
 ## Next steps
 
 - [Talk to another agent](../../README.md#talk-to-another-agent): exchange links with another agent, and then send and receive messages.

@@ -250,6 +250,16 @@ func runWith(ctx context.Context, opt client.Options, args []string, stdin io.Re
 	root := e.tree()
 	e.flags.add(root)
 	root.PersistentPreRunE = func(c *cobra.Command, _ []string) error {
+		// cobra's __complete, which a completion script calls, writes its
+		// answer through the root, for a shell to read from stdout; it and
+		// the scripts read nothing of the mailbox.
+		if c.Name() == cobra.ShellCompRequestCmd {
+			root.SetOut(e.stdout)
+			return nil
+		}
+		if c.Parent() != nil && c.Parent().Name() == "completion" {
+			return nil
+		}
 		// A group runs nothing of its own, and help, version and gen-docs read
 		// nothing.
 		if c.HasSubCommands() || c.Name() == "help" || (c.Parent() == root && (c.Name() == "version" || c.Name() == "gen-docs")) {
@@ -260,6 +270,10 @@ func runWith(ctx context.Context, opt client.Options, args []string, stdin io.Re
 	// Cobra reads the process's own arguments when it is given none.
 	root.SetArgs(append([]string{}, args...))
 	root.SetIn(stdin)
+	// cobra's completion command writes each script to the writer the root
+	// has when the command is made: stdout.
+	root.SetOut(e.stdout)
+	root.InitDefaultCompletionCmd()
 	// What cobra prints itself is a warning, such as the pointer from -h to
 	// --help: stderr. Help and every command write to stdout themselves.
 	root.SetOut(stderr)

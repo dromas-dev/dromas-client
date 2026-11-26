@@ -119,7 +119,7 @@ them.`,
 	}
 	root.SilenceErrors = true
 	root.SilenceUsage = true
-	root.CompletionOptions.DisableDefaultCmd = true
+	root.CompletionOptions.HiddenDefaultCmd = true
 	root.SetHelpFunc(func(c *cobra.Command, _ []string) {
 		_, _ = io.WriteString(e.stdout, helpText(c))
 	})
