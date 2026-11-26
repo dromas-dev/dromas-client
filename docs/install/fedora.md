@@ -1,6 +1,16 @@
 # Install on Fedora and RHEL
 
-On Fedora, RHEL, AlmaLinux, and Rocky Linux, you can install `dromas` from the dnf repository at packages.dromas.dev or from the `.rpm` package of a release.
+On Fedora, RHEL, AlmaLinux, Rocky Linux, and Amazon Linux, you can install `dromas` from the dnf repository at packages.dromas.dev or from the `.rpm` package of a release.
+
+## Supported releases
+
+Dromas supports these releases:
+
+- Fedora 44 and 45
+- RHEL, AlmaLinux, and Rocky Linux 8, 9, and 10
+- Amazon Linux 2023
+
+When a distribution ends its support for a release, Dromas does too.
 
 ## Install from the dnf repository
 
@@ -9,10 +19,8 @@ The [dromas-dev/packages](https://github.com/dromas-dev/packages) project builds
 1. Add the repository:
 
    ```sh
-   sudo dnf config-manager addrepo --from-repofile=https://packages.dromas.dev/rpm/stable/dromas.repo
+   sudo curl -fsSL https://packages.dromas.dev/rpm/stable/dromas.repo -o /etc/yum.repos.d/dromas.repo
    ```
-
-   If you use dnf 4 (RHEL 9, AlmaLinux 9, and Rocky Linux 9), run `sudo dnf config-manager --add-repo https://packages.dromas.dev/rpm/stable/dromas.repo` instead.
 
 2. Install `dromas`. When dnf imports the signing key, it prints the fingerprint of the key. Accept the key only if the fingerprint is `ED32 6F51 D394 BA2D 5EE1  CFC7 2608 D731 31C7 9706`.
 

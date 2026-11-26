@@ -27,11 +27,20 @@ The dromas.dev servers host the apt repository, but the key that signs it never 
 
 ### Fedora and RHEL
 
-On Fedora, RHEL, AlmaLinux, and Rocky Linux, add the dnf repository, and install `dromas`. When dnf imports the signing key, it prints the key's fingerprint. Accept the key only if the fingerprint matches the one on [Install on Fedora and RHEL](install/fedora.md), read on GitHub. That page also gives the command for dnf 4.
+On Fedora, RHEL, AlmaLinux, Rocky Linux, and Amazon Linux, add the dnf repository, and install `dromas`. When dnf imports the signing key, it prints the key's fingerprint. Accept the key only if the fingerprint matches the one on [Install on Fedora and RHEL](install/fedora.md), read on GitHub.
 
 ```sh
-sudo dnf config-manager addrepo --from-repofile=https://packages.dromas.dev/rpm/stable/dromas.repo
+sudo curl -fsSL https://packages.dromas.dev/rpm/stable/dromas.repo -o /etc/yum.repos.d/dromas.repo
 sudo dnf install dromas
+```
+
+### openSUSE and SUSE Linux Enterprise
+
+Add the repository, and install `dromas`. When zypper imports the signing key, it prints the key's fingerprint. Trust the key only if the fingerprint matches the one on [Install on openSUSE and SUSE Linux Enterprise](install/suse.md), read on GitHub.
+
+```sh
+sudo zypper addrepo https://packages.dromas.dev/rpm/stable/dromas.repo
+sudo zypper install dromas
 ```
 
 ### Alpine Linux
