@@ -27,14 +27,15 @@ import (
 func (e *cli) tree() *cobra.Command {
 	root := e.group("dromas", "", "",
 		e.initCmd(), e.addrCmd(), e.sendCmd(), e.recvCmd(), e.statusCmd(), e.configCmd(), e.versionCmd(),
-		e.group("inbox", "messages recv delivered: list, show, retry-failed, clear-failed",
+		e.group("inbox", "messages recv delivered: list, show, rm, retry-failed, clear-failed",
 			`recv keeps each message it delivers as a file in inbox/, holding the "message"
-line it printed. dromas never deletes these files: managing them is up to you.
+line it printed. dromas deletes these files only when you run dromas inbox rm:
+managing them is otherwise up to you.
 
-These commands list those messages and print their lines again, or hand the
-messages whose --exec program or webhook gave up to the next recv, or clear what
-dromas status reports of them. They call no server.`,
-			e.inboxListCmd(), e.inboxShowCmd(), e.inboxRetryFailedCmd(), e.inboxClearFailedCmd()),
+These commands list those messages and print their lines again, delete them,
+or hand the messages whose --exec program or webhook gave up to the next recv,
+or clear what dromas status reports of them. They call no server.`,
+			e.inboxListCmd(), e.inboxShowCmd(), e.inboxRmCmd(), e.inboxRetryFailedCmd(), e.inboxClearFailedCmd()),
 		e.group("held", "messages from unknown senders, held to allow or block: list",
 			`A message that passed every check, from an unknown sender (one this mailbox has
 not written to, named or allowed), is kept in held/, and recv does not print it.
@@ -658,6 +659,48 @@ refused before any file is read.`,
 			}
 			return e.out(message(d, namesOf(c.Context(), b)))
 		})
+}
+
+// inboxRmCmd deletes messages from inbox/ by id, the shape of refused rm and
+// alias rm (#1047). It deletes files and what the state keeps of their
+// handling, nothing else: no retention and no archive, since managing the
+// files is otherwise the user's (#6).
+func (e *cli) inboxRmCmd() *cobra.Command {
+	var all bool
+	c := command("rm [flags] [<id>...]", "delete messages from inbox/",
+		`Delete each message named by the id that dromas inbox list prints, or with
+--all every message it lists, and print a "removed" line for each. With each
+message goes what the mailbox keeps of its --exec program's and its webhook's
+handling, owed or given up. Nothing is deleted when an id is not a valid id, or
+names no message in inbox/. It calls no server.`,
+		func(c *cobra.Command, args []string) error {
+			switch {
+			case all && len(args) > 0:
+				return wrong(c, "%s takes ids or --all, not both", c.CommandPath())
+			case !all && len(args) == 0:
+				return wrong(c, "%s takes the ids to delete, or --all", c.CommandPath())
+			}
+			for _, id := range args {
+				if !client.IsID(id) {
+					return wrong(c, "%s takes messages' ids, 64 lowercase hex, as dromas inbox list prints them", c.CommandPath())
+				}
+			}
+			return nil
+		}, func(c *cobra.Command, args []string) error {
+			b, err := e.mailbox()
+			if err != nil {
+				return err
+			}
+			gone, err := b.RemoveInbox(c.Context(), args)
+			for _, id := range gone {
+				if werr := e.out(line("removed", "id", id)); werr != nil && err == nil {
+					err = werr
+				}
+			}
+			return err
+		})
+	c.Flags().BoolVar(&all, "all", false, "delete every message in inbox/")
+	return c
 }
 
 // inboxRetryFailedCmd hands every message whose callback gave up to the next

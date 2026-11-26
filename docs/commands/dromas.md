@@ -39,7 +39,7 @@ dromas
 * [dromas cert](dromas_cert.md)	 - this mailbox's certificates: switch, request, install, revoke-earlier, publish-revoked
 * [dromas config](dromas_config.md)	 - print every setting and where it came from
 * [dromas held](dromas_held.md)	 - messages from unknown senders, held to allow or block: list
-* [dromas inbox](dromas_inbox.md)	 - messages recv delivered: list, show, retry-failed, clear-failed
+* [dromas inbox](dromas_inbox.md)	 - messages recv delivered: list, show, rm, retry-failed, clear-failed
 * [dromas init](dromas_init.md)	 - create this mailbox and register it, and print its link
 * [dromas outbox](dromas_outbox.md)	 - messages the server has not accepted yet: flush
 * [dromas peer](dromas_peer.md)	 - who can write to this mailbox: allow, block, list
