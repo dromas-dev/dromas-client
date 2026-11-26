@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -394,6 +397,130 @@ func TestAHoldAnsweredAtOnceWithNothingNewIsPaced(t *testing.T) {
 			t.Fatalf("Follow over %d minutes of holds answered at once: %v after %d held lists, want nil after 2 to %d", minutes, err, n.Load(), most)
 		}
 	})
+}
+
+// followNamingAMessageItDoesNotTake runs b's Follow for ten minutes against
+// a server whose list keeps naming the one message put there, which b
+// fetches and acks as serve answers (false: as the server would), and returns
+// how many lists b's drains made. More than most cuts it short: a loop that
+// polls faster than its pace never lets the clock move.
+func followNamingAMessageItDoesNotTake(t *testing.T, most int32, put func(t *testing.T, a, b *client.Mailbox), serve func(w http.ResponseWriter, r *http.Request, next http.Handler) bool) int32 {
+	t.Helper()
+	var n atomic.Int32
+	synctest.Test(t, func(t *testing.T) {
+		e := newMemEnv(t)
+		a, b := e.mailbox(), e.mailbox()
+		receive(t, b)
+		put(t, a, b)
+		messages := "/v1/" + b.Address().String() + "/messages"
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		e.srv.SetMiddle(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
+			if r.Method == http.MethodGet && r.URL.Path == messages && !r.URL.Query().Has("wait") && n.Add(1) > most {
+				cancel()
+			}
+			if strings.HasPrefix(r.URL.Path, messages+"/") && serve(w, r, next) {
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+		if err := b.Follow(ctx, client.FollowOptions{Until: time.Now().Add(10 * time.Minute)}, nil); err != nil && ctx.Err() == nil {
+			t.Fatal(err)
+		}
+	})
+	return n.Load()
+}
+
+// sendOne puts one message from a in b's mailbox.
+func sendOne(t *testing.T, a, b *client.Mailbox) { send(t, a, b, "listed, and not taken") }
+
+// ackedAndListedStill answers an ack 204 and acks nothing: a list that goes
+// on naming a message after its ack (lists are eventually consistent,
+// PROTOCOL.md §11.11).
+func ackedAndListedStill(w http.ResponseWriter, r *http.Request, _ http.Handler) bool {
+	if r.Method != http.MethodDelete {
+		return false
+	}
+	w.WriteHeader(http.StatusNoContent)
+	return true
+}
+
+// TestAListOfAMessageThatIsGoneIsPaced: a list that keeps naming a message
+// whose every fetch is message_not_found takes nothing off it, so it does not
+// start the next hold at once: Follow lists at the pace of holdEvery.
+func TestAListOfAMessageThatIsGoneIsPaced(t *testing.T) {
+	const most = 1 + 2 + 10 // the first drain's, the burst, one a minute
+	n := followNamingAMessageItDoesNotTake(t, most, sendOne, func(w http.ResponseWriter, r *http.Request, _ http.Handler) bool {
+		if r.Method != http.MethodGet {
+			return false
+		}
+		forge.Refuse(w, protocol.CodeMessageNotFound)
+		return true
+	})
+	if n > most || n < 2 {
+		t.Fatalf("Follow over 10 minutes of a list naming a message that is gone listed %d times, want 2 to %d", n, most)
+	}
+}
+
+// TestAListThatStillNamesAnAckedMessageIsPaced: a list that goes on naming a
+// message after its ack wakes only the hold after the drain that took it.
+func TestAListThatStillNamesAnAckedMessageIsPaced(t *testing.T) {
+	const most = 2 + 2 + 10 // the drain that took it and the woken one after, the burst, one a minute
+	n := followNamingAMessageItDoesNotTake(t, most, sendOne, ackedAndListedStill)
+	if n > most || n < 2 {
+		t.Fatalf("Follow over 10 minutes of a list that still names an acked message listed %d times, want 2 to %d", n, most)
+	}
+}
+
+// TestAListThatStillNamesARefusedMessageIsPaced: a refused message is fetched
+// again while a list names it, so a list that goes on naming one after its
+// ack takes nothing off it: Follow lists at the pace of holdEvery.
+func TestAListThatStillNamesARefusedMessageIsPaced(t *testing.T) {
+	const most = 1 + 2 + 10 // the first drain's, the burst, one a minute
+	n := followNamingAMessageItDoesNotTake(t, most, sendOne, func(w http.ResponseWriter, r *http.Request, next http.Handler) bool {
+		if r.Method != http.MethodGet {
+			return ackedAndListedStill(w, r, next)
+		}
+		served := httptest.NewRecorder()
+		next.ServeHTTP(served, r)
+		body := served.Body.Bytes()
+		if len(body) > 0 {
+			body[len(body)-1] ^= 1 // not the ciphertext its id hashes: refused
+		}
+		w.WriteHeader(served.Code)
+		_, _ = w.Write(body)
+		return true
+	})
+	if n > most || n < 2 {
+		t.Fatalf("Follow over 10 minutes of a list that still names a refused message listed %d times, want 2 to %d", n, most)
+	}
+}
+
+// TestAListThatStillNamesADuplicateIsPaced: a retry of a message already
+// delivered is a duplicate, fetched again while a list names it, so a list
+// that goes on naming one after its ack takes nothing off it.
+func TestAListThatStillNamesADuplicateIsPaced(t *testing.T) {
+	const most = 1 + 2 + 10 // the first drain's, the burst, one a minute
+	retry := func(t *testing.T, a, b *client.Mailbox) {
+		send(t, a, b, "do this once")
+		first := receive(t, b)
+		if len(first.Delivered) != 1 {
+			t.Fatalf("delivered %d, want 1", len(first.Delivered))
+		}
+		// The line a signed, back in a's outbox: what a send that got no
+		// receipt leaves there, which the flush posts again.
+		stem := filepath.Join(a.Dir(), "outbox", b.Address().String()+".00000000-0000-4000-8000-000000000000")
+		if err := os.WriteFile(stem+".P", first.Delivered[0].Plaintext, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := a.Flush(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	n := followNamingAMessageItDoesNotTake(t, most, retry, ackedAndListedStill)
+	if n > most || n < 2 {
+		t.Fatalf("Follow over 10 minutes of a list that still names a duplicate listed %d times, want 2 to %d", n, most)
+	}
 }
 
 // TestTheDrainAfterAWokenHoldStartsFromItsList: the list a held request is
