@@ -73,8 +73,8 @@ download() {
 	fi
 }
 
-# sha256 FILE prints FILE's SHA-256 in hex.
-sha256() {
+# sha256_of FILE prints FILE's SHA-256 in hex.
+sha256_of() {
 	if command -v sha256sum > /dev/null 2>&1; then
 		sha256sum "$1" | cut -d ' ' -f 1
 	elif command -v shasum > /dev/null 2>&1; then
@@ -193,7 +193,7 @@ bsd() {
 	want=${line%% *}
 	archive=${line##* }
 	download "$releases/$archive" "$tmp/$archive"
-	got=$(sha256 "$tmp/$archive")
+	got=$(sha256_of "$tmp/$archive")
 	[ "$got" = "$want" ] ||
 		fail "$archive's SHA-256 is $got, not the $want of the release's checksums.txt: nothing installed"
 	(cd "$tmp" && tar -xzf "$archive" dromas)
