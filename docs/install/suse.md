@@ -13,7 +13,7 @@ When SUSE ends its support for a release, Dromas does too.
 
 ## Install from the zypper repository
 
-The [dromas-dev/packages](https://github.com/dromas-dev/packages) project builds the apt, dnf, and apk repositories at packages.dromas.dev from the releases of this repository. zypper reads the dnf repository. The dromas.dev servers host the repositories, but the keys that sign the repositories never reach those servers. A compromised server can withhold a release, but it can't forge one. Before your system trusts the signing key, read this page on GitHub and check the key against the fingerprint on this page.
+The [dromas-dev/packages](https://github.com/dromas-dev/packages) project builds the apt, dnf, and apk repositories at packages.dromas.dev from the releases of this repository. zypper reads the dnf repository. The dromas.dev servers host the repositories, but the keys that sign the repositories never reach those servers. Before your system trusts the signing key, read this page on GitHub and check the key against the fingerprint on this page.
 
 1. Add the repository:
 
