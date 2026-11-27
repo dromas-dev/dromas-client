@@ -1,5 +1,5 @@
 #!/bin/sh
-# installer.sh: installs dromas on Linux, macOS and the BSDs. dromas.dev
+# install.sh: installs dromas on Linux, macOS and the BSDs. dromas.dev
 # serves it at https://dromas.dev/install.sh:
 #
 #   curl -fsSL https://dromas.dev/install.sh | sh

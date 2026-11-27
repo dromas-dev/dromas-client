@@ -1,4 +1,4 @@
-# The one-line installer, scripts/installer.sh, run on each system it installs
+# The one-line installer, scripts/install.sh, run on each system it installs
 # on, whenever it or this file changes, and on no other change (Tailscale's
 # installer.yml, without its daily run). It installs what is live: the
 # packages at packages.dromas.dev, the Homebrew tap, and the latest release on
@@ -10,11 +10,11 @@ on:
   push:
     branches: [main]
     paths:
-      - scripts/installer.sh
+      - scripts/install.sh
       - .github/workflows/installer.yml
   pull_request:
     paths:
-      - scripts/installer.sh
+      - scripts/install.sh
       - .github/workflows/installer.yml
   workflow_dispatch:
 
@@ -32,7 +32,7 @@ jobs:
       - run: |
           command -v shellcheck > /dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck; }
           shellcheck --version
-          shellcheck -s sh scripts/installer.sh
+          shellcheck -s sh scripts/install.sh
 
   linux:
     # The supported releases of each distribution: the same list as each page
@@ -78,7 +78,7 @@ jobs:
       - name: install, then install again over it
         env:
           IMAGE: ${{ matrix.image }}
-        run: docker run --rm -v "$PWD/scripts:/s:ro" "$IMAGE" sh -c 'sh /s/installer.sh && sh /s/installer.sh && dromas version'
+        run: docker run --rm -v "$PWD/scripts:/s:ro" "$IMAGE" sh -c 'sh /s/install.sh && sh /s/install.sh && dromas version'
 
   macos:
     # The Mac VM of ci.yml's test job, whose image has Homebrew. Its user is
@@ -90,10 +90,10 @@ jobs:
         with:
           persist-credentials: false
       - name: install
-        run: sh scripts/installer.sh && dromas version
+        run: sh scripts/install.sh && dromas version
       - name: refuse root
         run: |
-          if sudo sh scripts/installer.sh; then echo "::error::installer.sh ran as root on macOS"; exit 1; fi
+          if sudo sh scripts/install.sh; then echo "::error::install.sh ran as root on macOS"; exit 1; fi
 
   bsd:
     # The BSD VMs of ci.yml's bsd job, each as its user with sudo, and with
@@ -123,6 +123,6 @@ jobs:
         run: |
           uname -a
           for t in curl wget fetch ftp sha256sum shasum sha256 openssl; do command -v "$t" || true; done
-          sh scripts/installer.sh
-          sh scripts/installer.sh
+          sh scripts/install.sh
+          sh scripts/install.sh
           /usr/local/bin/dromas version
