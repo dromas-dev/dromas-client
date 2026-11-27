@@ -1,0 +1,127 @@
+# The one-line installer, scripts/installer.sh, run on each system it installs
+# on, whenever it or this file changes, and on no other change (Tailscale's
+# installer.yml, without its daily run). It installs what is live: the
+# packages at packages.dromas.dev, the Homebrew tap, and the latest release on
+# GitHub. Not a required check: a workflow that runs only on some pull
+# requests never reports on the others.
+name: installer
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - scripts/installer.sh
+      - .github/workflows/installer.yml
+  pull_request:
+    paths:
+      - scripts/installer.sh
+      - .github/workflows/installer.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  shellcheck:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: |
+          command -v shellcheck > /dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck; }
+          shellcheck --version
+          shellcheck -s sh scripts/installer.sh
+
+  linux:
+    # The supported releases of each distribution: the same list as each page
+    # of docs/install/ and the test matrix of dromas-dev/packages. Each image
+    # runs as root, with neither curl nor wget in Debian's and Ubuntu's, and
+    # only BusyBox wget in Alpine's.
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-26.04, ubuntu-26.04-arm]
+        image:
+          - debian:bookworm
+          - debian:trixie
+          - ubuntu:22.04
+          - ubuntu:24.04
+          - ubuntu:26.04
+          - ubuntu:26.10
+          - fedora:44
+          - fedora:45
+          - registry.access.redhat.com/ubi8/ubi
+          - registry.access.redhat.com/ubi9/ubi
+          - registry.access.redhat.com/ubi10/ubi
+          - almalinux:8
+          - almalinux:9
+          - almalinux:10
+          - rockylinux/rockylinux:8
+          - rockylinux/rockylinux:9
+          - rockylinux/rockylinux:10
+          - amazonlinux:2023
+          - alpine:3.22
+          - alpine:3.23
+          - alpine:3.24
+          - opensuse/leap:16.0
+          - registry.suse.com/bci/bci-base:15.7
+          - registry.suse.com/bci/bci-base:16.0
+    name: linux (${{ matrix.image }}, ${{ matrix.runner }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: install, then install again over it
+        env:
+          IMAGE: ${{ matrix.image }}
+        run: docker run --rm -v "$PWD/scripts:/s:ro" "$IMAGE" sh -c 'sh /s/installer.sh && sh /s/installer.sh && dromas version'
+
+  macos:
+    # The Mac VM of ci.yml's test job, whose image has Homebrew. Its user is
+    # an administrator, as on a Mac its owner sets up.
+    runs-on: dromas-macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: install
+        run: sh scripts/installer.sh && dromas version
+      - name: refuse root
+        run: |
+          if sudo sh scripts/installer.sh; then echo "::error::installer.sh ran as root on macOS"; exit 1; fi
+
+  bsd:
+    # The BSD VMs of ci.yml's bsd job, each as its user with sudo, and with
+    # whichever of curl, wget, fetch and ftp its image has.
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - { name: freebsd, version: "15.1" }
+          - { name: openbsd, version: "8.0" }
+          - { name: netbsd, version: "11.0" }
+          - { name: dragonflybsd, version: "6.4.2" }
+    name: bsd (${{ matrix.os.name }})
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: cross-platform-actions/action@30cde56b87a128507bebea9531205087890ee360 # v1.8.0
+        with:
+          operating_system: ${{ matrix.os.name }}
+          version: ${{ matrix.os.version }}
+          shell: sh
+      - name: install, then install again over it
+        shell: cpa.sh {0}
+        run: |
+          uname -a
+          sh scripts/installer.sh
+          sh scripts/installer.sh
+          /usr/local/bin/dromas version
