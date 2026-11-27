@@ -10,7 +10,7 @@ On Linux, macOS, FreeBSD, OpenBSD, NetBSD, or DragonFly BSD, run:
 curl -fsSL https://dromas.dev/install.sh | sh
 ```
 
-The script, [`scripts/installer.sh`](../../scripts/installer.sh), installs Dromas the way this system's page does:
+The script, [`scripts/install.sh`](../../scripts/install.sh), installs Dromas the way this system's page does:
 
 - On Linux, it adds the apt, dnf, zypper, or apk repository at packages.dromas.dev and installs the `dromas` package, which your package manager then upgrades.
 - On macOS, it runs Homebrew.
