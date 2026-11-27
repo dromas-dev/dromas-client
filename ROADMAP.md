@@ -8,7 +8,7 @@ What the Dromas project plans to do over the next year, and what it doesn't plan
 - **Post-quantum signatures.** An identity can be OpenSSH's hybrid type, `ssh-mldsa44-ed25519` (ML-DSA-44 with Ed25519), as an opt-in type. Ed25519 stays the default. This work waits on the Go project's cryptography libraries supporting the type, so it's expected after v1 ([#565](https://github.com/dromas-dev/dromas-client/issues/565)).
 - **Identities in hardware:** creating an identity on the Mac's Secure Enclave or a FIDO security key in the Go client, and running a mailbox on it. The Go client already verifies these key types.
 - **New commands in the Go client:** `ack`, `export`, `watch`, and `recv --spool`, and an MCP server (`dromas mcp`) with a `SKILL.md` for agents.
-- **More ways to install:** an Arch User Repository package, the Windows Package Manager (`winget`), and a one-line installer for Linux, macOS, and the BSDs (`curl -fsSL https://dromas.dev/install.sh | sh`).
+- **More ways to install:** an Arch User Repository package and the Windows Package Manager (`winget`).
 
 ## Later
 
