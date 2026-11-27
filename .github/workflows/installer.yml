@@ -122,6 +122,7 @@ jobs:
         shell: cpa.sh {0}
         run: |
           uname -a
+          for t in curl wget fetch ftp sha256sum shasum sha256 openssl; do command -v "$t" || true; done
           sh scripts/installer.sh
           sh scripts/installer.sh
           /usr/local/bin/dromas version

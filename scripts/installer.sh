@@ -193,8 +193,9 @@ bsd() {
 	want=${line%% *}
 	archive=${line##* }
 	download "$releases/$archive" "$tmp/$archive"
-	[ "$(sha256 "$tmp/$archive")" = "$want" ] ||
-		fail "$archive does not match the release's checksums.txt: nothing installed"
+	got=$(sha256 "$tmp/$archive")
+	[ "$got" = "$want" ] ||
+		fail "$archive's SHA-256 is $got, not the $want of the release's checksums.txt: nothing installed"
 	(cd "$tmp" && tar -xzf "$archive" dromas)
 	run install -d -m 0755 /usr/local/bin
 	run install -m 0755 "$tmp/dromas" /usr/local/bin/dromas
